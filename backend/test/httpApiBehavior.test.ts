@@ -992,6 +992,27 @@ describe("Mira Dashboard backend integration", () => {
             metadata: { producer: "preserve" },
             preserveExistingData: true,
         });
+        writeCacheSuccess({
+            key: "docker.summary",
+            data: {
+                checkedAt: "2026-06-23T09:10:00.000Z",
+                containers: [
+                    {
+                        command: "large detail omitted from heartbeat",
+                        health: "healthy",
+                        name: "dashboard",
+                        restartCount: 0,
+                        state: "running",
+                        status: "Up 1 hour",
+                    },
+                ],
+                updaterSummary: { failed: 0, total: 1 },
+            },
+            source: "docker",
+            ttl: 5,
+            ttlUnit: "minutes",
+            metadata: { producer: "test" },
+        });
         writeCacheFailure({
             key: "weather.failure",
             source: "weather",
@@ -1019,6 +1040,7 @@ describe("Mira Dashboard backend integration", () => {
 
         const heartbeat = await api<{
             count: number;
+            schemaVersion: number;
             entries: Array<{
                 consecutiveFailures: number;
                 data: unknown;
@@ -1031,6 +1053,7 @@ describe("Mira Dashboard backend integration", () => {
             }>;
         }>("/api/cache/heartbeat");
         expect(heartbeat.status).toBe(200);
+        expect(heartbeat.body.schemaVersion).toBe(2);
         expect(heartbeat.body.count).toBeGreaterThanOrEqual(2);
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "moltbook.home")
@@ -1052,7 +1075,7 @@ describe("Mira Dashboard backend integration", () => {
         });
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "moltbook.home")?.data
-        ).toMatchObject({ posts: [{ id: "post-1" }] });
+        ).toEqual({ posts: [{ id: "post-1" }] });
         const status = await api<{
             count: number;
             entries: Array<{
@@ -1080,6 +1103,21 @@ describe("Mira Dashboard backend integration", () => {
         ).toMatchObject({
             meta: { producer: "preserve" },
             status: "fresh",
+        });
+        expect(
+            heartbeat.body.entries.find((entry) => entry.key === "docker.summary")?.data
+        ).toEqual({
+            checkedAt: "2026-06-23T09:10:00.000Z",
+            containers: [
+                {
+                    health: "healthy",
+                    name: "dashboard",
+                    restartCount: 0,
+                    state: "running",
+                    status: "Up 1 hour",
+                },
+            ],
+            updaterSummary: { failed: 0, total: 1 },
         });
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "weather.failure")
