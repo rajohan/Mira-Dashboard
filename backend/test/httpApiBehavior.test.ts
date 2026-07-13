@@ -70,6 +70,10 @@ async function writeFakeDocker(binaryPath: string): Promise<void> {
             ]
         ),
         bitmagnet: table(["count"], [["11"]]),
+        bloatEstimates: table(
+            ["schemaname", "relname", "physical_bytes", "estimated_reclaimable_bytes"],
+            [["public", "events", "2097152", "1048576"]]
+        ),
         comet: table(["count"], [["7"]]),
         databases: table(["datname"], [["mira"]]),
         deadTuples: table(
@@ -154,6 +158,8 @@ if (sql.includes("FROM torrents")) {
   key = "activity";
 } else if (sql.includes("FROM pg_database")) {
   key = "databases";
+} else if (sql.includes("estimated_reclaimable_bytes")) {
+  key = "bloatEstimates";
 } else if (sql.includes("FROM pg_stat_user_tables")) {
   key = "deadTuples";
 } else if (sql.includes("FROM pg_extension")) {

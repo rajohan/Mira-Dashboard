@@ -121,7 +121,13 @@ describe("backend service utilities", () => {
                         size_bytes: "100",
                     },
                 ],
-                overview: { totalBackends: 2 },
+                overview: {
+                    totalBackends: 2,
+                    maintenance: {
+                        status: "review",
+                        estimatedReclaimableBytes: 6_442_450_944,
+                    },
+                },
                 topQueries: ["omitted"],
             })
         ).toEqual({
@@ -134,7 +140,17 @@ describe("backend service utilities", () => {
                     sizeBytes: "100",
                 },
             ],
-            overview: { totalBackends: 2 },
+            maintenance: {
+                status: "review",
+                estimatedReclaimableBytes: 6_442_450_944,
+            },
+            overview: {
+                totalBackends: 2,
+                maintenance: {
+                    status: "review",
+                    estimatedReclaimableBytes: 6_442_450_944,
+                },
+            },
         });
 
         expect(

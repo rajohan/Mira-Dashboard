@@ -4,6 +4,10 @@ import { runProcess } from "../lib/processes.ts";
 import { stringFallback } from "../lib/values.ts";
 
 const DOCKER_EXEC_TIMEOUT_MS = 30_000;
+const BLOAT_REVIEW_BYTES = 5 * 1024 * 1024 * 1024;
+const BLOAT_REVIEW_MINIMUM_BYTES = 1024 * 1024 * 1024;
+const BLOAT_REVIEW_PERCENT = 25;
+const BLOAT_DETAIL_MINIMUM_BYTES = 64 * 1024 * 1024;
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
 interface PostgresDatabaseRow {
@@ -33,6 +37,14 @@ interface DeadTupleRow {
     dead_pct: string;
     last_autovacuum: string | undefined;
     last_autoanalyze: string | undefined;
+}
+
+/** Represents a conservative catalog-based heap bloat estimate for one table. */
+interface BloatEstimateRow {
+    schemaname: string;
+    relname: string;
+    physical_bytes: string;
+    estimated_reclaimable_bytes: string;
 }
 
 /** Represents one pg_stat_statements row for the slowest/highest-cost queries. */
@@ -244,7 +256,9 @@ function sumBy<T>(rows: T[], selector: (row: T) => number): number {
 }
 
 /** Runs a SQL query against every connectable non-template database and concatenates parsed rows. */
-async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]> {
+async function queryAllUserDatabases<T extends object>(
+    sql: string
+): Promise<Array<T & { database: string }>> {
     const databases = parseTable<{ datname: string }>(
         await queryPostgres(`
             SELECT datname
@@ -255,10 +269,10 @@ async function queryAllUserDatabases<T extends object>(sql: string): Promise<T[]
         `)
     );
 
-    const results: T[] = [];
+    const results: Array<T & { database: string }> = [];
     for (const database of databases) {
         const rows = parseTable<T>(await queryPostgres(sql, database.datname));
-        results.push(...rows);
+        results.push(...rows.map((row) => ({ ...row, database: database.datname })));
     }
 
     return results;
@@ -378,6 +392,47 @@ export async function getDatabaseOverview() {
         .toSorted((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
         .slice(0, 25);
 
+    // Catalog statistics keep this hourly check bounded; tuple overhead and 20% headroom
+    // deliberately bias the estimate below what VACUUM FULL might actually recover.
+    const bloatEstimates = await queryAllUserDatabases<BloatEstimateRow>(`
+        WITH average_row_widths AS (
+            SELECT schemaname, tablename, SUM(avg_width)::numeric AS row_width
+            FROM pg_stats
+            GROUP BY schemaname, tablename
+        )
+        SELECT
+            tables.schemaname,
+            tables.relname,
+            pg_relation_size(tables.relid)::text AS physical_bytes,
+            GREATEST(
+                pg_relation_size(tables.relid) - CEIL(
+                    tables.n_live_tup * (COALESCE(widths.row_width, 0) + 32) * 1.2
+                ),
+                0
+            )::bigint::text AS estimated_reclaimable_bytes
+        FROM pg_stat_user_tables AS tables
+        LEFT JOIN average_row_widths AS widths
+          ON widths.schemaname = tables.schemaname
+         AND widths.tablename = tables.relname
+        WHERE pg_relation_size(tables.relid) > 0;
+    `);
+    const physicalTableBytes = sumBy(bloatEstimates, (row) =>
+        numberFrom(row.physical_bytes)
+    );
+    const estimatedReclaimableBytes = sumBy(bloatEstimates, (row) =>
+        numberFrom(row.estimated_reclaimable_bytes)
+    );
+    const estimatedReclaimablePercent =
+        physicalTableBytes > 0
+            ? (estimatedReclaimableBytes / physicalTableBytes) * 100
+            : 0;
+    const maintenanceStatus =
+        estimatedReclaimableBytes >= BLOAT_REVIEW_BYTES ||
+        (estimatedReclaimableBytes >= BLOAT_REVIEW_MINIMUM_BYTES &&
+            estimatedReclaimablePercent >= BLOAT_REVIEW_PERCENT)
+            ? "review"
+            : "healthy";
+
     const pgStatStatementsResult = await queryPostgres(`
         SELECT extname FROM pg_extension WHERE extname = 'pg_stat_statements';
     `);
@@ -463,9 +518,30 @@ export async function getDatabaseOverview() {
                 avgQueryTime,
                 avgTransactionTime,
             },
+            maintenance: {
+                status: maintenanceStatus,
+                physicalTableBytes,
+                estimatedReclaimableBytes,
+                estimatedReclaimablePercent,
+                reviewThresholdBytes: BLOAT_REVIEW_BYTES,
+                reviewMinimumBytes: BLOAT_REVIEW_MINIMUM_BYTES,
+                reviewThresholdPercent: BLOAT_REVIEW_PERCENT,
+            },
         },
         databases: databaseRows,
         deadTuples: deadTupleRows,
+        bloatEstimates: bloatEstimates
+            .filter(
+                (row) =>
+                    numberFrom(row.estimated_reclaimable_bytes) >=
+                    BLOAT_DETAIL_MINIMUM_BYTES
+            )
+            .toSorted(
+                (a, b) =>
+                    numberFrom(b.estimated_reclaimable_bytes) -
+                    numberFrom(a.estimated_reclaimable_bytes)
+            )
+            .slice(0, 25),
         topQueries,
         pgbouncerPools: pgBouncerPools,
         pgbouncerStats: pgBouncerStats,

@@ -5,10 +5,6 @@ import { type DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { Card } from "../../ui/Card";
 import { formatBytes } from "../database/databaseUtilities";
 
-const SLOW_QUERY_MEAN_MS = 500;
-const HIGH_DEAD_TUPLE_PERCENT = 20;
-const HIGH_DEAD_TUPLE_MINIMUM = 1000;
-
 function isDatabaseOverviewResponse(value: unknown): value is DatabaseOverviewResponse {
     if (!value || typeof value !== "object") return false;
     const candidate = value as Partial<DatabaseOverviewResponse>;
@@ -30,15 +26,7 @@ export function DatabaseOverviewCard() {
     const database = isDatabaseOverviewResponse(data?.data) ? data.data : undefined;
     const overview = database?.overview;
     const waitingClients = overview?.pgbouncer.waitingClients ?? 0;
-    const slowQueries = database?.topQueries.filter(
-        (query) => Number(query.mean_exec_time) >= SLOW_QUERY_MEAN_MS
-    ).length;
-    const highDeadTupleTables = database?.deadTuples.filter(
-        (table) =>
-            Number(table.dead_pct) >= HIGH_DEAD_TUPLE_PERCENT &&
-            Number(table.n_dead_tup) >= HIGH_DEAD_TUPLE_MINIMUM
-    ).length;
-    const maintenanceHints = (slowQueries ?? 0) + (highDeadTupleTables ?? 0);
+    const maintenance = overview?.maintenance;
 
     return (
         <Card>
@@ -88,15 +76,21 @@ export function DatabaseOverviewCard() {
                         </span>
                     </div>
                     <div className="flex items-center justify-between">
-                        <span>Maintenance hints</span>
+                        <span>Maintenance</span>
                         <span
                             className={
-                                maintenanceHints > 0
+                                maintenance?.status === "review"
                                     ? "text-yellow-300"
-                                    : "text-green-300"
+                                    : maintenance
+                                      ? "text-green-300"
+                                      : "text-primary-400"
                             }
                         >
-                            {maintenanceHints}
+                            {maintenance
+                                ? maintenance.status === "review"
+                                    ? `Review · ${formatBytes(maintenance.estimatedReclaimableBytes)}`
+                                    : "Healthy"
+                                : "Not assessed"}
                         </span>
                     </div>
                 </div>

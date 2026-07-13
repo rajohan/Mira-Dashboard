@@ -8710,6 +8710,61 @@ describe("shared component helpers", () => {
         view.queryClient.clear();
     });
 
+    it("shows compact database maintenance review status", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    consecutiveFailures: 0,
+                    data: {
+                        overview: {
+                            totalDatabaseSizeBytes: 10_737_418_240,
+                            totalBackends: 2,
+                            averageCacheHitRatio: 99,
+                            connections: {},
+                            pgStatStatementsEnabled: true,
+                            torrentCounts: { comet: 1, bitmagnet: 2 },
+                            pgbouncer: {
+                                clientConnections: 2,
+                                serverConnections: 2,
+                                waitingClients: 0,
+                                maxWait: 0,
+                                avgQueryTime: 1,
+                                avgTransactionTime: 1,
+                            },
+                            maintenance: {
+                                status: "review",
+                                physicalTableBytes: 8_589_934_592,
+                                estimatedReclaimableBytes: 6_442_450_944,
+                                estimatedReclaimablePercent: 75,
+                                reviewThresholdBytes: 5_368_709_120,
+                                reviewMinimumBytes: 1_073_741_824,
+                                reviewThresholdPercent: 25,
+                            },
+                        },
+                        databases: [],
+                        deadTuples: [],
+                        bloatEstimates: [],
+                        topQueries: [],
+                        pgbouncerPools: [],
+                        pgbouncerStats: [],
+                    },
+                    key: "database.summary",
+                    meta: {},
+                    source: "backend",
+                    status: "fresh",
+                })
+            ),
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<DatabaseOverviewCard />);
+
+        expect(await screen.findByText("Review · 6.0 GB")).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("drives service action confirmation, exec polling, and cache refresh", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {

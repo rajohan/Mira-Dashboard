@@ -28,6 +28,11 @@ export function DatabaseOverviewCards({ overview }: Properties) {
                 <div className="mt-2 text-2xl font-semibold sm:text-3xl">
                     {formatBytes(overview.totalDatabaseSizeBytes)}
                 </div>
+                <div className="mt-2 text-xs text-primary-400">
+                    {overview.maintenance
+                        ? `${overview.maintenance.status === "review" ? "Review" : "Healthy"} · ~${formatBytes(overview.maintenance.estimatedReclaimableBytes)} reclaimable`
+                        : "Bloat not assessed"}
+                </div>
             </Card>
             <Card className="p-3 sm:p-4">
                 <div className="text-sm text-primary-400">Connections</div>

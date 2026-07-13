@@ -25,6 +25,10 @@ function writeFakeDocker(binaryPath: string): void {
             ]
         ),
         bitmagnet: table(["count"], [["11"]]),
+        bloatEstimates: table(
+            ["schemaname", "relname", "physical_bytes", "estimated_reclaimable_bytes"],
+            [["public", "events", "4294967296", "3221225472"]]
+        ),
         comet: table(["count"], [["7"]]),
         databases: table(["datname"], [["mira"], ["logs"]]),
         deadTuples: table(
@@ -115,6 +119,8 @@ if (sql.includes("FROM torrents")) {
   key = "activity";
 } else if (sql.includes("FROM pg_database")) {
   key = "databases";
+} else if (sql.includes("estimated_reclaimable_bytes")) {
+  key = "bloatEstimates";
 } else if (sql.includes("FROM pg_stat_user_tables")) {
   key = "deadTuples";
 } else if (sql.includes("FROM pg_extension")) {
@@ -171,8 +177,19 @@ describe("database overview service", () => {
             });
             expect(overview.databases).toHaveLength(2);
             expect(overview.deadTuples[0]).toMatchObject({
+                database: "mira",
                 relname: "logs",
                 n_dead_tup: "8",
+            });
+            expect(overview.overview.maintenance).toMatchObject({
+                status: "review",
+                physicalTableBytes: 8_589_934_592,
+                estimatedReclaimableBytes: 6_442_450_944,
+                estimatedReclaimablePercent: 75,
+            });
+            expect(overview.bloatEstimates[0]).toMatchObject({
+                database: "mira",
+                relname: "events",
             });
             expect(overview.topQueries[0]).toMatchObject({
                 query: "SELECT 1",
