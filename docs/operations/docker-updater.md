@@ -8,13 +8,13 @@ compose rewriting.
 
 Important environment variables:
 
-| Variable | Purpose |
-| --- | --- |
-| `MIRA_DOCKER_COMPOSE_WRAPPER` | Command used to run compose operations. Production commonly uses `/opt/docker/bin/docker-compose-doppler`. |
-| `MIRA_DOCKER_UPDATER_PLATFORM` | Optional platform override for registry lookups. |
-| `MIRA_DOCKER_UPDATER_SKIP_REGISTRY` | Set `1` only for tests/debugging to skip registry checks. |
-| `DOCKER_LOGIN` + `DOCKER_TOKEN` | Docker Hub auth. Both are required; token alone is ignored. |
-| `MIRA_GITHUB_USERNAME` + `MIRA_GITHUB_TOKEN` | GHCR auth for registry lookups where needed. |
+| Variable                                     | Purpose                                                                                                    |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `MIRA_DOCKER_COMPOSE_WRAPPER`                | Command used to run compose operations. Production commonly uses `/opt/docker/bin/docker-compose-doppler`. |
+| `MIRA_DOCKER_UPDATER_PLATFORM`               | Optional platform override for registry lookups.                                                           |
+| `MIRA_DOCKER_UPDATER_SKIP_REGISTRY`          | Set `1` only for tests/debugging to skip registry checks.                                                  |
+| `DOCKER_LOGIN` + `DOCKER_TOKEN`              | Docker Hub auth. Both are required; token alone is ignored.                                                |
+| `MIRA_GITHUB_USERNAME` + `MIRA_GITHUB_TOKEN` | GHCR auth for registry lookups where needed.                                                               |
 
 Validate production compose after manual changes:
 
@@ -37,10 +37,10 @@ Unsupported registry/image formats should be treated as manual updates.
 
 Docker updater state is stored in SQLite:
 
-| Table | Purpose |
-| --- | --- |
+| Table                     | Purpose                                          |
+| ------------------------- | ------------------------------------------------ |
 | `docker_managed_services` | Services Dashboard is allowed to inspect/update. |
-| `docker_update_events` | Update check/apply history and errors. |
+| `docker_update_events`    | Update check/apply history and errors.           |
 
 The Docker page reads this state and backend registry probes. The scheduled job
 can check for updates in the background when schedulers are enabled.
@@ -63,8 +63,8 @@ It rewrites only the direct service-level `image:` line:
 
 ```yaml
 services:
-  app:
-    image: ghcr.io/example/app:1.2.3
+    app:
+        image: ghcr.io/example/app:1.2.3
 ```
 
 It must not rewrite:
@@ -96,10 +96,10 @@ Only commit intended image changes and formatting-preserving rewrites.
 
 ## Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
-| Registry checks unauthenticated | Ensure `DOCKER_LOGIN` and `DOCKER_TOKEN` are both set. |
-| GHCR rate/auth errors | Check `MIRA_GITHUB_USERNAME` and `MIRA_GITHUB_TOKEN`. |
-| Compose validates locally but Dashboard fails | Confirm `MIRA_DOCKER_COMPOSE_WRAPPER` points to the same wrapper you used manually. |
-| Compose file collapsed to one line | This should not happen with current updater code; inspect recent commits and restore readable YAML before applying further updates. |
-| Wrong image changed | Check direct-child rewrite rules and add a regression test before retrying. |
+| Symptom                                       | Check                                                                                                                               |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Registry checks unauthenticated               | Ensure `DOCKER_LOGIN` and `DOCKER_TOKEN` are both set.                                                                              |
+| GHCR rate/auth errors                         | Check `MIRA_GITHUB_USERNAME` and `MIRA_GITHUB_TOKEN`.                                                                               |
+| Compose validates locally but Dashboard fails | Confirm `MIRA_DOCKER_COMPOSE_WRAPPER` points to the same wrapper you used manually.                                                 |
+| Compose file collapsed to one line            | This should not happen with current updater code; inspect recent commits and restore readable YAML before applying further updates. |
+| Wrong image changed                           | Check direct-child rewrite rules and add a regression test before retrying.                                                         |

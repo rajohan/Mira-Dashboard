@@ -14,7 +14,12 @@ journalctl --user -u mira-dashboard.service -n 120 --no-pager
 Expected health:
 
 ```json
-{"status":"isOk","gatewayConnected":true,"sessionCount":9,"backendCommit":"abc1234"}
+{
+    "status": "isOk",
+    "gatewayConnected": true,
+    "sessionCount": 9,
+    "backendCommit": "abc1234"
+}
 ```
 
 ## Restart Dashboard
@@ -37,9 +42,9 @@ openclaw status
 
 3. Check Dashboard logs for `gateway token mismatch`.
 4. Verify token precedence:
-   - `OPENCLAW_GATEWAY_TOKEN`
-   - `OPENCLAW_TOKEN`
-   - persisted `app_config.gateway_token`
+    - `OPENCLAW_GATEWAY_TOKEN`
+    - `OPENCLAW_TOKEN`
+    - persisted `app_config.gateway_token`
 5. If bootstrap was just reset, ensure the new token was accepted by bootstrap.
 
 ## Reset Dashboard Users And Sessions
@@ -92,6 +97,21 @@ systemctl --user status mira-dashboard.service --no-pager
 
 Avoid running multiple manual `sqlite3` write sessions while the service is
 busy.
+
+## Database Page Requests Maintenance Review
+
+The Database page uses catalog statistics for a conservative heap-bloat
+estimate. `Review` can also include slow-query or high-dead-tuple signals, so
+inspect the detail fields before interpreting the status as reclaimable disk.
+`Not assessed` means at least 1 GiB of physical table heap lacks usable row-width
+or live-tuple statistics.
+
+Run `ANALYZE` when statistics are missing, then let the hourly database cache
+refresh. Do not run `VACUUM FULL` from the status alone: it takes exclusive
+locks, requires explicit approval, and must be planned as service disruption.
+
+The bloat query intentionally excludes the default `postgres` database and
+reports only user-database scope shown by Dashboard.
 
 ## Reports Smoke Test
 

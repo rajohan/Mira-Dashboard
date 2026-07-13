@@ -9,9 +9,9 @@ disables schedulers by default.
 
 Dashboard-local scheduled jobs are stored in SQLite:
 
-| Table | Purpose |
-| --- | --- |
-| `scheduled_jobs` | Job definitions. |
+| Table                | Purpose                                  |
+| -------------------- | ---------------------------------------- |
+| `scheduled_jobs`     | Job definitions.                         |
 | `scheduled_job_runs` | Run history, status, output, and errors. |
 
 Supported schedule shapes:
@@ -78,6 +78,39 @@ External cache refreshes may require these env vars:
 
 If a page shows stale provider data, check the cache entry timestamp and the
 latest scheduled job run before debugging the frontend.
+
+### Status And Heartbeat Projections
+
+Dashboard exposes two intentionally different aggregate cache endpoints:
+
+| Endpoint               | Consumer               | Payload contract                                                       |
+| ---------------------- | ---------------------- | ---------------------------------------------------------------------- |
+| `/api/cache/status`    | Dashboard UI polling   | Cache envelopes only; `data` is `null`.                                |
+| `/api/cache/heartbeat` | OpenClaw ops heartbeat | `schemaVersion: 2` plus compact, key-specific operational projections. |
+
+Both responses retain every cache envelope so consumers can assess freshness,
+status, errors, timestamps, and consecutive failures. Heartbeat v2 avoids
+returning full provider payloads; consumers must use the documented compact
+fields and must not assume the original cached object is present.
+
+Do not change heartbeat automation to `/api/cache/status`: it needs the compact
+operational data. Conversely, routine UI badge polling should not download the
+heartbeat projection or full cache rows.
+
+Git cache rows use `exists === false` as the explicit missing-repository signal.
+Legacy rows may omit `exists` and remain valid. Explicitly missing repositories
+are excluded from off-main totals even if stale branch fields remain.
+
+OpenAI quota parsing accepts a weekly window and an optional five-hour window.
+After a Codex CLI update, the producer retries the quota probe once because the
+first invocation may only complete the CLI self-update.
+
+### Log Rotation Job State
+
+Log rotation runs through scheduled-job tracking. Status must distinguish
+queued/running, succeeded, failed, and missing job records; repeated scheduled
+failures are bounded so one broken rotation does not create unbounded run noise.
+Generated rotated logs are compressed before retention deletion.
 
 ## Backups
 
