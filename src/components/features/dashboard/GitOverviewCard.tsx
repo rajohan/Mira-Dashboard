@@ -65,7 +65,7 @@ export function GitOverviewCard() {
     const repos = git?.repos || [];
     const dirtyRepos = repos.filter((repo) => repo.dirty);
     const offMainRepos = repos.filter(
-        (repo) => repo.branch && repo.branch !== DEFAULT_BRANCH
+        (repo) => repo.exists !== false && repo.branch && repo.branch !== DEFAULT_BRANCH
     );
 
     return (

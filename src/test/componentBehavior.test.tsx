@@ -7266,6 +7266,9 @@ describe("shared component helpers", () => {
         expect(screen.getByText("Missing repos").nextElementSibling).toHaveTextContent(
             "1"
         );
+        expect(screen.getByText("Repos off main").nextElementSibling).toHaveTextContent(
+            "1"
+        );
         expect(screen.getByText("Clean")).toBeInTheDocument();
         view.unmount();
         view.queryClient.clear();
