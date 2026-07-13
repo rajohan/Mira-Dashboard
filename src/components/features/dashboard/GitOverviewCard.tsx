@@ -10,6 +10,7 @@ const DEFAULT_BRANCH = "main";
 interface GitRepoSummary {
     key: string;
     name: string;
+    exists: boolean;
     branch: string | undefined;
     remote: string | undefined;
     dirty: boolean;
@@ -103,6 +104,19 @@ export function GitOverviewCard() {
                     </div>
 
                     <div className="flex items-center justify-between">
+                        <span>Missing repos</span>
+                        <span
+                            className={
+                                git.missingRepos.length > 0
+                                    ? "font-semibold text-red-300"
+                                    : "font-semibold text-green-300"
+                            }
+                        >
+                            {git.missingRepos.length}
+                        </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
                         <span>Repos off main</span>
                         <span
                             className={
@@ -128,6 +142,7 @@ export function GitOverviewCard() {
 
 function GitRepoRow({ repo }: { repo: GitRepoSummary }) {
     const repoUrl = repoUrlFromRemote(repo.remote);
+    const isMissing = !repo.exists;
 
     return (
         <div className="rounded-lg border border-primary-700 bg-primary-800/40 px-3 py-2">
@@ -153,16 +168,20 @@ function GitRepoRow({ repo }: { repo: GitRepoSummary }) {
                     {repo.branch && repo.branch !== DEFAULT_BRANCH ? (
                         <Badge variant="warning">Off main</Badge>
                     ) : undefined}
-                    <Badge variant={repo.dirty ? "warning" : "success"}>
-                        {repo.dirty ? "Dirty" : "Clean"}
+                    <Badge
+                        variant={isMissing ? "error" : repo.dirty ? "warning" : "success"}
+                    >
+                        {isMissing ? "Missing" : repo.dirty ? "Dirty" : "Clean"}
                     </Badge>
                 </div>
             </div>
             <div className="text-xs wrap-break-word text-primary-400">
-                {repo.branch || "unknown branch"}
-                {repo.statusSummary.total > 0
-                    ? ` · ${repo.statusSummary.total} change${repo.statusSummary.total === 1 ? "" : "s"}`
-                    : " · no changes"}
+                {isMissing ? "repository unavailable" : repo.branch || "unknown branch"}
+                {isMissing
+                    ? undefined
+                    : repo.statusSummary.total > 0
+                      ? ` · ${repo.statusSummary.total} change${repo.statusSummary.total === 1 ? "" : "s"}`
+                      : " · no changes"}
             </div>
         </div>
     );

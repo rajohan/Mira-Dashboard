@@ -60,6 +60,7 @@ import { BackupOverviewCard } from "../components/features/dashboard/BackupOverv
 import { CacheStatusCard } from "../components/features/dashboard/CacheStatusCard";
 import { DatabaseOverviewCard } from "../components/features/dashboard/DatabaseOverviewCard";
 import { DockerOverviewCard } from "../components/features/dashboard/DockerOverviewCard";
+import { GitOverviewCard } from "../components/features/dashboard/GitOverviewCard";
 import { JobsOverviewCard } from "../components/features/dashboard/JobsOverviewCard";
 import { LogRotationCard } from "../components/features/dashboard/LogRotationCard";
 import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOverviewCard";
@@ -7191,6 +7192,64 @@ describe("shared component helpers", () => {
         expect(screen.getByText(/Cached heartbeat report/)).toBeInTheDocument();
 
         queryClient.clear();
+    });
+
+    it("marks unavailable Git repositories as missing instead of clean", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    consecutiveFailures: 0,
+                    data: {
+                        checkedAt: "2026-07-13T10:00:00.000Z",
+                        dirtyCount: 0,
+                        dirtyRepos: [],
+                        missingRepos: ["workspace"],
+                        repos: [
+                            {
+                                branch: undefined,
+                                dirty: false,
+                                exists: false,
+                                key: "workspace",
+                                name: "Mira Workspace",
+                                remote: undefined,
+                                statusSummary: {
+                                    conflicted: 0,
+                                    deleted: 0,
+                                    modified: 0,
+                                    renamed: 0,
+                                    staged: 0,
+                                    total: 0,
+                                    untracked: 0,
+                                },
+                            },
+                        ],
+                    },
+                    errorCode: undefined,
+                    errorMessage: undefined,
+                    expiresAt: undefined,
+                    key: "git.workspace",
+                    lastAttemptAt: undefined,
+                    meta: {},
+                    source: "backend",
+                    status: "fresh",
+                    updatedAt: "2026-07-13T10:00:00.000Z",
+                })
+            ),
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<GitOverviewCard />);
+
+        expect(await screen.findByText("Mira Workspace")).toBeInTheDocument();
+        expect(screen.getByText("Missing")).toBeInTheDocument();
+        expect(screen.getByText("repository unavailable")).toBeInTheDocument();
+        expect(screen.getByText("Missing repos").nextElementSibling).toHaveTextContent(
+            "1"
+        );
+        expect(screen.queryByText("Clean")).not.toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
     });
 
     it("drives dashboard cards, file tree/config branches, and session action hook", async () => {
