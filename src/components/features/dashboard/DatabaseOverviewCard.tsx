@@ -83,7 +83,7 @@ export function DatabaseOverviewCard() {
                             className={
                                 maintenance?.status === "review"
                                     ? "text-yellow-300"
-                                    : maintenance
+                                    : maintenance?.status === "healthy"
                                       ? "text-green-300"
                                       : "text-primary-400"
                             }
@@ -91,7 +91,9 @@ export function DatabaseOverviewCard() {
                             {maintenance
                                 ? maintenance.status === "review"
                                     ? `Review · ${maintenanceHintCount} ${maintenanceHintCount === 1 ? "hint" : "hints"}`
-                                    : "Healthy"
+                                    : maintenance.status === "healthy"
+                                      ? "Healthy"
+                                      : "Not assessed"
                                 : "Not assessed"}
                         </span>
                     </div>

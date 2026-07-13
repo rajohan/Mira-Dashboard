@@ -22,9 +22,12 @@ export interface DatabaseOverviewResponse {
             avgTransactionTime: number;
         };
         maintenance?: {
-            status: "healthy" | "review";
+            status: "healthy" | "not_assessed" | "review";
             hintCount: number;
             bloatNeedsReview: boolean;
+            bloatAssessmentIncomplete: boolean;
+            unassessedTableCount: number;
+            unassessedPhysicalBytes: number;
             slowQueryCount: number;
             highDeadTupleTableCount: number;
             physicalTableBytes: number;
@@ -62,6 +65,7 @@ export interface DatabaseOverviewResponse {
         relname: string;
         physical_bytes: string;
         estimated_reclaimable_bytes: string;
+        assessed: string;
     }>;
     topQueries: Array<{
         query: string;

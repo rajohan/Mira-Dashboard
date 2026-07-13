@@ -71,8 +71,17 @@ async function writeFakeDocker(binaryPath: string): Promise<void> {
         ),
         bitmagnet: table(["count"], [["11"]]),
         bloatEstimates: table(
-            ["schemaname", "relname", "physical_bytes", "estimated_reclaimable_bytes"],
-            [["public", "events", "2097152", "1048576"]]
+            [
+                "schemaname",
+                "relname",
+                "physical_bytes",
+                "estimated_reclaimable_bytes",
+                "assessed",
+            ],
+            [
+                ["public", "events", "2097152", "1048576", "true"],
+                ["public", "emptied", "2147483648", "", "false"],
+            ]
         ),
         comet: table(["count"], [["7"]]),
         databases: table(["datname"], [["mira"]]),
@@ -1290,6 +1299,12 @@ describe("Mira Dashboard backend integration", () => {
             process.env.PATH = `${temporaryRoot}${path.delimiter}${originalPath ?? ""}`;
             const overview = await api<{
                 overview: {
+                    maintenance: {
+                        bloatAssessmentIncomplete: boolean;
+                        status: string;
+                        unassessedPhysicalBytes: number;
+                        unassessedTableCount: number;
+                    };
                     totalBackends: number;
                     totalDatabaseSizeBytes: number;
                     torrentCounts: { bitmagnet: number; comet: number };
@@ -1299,6 +1314,12 @@ describe("Mira Dashboard backend integration", () => {
 
             expect(overview.status).toBe(200);
             expect(overview.body.overview).toMatchObject({
+                maintenance: {
+                    bloatAssessmentIncomplete: true,
+                    status: "not_assessed",
+                    unassessedPhysicalBytes: 2_147_483_648,
+                    unassessedTableCount: 1,
+                },
                 totalBackends: 3,
                 totalDatabaseSizeBytes: 2_097_152,
                 torrentCounts: { bitmagnet: 11, comet: 7 },

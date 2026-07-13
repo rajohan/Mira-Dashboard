@@ -26,8 +26,17 @@ function writeFakeDocker(binaryPath: string): void {
         ),
         bitmagnet: table(["count"], [["11"]]),
         bloatEstimates: table(
-            ["schemaname", "relname", "physical_bytes", "estimated_reclaimable_bytes"],
-            [["public", "events", "4294967296", "3221225472"]]
+            [
+                "schemaname",
+                "relname",
+                "physical_bytes",
+                "estimated_reclaimable_bytes",
+                "assessed",
+            ],
+            [
+                ["public", "events", "4294967296", "3221225472", "true"],
+                ["public", "emptied", "2147483648", "", "false"],
+            ]
         ),
         comet: table(["count"], [["7"]]),
         databases: table(["datname"], [["mira"], ["logs"]]),
@@ -185,6 +194,9 @@ describe("database overview service", () => {
                 status: "review",
                 hintCount: 4,
                 bloatNeedsReview: true,
+                bloatAssessmentIncomplete: true,
+                unassessedTableCount: 2,
+                unassessedPhysicalBytes: 4_294_967_296,
                 slowQueryCount: 1,
                 highDeadTupleTableCount: 2,
                 physicalTableBytes: 8_589_934_592,

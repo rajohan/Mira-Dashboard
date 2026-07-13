@@ -48,6 +48,7 @@ interface BloatEstimateRow {
     relname: string;
     physical_bytes: string;
     estimated_reclaimable_bytes: string;
+    assessed: string;
 }
 
 /** Represents one pg_stat_statements row for the slowest/highest-cost queries. */
@@ -407,25 +408,38 @@ export async function getDatabaseOverview() {
             tables.schemaname,
             tables.relname,
             pg_relation_size(tables.relid)::text AS physical_bytes,
-            GREATEST(
-                pg_relation_size(tables.relid) - CEIL(
-                    tables.n_live_tup * (COALESCE(widths.row_width, 0) + 32) * 1.2
-                ),
-                0
-            )::bigint::text AS estimated_reclaimable_bytes
+            CASE
+                WHEN widths.row_width IS NULL OR tables.n_live_tup <= 0 THEN ''
+                ELSE GREATEST(
+                    pg_relation_size(tables.relid) - CEIL(
+                        tables.n_live_tup * (widths.row_width + 32) * 1.2
+                    ),
+                    0
+                )::bigint::text
+            END AS estimated_reclaimable_bytes,
+            (widths.row_width IS NOT NULL AND tables.n_live_tup > 0)::text AS assessed
         FROM pg_stat_user_tables AS tables
-        INNER JOIN average_row_widths AS widths
+        LEFT JOIN average_row_widths AS widths
           ON widths.schemaname = tables.schemaname
          AND widths.tablename = tables.relname
-        WHERE pg_relation_size(tables.relid) > 0
-          AND tables.n_live_tup > 0;
+        WHERE pg_relation_size(tables.relid) > 0;
     `);
-    const physicalTableBytes = sumBy(bloatEstimates, (row) =>
+    const assessedBloatEstimates = bloatEstimates.filter(
+        (row) => row.assessed === "true"
+    );
+    const physicalTableBytes = sumBy(assessedBloatEstimates, (row) =>
         numberFrom(row.physical_bytes)
     );
-    const estimatedReclaimableBytes = sumBy(bloatEstimates, (row) =>
+    const estimatedReclaimableBytes = sumBy(assessedBloatEstimates, (row) =>
         numberFrom(row.estimated_reclaimable_bytes)
     );
+    const unassessedTableCount = bloatEstimates.length - assessedBloatEstimates.length;
+    const unassessedPhysicalBytes = sumBy(
+        bloatEstimates.filter((row) => row.assessed !== "true"),
+        (row) => numberFrom(row.physical_bytes)
+    );
+    const bloatAssessmentIncomplete =
+        unassessedPhysicalBytes >= BLOAT_REVIEW_MINIMUM_BYTES;
     const estimatedReclaimablePercent =
         physicalTableBytes > 0
             ? (estimatedReclaimableBytes / physicalTableBytes) * 100
@@ -531,9 +545,17 @@ export async function getDatabaseOverview() {
                 avgTransactionTime,
             },
             maintenance: {
-                status: maintenanceHintCount > 0 ? "review" : "healthy",
+                status:
+                    maintenanceHintCount > 0
+                        ? "review"
+                        : bloatAssessmentIncomplete
+                          ? "not_assessed"
+                          : "healthy",
                 hintCount: maintenanceHintCount,
                 bloatNeedsReview,
+                bloatAssessmentIncomplete,
+                unassessedTableCount,
+                unassessedPhysicalBytes,
                 slowQueryCount,
                 highDeadTupleTableCount,
                 physicalTableBytes,
@@ -549,8 +571,9 @@ export async function getDatabaseOverview() {
         bloatEstimates: bloatEstimates
             .filter(
                 (row) =>
+                    row.assessed === "true" &&
                     numberFrom(row.estimated_reclaimable_bytes) >=
-                    BLOAT_DETAIL_MINIMUM_BYTES
+                        BLOAT_DETAIL_MINIMUM_BYTES
             )
             .toSorted(
                 (a, b) =>
