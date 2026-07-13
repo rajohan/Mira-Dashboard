@@ -67,8 +67,8 @@ import { QuotaOverviewCard } from "../components/features/dashboard/QuotaOvervie
 import { ReportsOverviewCard } from "../components/features/dashboard/ReportsOverviewCard";
 import { ServiceActionsCard } from "../components/features/dashboard/ServiceActionsCard";
 import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
-import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
 import { DatabaseOverviewCards } from "../components/features/database/DatabaseOverviewCards";
+import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
 import { DatabaseTableShell } from "../components/features/database/DatabaseTableShell";
 import { PgBouncerPoolsTable } from "../components/features/database/PgBouncerPoolsTable";
 import { PgBouncerStatsTable } from "../components/features/database/PgBouncerStatsTable";
