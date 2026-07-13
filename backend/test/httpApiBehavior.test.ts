@@ -1300,7 +1300,7 @@ describe("Mira Dashboard backend integration", () => {
             const overview = await api<{
                 overview: {
                     maintenance: {
-                        bloatAssessmentIncomplete: boolean;
+                        isBloatAssessmentIncomplete: boolean;
                         status: string;
                         unassessedPhysicalBytes: number;
                         unassessedTableCount: number;
@@ -1315,7 +1315,7 @@ describe("Mira Dashboard backend integration", () => {
             expect(overview.status).toBe(200);
             expect(overview.body.overview).toMatchObject({
                 maintenance: {
-                    bloatAssessmentIncomplete: true,
+                    isBloatAssessmentIncomplete: true,
                     status: "not_assessed",
                     unassessedPhysicalBytes: 2_147_483_648,
                     unassessedTableCount: 1,

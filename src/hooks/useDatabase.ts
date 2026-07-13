@@ -24,8 +24,8 @@ export interface DatabaseOverviewResponse {
         maintenance?: {
             status: "healthy" | "not_assessed" | "review";
             hintCount: number;
-            bloatNeedsReview: boolean;
-            bloatAssessmentIncomplete: boolean;
+            requiresBloatReview: boolean;
+            isBloatAssessmentIncomplete: boolean;
             unassessedTableCount: number;
             unassessedPhysicalBytes: number;
             slowQueryCount: number;

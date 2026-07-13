@@ -30,9 +30,9 @@ export function DatabaseOverviewCards({ overview }: Properties) {
                 </div>
                 <div className="mt-2 text-xs text-primary-400">
                     {overview.maintenance
-                        ? overview.maintenance.status === "not_assessed"
+                        ? overview.maintenance.isBloatAssessmentIncomplete
                             ? "Bloat not assessed"
-                            : `${overview.maintenance.status === "review" ? "Review" : "Healthy"} · ~${formatBytes(overview.maintenance.estimatedReclaimableBytes)} reclaimable`
+                            : `${overview.maintenance.requiresBloatReview ? "Review" : "Healthy"} · ~${formatBytes(overview.maintenance.estimatedReclaimableBytes)} reclaimable`
                         : "Bloat not assessed"}
                 </div>
             </Card>

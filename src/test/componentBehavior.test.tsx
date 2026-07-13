@@ -68,6 +68,7 @@ import { ReportsOverviewCard } from "../components/features/dashboard/ReportsOve
 import { ServiceActionsCard } from "../components/features/dashboard/ServiceActionsCard";
 import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
 import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
+import { DatabaseOverviewCards } from "../components/features/database/DatabaseOverviewCards";
 import { DatabaseTableShell } from "../components/features/database/DatabaseTableShell";
 import { PgBouncerPoolsTable } from "../components/features/database/PgBouncerPoolsTable";
 import { PgBouncerStatsTable } from "../components/features/database/PgBouncerStatsTable";
@@ -8735,8 +8736,8 @@ describe("shared component helpers", () => {
                             maintenance: {
                                 status: "review",
                                 hintCount: 3,
-                                bloatNeedsReview: true,
-                                bloatAssessmentIncomplete: false,
+                                requiresBloatReview: true,
+                                isBloatAssessmentIncomplete: false,
                                 unassessedTableCount: 0,
                                 unassessedPhysicalBytes: 0,
                                 slowQueryCount: 1,
@@ -8770,6 +8771,57 @@ describe("shared component helpers", () => {
         expect(await screen.findByText("Review · 3 hints")).toBeInTheDocument();
         view.unmount();
         view.queryClient.clear();
+    });
+
+    it("keeps total database size status scoped to bloat", () => {
+        const overview = {
+            totalDatabaseSizeBytes: 10_737_418_240,
+            totalBackends: 2,
+            averageCacheHitRatio: 99,
+            connections: {},
+            pgStatStatementsEnabled: true,
+            torrentCounts: { comet: 1, bitmagnet: 2 },
+            pgbouncer: {
+                clientConnections: 2,
+                serverConnections: 2,
+                waitingClients: 0,
+                maxWait: 0,
+                avgQueryTime: 1,
+                avgTransactionTime: 1,
+            },
+            maintenance: {
+                status: "review" as const,
+                hintCount: 1,
+                requiresBloatReview: false,
+                isBloatAssessmentIncomplete: false,
+                unassessedTableCount: 0,
+                unassessedPhysicalBytes: 0,
+                slowQueryCount: 1,
+                highDeadTupleTableCount: 0,
+                physicalTableBytes: 8_589_934_592,
+                estimatedReclaimableBytes: 1_048_576,
+                estimatedReclaimablePercent: 0.01,
+                reviewThresholdBytes: 5_368_709_120,
+                reviewMinimumBytes: 1_073_741_824,
+                reviewThresholdPercent: 25,
+            },
+        };
+        const view = render(<DatabaseOverviewCards overview={overview} />);
+
+        expect(screen.getByText("Healthy · ~1.0 MB reclaimable")).toBeInTheDocument();
+
+        view.rerender(
+            <DatabaseOverviewCards
+                overview={{
+                    ...overview,
+                    maintenance: {
+                        ...overview.maintenance,
+                        isBloatAssessmentIncomplete: true,
+                    },
+                }}
+            />
+        );
+        expect(screen.getByText("Bloat not assessed")).toBeInTheDocument();
     });
 
     it("drives service action confirmation, exec polling, and cache refresh", async () => {

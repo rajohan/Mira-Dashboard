@@ -438,13 +438,13 @@ export async function getDatabaseOverview() {
         bloatEstimates.filter((row) => row.assessed !== "true"),
         (row) => numberFrom(row.physical_bytes)
     );
-    const bloatAssessmentIncomplete =
+    const isBloatAssessmentIncomplete =
         unassessedPhysicalBytes >= BLOAT_REVIEW_MINIMUM_BYTES;
     const estimatedReclaimablePercent =
         physicalTableBytes > 0
             ? (estimatedReclaimableBytes / physicalTableBytes) * 100
             : 0;
-    const bloatNeedsReview =
+    const requiresBloatReview =
         estimatedReclaimableBytes >= BLOAT_REVIEW_BYTES ||
         (estimatedReclaimableBytes >= BLOAT_REVIEW_MINIMUM_BYTES &&
             estimatedReclaimablePercent >= BLOAT_REVIEW_PERCENT);
@@ -479,7 +479,7 @@ export async function getDatabaseOverview() {
             numberFrom(table.n_dead_tup) >= HIGH_DEAD_TUPLE_MINIMUM
     ).length;
     const maintenanceHintCount =
-        slowQueryCount + highDeadTupleTableCount + (bloatNeedsReview ? 1 : 0);
+        slowQueryCount + highDeadTupleTableCount + (requiresBloatReview ? 1 : 0);
 
     const pgBouncerPools = parseTable<PgBouncerPoolRow>(
         await queryPgBouncer("SHOW POOLS;")
@@ -548,12 +548,12 @@ export async function getDatabaseOverview() {
                 status:
                     maintenanceHintCount > 0
                         ? "review"
-                        : bloatAssessmentIncomplete
+                        : isBloatAssessmentIncomplete
                           ? "not_assessed"
                           : "healthy",
                 hintCount: maintenanceHintCount,
-                bloatNeedsReview,
-                bloatAssessmentIncomplete,
+                requiresBloatReview,
+                isBloatAssessmentIncomplete,
                 unassessedTableCount,
                 unassessedPhysicalBytes,
                 slowQueryCount,

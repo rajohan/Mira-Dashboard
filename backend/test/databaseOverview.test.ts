@@ -193,8 +193,8 @@ describe("database overview service", () => {
             expect(overview.overview.maintenance).toMatchObject({
                 status: "review",
                 hintCount: 4,
-                bloatNeedsReview: true,
-                bloatAssessmentIncomplete: true,
+                requiresBloatReview: true,
+                isBloatAssessmentIncomplete: true,
                 unassessedTableCount: 2,
                 unassessedPhysicalBytes: 4_294_967_296,
                 slowQueryCount: 1,
