@@ -14,6 +14,12 @@ updates:
       - "area: frontend"
     commit-message:
       prefix: "deps"
+    ignore:
+      # TypeScript 7 is already used for builds through @typescript/native.
+      # Keep TypeScript 6 available for typescript-eslint's compiler API.
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
     groups:
       frontend-major:
         patterns:
@@ -40,6 +46,12 @@ updates:
       - "area: backend"
     commit-message:
       prefix: "deps"
+    ignore:
+      # TypeScript 7 is already used for builds through @typescript/native.
+      # Keep TypeScript 6 available for typescript-eslint's compiler API.
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
     groups:
       backend-major:
         patterns:
