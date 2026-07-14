@@ -81,7 +81,9 @@ For destructive actions:
   status and assignee filters.
 - Chat composer settings own model, thinking level, speed, and context
   compaction. Thinking visibility, tool visibility, and retaining visible
-  thinking after the final answer are independent persisted toggles.
+  thinking after the final answer are independent persisted toggles. Composer
+  overlays expose explicit close controls, slash suggestions are keyboard
+  navigable, and mobile Enter retains multiline input behavior.
 - The quota card shows provider-specific windows. OpenAI may expose a weekly
   window with an optional five-hour window; a missing five-hour value means
   unlimited, not a parse failure.

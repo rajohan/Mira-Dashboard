@@ -4,6 +4,7 @@ import { currentIsoString, isoStringFromDate } from "../../../utils/date";
 import {
     type ActiveChatStream,
     type ActiveChatStreams,
+    applyFinalThinkingPersistence,
     createChatVisibility,
     createLocalSystemMessage,
     finalMessageFromPayload,
@@ -52,14 +53,6 @@ type AssistantTextSource = "chat" | "runtime";
 interface CompletedAssistantText {
     runIds: string[];
     text: string;
-}
-
-/** Removes terminal thinking details when the user did not choose to retain them. */
-export function applyFinalThinkingPersistence(
-    message: ChatHistoryMessage,
-    shouldKeepThinkingAfterFinal: boolean
-): ChatHistoryMessage {
-    return shouldKeepThinkingAfterFinal ? message : { ...message, thinking: undefined };
 }
 
 const TERMINAL_LIFECYCLE_PHASES = new Set(["end", "error"]);
@@ -1217,7 +1210,8 @@ export function useChatRuntimeEvents({
                                     createChatVisibility(
                                         showThinkingOutput,
                                         showToolOutput
-                                    )
+                                    ),
+                                    keepThinkingAfterFinal
                                 )
                             )
                         );
@@ -1480,10 +1474,14 @@ export function useChatRuntimeEvents({
                     )
                 )
                 .map((message) =>
-                    keepThinkingAfterFinal ? message : { ...message, thinking: undefined }
+                    applyFinalThinkingPersistence(message, keepThinkingAfterFinal)
                 )
                 .filter((message) => hasChatMessageDetails(message))
-                .map((message) => ({ ...message, local: true }));
+                .map((message) => ({
+                    ...message,
+                    diagnostic: true,
+                    local: true,
+                }));
         };
 
         /** Responds to runtime transcript event events. */
@@ -2190,7 +2188,8 @@ export function useChatRuntimeEvents({
                                         createChatVisibility(
                                             showThinkingOutput,
                                             showToolOutput
-                                        )
+                                        ),
+                                        keepThinkingAfterFinal
                                     )
                                 )
                             );

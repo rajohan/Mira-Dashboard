@@ -194,6 +194,40 @@ export function finalMessageFromPayload(
     };
 }
 
+/** Removes thinking metadata and thinking content blocks from a message. */
+export function stripThinkingFromMessage(
+    message: ChatHistoryMessage
+): ChatHistoryMessage {
+    const content = Array.isArray(message.content)
+        ? message.content.filter(
+              (block) =>
+                  !isRecord(block) ||
+                  (block as Record<string, unknown>).type !== "thinking"
+          )
+        : message.content;
+    const normalizedWithoutThinking = normalizeChatHistoryMessage({
+        ...message,
+        content,
+    });
+    const text = (Array.isArray(message.content) ? normalizedWithoutThinking : message)
+        .text;
+
+    return {
+        ...message,
+        content,
+        text,
+        thinking: undefined,
+    };
+}
+
+/** Applies the user's terminal-thinking persistence preference. */
+export function applyFinalThinkingPersistence(
+    message: ChatHistoryMessage,
+    shouldKeepThinkingAfterFinal: boolean
+): ChatHistoryMessage {
+    return shouldKeepThinkingAfterFinal ? message : stripThinkingFromMessage(message);
+}
+
 /** Performs merge stream message. */
 export function mergeStreamMessage(
     wasPrevious: ChatHistoryMessage | undefined,
@@ -272,9 +306,17 @@ export function hasRecoveredStreamHistory(
 /** Performs visible history messages. */
 export function visibleHistoryMessages(
     messages: RawChatHistoryMessage[] = [],
-    visibility: ChatVisibilitySettings
+    visibility: ChatVisibilitySettings,
+    shouldKeepThinkingAfterFinal = true
 ) {
-    return normalizeVisibleChatHistoryMessages(messages, visibility);
+    const visibleMessages = normalizeVisibleChatHistoryMessages(messages, visibility);
+    if (shouldKeepThinkingAfterFinal) {
+        return visibleMessages;
+    }
+
+    return visibleMessages
+        .map((message) => stripThinkingFromMessage(message))
+        .filter((message) => isRenderableChatHistoryMessage(message, visibility));
 }
 
 /** Creates chat visibility. */

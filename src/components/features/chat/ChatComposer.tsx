@@ -1,6 +1,5 @@
 import {
     Combobox,
-    ComboboxInput,
     ComboboxOption,
     ComboboxOptions,
     Popover,
@@ -20,12 +19,18 @@ import {
     Wrench,
     X,
 } from "lucide-react";
-import { type KeyboardEvent as ReactKeyboardEvent, type RefObject, useRef } from "react";
+import {
+    type KeyboardEvent as ReactKeyboardEvent,
+    type RefObject,
+    useRef,
+    useState,
+} from "react";
 
 import type { Session } from "../../../types/session";
 import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
+import { Textarea } from "../../ui/Textarea";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 import {
     base64ToText,
@@ -147,7 +152,15 @@ export function ChatComposer({
     onSelectModel,
     onCompact,
 }: ChatComposerProperties) {
+    const [activeSlashSuggestionIndex, setActiveSlashSuggestionIndex] = useState(0);
+    const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
     const textareaReference = useRef<HTMLTextAreaElement | undefined>(undefined);
+    const shouldShowSlashSuggestions =
+        !slashSuggestionsDismissed && slashCommandSuggestions.length > 0;
+    const selectedSlashSuggestionIndex = Math.min(
+        activeSlashSuggestionIndex,
+        Math.max(0, slashCommandSuggestions.length - 1)
+    );
     const modelSelectOptions = modelOptions.map((option) => ({
         value: option.id || option.name || option.label || "",
         label: option.label || option.name || option.id || "Unknown",
@@ -187,6 +200,13 @@ export function ChatComposer({
             textarea?.focus();
             textarea?.setSelectionRange(nextCursor, nextCursor);
         }, 0);
+    };
+
+    /** Applies a slash suggestion and returns focus to the composer. */
+    const applySlashSuggestion = (suggestion: SlashCommandSuggestion) => {
+        setSlashSuggestionsDismissed(true);
+        onApplySlashSuggestion(suggestion.value);
+        requestAnimationFrame(() => textareaReference.current?.focus());
     };
 
     return (
@@ -246,7 +266,7 @@ export function ChatComposer({
                 </div>
             ) : undefined}
 
-            <div className="flex flex-col gap-2 sm:gap-3 md:flex-row">
+            <div>
                 <input
                     ref={(element) => {
                         fileInputReference.current = element ?? undefined;
@@ -260,26 +280,48 @@ export function ChatComposer({
                     value={undefined as SlashCommandSuggestion | undefined}
                     onChange={(suggestion: SlashCommandSuggestion | null | undefined) => {
                         if (suggestion) {
-                            onApplySlashSuggestion(suggestion.value);
+                            applySlashSuggestion(suggestion);
                         }
                     }}
                     as="div"
-                    className="relative min-w-0 flex-1 rounded-lg border border-primary-600 bg-primary-800 transition-colors focus-within:border-accent-500 hover:border-primary-500 focus-within:hover:border-accent-500"
+                    className="relative min-w-0 rounded-lg border border-primary-600 bg-primary-800 transition-colors focus-within:border-accent-500 hover:border-primary-500 focus-within:hover:border-accent-500"
                 >
-                    {slashCommandSuggestions.length > 0 ? (
+                    {shouldShowSlashSuggestions ? (
                         <ComboboxOptions
+                            static
                             modal={false}
+                            id="chat-slash-command-options"
                             className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl outline-none"
                         >
-                            <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium tracking-wide text-primary-400 uppercase">
-                                Slash commands
+                            <div className="flex items-center justify-between border-b border-primary-700 px-3 py-2">
+                                <span className="text-xs font-medium tracking-wide text-primary-400 uppercase">
+                                    Slash commands
+                                </span>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setSlashSuggestionsDismissed(true)}
+                                    className="p-1 text-primary-400 hover:text-primary-100"
+                                    aria-label="Close slash commands"
+                                >
+                                    <X className="size-4" />
+                                </Button>
                             </div>
                             <div className="max-h-72 overflow-y-auto py-1">
-                                {slashCommandSuggestions.map((suggestion) => (
+                                {slashCommandSuggestions.map((suggestion, index) => (
                                     <ComboboxOption
                                         key={suggestion.value}
+                                        id={`chat-slash-command-option-${index}`}
                                         value={suggestion}
-                                        className="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-primary-800 focus:outline-none data-focus:bg-primary-800"
+                                        onMouseEnter={() =>
+                                            setActiveSlashSuggestionIndex(index)
+                                        }
+                                        className={`flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-primary-800 focus:outline-none data-focus:bg-primary-800 ${
+                                            index === selectedSlashSuggestionIndex
+                                                ? "bg-primary-800"
+                                                : ""
+                                        }`}
                                     >
                                         <span className="min-w-0 flex-1">
                                             <span className="block truncate font-mono text-sm text-primary-100">
@@ -294,31 +336,76 @@ export function ChatComposer({
                             </div>
                         </ComboboxOptions>
                     ) : undefined}
-                    <ComboboxInput
-                        as="textarea"
+                    <Textarea
                         aria-label="Message"
                         ref={(element) => {
-                            textareaReference.current =
-                                (element as unknown as HTMLTextAreaElement | null) ??
-                                undefined;
+                            textareaReference.current = element ?? undefined;
                         }}
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={shouldShowSlashSuggestions}
+                        aria-controls={
+                            shouldShowSlashSuggestions
+                                ? "chat-slash-command-options"
+                                : undefined
+                        }
+                        aria-activedescendant={
+                            shouldShowSlashSuggestions
+                                ? `chat-slash-command-option-${selectedSlashSuggestionIndex}`
+                                : undefined
+                        }
                         value={draft}
                         onChange={(event) => {
+                            setSlashSuggestionsDismissed(false);
+                            setActiveSlashSuggestionIndex(0);
                             onChangeDraft(event.target.value);
                         }}
                         onKeyDown={(event) => {
-                            if (
-                                event.key === "Tab" &&
-                                slashCommandSuggestions.length > 0
-                            ) {
+                            if (event.nativeEvent.isComposing) {
+                                return;
+                            }
+
+                            if (shouldShowSlashSuggestions && event.key === "ArrowDown") {
                                 event.preventDefault();
-                                onApplySlashSuggestion(
-                                    slashCommandSuggestions[0]?.value || draft
+                                setActiveSlashSuggestionIndex(
+                                    (selectedSlashSuggestionIndex + 1) %
+                                        slashCommandSuggestions.length
                                 );
                                 return;
                             }
 
-                            if (shouldSendFromEnter(event) && canSend) {
+                            if (shouldShowSlashSuggestions && event.key === "ArrowUp") {
+                                event.preventDefault();
+                                setActiveSlashSuggestionIndex(
+                                    (selectedSlashSuggestionIndex -
+                                        1 +
+                                        slashCommandSuggestions.length) %
+                                        slashCommandSuggestions.length
+                                );
+                                return;
+                            }
+
+                            const shouldUseEnterForAction = shouldSendFromEnter(event);
+                            if (
+                                shouldShowSlashSuggestions &&
+                                (event.key === "Tab" || shouldUseEnterForAction)
+                            ) {
+                                event.preventDefault();
+                                const suggestion =
+                                    slashCommandSuggestions[selectedSlashSuggestionIndex];
+                                if (suggestion) {
+                                    applySlashSuggestion(suggestion);
+                                }
+                                return;
+                            }
+
+                            if (shouldShowSlashSuggestions && event.key === "Escape") {
+                                event.preventDefault();
+                                setSlashSuggestionsDismissed(true);
+                                return;
+                            }
+
+                            if (shouldUseEnterForAction && canSend) {
                                 event.preventDefault();
                                 onSend();
                             }
@@ -336,81 +423,115 @@ export function ChatComposer({
                     <div className="flex min-h-10 items-center justify-between rounded-b-lg border-t border-primary-600 bg-primary-700 px-2 py-1">
                         <div className="flex items-center gap-1">
                             <Popover className="relative">
-                                <PopoverButton
-                                    aria-label="Model and response settings"
-                                    className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100"
-                                >
-                                    <Settings2 className="size-4" />
-                                </PopoverButton>
-                                <PopoverPanel
-                                    anchor={{ to: "top start", gap: 8 }}
-                                    className="z-50 w-72 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
-                                >
-                                    <div className="space-y-1">
-                                        <div className="text-xs font-medium text-primary-400">
-                                            Model
-                                        </div>
-                                        <Select
-                                            ariaLabel="Model"
-                                            width="w-full"
-                                            value={selectedSession?.model || ""}
-                                            disabled={
-                                                !selectedSessionKey ||
-                                                sessionControlsDisabled
-                                            }
-                                            onChange={(value) => onSelectModel?.(value)}
-                                            options={modelSelectOptions}
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <div className="text-xs font-medium text-primary-400">
-                                            Thinking
-                                        </div>
-                                        <Select
-                                            ariaLabel="Thinking"
-                                            width="w-full"
-                                            value={selectedSession?.thinkingLevel || ""}
-                                            disabled={
-                                                !selectedSessionKey ||
-                                                sessionControlsDisabled
-                                            }
-                                            onChange={(value) =>
-                                                onSelectThinkingLevel?.(value)
-                                            }
-                                            options={chatThinkingOptions(selectedSession)}
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <div className="text-xs font-medium text-primary-400">
-                                            Speed
-                                        </div>
-                                        <Select
-                                            ariaLabel="Speed"
-                                            width="w-full"
-                                            value={selectedChatSpeed(selectedSession)}
-                                            disabled={
-                                                !selectedSessionKey ||
-                                                sessionControlsDisabled
-                                            }
-                                            onChange={(value) => onSelectSpeed?.(value)}
-                                            options={chatSpeedOptions(selectedSession)}
-                                        />
-                                    </div>
-                                    <Button
-                                        variant="primary"
-                                        size="sm"
-                                        className="w-full justify-center"
-                                        disabled={
-                                            !selectedSessionKey ||
-                                            sessionControlsDisabled ||
-                                            isCompacting
-                                        }
-                                        onClick={() => onCompact?.()}
-                                    >
-                                        <Minimize2 className="size-4" />
-                                        {isCompacting ? "Compacting…" : "Compact context"}
-                                    </Button>
-                                </PopoverPanel>
+                                {({ close }) => (
+                                    <>
+                                        <PopoverButton
+                                            aria-label="Model and response settings"
+                                            className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100"
+                                        >
+                                            <Settings2 className="size-4" />
+                                        </PopoverButton>
+                                        <PopoverPanel
+                                            anchor={{ to: "top start", gap: 8 }}
+                                            className="z-50 w-72 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-medium tracking-wide text-primary-400 uppercase">
+                                                    Response settings
+                                                </span>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => close()}
+                                                    className="p-1 text-primary-400 hover:text-primary-100"
+                                                    aria-label="Close response settings"
+                                                >
+                                                    <X className="size-4" />
+                                                </Button>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-xs font-medium text-primary-400">
+                                                    Model
+                                                </div>
+                                                <Select
+                                                    ariaLabel="Model"
+                                                    width="w-full"
+                                                    value={selectedSession?.model || ""}
+                                                    disabled={
+                                                        !selectedSessionKey ||
+                                                        sessionControlsDisabled
+                                                    }
+                                                    onChange={(value) =>
+                                                        onSelectModel?.(value)
+                                                    }
+                                                    options={modelSelectOptions}
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-xs font-medium text-primary-400">
+                                                    Thinking
+                                                </div>
+                                                <Select
+                                                    ariaLabel="Thinking"
+                                                    width="w-full"
+                                                    value={
+                                                        selectedSession?.thinkingLevel ||
+                                                        ""
+                                                    }
+                                                    disabled={
+                                                        !selectedSessionKey ||
+                                                        sessionControlsDisabled
+                                                    }
+                                                    onChange={(value) =>
+                                                        onSelectThinkingLevel?.(value)
+                                                    }
+                                                    options={chatThinkingOptions(
+                                                        selectedSession
+                                                    )}
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-xs font-medium text-primary-400">
+                                                    Speed
+                                                </div>
+                                                <Select
+                                                    ariaLabel="Speed"
+                                                    width="w-full"
+                                                    value={selectedChatSpeed(
+                                                        selectedSession
+                                                    )}
+                                                    disabled={
+                                                        !selectedSessionKey ||
+                                                        sessionControlsDisabled
+                                                    }
+                                                    onChange={(value) =>
+                                                        onSelectSpeed?.(value)
+                                                    }
+                                                    options={chatSpeedOptions(
+                                                        selectedSession
+                                                    )}
+                                                />
+                                            </div>
+                                            <Button
+                                                variant="primary"
+                                                size="sm"
+                                                className="w-full justify-center"
+                                                disabled={
+                                                    !selectedSessionKey ||
+                                                    sessionControlsDisabled ||
+                                                    isCompacting
+                                                }
+                                                onClick={() => onCompact?.()}
+                                            >
+                                                <Minimize2 className="size-4" />
+                                                {isCompacting
+                                                    ? "Compacting…"
+                                                    : "Compact context"}
+                                            </Button>
+                                        </PopoverPanel>
+                                    </>
+                                )}
                             </Popover>
                             <Button
                                 type="button"
@@ -462,105 +583,125 @@ export function ChatComposer({
                                 <Pin className="size-4" />
                             </Button>
                         </div>
-                        <Popover className="relative">
-                            {({ close }) => (
-                                <>
-                                    <PopoverButton
-                                        as={Button}
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled={
-                                            !isConnected ||
-                                            !selectedSessionKey ||
-                                            isSending
-                                        }
-                                        className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 disabled:opacity-40"
-                                        title="Insert emoji"
-                                        aria-label="Insert emoji"
-                                    >
-                                        <Smile className="size-5" />
-                                    </PopoverButton>
-                                    <PopoverPanel
-                                        anchor={{ to: "top end", gap: 8 }}
-                                        className="z-50 w-80 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl outline-none"
-                                    >
-                                        <div className="mb-2 px-1 text-xs font-medium tracking-wide text-primary-400 uppercase">
-                                            Emoji
-                                        </div>
-                                        <div className="grid max-h-64 grid-cols-6 gap-1 overflow-y-auto">
-                                            {CHAT_EMOJIS.map((emoji) => (
+                        <div className="flex items-center gap-1">
+                            <Popover className="relative">
+                                {({ close }) => (
+                                    <>
+                                        <PopoverButton
+                                            as={Button}
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            disabled={
+                                                !isConnected ||
+                                                !selectedSessionKey ||
+                                                isSending
+                                            }
+                                            className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 disabled:opacity-40"
+                                            title="Insert emoji"
+                                            aria-label="Insert emoji"
+                                        >
+                                            <Smile className="size-5" />
+                                        </PopoverButton>
+                                        <PopoverPanel
+                                            anchor={{ to: "top end", gap: 8 }}
+                                            className="z-50 w-80 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl outline-none"
+                                        >
+                                            <div className="mb-2 flex items-center justify-between px-1">
+                                                <span className="text-xs font-medium tracking-wide text-primary-400 uppercase">
+                                                    Emoji
+                                                </span>
                                                 <Button
-                                                    key={emoji}
                                                     type="button"
                                                     variant="ghost"
                                                     size="sm"
-                                                    onClick={() => {
-                                                        insertEmoji(emoji);
-                                                        close();
-                                                    }}
-                                                    className="p-2.5 text-xl hover:bg-primary-800 focus:bg-primary-800"
-                                                    aria-label={`Insert ${emoji}`}
+                                                    onClick={() => close()}
+                                                    className="p-1 text-primary-400 hover:text-primary-100"
+                                                    aria-label="Close emoji picker"
                                                 >
-                                                    {emoji}
+                                                    <X className="size-4" />
                                                 </Button>
-                                            ))}
-                                        </div>
-                                    </PopoverPanel>
-                                </>
-                            )}
-                        </Popover>
+                                            </div>
+                                            <div className="grid max-h-64 grid-cols-6 gap-1 overflow-y-auto">
+                                                {CHAT_EMOJIS.map((emoji) => (
+                                                    <Button
+                                                        key={emoji}
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            insertEmoji(emoji);
+                                                            close();
+                                                        }}
+                                                        className="p-2.5 text-xl hover:bg-primary-800 focus:bg-primary-800"
+                                                        aria-label={`Insert ${emoji}`}
+                                                    >
+                                                        {emoji}
+                                                    </Button>
+                                                ))}
+                                            </div>
+                                        </PopoverPanel>
+                                    </>
+                                )}
+                            </Popover>
+                            <Button
+                                type="button"
+                                variant={isRecording ? "primary" : "ghost"}
+                                size="sm"
+                                onClick={onToggleRecording}
+                                disabled={
+                                    !isConnected ||
+                                    !selectedSessionKey ||
+                                    isSending ||
+                                    isTranscribing
+                                }
+                                title={
+                                    isRecording ? "Stop recording" : "Record voice input"
+                                }
+                                aria-label={
+                                    isRecording ? "Stop recording" : "Record voice input"
+                                }
+                                className="rounded-full p-2"
+                            >
+                                {isRecording ? (
+                                    <Square className="size-4" />
+                                ) : (
+                                    <Mic className="size-4" />
+                                )}
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => fileInputReference.current?.click()}
+                                disabled={
+                                    !isConnected ||
+                                    !selectedSessionKey ||
+                                    isSending ||
+                                    isRecording ||
+                                    attachments.length >= 10
+                                }
+                                title="Attach files"
+                                aria-label="Attach files"
+                                className="rounded-full p-2"
+                            >
+                                <Paperclip className="size-4" />
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="primary"
+                                size="sm"
+                                onClick={onSend}
+                                disabled={!canSend || isRecording || isTranscribing}
+                                title="Send"
+                                aria-label="Send"
+                                className="rounded-full p-2"
+                            >
+                                <Send className="size-4" />
+                            </Button>
+                        </div>
                     </div>
                 </Combobox>
-                <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
-                    <Button
-                        variant={isRecording ? "primary" : "secondary"}
-                        size="md"
-                        onClick={onToggleRecording}
-                        disabled={
-                            !isConnected ||
-                            !selectedSessionKey ||
-                            isSending ||
-                            isTranscribing
-                        }
-                        title={isRecording ? "Stop recording" : "Record voice input"}
-                        className="w-full px-2 sm:px-4"
-                    >
-                        {isRecording ? (
-                            <Square className="size-4" />
-                        ) : (
-                            <Mic className="size-4" />
-                        )}
-                        {isRecording ? "Stop" : isTranscribing ? "STT…" : "Voice"}
-                    </Button>
-                    <Button
-                        variant="secondary"
-                        size="md"
-                        onClick={() => fileInputReference.current?.click()}
-                        disabled={
-                            !isConnected ||
-                            !selectedSessionKey ||
-                            isSending ||
-                            isRecording ||
-                            attachments.length >= 10
-                        }
-                        title="Attach files"
-                        className="w-full px-2 sm:px-4"
-                    >
-                        <Paperclip className="size-4" />
-                        Attach
-                    </Button>
-                    <Button
-                        variant="primary"
-                        size="md"
-                        onClick={onSend}
-                        disabled={!canSend || isRecording || isTranscribing}
-                        className="w-full px-2 sm:px-4"
-                    >
-                        <Send className="size-4" />
-                        Send
-                    </Button>
-                </div>
             </div>
         </div>
     );

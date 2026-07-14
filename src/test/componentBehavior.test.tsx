@@ -30,8 +30,10 @@ import {
 } from "../components/features/chat/ChatMessagesList";
 import {
     type ActiveChatStreams,
+    applyFinalThinkingPersistence,
     createChatVisibility,
     mergeStreamMessage,
+    visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
 import {
     type ChatHistoryMessage,
@@ -43,7 +45,6 @@ import {
     messageIdentity,
 } from "../components/features/chat/chatUtilities";
 import {
-    applyFinalThinkingPersistence,
     compactStatusText,
     detailFromArguments,
     formatToolName,
@@ -265,6 +266,34 @@ describe("shared component helpers", () => {
         expect(
             applyFinalThinkingPersistence(finalMessage, false).thinking
         ).toBeUndefined();
+
+        const blockFinalMessage = {
+            content: [
+                { type: "thinking", text: "Reasoning" },
+                { type: "text", text: "Answer" },
+            ],
+            role: "assistant",
+            text: "Reasoning\n\nAnswer",
+            thinking: [{ text: "Reasoning" }],
+        };
+        expect(applyFinalThinkingPersistence(blockFinalMessage, false)).toMatchObject({
+            content: [{ type: "text", text: "Answer" }],
+            text: "Answer",
+            thinking: undefined,
+        });
+        expect(
+            visibleHistoryMessages(
+                [
+                    blockFinalMessage,
+                    {
+                        role: "assistant",
+                        content: [{ type: "thinking", text: "Only reasoning" }],
+                    },
+                ],
+                createChatVisibility(true, false),
+                false
+            )
+        ).toEqual([expect.objectContaining({ text: "Answer", thinking: undefined })]);
 
         localStorage.removeItem(storageKey);
     });
@@ -806,6 +835,11 @@ describe("shared component helpers", () => {
                         title: "/help",
                         value: "/help",
                     },
+                    {
+                        description: "Show health",
+                        title: "/health",
+                        value: "/health",
+                    },
                 ]}
                 onApplySlashSuggestion={onApplySlashSuggestion}
                 onAttachFiles={onAttachFiles}
@@ -830,10 +864,51 @@ describe("shared component helpers", () => {
         await user.click(await screen.findByRole("option", { name: /help/i }));
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/help");
 
-        fireEvent.change(textarea, { target: { value: "/help" } });
-        expect(onChangeDraft).toHaveBeenCalledWith("/help");
-        expect(textarea).toHaveAttribute("aria-expanded", "true");
+        fireEvent.change(textarea, { target: { value: "/hea" } });
+        expect(textarea.getAttribute("aria-expanded")).toBe("true");
+        expect(fireEvent.keyDown(textarea, { key: "ArrowDown" })).toBe(false);
+        expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
+        expect(onApplySlashSuggestion).toHaveBeenLastCalledWith("/health");
+        expect(onSend).not.toHaveBeenCalled();
 
+        fireEvent.change(textarea, { target: { value: "/he-shift" } });
+        expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
+        expect(onApplySlashSuggestion).toHaveBeenCalledTimes(2);
+        expect(onSend).not.toHaveBeenCalled();
+        await user.click(screen.getByRole("button", { name: /close slash commands/i }));
+        expect(fireEvent.keyDown(textarea, { key: "ArrowDown" })).toBe(true);
+        expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
+        expect(onSend).toHaveBeenCalledTimes(1);
+
+        const originalMatchMedia = Object.getOwnPropertyDescriptor(
+            globalThis,
+            "matchMedia"
+        );
+        Object.defineProperty(globalThis, "matchMedia", {
+            configurable: true,
+            value: jest.fn(() => ({ matches: true })),
+        });
+        fireEvent.change(textarea, { target: { value: "/he-mobile" } });
+        expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(true);
+        expect(onApplySlashSuggestion).toHaveBeenCalledTimes(2);
+        expect(onSend).toHaveBeenCalledTimes(1);
+        if (originalMatchMedia) {
+            Object.defineProperty(globalThis, "matchMedia", originalMatchMedia);
+        } else {
+            Reflect.deleteProperty(globalThis, "matchMedia");
+        }
+
+        await user.click(screen.getByRole("button", { name: /response settings/i }));
+        await user.click(
+            screen.getByRole("button", { name: /close response settings/i })
+        );
+        expect(
+            screen.queryByRole("button", { name: /close response settings/i })
+        ).toBeNull();
+
+        await user.click(screen.getByRole("button", { name: /insert emoji/i }));
+        await user.click(screen.getByRole("button", { name: /close emoji picker/i }));
+        expect(screen.queryByRole("button", { name: /close emoji picker/i })).toBeNull();
         await user.click(screen.getByRole("button", { name: /insert emoji/i }));
         const emojiButton = screen.getByRole("button", { name: "Insert 😀" });
         (textarea as HTMLTextAreaElement).setSelectionRange(0, 0);
@@ -844,7 +919,7 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: /attach/i }));
         await user.click(screen.getByRole("button", { name: /send/i }));
         expect(onToggleRecording).toHaveBeenCalledTimes(1);
-        expect(onSend).toHaveBeenCalledTimes(1);
+        expect(onSend).toHaveBeenCalledTimes(2);
 
         await user.click(
             screen.getByRole("button", { name: "Keep thinking after final" })
@@ -6598,6 +6673,7 @@ describe("shared component helpers", () => {
                 role: "assistant",
                 text: "Ran the requested check",
                 timestamp: "2026-07-10T15:00:02.000Z",
+                diagnostic: true,
                 toolCalls: [{ id: "tool-1", name: "bash" }],
             },
         };
@@ -6670,6 +6746,22 @@ describe("shared component helpers", () => {
                 thinkingRow,
             ]).map((row) => row.key)
         ).toEqual(["user", "preamble", "thinking", "final-stream"]);
+        const combinedFinalRow = {
+            ...finalStreamRow,
+            key: "combined-final",
+            message: {
+                ...finalStreamRow.message,
+                toolCalls: [{ id: "tool-2", name: "bash" }],
+            },
+        };
+        expect(
+            orderCurrentResponseRows([
+                userRow,
+                preambleRow,
+                combinedFinalRow,
+                thinkingRow,
+            ]).map((row) => row.key)
+        ).toEqual(["user", "preamble", "thinking", "combined-final"]);
         const previousThinkingRow = {
             ...thinkingRow,
             key: "previous-thinking",

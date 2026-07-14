@@ -104,7 +104,16 @@ the setting and the message it affects stay in one interaction surface.
 Live response rows must keep tool diagnostics and retained thinking before the
 final assistant text. Tool rows can carry descriptive text, so row ordering must
 identify them by their tool metadata rather than treating every text-bearing
-assistant row as a final answer.
+assistant row as a final answer. A final answer may also carry merged tool
+details, so live-only diagnostic rows are tagged separately instead of treating
+all rows with tool metadata as tool-only rows.
+
+The composer keeps native multiline textarea behavior: desktop Enter sends only
+when no slash option is being selected, Shift+Enter inserts a line break, and
+Enter on coarse-pointer/mobile devices inserts a line break. Slash suggestions
+support Up/Down, Enter, Tab, Escape, pointer selection, and an explicit close
+control. Response settings, emoji, voice, attachment, and send controls remain
+inside the composer surface, and every overlay has an explicit close control.
 
 Tool-call failures should render as tool diagnostics, not as the global chat
 error banner. The global error banner is reserved for send failures, Gateway

@@ -158,6 +158,7 @@ export interface ChatHistoryMessage {
     toolCalls?: ChatToolCallDisplay[];
     toolResult?: ChatToolResultDisplay;
     timestamp?: string;
+    diagnostic?: boolean;
     local?: boolean;
     runId?: string;
 }

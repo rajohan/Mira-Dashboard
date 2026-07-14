@@ -186,12 +186,14 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     }
 
     const responseRows = rows.slice(lastUserRowIndex + 1);
-    const isToolRow = (row: ChatRow) => {
+    const isToolDiagnosticRow = (row: ChatRow) => {
         const role = row.message.role.toLowerCase();
+        const hasToolDetails = Boolean(
+            row.message.toolCalls?.length || row.message.toolResult
+        );
         return Boolean(
             TOOL_ROLE_VARIANTS.includes(role) ||
-            row.message.toolCalls?.length ||
-            row.message.toolResult
+            (hasToolDetails && (row.message.diagnostic || !row.message.text.trim()))
         );
     };
     const finalRowIndex = responseRows.findLastIndex(
@@ -199,7 +201,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
             Boolean(row.message.text.trim()) &&
-            !isToolRow(row)
+            !isToolDiagnosticRow(row)
     );
     if (finalRowIndex === -1) {
         return rows;
@@ -212,7 +214,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
             Boolean(row.message.text.trim()) &&
-            !isToolRow(row)
+            !isToolDiagnosticRow(row)
     );
     const currentResponseStartIndex = previousAssistantTextRowIndex + 1;
     const currentResponseRows = responseRows.slice(currentResponseStartIndex);
@@ -234,7 +236,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
         if (row === finalRow || !isRowInCurrentResponse(row)) {
             return false;
         }
-        return isToolRow(row);
+        return isToolDiagnosticRow(row);
     });
     if (thinkingRows.length === 0 && toolRows.length === 0) {
         return rows;
@@ -1054,7 +1056,8 @@ export function Chat() {
 
                 const nextMessages = visibleHistoryMessages(
                     result.messages,
-                    createChatVisibility(showThinkingOutput, showToolOutput)
+                    createChatVisibility(showThinkingOutput, showToolOutput),
+                    keepThinkingAfterFinal
                 );
                 setMessages((wasPrevious) => {
                     if (loadedHistorySessionReference.current !== selectedSessionKey) {
@@ -1095,7 +1098,14 @@ export function Chat() {
         return () => {
             isCancelled = true;
         };
-    }, [isConnected, request, selectedSessionKey, showThinkingOutput, showToolOutput]);
+    }, [
+        isConnected,
+        keepThinkingAfterFinal,
+        request,
+        selectedSessionKey,
+        showThinkingOutput,
+        showToolOutput,
+    ]);
     useEffect(() => {
         if (
             !isConnected ||
@@ -1131,7 +1141,8 @@ export function Chat() {
 
                 const nextMessages = visibleHistoryMessages(
                     result.messages,
-                    createChatVisibility(showThinkingOutput, showToolOutput)
+                    createChatVisibility(showThinkingOutput, showToolOutput),
+                    keepThinkingAfterFinal
                 );
                 const recoveredStreamKeys = Object.entries(activeStreamsReference.current)
                     .filter(([, stream]) =>
@@ -1208,6 +1219,7 @@ export function Chat() {
     }, [
         isLoadingHistory,
         isConnected,
+        keepThinkingAfterFinal,
         request,
         selectedSessionKey,
         selectedSessionUpdatedAt,
@@ -1251,7 +1263,8 @@ export function Chat() {
 
                 const nextMessages = visibleHistoryMessages(
                     result.messages,
-                    createChatVisibility(showThinkingOutput, showToolOutput)
+                    createChatVisibility(showThinkingOutput, showToolOutput),
+                    keepThinkingAfterFinal
                 );
 
                 setMessages((wasPrevious) =>
@@ -1276,7 +1289,14 @@ export function Chat() {
             isCancelled = true;
             clearInterval(interval);
         };
-    }, [isConnected, request, selectedSessionKey, showThinkingOutput, showToolOutput]);
+    }, [
+        isConnected,
+        keepThinkingAfterFinal,
+        request,
+        selectedSessionKey,
+        showThinkingOutput,
+        showToolOutput,
+    ]);
 
     useChatRuntimeEvents({
         request,
