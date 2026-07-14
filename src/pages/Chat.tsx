@@ -68,18 +68,6 @@ const LIVE_HISTORY_POLL_MS = 2000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
 const NO_CHAT_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
-/** Returns whether a pending submit must block another message. */
-export function isChatSendBlocked(
-    inFlightSendCount: number,
-    activeStreams: ActiveChatStreams,
-    selectedSessionKey: string
-): boolean {
-    const hasActiveSelectedStream = Object.values(activeStreams).some((stream) =>
-        isSameSessionKey(stream.sessionKey, selectedSessionKey)
-    );
-    return inFlightSendCount > 0 && !hasActiveSelectedStream;
-}
-
 /** Returns a collision-free active-stream key for an optimistic chat send. */
 export function optimisticChatStreamKey(
     sessionKey: string,
@@ -1877,14 +1865,6 @@ export function Chat() {
         setIsSending(sendInFlightCountReference.current > 0);
     };
 
-    /** Returns whether the current in-flight sends should block this draft. */
-    const isBlockedByInFlightSend = () =>
-        isChatSendBlocked(
-            sendInFlightCountReference.current,
-            activeStreams,
-            selectedSessionKey
-        );
-
     /** Reconciles an optimistic stream identifier with the Gateway run id. */
     const acknowledgeActiveStreamRun = (
         sessionKey: string,
@@ -1929,10 +1909,6 @@ export function Chat() {
         if (!selectedSessionKey) {
             return;
         }
-        if (isBlockedByInFlightSend()) {
-            return;
-        }
-
         let text = draft.trim();
 
         if (!text && attachments.length === 0) {
@@ -1953,7 +1929,7 @@ export function Chat() {
 
         text = draftReference.current.trim();
         const currentAttachments = attachmentsReference.current;
-        if (isBlockedByInFlightSend() || (!text && currentAttachments.length === 0)) {
+        if (!text && currentAttachments.length === 0) {
             return;
         }
 
@@ -2086,7 +2062,6 @@ export function Chat() {
     };
 
     const draftText = draft.trim();
-    const isBlockedByPendingSend = isBlockedByInFlightSend();
     const isPatchingSession = (pendingSessionPatchCounts[selectedSessionKey] || 0) > 0;
     const isCompactingSession = selectedStreams.some(
         ([, stream]) =>
@@ -2100,7 +2075,6 @@ export function Chat() {
         !isTranscribing &&
         !isPatchingSession &&
         !isCompactingSession &&
-        !isBlockedByPendingSend &&
         (draftText || attachments.length > 0)
     );
     const isSessionControlsDisabled = Boolean(
@@ -2258,7 +2232,6 @@ export function Chat() {
                         fileInputReference={fileInputReference}
                         isConnected={isConnected}
                         isRecording={isRecording}
-                        isSending={isSending}
                         isTranscribing={isTranscribing}
                         selectedSessionKey={selectedSessionKey}
                         selectedSession={selectedSession}

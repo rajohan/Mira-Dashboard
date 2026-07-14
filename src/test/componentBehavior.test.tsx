@@ -939,7 +939,6 @@ describe("shared component helpers", () => {
                 fileInputReference={fileInputReference}
                 isConnected={true}
                 isRecording={false}
-                isSending={false}
                 isTranscribing={false}
                 selectedSessionKey="agent:main:main"
                 shouldShowThinking={true}
@@ -1054,7 +1053,6 @@ describe("shared component helpers", () => {
                 fileInputReference={{ current: undefined }}
                 isConnected={true}
                 isRecording={false}
-                isSending={false}
                 isTranscribing={false}
                 selectedSessionKey="agent:main:main"
                 slashCommandSuggestions={[
@@ -1093,7 +1091,6 @@ describe("shared component helpers", () => {
                 fileInputReference={{ current: undefined }}
                 isConnected={true}
                 isRecording={false}
-                isSending={false}
                 isTranscribing={false}
                 selectedSessionKey="agent:main:main"
                 slashCommandSuggestions={[
@@ -1130,7 +1127,6 @@ describe("shared component helpers", () => {
                 fileInputReference={{ current: undefined }}
                 isConnected={true}
                 isRecording={false}
-                isSending={false}
                 isTranscribing={false}
                 selectedSessionKey="agent:main:main"
                 slashCommandSuggestions={[
@@ -5204,6 +5200,145 @@ describe("shared component helpers", () => {
 
         unmount();
         expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps ambiguous unscoped terminal events from clearing optimistic runs", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const activeStreamsReference: { current: ActiveChatStreams } = { current: {} };
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return jest.fn();
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+        for (const terminalState of ["final", "aborted", "error"] as const) {
+            activeStreamsReference.current = {
+                "agent:main:main::dashboard-chat-first::assistant": {
+                    aliases: ["dashboard-chat-first"],
+                    runId: "dashboard-chat-first",
+                    sessionKey: "agent:main:main",
+                    statusText: "Thinking",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+                "agent:main:main::dashboard-chat-second::assistant": {
+                    aliases: ["dashboard-chat-second"],
+                    runId: "dashboard-chat-second",
+                    sessionKey: "agent:main:main",
+                    statusText: "Thinking",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+            };
+            act(() => {
+                listener?.({
+                    event: "chat",
+                    payload: {
+                        errorMessage:
+                            terminalState === "error" ? "ambiguous error" : undefined,
+                        message: terminalState === "final" ? "Unscoped final" : undefined,
+                        sessionKey: "agent:main:main",
+                        state: terminalState,
+                    },
+                    type: "event",
+                });
+            });
+            expect(Object.keys(activeStreamsReference.current)).toEqual([
+                "agent:main:main::dashboard-chat-first::assistant",
+                "agent:main:main::dashboard-chat-second::assistant",
+            ]);
+        }
+
+        unmount();
+    });
+
+    it("keeps concurrent pending chat deltas on separate stream keys", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const activeStreamsReference: { current: ActiveChatStreams } = { current: {} };
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return jest.fn();
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "First pending answer",
+                    runId: "first-pending-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Second pending answer",
+                    runId: "second-pending-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "First pending answer"
+            );
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::second-pending-run::assistant"
+                ]?.text
+            ).toBe("Second pending answer");
+        });
+
+        unmount();
     });
 
     it("strips terminal thinking diagnostics when final retention is disabled", async () => {

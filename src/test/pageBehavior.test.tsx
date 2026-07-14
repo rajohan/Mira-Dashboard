@@ -35,7 +35,6 @@ import {
     Chat,
     hasNewerAssistantMessageInHistory,
     hasNewerFinalForStrippedThinkingStream,
-    isChatSendBlocked,
     isSessionActive,
     nextHistoryBottomState,
     nextHistoryLoadSendError,
@@ -3349,25 +3348,9 @@ describe("Mira Dashboard pages", () => {
         expect(nextHistoryBottomState(false, false, false)).toBe(false);
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");
         expect(nextHistoryLoadSendError(undefined, false, "new")).toBe("new");
-        expect(isChatSendBlocked(1, {}, "agent:main:main")).toBe(true);
         expect(
             optimisticChatStreamKey("agent:main:main", "dashboard-chat-first")
         ).not.toBe(optimisticChatStreamKey("agent:main:main", "dashboard-chat-second"));
-        expect(
-            isChatSendBlocked(
-                1,
-                {
-                    "agent:main:main::run-1::assistant": {
-                        aliases: [],
-                        runId: "run-1",
-                        sessionKey: "agent:main:main",
-                        text: "Streaming",
-                        updatedAt: "2026-06-24T08:00:00.000Z",
-                    },
-                },
-                "agent:main:main"
-            )
-        ).toBe(false);
         expect(isSessionActive(undefined)).toBe(false);
         expect(
             isSessionActive({ status: "running" } as Parameters<

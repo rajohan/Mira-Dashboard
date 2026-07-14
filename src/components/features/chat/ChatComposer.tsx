@@ -125,7 +125,6 @@ interface ChatComposerProperties {
     fileInputReference: RefObject<HTMLInputElement | undefined>;
     isConnected: boolean;
     isRecording: boolean;
-    isSending: boolean;
     isTranscribing: boolean;
     selectedSessionKey: string;
     selectedSession?: Session;
@@ -160,7 +159,6 @@ export function ChatComposer({
     fileInputReference,
     isConnected,
     isRecording,
-    isSending,
     isTranscribing,
     selectedSessionKey,
     selectedSession,
@@ -614,11 +612,7 @@ export function ChatComposer({
                                             type="button"
                                             variant="ghost"
                                             size="sm"
-                                            disabled={
-                                                !isConnected ||
-                                                !selectedSessionKey ||
-                                                isSending
-                                            }
+                                            disabled={!isConnected || !selectedSessionKey}
                                             className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 disabled:opacity-40"
                                             title="Insert emoji"
                                             aria-label="Insert emoji"
@@ -663,10 +657,7 @@ export function ChatComposer({
                                 size="sm"
                                 onClick={onToggleRecording}
                                 disabled={
-                                    !isConnected ||
-                                    !selectedSessionKey ||
-                                    isSending ||
-                                    isTranscribing
+                                    !isConnected || !selectedSessionKey || isTranscribing
                                 }
                                 title={
                                     isRecording ? "Stop recording" : "Record voice input"
@@ -690,7 +681,6 @@ export function ChatComposer({
                                 disabled={
                                     !isConnected ||
                                     !selectedSessionKey ||
-                                    isSending ||
                                     isRecording ||
                                     attachments.length >= 10
                                 }
