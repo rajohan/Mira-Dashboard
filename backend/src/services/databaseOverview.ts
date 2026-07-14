@@ -358,8 +358,7 @@ export async function getDatabaseOverview() {
             COALESCE(last_autoanalyze::text, '') AS last_autoanalyze
         FROM pg_stat_user_tables
         WHERE n_live_tup > 0 OR n_dead_tup > 0
-        ORDER BY n_dead_tup DESC
-        LIMIT 25;
+        ORDER BY n_dead_tup DESC;
     `);
     const deadTupleRows = allDeadTupleRows
         .toSorted((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
@@ -442,7 +441,7 @@ export async function getDatabaseOverview() {
     const slowQueryCount = topQueries.filter(
         (query) => numberFrom(query.mean_exec_time) >= SLOW_QUERY_MEAN_MS
     ).length;
-    const highDeadTupleTableCount = deadTupleRows.filter(
+    const highDeadTupleTableCount = allDeadTupleRows.filter(
         (table) =>
             numberFrom(table.physical_bytes) >= HIGH_DEAD_TUPLE_MINIMUM_BYTES &&
             numberFrom(table.dead_pct) >= HIGH_DEAD_TUPLE_PERCENT &&
