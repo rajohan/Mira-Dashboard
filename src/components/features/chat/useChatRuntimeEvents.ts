@@ -140,6 +140,18 @@ function runtimeWorkStreamKey(
     return runId ? `${sessionKey}::${runId}::${channel}` : `${sessionKey}::${channel}`;
 }
 
+/** Returns whether an active stream key can carry primary assistant chat text. */
+function isAssistantActiveStreamKey(
+    sessionKey: string,
+    activeStreamKey: string
+): boolean {
+    return (
+        activeStreamKey === sessionKey ||
+        activeStreamKey.endsWith("::assistant") ||
+        activeStreamKey.endsWith("::chat")
+    );
+}
+
 /** Returns diagnostic message identity used to replace terminal channel buffers. */
 function diagnosticMessageIdentity(message?: ChatHistoryMessage): string {
     if (!message) {
@@ -2135,12 +2147,10 @@ export function useChatRuntimeEvents({
                         : deltaMessage;
                     const textToApply = deltaMessageToApply.text;
 
-                    const sessionRunIds = uniqueStrings(
-                        Object.values(activeStreamsReference.current)
-                            .filter((stream) =>
-                                isSameSessionKey(stream.sessionKey, streamSessionKey)
-                            )
-                            .map((stream) => stream.runId)
+                    const sessionStreamEntries = Object.entries(
+                        activeStreamsReference.current
+                    ).filter(([, stream]) =>
+                        isSameSessionKey(stream.sessionKey, streamSessionKey)
                     );
                     const runId =
                         payload.runId ||
@@ -2149,9 +2159,46 @@ export function useChatRuntimeEvents({
                         ) ||
                         streamForRun?.runId ||
                         streamSessionKey;
+                    const assistantStreamForRunEntry = payload.runId
+                        ? sessionStreamEntries.find(
+                              ([activeStreamKey, stream]) =>
+                                  isAssistantActiveStreamKey(
+                                      streamSessionKey,
+                                      activeStreamKey
+                                  ) &&
+                                  (stream.runId === runId ||
+                                      stream.aliases.includes(runId))
+                          )
+                        : undefined;
+                    const optimisticAssistantStreamEntries = payload.runId
+                        ? sessionStreamEntries.filter(
+                              ([activeStreamKey, stream]) =>
+                                  isAssistantActiveStreamKey(
+                                      streamSessionKey,
+                                      activeStreamKey
+                                  ) &&
+                                  isOptimisticRunId(stream.runId) &&
+                                  stream.operation !== "compact"
+                          )
+                        : [];
+                    const resolvedAssistantStreamEntry =
+                        assistantStreamForRunEntry ||
+                        (optimisticAssistantStreamEntries.length === 1
+                            ? optimisticAssistantStreamEntries[0]
+                            : undefined);
+                    const hasAnotherActiveRun = Boolean(
+                        payload.runId &&
+                        sessionStreamEntries.some(
+                            ([activeStreamKey, stream]) =>
+                                activeStreamKey !== resolvedAssistantStreamEntry?.[0] &&
+                                stream.runId !== runId &&
+                                !stream.aliases.includes(runId) &&
+                                !isProvisionalRunId(streamSessionKey, stream.runId)
+                        )
+                    );
                     const activeStreamKey =
-                        streamForRunEntry?.[0] ||
-                        (payload.runId && sessionRunIds.length > 1
+                        resolvedAssistantStreamEntry?.[0] ||
+                        (hasAnotherActiveRun
                             ? runtimeWorkStreamKey(
                                   streamSessionKey,
                                   "assistant",

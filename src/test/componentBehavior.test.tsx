@@ -295,7 +295,7 @@ describe("shared component helpers", () => {
         expect(
             visibleHistoryMessages(
                 [
-                    blockFinalMessage,
+                    { role: "user", content: "Question" },
                     {
                         role: "assistant",
                         content: [{ type: "thinking", text: "Only reasoning" }],
@@ -305,7 +305,7 @@ describe("shared component helpers", () => {
                 false
             )
         ).toEqual([
-            expect.objectContaining({ text: "Answer", thinking: undefined }),
+            expect.objectContaining({ role: "user", text: "Question" }),
             expect.objectContaining({
                 text: "Only reasoning",
                 thinking: [{ text: "Only reasoning" }],
@@ -330,6 +330,51 @@ describe("shared component helpers", () => {
         ).toEqual([
             expect.objectContaining({ role: "user", text: "Question" }),
             expect.objectContaining({ text: "Answer", thinking: undefined }),
+        ]);
+        expect(
+            visibleHistoryMessages(
+                [
+                    { role: "user", content: "Question" },
+                    blockFinalMessage,
+                    {
+                        role: "assistant",
+                        content: [{ type: "thinking", text: "Late reasoning" }],
+                    },
+                ],
+                createChatVisibility(true, false),
+                false
+            )
+        ).toEqual([
+            expect.objectContaining({ role: "user", text: "Question" }),
+            expect.objectContaining({ text: "Answer", thinking: undefined }),
+        ]);
+        expect(
+            visibleHistoryMessages(
+                [
+                    { role: "user", content: "Show an image" },
+                    {
+                        role: "assistant",
+                        content: [{ type: "thinking", text: "Only reasoning" }],
+                    },
+                    {
+                        role: "assistant",
+                        content: [
+                            {
+                                type: "image",
+                                mimeType: "image/png",
+                                data: "image-data",
+                            },
+                        ],
+                    },
+                ],
+                createChatVisibility(true, false),
+                false
+            )
+        ).toEqual([
+            expect.objectContaining({ role: "user", text: "Show an image" }),
+            expect.objectContaining({
+                images: [expect.objectContaining({ type: "image" })],
+            }),
         ]);
         expect(
             visibleHistoryMessages(
@@ -1046,6 +1091,45 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("option", { name: /think/i }));
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/think ");
         expect(screen.getByRole("combobox")).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("applies an exact argument command before sending", () => {
+        const onApplySlashSuggestion = jest.fn();
+        const onSend = jest.fn();
+
+        render(
+            <ChatComposer
+                attachments={[]}
+                canSend={true}
+                draft="/think"
+                fileInputReference={{ current: undefined }}
+                isConnected={true}
+                isRecording={false}
+                isSending={false}
+                isTranscribing={false}
+                selectedSessionKey="agent:main:main"
+                slashCommandSuggestions={[
+                    {
+                        description: "Show or set thinking level",
+                        title: "/think [level]",
+                        value: "/think ",
+                    },
+                ]}
+                onApplySlashSuggestion={onApplySlashSuggestion}
+                onAttachFiles={jest.fn()}
+                onChangeDraft={jest.fn()}
+                onPreview={jest.fn()}
+                onRemoveAttachment={jest.fn()}
+                onSend={onSend}
+                onToggleRecording={jest.fn()}
+            />
+        );
+
+        expect(fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" })).toBe(
+            false
+        );
+        expect(onApplySlashSuggestion).toHaveBeenCalledWith("/think ");
+        expect(onSend).not.toHaveBeenCalled();
     });
 
     it("handles chat slash commands without rendering the page", async () => {
@@ -3459,6 +3543,127 @@ describe("shared component helpers", () => {
             ]
         ).toBeUndefined();
         activeStreamsReference.current = {};
+
+        activeStreams = {
+            "agent:main:main::dashboard-chat-pre-ack::assistant": {
+                aliases: ["dashboard-chat-pre-ack"],
+                runId: "dashboard-chat-pre-ack",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Pre-ACK answer",
+                    runId: "real-pre-ack-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            const preAckStream =
+                activeStreamsReference.current[
+                    "agent:main:main::dashboard-chat-pre-ack::assistant"
+                ];
+            expect(preAckStream?.aliases).toContain("real-pre-ack-run");
+            expect(preAckStream?.text).toBe("Pre-ACK answer");
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "real-pre-ack-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::dashboard-chat-pre-ack::assistant"
+            ]
+        ).toBeUndefined();
+
+        activeStreams = {
+            "agent:main:main::diagnostic-first-run::thinking": {
+                aliases: ["diagnostic-first-run"],
+                runId: "diagnostic-first-run",
+                sessionKey: "agent:main:main",
+                text: "",
+                message: {
+                    content: [],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "Reasoning" }],
+                },
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Answer beside thinking",
+                    runId: "diagnostic-first-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+                "Answer beside thinking"
+            );
+        });
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::diagnostic-first-run::thinking"
+            ]?.message?.thinking
+        ).toEqual([{ text: "Reasoning" }]);
+
+        activeStreams = {
+            "agent:main:main::existing-run::assistant": {
+                aliases: ["existing-run"],
+                runId: "existing-run",
+                sessionKey: "agent:main:main",
+                text: "Existing answer",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Concurrent first delta",
+                    runId: "new-concurrent-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::new-concurrent-run::assistant"
+                ]?.text
+            ).toBe("Concurrent first delta");
+        });
+        expect(
+            activeStreamsReference.current["agent:main:main::existing-run::assistant"]
+                ?.text
+        ).toBe("Existing answer");
 
         activeStreams = {
             "agent:main:main::dashboard-chat-first::assistant": {

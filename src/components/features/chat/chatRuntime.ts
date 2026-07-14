@@ -330,30 +330,6 @@ export function hasRecoveredStreamHistory(
     );
 }
 
-/** Returns whether a later primary answer supersedes a thinking-only history row. */
-function hasLaterAssistantAnswer(
-    messages: ChatHistoryMessage[],
-    messageIndex: number
-): boolean {
-    const laterMessages = messages.slice(messageIndex + 1);
-    for (const message of laterMessages) {
-        if (message.role.toLowerCase() === "user") {
-            return false;
-        }
-
-        const messageWithoutThinking = stripThinkingFromMessage(message);
-        if (
-            message.role.toLowerCase() === "assistant" &&
-            messageWithoutThinking.text.trim() &&
-            !(message.diagnostic && (message.toolCalls?.length || message.toolResult))
-        ) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 /** Performs visible history messages. */
 export function visibleHistoryMessages(
     messages: RawChatHistoryMessage[] = [],
@@ -365,21 +341,64 @@ export function visibleHistoryMessages(
         return visibleMessages;
     }
 
-    return visibleMessages
-        .map((message, messageIndex) => {
-            const messageWithoutThinking = stripThinkingFromMessage(message);
-            const isThinkingOnlyAssistant = Boolean(
+    const nextMessages: ChatHistoryMessage[] = [];
+    let responseSegment: Array<{
+        message: ChatHistoryMessage;
+        messageWithoutThinking: ChatHistoryMessage;
+        isThinkingOnlyAssistant: boolean;
+    }> = [];
+    let hasPrimaryAssistantAnswer = false;
+
+    const flushResponseSegment = () => {
+        for (const entry of responseSegment) {
+            nextMessages.push(
+                entry.isThinkingOnlyAssistant && !hasPrimaryAssistantAnswer
+                    ? entry.message
+                    : entry.messageWithoutThinking
+            );
+        }
+        responseSegment = [];
+        hasPrimaryAssistantAnswer = false;
+    };
+
+    for (
+        let messageIndex = visibleMessages.length - 1;
+        messageIndex >= 0;
+        messageIndex -= 1
+    ) {
+        const message = visibleMessages[messageIndex]!;
+        const messageWithoutThinking = stripThinkingFromMessage(message);
+        if (message.role.toLowerCase() === "user") {
+            flushResponseSegment();
+            nextMessages.push(messageWithoutThinking);
+            continue;
+        }
+
+        const isDiagnosticToolMessage = Boolean(
+            message.diagnostic && (message.toolCalls?.length || message.toolResult)
+        );
+        if (
+            message.role.toLowerCase() === "assistant" &&
+            !isDiagnosticToolMessage &&
+            isRenderableChatHistoryMessage(messageWithoutThinking, visibility)
+        ) {
+            hasPrimaryAssistantAnswer = true;
+        }
+        responseSegment.push({
+            message,
+            messageWithoutThinking,
+            isThinkingOnlyAssistant: Boolean(
                 visibility.shouldShowThinking &&
                 message.role.toLowerCase() === "assistant" &&
                 message.thinking?.length &&
                 !isRenderableChatHistoryMessage(messageWithoutThinking, visibility)
-            );
+            ),
+        });
+    }
+    flushResponseSegment();
 
-            return isThinkingOnlyAssistant &&
-                !hasLaterAssistantAnswer(visibleMessages, messageIndex)
-                ? message
-                : messageWithoutThinking;
-        })
+    return nextMessages
+        .toReversed()
         .filter((message) => isRenderableChatHistoryMessage(message, visibility));
 }
 
