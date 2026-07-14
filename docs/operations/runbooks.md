@@ -103,6 +103,9 @@ busy.
 The Database page uses catalog statistics for a conservative heap-bloat
 estimate. `Review` can also include slow-query or high-dead-tuple signals, so
 inspect the detail fields before interpreting the status as reclaimable disk.
+The high-dead-tuple signal requires at least 20% and 1,000 dead tuples on a
+table with at least 64 MiB of heap; smaller high-churn tables remain visible in
+the autovacuum detail table without changing the aggregate status.
 `Not assessed` means at least 1 GiB of physical table heap lacks usable row-width
 or live-tuple statistics.
 

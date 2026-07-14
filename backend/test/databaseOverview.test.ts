@@ -47,6 +47,7 @@ function writeFakeDocker(binaryPath: string): void {
             [
                 "schemaname",
                 "relname",
+                "physical_bytes",
                 "n_live_tup",
                 "n_dead_tup",
                 "dead_pct",
@@ -54,8 +55,18 @@ function writeFakeDocker(binaryPath: string): void {
                 "last_autoanalyze",
             ],
             [
-                ["public", "tasks", "100", "5", "5", "2026-06-23", ""],
-                ["public", "logs", "2000", "1001", "50.05", "", "2026-06-22"],
+                ["public", "tasks", "1048576", "100", "5", "5", "2026-06-23", ""],
+                [
+                    "public",
+                    "alerts",
+                    "3045068",
+                    "4482",
+                    "1008",
+                    "22.49",
+                    "",
+                    "2026-07-14",
+                ],
+                ["public", "logs", "67108864", "2000", "1001", "50.05", "", "2026-06-22"],
             ]
         ),
         extensions: table(["extname"], [["pg_stat_statements"]]),
@@ -198,7 +209,16 @@ describe("database overview service", () => {
                 },
             });
             expect(overview.databases).toHaveLength(2);
-            expect(overview.deadTuples[0]).toMatchObject({
+            expect(
+                overview.deadTuples.find((table) => table.relname === "alerts")
+            ).toMatchObject({
+                database: "mira",
+                physical_bytes: "3045068",
+                n_dead_tup: "1008",
+            });
+            expect(
+                overview.deadTuples.find((table) => table.relname === "logs")
+            ).toMatchObject({
                 database: "mira",
                 relname: "logs",
                 n_dead_tup: "1001",

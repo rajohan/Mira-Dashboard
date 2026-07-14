@@ -11,6 +11,7 @@ const BLOAT_DETAIL_MINIMUM_BYTES = 64 * 1024 * 1024;
 const SLOW_QUERY_MEAN_MS = 500;
 const HIGH_DEAD_TUPLE_PERCENT = 20;
 const HIGH_DEAD_TUPLE_MINIMUM = 1000;
+const HIGH_DEAD_TUPLE_MINIMUM_BYTES = 64 * 1024 * 1024;
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
 interface PostgresDatabaseRow {
@@ -35,6 +36,7 @@ interface ConnectionCountsRow {
 interface DeadTupleRow {
     schemaname: string;
     relname: string;
+    physical_bytes: string;
     n_live_tup: string;
     n_dead_tup: string;
     dead_pct: string;
@@ -343,6 +345,7 @@ export async function getDatabaseOverview() {
         SELECT
             schemaname,
             relname,
+            pg_relation_size(relid)::text AS physical_bytes,
             n_live_tup::text,
             n_dead_tup::text,
             ROUND(
@@ -441,6 +444,7 @@ export async function getDatabaseOverview() {
     ).length;
     const highDeadTupleTableCount = deadTupleRows.filter(
         (table) =>
+            numberFrom(table.physical_bytes) >= HIGH_DEAD_TUPLE_MINIMUM_BYTES &&
             numberFrom(table.dead_pct) >= HIGH_DEAD_TUPLE_PERCENT &&
             numberFrom(table.n_dead_tup) >= HIGH_DEAD_TUPLE_MINIMUM
     ).length;

@@ -201,8 +201,9 @@ File routes reject hidden paths and paths outside their configured roots.
 conservative Postgres maintenance assessment. Bloat is marked for review at an
 estimated 5 GiB reclaimable, or at 1 GiB plus 25% of assessed heap. At least
 1 GiB of heap that cannot be assessed produces `not_assessed` unless an
-actionable review signal already exists. `VACUUM FULL` remains a manual,
-approval-only operation.
+actionable review signal already exists. High dead tuples contribute a review
+signal only for tables with at least 64 MiB of heap, 1,000 dead tuples, and a
+20% dead-tuple ratio. `VACUUM FULL` remains a manual, approval-only operation.
 
 `/api/cache/heartbeat` and `/api/cache/status` are not interchangeable. See
 [Scheduler, cache, and backups](../operations/scheduler-cache-backups.md) for
