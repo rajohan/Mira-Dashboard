@@ -130,6 +130,6 @@ export function useDatabaseOverview() {
         query.error ??
         (cacheEnvelope?.status === "error"
             ? new Error(cacheEnvelope.errorMessage || "Database metrics refresh failed.")
-            : null);
+            : undefined);
     return { ...query, data, error };
 }
