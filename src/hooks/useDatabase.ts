@@ -119,9 +119,17 @@ export function useDatabaseOverview() {
     const query = useCacheEntry<DatabaseOverviewResponse>("database.summary", 60_000, {
         refreshOnMissing: true,
     });
+    const cacheEnvelope = query.data;
     const data =
-        query.data?.status === "fresh" && isDatabaseOverviewResponse(query.data.data)
-            ? query.data.data
+        cacheEnvelope &&
+        (cacheEnvelope.status === "fresh" || cacheEnvelope.status === "error") &&
+        isDatabaseOverviewResponse(cacheEnvelope.data)
+            ? cacheEnvelope.data
             : undefined;
-    return { ...query, data };
+    const error =
+        query.error ??
+        (cacheEnvelope?.status === "error"
+            ? new Error(cacheEnvelope.errorMessage || "Database metrics refresh failed.")
+            : undefined);
+    return { ...query, data, error };
 }

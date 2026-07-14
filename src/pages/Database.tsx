@@ -2,6 +2,7 @@ import { AutovacuumHealthTable } from "../components/features/database/Autovacuu
 import { DatabaseOverviewCards } from "../components/features/database/DatabaseOverviewCards";
 import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
 import { TopQueriesTable } from "../components/features/database/TopQueriesTable";
+import { Alert } from "../components/ui/Alert";
 import { EmptyState } from "../components/ui/EmptyState";
 import { LoadingState } from "../components/ui/LoadingState";
 import { useDatabaseOverview } from "../hooks/useDatabase";
@@ -14,7 +15,7 @@ export function Database() {
         return <LoadingState message="Loading database metrics..." size="lg" />;
     }
 
-    if (error || !data) {
+    if (!data) {
         return (
             <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
                 <EmptyState message="Failed to load database metrics." />
@@ -24,6 +25,13 @@ export function Database() {
 
     return (
         <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
+            {error && (
+                <Alert variant="warning">
+                    Database refresh failed. Showing the last loaded metrics.{" "}
+                    {error.message}
+                </Alert>
+            )}
+
             <DatabaseOverviewCards overview={data.overview} />
 
             <div className="border-b border-primary-700 pb-2">
