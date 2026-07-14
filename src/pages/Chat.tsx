@@ -15,6 +15,7 @@ import {
     hasRecoveredStreamHistory,
     isSameSessionKey,
     shouldShowStreamRow as shouldRenderStreamRow,
+    stripThinkingFromMessage,
     uniqueStrings,
     visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
@@ -2212,15 +2213,18 @@ export function Chat() {
                         onRemoveAttachment={removeAttachment}
                         onSend={() => void handleSend()}
                         onToggleRecording={() => void handleToggleRecording()}
-                        onToggleThinking={() =>
-                            setShowThinkingOutput((value) => {
-                                const shouldShowThinking = !value;
-                                if (!shouldShowThinking) {
-                                    setKeepThinkingAfterFinal(false);
-                                }
-                                return shouldShowThinking;
-                            })
-                        }
+                        onToggleThinking={() => {
+                            const shouldShowThinking = !showThinkingOutput;
+                            if (!shouldShowThinking) {
+                                setKeepThinkingAfterFinal(false);
+                                setMessages((wasPrevious) =>
+                                    wasPrevious.map((message) =>
+                                        stripThinkingFromMessage(message)
+                                    )
+                                );
+                            }
+                            setShowThinkingOutput(shouldShowThinking);
+                        }}
                         onToggleTools={() => setShowToolOutput((value) => !value)}
                         onToggleKeepThinkingAfterFinal={() => {
                             if (showThinkingOutput) {

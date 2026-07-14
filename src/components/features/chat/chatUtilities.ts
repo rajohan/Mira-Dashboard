@@ -555,8 +555,11 @@ export function mergeWithRecentOptimisticMessages(
     const mergeablePreviousMessages = shouldMergeThinking
         ? previousMessages
         : previousMessages.map((message) => stripThinkingFromMessage(message));
+    const mergeableNextMessages = shouldMergeThinking
+        ? nextMessages
+        : nextMessages.map((message) => stripThinkingFromMessage(message));
     if (previousMessages.length === 0) {
-        return dedupeMessages(nextMessages);
+        return dedupeMessages(mergeableNextMessages);
     }
 
     if (nextMessages.length === 0) {
@@ -565,7 +568,7 @@ export function mergeWithRecentOptimisticMessages(
 
     const enrichedNextMessages = mergeDiagnosticDetails(
         mergeablePreviousMessages,
-        mergeToolCallResults(mergeablePreviousMessages, nextMessages)
+        mergeToolCallResults(mergeablePreviousMessages, mergeableNextMessages)
     );
     const nextIdentities = new Set(
         enrichedNextMessages.map((message) => messageIdentity(message))
@@ -616,7 +619,7 @@ export function mergeWithRecentOptimisticMessages(
             nextToolCallRowsByIdentity.set(identity, message);
         }
     }
-    const nextAssistantTexts = nextMessages
+    const nextAssistantTexts = mergeableNextMessages
         .filter((message) => message.role.toLowerCase() === "assistant")
         .map((message) => message.text);
     const now = Date.now();

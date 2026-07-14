@@ -411,9 +411,14 @@ export function ChatComposer({
                             }
 
                             const shouldUseEnterForAction = shouldSendFromEnter(event);
+                            const currentDraft = event.currentTarget.value.trim();
+                            const isExactSlashSuggestion = slashCommandSuggestions.some(
+                                (suggestion) => suggestion.value.trim() === currentDraft
+                            );
                             if (
                                 shouldShowSlashSuggestions &&
-                                (event.key === "Tab" || shouldUseEnterForAction)
+                                (event.key === "Tab" ||
+                                    (shouldUseEnterForAction && !isExactSlashSuggestion))
                             ) {
                                 event.preventDefault();
                                 const suggestion =

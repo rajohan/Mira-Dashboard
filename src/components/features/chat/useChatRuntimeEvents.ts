@@ -2046,7 +2046,13 @@ export function useChatRuntimeEvents({
                 ? selectedSessionKey
                 : streamForRun!.sessionKey;
             const selectedStream = eventMatchesSelected
-                ? streams[selectedSessionKey]
+                ? streams[selectedSessionKey] ||
+                  Object.values(streams).find(
+                      (stream) =>
+                          isSameSessionKey(stream.sessionKey, selectedSessionKey) &&
+                          isOptimisticRunId(stream.runId) &&
+                          stream.operation !== "compact"
+                  )
                 : undefined;
             const shouldAliasOptimisticTerminal =
                 eventMatchesSelected &&

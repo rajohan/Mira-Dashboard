@@ -944,6 +944,45 @@ describe("shared component helpers", () => {
         expect(onToggleKeepThinkingAfterFinal).toHaveBeenCalledTimes(1);
     });
 
+    it("submits an exact slash command on the first Enter", () => {
+        const onApplySlashSuggestion = jest.fn();
+        const onSend = jest.fn();
+
+        render(
+            <ChatComposer
+                attachments={[]}
+                canSend={true}
+                draft="/help"
+                fileInputReference={{ current: undefined }}
+                isConnected={true}
+                isRecording={false}
+                isSending={false}
+                isTranscribing={false}
+                selectedSessionKey="agent:main:main"
+                slashCommandSuggestions={[
+                    {
+                        description: "Show commands",
+                        title: "/help",
+                        value: "/help",
+                    },
+                ]}
+                onApplySlashSuggestion={onApplySlashSuggestion}
+                onAttachFiles={jest.fn()}
+                onChangeDraft={jest.fn()}
+                onPreview={jest.fn()}
+                onRemoveAttachment={jest.fn()}
+                onSend={onSend}
+                onToggleRecording={jest.fn()}
+            />
+        );
+
+        expect(fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" })).toBe(
+            false
+        );
+        expect(onApplySlashSuggestion).not.toHaveBeenCalled();
+        expect(onSend).toHaveBeenCalledTimes(1);
+    });
+
     it("handles chat slash commands without rendering the page", async () => {
         const requestCalls: Array<[string, Record<string, unknown> | undefined]> = [];
         const request = async <T = unknown,>(
@@ -953,17 +992,25 @@ describe("shared component helpers", () => {
             requestCalls.push([method, parameters]);
             return { ok: true } as T;
         };
-        const updateActiveStreams = jest.fn((updater) =>
-            updater({
-                "agent:main:main": {
+        let updatedActiveStreams: ActiveChatStreams = {};
+        const updateActiveStreams = jest.fn((updater) => {
+            updatedActiveStreams = updater({
+                "agent:main:main::dashboard-chat-r1::assistant": {
                     aliases: [],
-                    runId: "r1",
+                    runId: "dashboard-chat-r1",
                     sessionKey: "agent:main:main",
                     text: "run",
                     updatedAt: "now",
                 },
-            })
-        );
+                "agent:other:main::r2::assistant": {
+                    aliases: [],
+                    runId: "r2",
+                    sessionKey: "agent:other:main",
+                    text: "other run",
+                    updatedAt: "now",
+                },
+            });
+        });
         const setMessages = jest.fn((updater) => updater([]));
         const setDraft = jest.fn();
         const setSendError = jest.fn();
@@ -987,6 +1034,9 @@ describe("shared component helpers", () => {
         expect(requestCalls).toContainEqual([
             "chat.abort",
             { sessionKey: "agent:main:main" },
+        ]);
+        expect(Object.keys(updatedActiveStreams)).toEqual([
+            "agent:other:main::r2::assistant",
         ]);
 
         const blocked = useChatSlashCommands({
@@ -3274,14 +3324,6 @@ describe("shared component helpers", () => {
         ).toBe(true);
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
-        activeStreamsReference.current["agent:main:main"] = {
-            aliases: [],
-            runId: "dashboard-chat-optimistic",
-            sessionKey: "agent:main:main",
-            statusText: "Thinking",
-            text: "Optimistic buffered answer",
-            updatedAt: new Date().toISOString(),
-        };
         activeStreamsReference.current[
             "agent:main:main::dashboard-chat-optimistic::assistant"
         ] = {
@@ -3313,7 +3355,6 @@ describe("shared component helpers", () => {
                     message.text === "Optimistic buffered answer"
             )
         ).toBe(true);
-        expect(activeStreamsReference.current["agent:main:main"]).toBeUndefined();
         expect(
             activeStreamsReference.current[
                 "agent:main:main::dashboard-chat-optimistic::assistant"
@@ -5812,6 +5853,19 @@ describe("shared component helpers", () => {
         ).toBeUndefined();
         expect(
             mergeWithRecentOptimisticMessages([mixedDiagnosticLocalRow], [], false)[0]
+        ).toMatchObject({ text: "same visible text", thinking: undefined });
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [],
+                [
+                    {
+                        ...mixedDiagnosticLocalRow,
+                        local: undefined,
+                        text: "local reasoning\nsame visible text",
+                    },
+                ],
+                false
+            )[0]
         ).toMatchObject({ text: "same visible text", thinking: undefined });
         expect(
             mergeWithRecentOptimisticMessages(
