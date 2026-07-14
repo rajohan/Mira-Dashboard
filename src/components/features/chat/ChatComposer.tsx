@@ -7,12 +7,12 @@ import {
     PopoverPanel,
 } from "@headlessui/react";
 import {
+    ArrowUp,
     Brain,
     Mic,
     Minimize2,
     Paperclip,
     Pin,
-    Send,
     Settings2,
     Smile,
     Square,
@@ -708,9 +708,9 @@ export function ChatComposer({
                                 disabled={!canSend || isRecording || isTranscribing}
                                 title="Send"
                                 aria-label="Send"
-                                className="rounded-full p-2"
+                                className="size-8 shrink-0 rounded-full p-0"
                             >
-                                <Send className="size-4" />
+                                <ArrowUp className="size-4" />
                             </Button>
                         </div>
                     </div>

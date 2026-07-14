@@ -166,6 +166,7 @@ export interface ChatHistoryMessage {
 /** Represents raw chat history message. */
 export interface RawChatHistoryMessage {
     role?: string;
+    runId?: string;
     content?: unknown;
     text?: string;
     timestamp?: string | number;
@@ -549,6 +550,7 @@ export function normalizeChatHistoryMessage(
         thinking,
         toolCalls,
         toolResult,
+        runId: message.runId,
         timestamp:
             typeof message.timestamp === "number"
                 ? isoStringFromDate(message.timestamp)

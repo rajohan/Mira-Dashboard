@@ -545,7 +545,9 @@ export function sessionTimestampMs(value: unknown): number | undefined {
 /** Performs history has newer assistant message. */
 export function hasNewerAssistantMessageInHistory(
     messages: ChatHistoryMessage[],
-    updatedAt?: string
+    updatedAt?: string,
+    runIds: string[] = [],
+    shouldAllowUnscopedHistory = true
 ): boolean {
     const streamUpdatedAt = sessionTimestampMs(updatedAt);
 
@@ -554,7 +556,22 @@ export function hasNewerAssistantMessageInHistory(
     }
 
     return messages.some((message) => {
-        if (message.role.toLowerCase() !== "assistant" || !message.text.trim()) {
+        const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
+        const hasPrimaryAssistantContent = Boolean(
+            message.text.trim() || message.images?.length || message.attachments?.length
+        );
+        if (
+            message.role.toLowerCase() !== "assistant" ||
+            !hasPrimaryAssistantContent ||
+            (message.diagnostic && hasToolDetails)
+        ) {
+            return false;
+        }
+        if (
+            runIds.length > 0 &&
+            !shouldAllowUnscopedHistory &&
+            (!message.runId || !runIds.includes(message.runId))
+        ) {
             return false;
         }
 
@@ -567,7 +584,8 @@ export function hasNewerAssistantMessageInHistory(
 export function hasNewerFinalForStrippedThinkingStream(
     stream: ActiveChatStream,
     messages: ChatHistoryMessage[],
-    shouldKeepThinking: boolean
+    shouldKeepThinking: boolean,
+    shouldAllowUnscopedHistory = true
 ): boolean {
     return Boolean(
         !shouldKeepThinking &&
@@ -575,7 +593,12 @@ export function hasNewerFinalForStrippedThinkingStream(
         !stream.message.text.trim() &&
         !stream.message.toolCalls?.length &&
         !stream.message.toolResult &&
-        hasNewerAssistantMessageInHistory(messages, stream.updatedAt)
+        hasNewerAssistantMessageInHistory(
+            messages,
+            stream.updatedAt,
+            uniqueStrings([stream.runId, ...stream.aliases]),
+            shouldAllowUnscopedHistory
+        )
     );
 }
 
@@ -1223,6 +1246,14 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput),
                     keepThinkingAfterFinal
                 );
+                const activeSessionRunIds = new Set(
+                    Object.values(activeStreamsReference.current)
+                        .filter((stream) =>
+                            isSameSessionKey(stream.sessionKey, requestSessionKey)
+                        )
+                        .map((stream) => stream.runId)
+                );
+                const shouldAllowUnscopedHistory = activeSessionRunIds.size <= 1;
                 const recoveredStreamKeys = Object.entries(activeStreamsReference.current)
                     .filter(([, stream]) =>
                         isSameSessionKey(stream.sessionKey, requestSessionKey)
@@ -1260,12 +1291,15 @@ export function Chat() {
                                 (isStatusOnlyStream &&
                                     hasNewerAssistantMessageInHistory(
                                         nextMessages,
-                                        stream.updatedAt
+                                        stream.updatedAt,
+                                        uniqueStrings([stream.runId, ...stream.aliases]),
+                                        shouldAllowUnscopedHistory
                                     )) ||
                                 hasNewerFinalForStrippedThinkingStream(
                                     stream,
                                     nextMessages,
-                                    keepThinkingAfterFinal
+                                    keepThinkingAfterFinal,
+                                    shouldAllowUnscopedHistory
                                 ))
                         );
                     })

@@ -378,6 +378,31 @@ describe("shared component helpers", () => {
         ]);
         expect(
             visibleHistoryMessages(
+                [
+                    { role: "user", content: "Use a tool" },
+                    {
+                        role: "assistant",
+                        content: [{ type: "thinking", text: "Only reasoning" }],
+                    },
+                    {
+                        role: "assistant",
+                        content: [{ type: "toolCall", id: "call-1", name: "exec" }],
+                    },
+                ],
+                createChatVisibility(true, true),
+                false
+            )
+        ).toEqual([
+            expect.objectContaining({ role: "user", text: "Use a tool" }),
+            expect.objectContaining({
+                thinking: [{ text: "Only reasoning" }],
+            }),
+            expect.objectContaining({
+                toolCalls: [expect.objectContaining({ name: "exec" })],
+            }),
+        ]);
+        expect(
+            visibleHistoryMessages(
                 [blockFinalMessage],
                 createChatVisibility(false, false),
                 true

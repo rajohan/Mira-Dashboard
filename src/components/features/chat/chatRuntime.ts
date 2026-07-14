@@ -374,8 +374,14 @@ export function visibleHistoryMessages(
             continue;
         }
 
+        const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
+        const hasPrimaryAssistantContent = Boolean(
+            messageWithoutThinking.text.trim() ||
+            messageWithoutThinking.images?.length ||
+            messageWithoutThinking.attachments?.length
+        );
         const isDiagnosticToolMessage = Boolean(
-            message.diagnostic && (message.toolCalls?.length || message.toolResult)
+            hasToolDetails && (message.diagnostic || !hasPrimaryAssistantContent)
         );
         if (
             message.role.toLowerCase() === "assistant" &&

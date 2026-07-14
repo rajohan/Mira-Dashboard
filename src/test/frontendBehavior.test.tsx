@@ -3659,10 +3659,12 @@ describe("Mira Dashboard frontend behavior", () => {
 
         const normalized = normalizeChatHistoryMessage({
             role: "assistant",
+            runId: "history-run",
             content: `Here\nMEDIA:images/result.png\n<file name="note.txt" mime="text/plain">hello</file>`,
             timestamp: 1_782_172_800_000,
         });
         expect(normalized.text).toBe("Here");
+        expect(normalized.runId).toBe("history-run");
         expect(normalized.timestamp).toBe("2026-06-23T00:00:00.000Z");
         expect(normalized.attachments?.map((attachment) => attachment.fileName)).toEqual([
             "result.png",

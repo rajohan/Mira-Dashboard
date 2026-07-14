@@ -3207,6 +3207,40 @@ describe("Mira Dashboard pages", () => {
                 "2026-06-24T08:00:00.000Z"
             )
         ).toBe(true);
+        expect(
+            hasNewerAssistantMessageInHistory(
+                [
+                    {
+                        attachments: [
+                            {
+                                fileName: "result.png",
+                                id: "result",
+                                kind: "image",
+                            },
+                        ],
+                        content: "",
+                        role: "assistant",
+                        text: "",
+                        timestamp: "2026-06-24T08:01:00.000Z",
+                    },
+                ],
+                "2026-06-24T08:00:00.000Z"
+            )
+        ).toBe(true);
+        expect(
+            hasNewerAssistantMessageInHistory(
+                [
+                    {
+                        content: [{ type: "toolCall", name: "exec" }],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ name: "exec" }],
+                        timestamp: "2026-06-24T08:01:00.000Z",
+                    },
+                ],
+                "2026-06-24T08:00:00.000Z"
+            )
+        ).toBe(false);
         const quietThinkingStream = {
             aliases: [],
             message: {
@@ -3240,6 +3274,62 @@ describe("Mira Dashboard pages", () => {
                 quietThinkingStream,
                 newerFinalMessages,
                 true
+            )
+        ).toBe(false);
+        expect(
+            hasNewerFinalForStrippedThinkingStream(
+                quietThinkingStream,
+                [
+                    {
+                        content: "other run done",
+                        role: "assistant",
+                        runId: "other-run",
+                        text: "other run done",
+                        timestamp: "2026-06-24T08:01:00.000Z",
+                    },
+                ],
+                false,
+                false
+            )
+        ).toBe(false);
+        expect(
+            hasNewerFinalForStrippedThinkingStream(
+                quietThinkingStream,
+                [
+                    {
+                        content: "unambiguous real run done",
+                        role: "assistant",
+                        runId: "real-run-after-optimistic",
+                        text: "unambiguous real run done",
+                        timestamp: "2026-06-24T08:01:00.000Z",
+                    },
+                ],
+                false,
+                true
+            )
+        ).toBe(true);
+        expect(
+            hasNewerFinalForStrippedThinkingStream(
+                quietThinkingStream,
+                [
+                    {
+                        content: "same run done",
+                        role: "assistant",
+                        runId: "thinking-run",
+                        text: "same run done",
+                        timestamp: "2026-06-24T08:01:00.000Z",
+                    },
+                ],
+                false,
+                false
+            )
+        ).toBe(true);
+        expect(
+            hasNewerFinalForStrippedThinkingStream(
+                quietThinkingStream,
+                newerFinalMessages,
+                false,
+                false
             )
         ).toBe(false);
         expect(
