@@ -54,6 +54,14 @@ interface CompletedAssistantText {
     text: string;
 }
 
+/** Removes terminal thinking details when the user did not choose to retain them. */
+export function applyFinalThinkingPersistence(
+    message: ChatHistoryMessage,
+    shouldKeepThinkingAfterFinal: boolean
+): ChatHistoryMessage {
+    return shouldKeepThinkingAfterFinal ? message : { ...message, thinking: undefined };
+}
+
 const TERMINAL_LIFECYCLE_PHASES = new Set(["end", "error"]);
 const TERMINAL_RUNTIME_EVENTS = new Set(["model.completed", "session.ended"]);
 const TERMINAL_CHAT_STATES = new Set(["aborted", "error", "final"]);
@@ -1009,6 +1017,7 @@ interface UseChatRuntimeEventsParameters {
     ) => Promise<T>;
     subscribe: (listener: (data: unknown) => void) => () => void;
     selectedSessionKey: string;
+    keepThinkingAfterFinal?: boolean;
     showThinkingOutput: boolean;
     showToolOutput: boolean;
     activeStreamsReference: MutableReference<ActiveChatStreams>;
@@ -1030,6 +1039,7 @@ export function useChatRuntimeEvents({
     request,
     subscribe,
     selectedSessionKey,
+    keepThinkingAfterFinal = false,
     showThinkingOutput,
     showToolOutput,
     activeStreamsReference,
@@ -1469,6 +1479,10 @@ export function useChatRuntimeEvents({
                         isRenderableChatHistoryMessage(message, visibility)
                     )
                 )
+                .map((message) =>
+                    keepThinkingAfterFinal ? message : { ...message, thinking: undefined }
+                )
+                .filter((message) => hasChatMessageDetails(message))
                 .map((message) => ({ ...message, local: true }));
         };
 
@@ -2191,7 +2205,10 @@ export function useChatRuntimeEvents({
 
             if (payload.state === "final") {
                 flushPendingDeltaUpdates();
-                const finalMessage = finalMessageFromPayload(payload);
+                const finalMessage = applyFinalThinkingPersistence(
+                    finalMessageFromPayload(payload),
+                    keepThinkingAfterFinal
+                );
                 const bufferedText = activeAssistantTextForRun(
                     streamSessionKey,
                     payload.runId
@@ -2485,6 +2502,7 @@ export function useChatRuntimeEvents({
         };
     }, [
         activeStreamsReference,
+        keepThinkingAfterFinal,
         liveHistoryRefreshTimerReference,
         selectedSessionKey,
         setHistoryLoadVersion,

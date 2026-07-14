@@ -1,9 +1,18 @@
-import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
+import {
+    Combobox,
+    ComboboxInput,
+    ComboboxOption,
+    ComboboxOptions,
+    Popover,
+    PopoverButton,
+    PopoverPanel,
+} from "@headlessui/react";
 import {
     Brain,
     Mic,
     Minimize2,
     Paperclip,
+    Pin,
     Send,
     Settings2,
     Smile,
@@ -11,19 +20,12 @@ import {
     Wrench,
     X,
 } from "lucide-react";
-import {
-    type KeyboardEvent as ReactKeyboardEvent,
-    type RefObject,
-    useEffect,
-    useRef,
-    useState,
-} from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, type RefObject, useRef } from "react";
 
 import type { Session } from "../../../types/session";
 import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
-import { Textarea } from "../../ui/Textarea";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 import {
     base64ToText,
@@ -91,6 +93,7 @@ interface ChatComposerProperties {
     modelOptions?: ChatModelOption[];
     shouldShowThinking?: boolean;
     shouldShowTools?: boolean;
+    shouldKeepThinkingAfterFinal?: boolean;
     sessionControlsDisabled?: boolean;
     isCompacting?: boolean;
     slashCommandSuggestions: SlashCommandSuggestion[];
@@ -103,6 +106,7 @@ interface ChatComposerProperties {
     onToggleRecording: () => void;
     onToggleThinking?: () => void;
     onToggleTools?: () => void;
+    onToggleKeepThinkingAfterFinal?: () => void;
     onSelectThinkingLevel?: (value: string) => void;
     onSelectSpeed?: (value: string) => void;
     onSelectModel?: (value: string) => void;
@@ -124,6 +128,7 @@ export function ChatComposer({
     modelOptions = [],
     shouldShowThinking,
     shouldShowTools,
+    shouldKeepThinkingAfterFinal = false,
     sessionControlsDisabled,
     isCompacting,
     slashCommandSuggestions,
@@ -136,18 +141,13 @@ export function ChatComposer({
     onToggleRecording,
     onToggleThinking,
     onToggleTools,
+    onToggleKeepThinkingAfterFinal,
     onSelectThinkingLevel,
     onSelectSpeed,
     onSelectModel,
     onCompact,
 }: ChatComposerProperties) {
-    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-    const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
-    const composerReference = useRef<HTMLDivElement | undefined>(undefined);
     const textareaReference = useRef<HTMLTextAreaElement | undefined>(undefined);
-    const visibleSlashCommandSuggestions = slashSuggestionsDismissed
-        ? []
-        : slashCommandSuggestions;
     const modelSelectOptions = modelOptions.map((option) => ({
         value: option.id || option.name || option.label || "",
         label: option.label || option.name || option.id || "Unknown",
@@ -162,72 +162,6 @@ export function ChatComposer({
     if (modelSelectOptions.length === 0) {
         modelSelectOptions.push({ value: "", label: "Default" });
     }
-
-    useEffect(() => {
-        if (!showEmojiPicker) {
-            return;
-        }
-
-        /** Responds to pointer down events. */
-        const handlePointerDown = (event: PointerEvent) => {
-            if (
-                event.target instanceof Node &&
-                composerReference.current?.contains(event.target)
-            ) {
-                return;
-            }
-
-            setShowEmojiPicker(false);
-        };
-
-        /** Responds to key down events. */
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") {
-                setShowEmojiPicker(false);
-            }
-        };
-
-        document.addEventListener("pointerdown", handlePointerDown);
-        document.addEventListener("keydown", handleKeyDown);
-
-        return () => {
-            document.removeEventListener("pointerdown", handlePointerDown);
-            document.removeEventListener("keydown", handleKeyDown);
-        };
-    }, [showEmojiPicker]);
-
-    useEffect(() => {
-        if (slashCommandSuggestions.length === 0 || slashSuggestionsDismissed) {
-            return;
-        }
-
-        /** Responds to pointer down events. */
-        const handlePointerDown = (event: PointerEvent) => {
-            if (
-                event.target instanceof Node &&
-                composerReference.current?.contains(event.target)
-            ) {
-                return;
-            }
-
-            setSlashSuggestionsDismissed(true);
-        };
-
-        /** Responds to key down events. */
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") {
-                setSlashSuggestionsDismissed(true);
-            }
-        };
-
-        document.addEventListener("pointerdown", handlePointerDown);
-        document.addEventListener("keydown", handleKeyDown);
-
-        return () => {
-            document.removeEventListener("pointerdown", handlePointerDown);
-            document.removeEventListener("keydown", handleKeyDown);
-        };
-    }, [slashCommandSuggestions.length, slashSuggestionsDismissed]);
 
     /** Performs insert emoji. */
     const insertEmoji = (emoji: string) => {
@@ -248,7 +182,6 @@ export function ChatComposer({
         const nextCursor = selectionStart + emoji.length;
 
         onChangeDraft(nextDraft);
-        setShowEmojiPicker(false);
 
         setTimeout(() => {
             textarea?.focus();
@@ -257,12 +190,7 @@ export function ChatComposer({
     };
 
     return (
-        <div
-            ref={(element) => {
-                composerReference.current = element ?? undefined;
-            }}
-            className="mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4"
-        >
+        <div className="mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4">
             {attachments.length > 0 ? (
                 <div className="mb-3 flex flex-wrap gap-2">
                     {attachments.map((attachment) => (
@@ -328,21 +256,30 @@ export function ChatComposer({
                     className="hidden"
                     onChange={(event) => onAttachFiles(event.target.files ?? undefined)}
                 />
-                <div className="relative min-w-0 flex-1 rounded-lg border border-primary-600 bg-primary-800 transition-colors focus-within:border-accent-500 hover:border-primary-500 focus-within:hover:border-accent-500">
-                    {visibleSlashCommandSuggestions.length > 0 ? (
-                        <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl">
+                <Combobox
+                    value={undefined as SlashCommandSuggestion | undefined}
+                    onChange={(suggestion: SlashCommandSuggestion | null | undefined) => {
+                        if (suggestion) {
+                            onApplySlashSuggestion(suggestion.value);
+                        }
+                    }}
+                    as="div"
+                    className="relative min-w-0 flex-1 rounded-lg border border-primary-600 bg-primary-800 transition-colors focus-within:border-accent-500 hover:border-primary-500 focus-within:hover:border-accent-500"
+                >
+                    {slashCommandSuggestions.length > 0 ? (
+                        <ComboboxOptions
+                            modal={false}
+                            className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl outline-none"
+                        >
                             <div className="border-b border-primary-700 px-3 py-2 text-xs font-medium tracking-wide text-primary-400 uppercase">
                                 Slash commands
                             </div>
                             <div className="max-h-72 overflow-y-auto py-1">
-                                {visibleSlashCommandSuggestions.map((suggestion) => (
-                                    <button
+                                {slashCommandSuggestions.map((suggestion) => (
+                                    <ComboboxOption
                                         key={suggestion.value}
-                                        type="button"
-                                        onClick={() =>
-                                            onApplySlashSuggestion(suggestion.value)
-                                        }
-                                        className="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
+                                        value={suggestion}
+                                        className="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-primary-800 focus:outline-none data-focus:bg-primary-800"
                                     >
                                         <span className="min-w-0 flex-1">
                                             <span className="block truncate font-mono text-sm text-primary-100">
@@ -352,56 +289,31 @@ export function ChatComposer({
                                                 {suggestion.description}
                                             </span>
                                         </span>
-                                    </button>
+                                    </ComboboxOption>
                                 ))}
                             </div>
-                        </div>
+                        </ComboboxOptions>
                     ) : undefined}
-                    {showEmojiPicker ? (
-                        <div className="absolute inset-x-1 bottom-12 z-30 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl sm:left-auto sm:w-80">
-                            <div className="mb-2 flex items-center justify-between px-1 text-xs font-medium tracking-wide text-primary-400 uppercase">
-                                <span>Emoji</span>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowEmojiPicker(false)}
-                                    className="rounded p-1 text-primary-400 hover:bg-primary-800 hover:text-primary-100"
-                                    aria-label="Close emoji picker"
-                                >
-                                    <X className="size-4" />
-                                </button>
-                            </div>
-                            <div className="grid max-h-52 grid-cols-6 gap-1 overflow-y-auto sm:max-h-64">
-                                {CHAT_EMOJIS.map((emoji) => (
-                                    <button
-                                        key={emoji}
-                                        type="button"
-                                        onClick={() => insertEmoji(emoji)}
-                                        className="rounded-lg p-2.5 text-xl hover:bg-primary-800 focus:bg-primary-800 focus:outline-none"
-                                        aria-label={`Insert ${emoji}`}
-                                    >
-                                        {emoji}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    ) : undefined}
-                    <Textarea
+                    <ComboboxInput
+                        as="textarea"
+                        aria-label="Message"
                         ref={(element) => {
-                            textareaReference.current = element ?? undefined;
+                            textareaReference.current =
+                                (element as unknown as HTMLTextAreaElement | null) ??
+                                undefined;
                         }}
                         value={draft}
                         onChange={(event) => {
-                            setSlashSuggestionsDismissed(false);
                             onChangeDraft(event.target.value);
                         }}
                         onKeyDown={(event) => {
                             if (
                                 event.key === "Tab" &&
-                                visibleSlashCommandSuggestions.length > 0
+                                slashCommandSuggestions.length > 0
                             ) {
                                 event.preventDefault();
                                 onApplySlashSuggestion(
-                                    visibleSlashCommandSuggestions[0]?.value || draft
+                                    slashCommandSuggestions[0]?.value || draft
                                 );
                                 return;
                             }
@@ -419,7 +331,7 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="block min-h-24 resize-none rounded-t-lg! rounded-b-none! border-0! bg-transparent! text-base focus:border-0! sm:min-h-32 sm:text-sm"
+                        className="block min-h-24 w-full resize-none rounded-t-lg bg-transparent px-3 py-2 text-base text-primary-100 placeholder-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-32 sm:text-sm"
                     />
                     <div className="flex min-h-10 items-center justify-between rounded-b-lg border-t border-primary-600 bg-primary-700 px-2 py-1">
                         <div className="flex items-center gap-1">
@@ -500,49 +412,106 @@ export function ChatComposer({
                                     </Button>
                                 </PopoverPanel>
                             </Popover>
-                            <button
+                            <Button
                                 type="button"
+                                variant="ghost"
+                                size="sm"
                                 aria-pressed={shouldShowThinking}
                                 onClick={() => onToggleThinking?.()}
                                 disabled={!selectedSessionKey}
                                 className={
                                     shouldShowThinking
-                                        ? "rounded p-1.5 text-accent-300"
-                                        : "rounded p-1.5 text-primary-500"
+                                        ? "p-1.5 text-accent-300"
+                                        : "p-1.5 text-primary-500"
                                 }
                                 title="Show thinking"
                             >
                                 <Brain className="size-4" />
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                                 type="button"
+                                variant="ghost"
+                                size="sm"
                                 aria-pressed={shouldShowTools}
                                 onClick={() => onToggleTools?.()}
                                 disabled={!selectedSessionKey}
                                 className={
                                     shouldShowTools
-                                        ? "rounded p-1.5 text-accent-300"
-                                        : "rounded p-1.5 text-primary-500"
+                                        ? "p-1.5 text-accent-300"
+                                        : "p-1.5 text-primary-500"
                                 }
                                 title="Show tools"
                             >
                                 <Wrench className="size-4" />
-                            </button>
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                aria-pressed={shouldKeepThinkingAfterFinal}
+                                aria-label="Keep thinking after final"
+                                onClick={() => onToggleKeepThinkingAfterFinal?.()}
+                                disabled={!selectedSessionKey}
+                                className={
+                                    shouldKeepThinkingAfterFinal
+                                        ? "p-1.5 text-accent-300"
+                                        : "p-1.5 text-primary-500"
+                                }
+                                title="Keep thinking after final"
+                            >
+                                <Pin className="size-4" />
+                            </Button>
                         </div>
-                        <button
-                            type="button"
-                            onClick={() =>
-                                setShowEmojiPicker((wasPrevious) => !wasPrevious)
-                            }
-                            disabled={!isConnected || !selectedSessionKey || isSending}
-                            className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
-                            title="Insert emoji"
-                            aria-label="Insert emoji"
-                        >
-                            <Smile className="size-5" />
-                        </button>
+                        <Popover className="relative">
+                            {({ close }) => (
+                                <>
+                                    <PopoverButton
+                                        as={Button}
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled={
+                                            !isConnected ||
+                                            !selectedSessionKey ||
+                                            isSending
+                                        }
+                                        className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100 focus:bg-primary-600 focus:text-primary-100 disabled:opacity-40"
+                                        title="Insert emoji"
+                                        aria-label="Insert emoji"
+                                    >
+                                        <Smile className="size-5" />
+                                    </PopoverButton>
+                                    <PopoverPanel
+                                        anchor={{ to: "top end", gap: 8 }}
+                                        className="z-50 w-80 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl outline-none"
+                                    >
+                                        <div className="mb-2 px-1 text-xs font-medium tracking-wide text-primary-400 uppercase">
+                                            Emoji
+                                        </div>
+                                        <div className="grid max-h-64 grid-cols-6 gap-1 overflow-y-auto">
+                                            {CHAT_EMOJIS.map((emoji) => (
+                                                <Button
+                                                    key={emoji}
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        insertEmoji(emoji);
+                                                        close();
+                                                    }}
+                                                    className="p-2.5 text-xl hover:bg-primary-800 focus:bg-primary-800"
+                                                    aria-label={`Insert ${emoji}`}
+                                                >
+                                                    {emoji}
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    </PopoverPanel>
+                                </>
+                            )}
+                        </Popover>
                     </div>
-                </div>
+                </Combobox>
                 <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
                     <Button
                         variant={isRecording ? "primary" : "secondary"}

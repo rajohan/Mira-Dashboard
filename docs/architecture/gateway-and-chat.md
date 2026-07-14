@@ -96,8 +96,15 @@ Session controls are Gateway-backed rather than Dashboard-only preferences:
   treated as unsupported.
 
 Thinking/reasoning and tool diagnostics have separate visibility toggles stored
-in browser local storage. The composer owns these controls so the setting and
-the message it affects stay in one interaction surface.
+in browser local storage. A third persisted composer toggle controls whether
+visible thinking/commentary is retained after the final answer; it defaults off,
+matching the thinking-visibility default. The composer owns these controls so
+the setting and the message it affects stay in one interaction surface.
+
+Live response rows must keep tool diagnostics and retained thinking before the
+final assistant text. Tool rows can carry descriptive text, so row ordering must
+identify them by their tool metadata rather than treating every text-bearing
+assistant row as a final answer.
 
 Tool-call failures should render as tool diagnostics, not as the global chat
 error banner. The global error banner is reserved for send failures, Gateway

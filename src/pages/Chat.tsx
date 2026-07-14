@@ -186,11 +186,20 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     }
 
     const responseRows = rows.slice(lastUserRowIndex + 1);
+    const isToolRow = (row: ChatRow) => {
+        const role = row.message.role.toLowerCase();
+        return Boolean(
+            TOOL_ROLE_VARIANTS.includes(role) ||
+            row.message.toolCalls?.length ||
+            row.message.toolResult
+        );
+    };
     const finalRowIndex = responseRows.findLastIndex(
         (row) =>
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
-            Boolean(row.message.text.trim())
+            Boolean(row.message.text.trim()) &&
+            !isToolRow(row)
     );
     if (finalRowIndex === -1) {
         return rows;
@@ -202,7 +211,8 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
             rowIndex < finalRowIndex &&
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
-            Boolean(row.message.text.trim())
+            Boolean(row.message.text.trim()) &&
+            !isToolRow(row)
     );
     const currentResponseStartIndex = previousAssistantTextRowIndex + 1;
     const currentResponseRows = responseRows.slice(currentResponseStartIndex);
@@ -224,12 +234,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
         if (row === finalRow || !isRowInCurrentResponse(row)) {
             return false;
         }
-        const role = row.message.role.toLowerCase();
-        return Boolean(
-            TOOL_ROLE_VARIANTS.includes(role) ||
-            row.message.toolCalls?.length ||
-            row.message.toolResult
-        );
+        return isToolRow(row);
     });
     if (thinkingRows.length === 0 && toolRows.length === 0) {
         return rows;
@@ -485,6 +490,7 @@ export function writeDeletedMessageKeys(sessionKey: string, keys: Set<string>): 
 
 /** Represents stored chat diagnostic visibility. */
 interface StoredChatDiagnosticVisibility {
+    keepThinkingAfterFinal: boolean;
     thinking: boolean;
     tools: boolean;
 }
@@ -585,22 +591,23 @@ export function scheduleBottomFollowWhenNeeded(
 /** Performs read stored chat diagnostic visibility. */
 export function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
     if (typeof window === "undefined") {
-        return { thinking: false, tools: false };
+        return { keepThinkingAfterFinal: false, thinking: false, tools: false };
     }
 
     try {
         const raw = localStorage.getItem(CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY);
         if (!raw) {
-            return { thinking: false, tools: false };
+            return { keepThinkingAfterFinal: false, thinking: false, tools: false };
         }
 
         const parsed = JSON.parse(raw) as Partial<StoredChatDiagnosticVisibility>;
         return {
+            keepThinkingAfterFinal: parsed.keepThinkingAfterFinal === true,
             thinking: parsed.thinking === true,
             tools: parsed.tools === true,
         };
     } catch {
-        return { thinking: false, tools: false };
+        return { keepThinkingAfterFinal: false, thinking: false, tools: false };
     }
 }
 
@@ -725,6 +732,9 @@ export function Chat() {
     );
     const [showToolOutput, setShowToolOutput] = useState(
         () => readStoredChatDiagnosticVisibility().tools
+    );
+    const [keepThinkingAfterFinal, setKeepThinkingAfterFinal] = useState(
+        () => readStoredChatDiagnosticVisibility().keepThinkingAfterFinal
     );
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
     const [, setHistoryLoadVersion] = useState(0);
@@ -997,10 +1007,11 @@ export function Chat() {
 
     useEffect(() => {
         writeStoredChatDiagnosticVisibility({
+            keepThinkingAfterFinal,
             thinking: showThinkingOutput,
             tools: showToolOutput,
         });
-    }, [showThinkingOutput, showToolOutput]);
+    }, [keepThinkingAfterFinal, showThinkingOutput, showToolOutput]);
 
     useEffect(() => {
         const isNewSession = loadedHistorySessionReference.current !== selectedSessionKey;
@@ -1273,6 +1284,7 @@ export function Chat() {
         connectionId,
         isConnected,
         selectedSessionKey,
+        keepThinkingAfterFinal,
         showThinkingOutput,
         showToolOutput,
         activeStreamsReference,
@@ -2110,6 +2122,7 @@ export function Chat() {
                         selectedSession={selectedSession}
                         shouldShowThinking={showThinkingOutput}
                         shouldShowTools={showToolOutput}
+                        shouldKeepThinkingAfterFinal={keepThinkingAfterFinal}
                         sessionControlsDisabled={isSessionControlsDisabled}
                         isCompacting={isCompactingSession}
                         slashCommandSuggestions={slashCommandSuggestions}
@@ -2122,6 +2135,9 @@ export function Chat() {
                         onToggleRecording={() => void handleToggleRecording()}
                         onToggleThinking={() => setShowThinkingOutput((value) => !value)}
                         onToggleTools={() => setShowToolOutput((value) => !value)}
+                        onToggleKeepThinkingAfterFinal={() =>
+                            setKeepThinkingAfterFinal((value) => !value)
+                        }
                         onSelectThinkingLevel={(thinkingLevel) =>
                             void patchSelectedSession({
                                 // Gateway uses null to clear an inherited override.

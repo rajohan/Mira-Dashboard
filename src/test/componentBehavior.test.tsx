@@ -43,6 +43,7 @@ import {
     messageIdentity,
 } from "../components/features/chat/chatUtilities";
 import {
+    applyFinalThinkingPersistence,
     compactStatusText,
     detailFromArguments,
     formatToolName,
@@ -123,8 +124,10 @@ import {
     isActiveStreamRecoveredInMessages,
     nextRefreshedChatMessages,
     orderCurrentResponseRows,
+    readStoredChatDiagnosticVisibility,
     rollbackFailedOptimisticMessage,
     visibleActiveStreamContent,
+    writeStoredChatDiagnosticVisibility,
 } from "../pages/Chat";
 import type { Session } from "../types/session";
 
@@ -222,6 +225,49 @@ function thinkingTexts(stream?: ActiveChatStreams[string]) {
 }
 
 describe("shared component helpers", () => {
+    it("stores thinking persistence beside the existing diagnostic visibility", () => {
+        const storageKey = "mira-dashboard-chat-diagnostic-visibility";
+        localStorage.removeItem(storageKey);
+
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            keepThinkingAfterFinal: false,
+            thinking: false,
+            tools: false,
+        });
+
+        localStorage.setItem(storageKey, JSON.stringify({ thinking: true, tools: true }));
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            keepThinkingAfterFinal: false,
+            thinking: true,
+            tools: true,
+        });
+
+        writeStoredChatDiagnosticVisibility({
+            keepThinkingAfterFinal: true,
+            thinking: true,
+            tools: false,
+        });
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            keepThinkingAfterFinal: true,
+            thinking: true,
+            tools: false,
+        });
+
+        const finalMessage = {
+            content: "Answer",
+            role: "assistant",
+            text: "Answer",
+            thinking: [{ text: "Reasoning" }],
+        };
+        expect(applyFinalThinkingPersistence(finalMessage, true).thinking).toHaveLength(
+            1
+        );
+        expect(
+            applyFinalThinkingPersistence(finalMessage, false).thinking
+        ).toBeUndefined();
+
+        localStorage.removeItem(storageKey);
+    });
     it("names filter button groups and exposes their selected option", () => {
         render(
             <FilterButtonGroup
@@ -720,6 +766,7 @@ describe("shared component helpers", () => {
         const onRemoveAttachment = jest.fn();
         const onSend = jest.fn();
         const onToggleRecording = jest.fn();
+        const onToggleKeepThinkingAfterFinal = jest.fn();
 
         render(
             <ChatComposer
@@ -752,6 +799,7 @@ describe("shared component helpers", () => {
                 isSending={false}
                 isTranscribing={false}
                 selectedSessionKey="agent:main:main"
+                shouldKeepThinkingAfterFinal={true}
                 slashCommandSuggestions={[
                     {
                         description: "Show commands",
@@ -766,6 +814,7 @@ describe("shared component helpers", () => {
                 onRemoveAttachment={onRemoveAttachment}
                 onSend={onSend}
                 onToggleRecording={onToggleRecording}
+                onToggleKeepThinkingAfterFinal={onToggleKeepThinkingAfterFinal}
             />
         );
 
@@ -775,14 +824,15 @@ describe("shared component helpers", () => {
         );
         await user.click(screen.getByRole("button", { name: /remove note.txt/i }));
         expect(onRemoveAttachment).toHaveBeenCalledWith("a1");
-        await user.click(screen.getByRole("button", { name: /help/i }));
+
+        const textarea = screen.getByRole("combobox");
+        fireEvent.change(textarea, { target: { value: "/hel" } });
+        await user.click(await screen.findByRole("option", { name: /help/i }));
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/help");
 
-        const textarea = screen.getByPlaceholderText(/Message, attach files/i);
         fireEvent.change(textarea, { target: { value: "/help" } });
-        fireEvent.keyDown(textarea, { key: "Enter" });
         expect(onChangeDraft).toHaveBeenCalledWith("/help");
-        expect(onSend).toHaveBeenCalledTimes(1);
+        expect(textarea).toHaveAttribute("aria-expanded", "true");
 
         await user.click(screen.getByRole("button", { name: /insert emoji/i }));
         const emojiButton = screen.getByRole("button", { name: "Insert 😀" });
@@ -794,7 +844,12 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: /attach/i }));
         await user.click(screen.getByRole("button", { name: /send/i }));
         expect(onToggleRecording).toHaveBeenCalledTimes(1);
-        expect(onSend).toHaveBeenCalledTimes(2);
+        expect(onSend).toHaveBeenCalledTimes(1);
+
+        await user.click(
+            screen.getByRole("button", { name: "Keep thinking after final" })
+        );
+        expect(onToggleKeepThinkingAfterFinal).toHaveBeenCalledTimes(1);
     });
 
     it("handles chat slash commands without rendering the page", async () => {
@@ -1093,6 +1148,7 @@ describe("shared component helpers", () => {
                 liveHistoryRefreshTimerReference,
                 request,
                 selectedSessionKey: "agent:main:main",
+                keepThinkingAfterFinal: true,
                 setHistoryLoadVersion,
                 setIsAtBottom,
                 setMessages,
@@ -6538,9 +6594,9 @@ describe("shared component helpers", () => {
             key: "tool",
             kind: "message" as const,
             message: {
-                content: "",
+                content: "Ran the requested check",
                 role: "assistant",
-                text: "",
+                text: "Ran the requested check",
                 timestamp: "2026-07-10T15:00:02.000Z",
                 toolCalls: [{ id: "tool-1", name: "bash" }],
             },
