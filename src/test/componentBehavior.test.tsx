@@ -983,6 +983,43 @@ describe("shared component helpers", () => {
         expect(onSend).toHaveBeenCalledTimes(1);
     });
 
+    it("keeps slash argument suggestions open after command completion", async () => {
+        const user = userEvent.setup();
+        const onApplySlashSuggestion = jest.fn();
+
+        render(
+            <ChatComposer
+                attachments={[]}
+                canSend={true}
+                draft="/thi"
+                fileInputReference={{ current: undefined }}
+                isConnected={true}
+                isRecording={false}
+                isSending={false}
+                isTranscribing={false}
+                selectedSessionKey="agent:main:main"
+                slashCommandSuggestions={[
+                    {
+                        description: "Show or set thinking level",
+                        title: "/think [level]",
+                        value: "/think ",
+                    },
+                ]}
+                onApplySlashSuggestion={onApplySlashSuggestion}
+                onAttachFiles={jest.fn()}
+                onChangeDraft={jest.fn()}
+                onPreview={jest.fn()}
+                onRemoveAttachment={jest.fn()}
+                onSend={jest.fn()}
+                onToggleRecording={jest.fn()}
+            />
+        );
+
+        await user.click(screen.getByRole("option", { name: /think/i }));
+        expect(onApplySlashSuggestion).toHaveBeenCalledWith("/think ");
+        expect(screen.getByRole("combobox")).toHaveAttribute("aria-expanded", "true");
+    });
+
     it("handles chat slash commands without rendering the page", async () => {
         const requestCalls: Array<[string, Record<string, unknown> | undefined]> = [];
         const request = async <T = unknown,>(
@@ -1282,30 +1319,35 @@ describe("shared component helpers", () => {
                 typeof updater === "function" ? updater(historyLoadVersion) : updater;
         });
 
-        const { unmount } = renderHook(() =>
-            useChatRuntimeEvents({
-                activeStreamsReference,
-                connectionId: 1,
-                isConnected: true,
-                liveHistoryRefreshTimerReference,
-                request,
-                selectedSessionKey: "agent:main:main",
-                keepThinkingAfterFinal: true,
-                setHistoryLoadVersion,
-                setIsAtBottom,
-                setMessages,
-                setSendError,
-                shouldStickToBottomReference: stickToBottomReference,
-                showThinkingOutput: true,
-                showToolOutput: true,
-                subscribe,
-                updateActiveStreams,
-            })
+        const { rerender, unmount } = renderHook(
+            ({ shouldKeepThinking }: { shouldKeepThinking: boolean }) =>
+                useChatRuntimeEvents({
+                    activeStreamsReference,
+                    connectionId: 1,
+                    isConnected: true,
+                    liveHistoryRefreshTimerReference,
+                    request,
+                    selectedSessionKey: "agent:main:main",
+                    keepThinkingAfterFinal: shouldKeepThinking,
+                    setHistoryLoadVersion,
+                    setIsAtBottom,
+                    setMessages,
+                    setSendError,
+                    shouldStickToBottomReference: stickToBottomReference,
+                    showThinkingOutput: true,
+                    showToolOutput: true,
+                    subscribe,
+                    updateActiveStreams,
+                }),
+            { initialProps: { shouldKeepThinking: true } }
         );
 
         await waitFor(() => {
             expect(subscribe).toHaveBeenCalledTimes(1);
         });
+        rerender({ shouldKeepThinking: false });
+        rerender({ shouldKeepThinking: true });
+        expect(subscribe).toHaveBeenCalledTimes(1);
 
         act(() => {
             listener?.({

@@ -238,7 +238,7 @@ export function ChatComposer({
 
     /** Applies a slash suggestion and returns focus to the composer. */
     const applySlashSuggestion = (suggestion: SlashCommandSuggestion) => {
-        setSlashSuggestionsDismissed(true);
+        setSlashSuggestionsDismissed(!suggestion.value.endsWith(" "));
         onApplySlashSuggestion(suggestion.value);
         requestAnimationFrame(() => textareaReference.current?.focus());
     };

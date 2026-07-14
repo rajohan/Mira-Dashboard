@@ -34,6 +34,7 @@ import { Agents } from "../pages/Agents";
 import {
     Chat,
     hasNewerAssistantMessageInHistory,
+    hasNewerFinalForStrippedThinkingStream,
     isChatSendBlocked,
     isSessionActive,
     nextHistoryBottomState,
@@ -42,6 +43,7 @@ import {
     readDeletedMessageKeys,
     scheduleBottomFollowWhenNeeded,
     sessionTimestampMs,
+    stripThinkingFromMessages,
     writeDeletedMessageKeys,
 } from "../pages/Chat";
 import { Dashboard } from "../pages/Dashboard";
@@ -3205,6 +3207,54 @@ describe("Mira Dashboard pages", () => {
                 "2026-06-24T08:00:00.000Z"
             )
         ).toBe(true);
+        const quietThinkingStream = {
+            aliases: [],
+            message: {
+                content: [{ text: "private reasoning", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "private reasoning" }],
+            },
+            runId: "thinking-run",
+            sessionKey: "agent:main:main",
+            text: "",
+            updatedAt: "2026-06-24T08:00:00.000Z",
+        };
+        const newerFinalMessages = [
+            {
+                content: "done",
+                role: "assistant",
+                text: "done",
+                timestamp: "2026-06-24T08:01:00.000Z",
+            },
+        ];
+        expect(
+            hasNewerFinalForStrippedThinkingStream(
+                quietThinkingStream,
+                newerFinalMessages,
+                false
+            )
+        ).toBe(true);
+        expect(
+            hasNewerFinalForStrippedThinkingStream(
+                quietThinkingStream,
+                newerFinalMessages,
+                true
+            )
+        ).toBe(false);
+        expect(
+            stripThinkingFromMessages([
+                {
+                    content: [
+                        { text: "private reasoning", type: "thinking" },
+                        { text: "public answer", type: "text" },
+                    ],
+                    role: "assistant",
+                    text: "private reasoning\npublic answer",
+                    thinking: [{ text: "private reasoning" }],
+                },
+            ])[0]
+        ).toMatchObject({ text: "public answer", thinking: undefined });
         expect(nextHistoryBottomState(false, true, false)).toBe(true);
         expect(nextHistoryBottomState(false, false, false)).toBe(false);
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");

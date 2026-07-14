@@ -1055,9 +1055,11 @@ export function useChatRuntimeEvents({
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
     const toolErrorRunKeysReference = useRef(new Set<string>());
+    const keepThinkingAfterFinalReference = useRef(keepThinkingAfterFinal);
 
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
+    keepThinkingAfterFinalReference.current = keepThinkingAfterFinal;
 
     useEffect(() => {
         selectedSessionKeyReference.current = selectedSessionKey;
@@ -1211,9 +1213,10 @@ export function useChatRuntimeEvents({
                                         showThinkingOutput,
                                         showToolOutput
                                     ),
-                                    keepThinkingAfterFinal
+                                    keepThinkingAfterFinalReference.current
                                 ),
-                                keepThinkingAfterFinal && showThinkingOutput
+                                keepThinkingAfterFinalReference.current &&
+                                    showThinkingOutput
                             )
                         );
 
@@ -1477,7 +1480,7 @@ export function useChatRuntimeEvents({
                 .map((message) =>
                     applyFinalThinkingPersistence(
                         message,
-                        keepThinkingAfterFinal && showThinkingOutput
+                        keepThinkingAfterFinalReference.current && showThinkingOutput
                     )
                 )
                 .filter((message) => hasChatMessageDetails(message))
@@ -1618,7 +1621,7 @@ export function useChatRuntimeEvents({
                             "",
                             eventRunId
                         ),
-                        keepThinkingAfterFinal && showThinkingOutput
+                        keepThinkingAfterFinalReference.current && showThinkingOutput
                     );
                     if (
                         isRenderableChatHistoryMessage(
@@ -1737,7 +1740,7 @@ export function useChatRuntimeEvents({
                             "",
                             eventRunId
                         ),
-                        keepThinkingAfterFinal && showThinkingOutput
+                        keepThinkingAfterFinalReference.current && showThinkingOutput
                     );
                     if (
                         isRenderableChatHistoryMessage(
@@ -2213,9 +2216,10 @@ export function useChatRuntimeEvents({
                                             showThinkingOutput,
                                             showToolOutput
                                         ),
-                                        keepThinkingAfterFinal
+                                        keepThinkingAfterFinalReference.current
                                     ),
-                                    keepThinkingAfterFinal && showThinkingOutput
+                                    keepThinkingAfterFinalReference.current &&
+                                        showThinkingOutput
                                 )
                             );
                             setIsAtBottom(shouldStickToBottomReference.current);
@@ -2231,7 +2235,7 @@ export function useChatRuntimeEvents({
                 flushPendingDeltaUpdates();
                 const finalMessage = applyFinalThinkingPersistence(
                     finalMessageFromPayload(payload),
-                    keepThinkingAfterFinal && showThinkingOutput
+                    keepThinkingAfterFinalReference.current && showThinkingOutput
                 );
                 const bufferedText = activeAssistantTextForRun(
                     streamSessionKey,
@@ -2526,7 +2530,6 @@ export function useChatRuntimeEvents({
         };
     }, [
         activeStreamsReference,
-        keepThinkingAfterFinal,
         liveHistoryRefreshTimerReference,
         selectedSessionKey,
         setHistoryLoadVersion,

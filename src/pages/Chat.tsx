@@ -563,6 +563,29 @@ export function hasNewerAssistantMessageInHistory(
     });
 }
 
+/** Returns whether stripped history supersedes a quiet thinking-only stream. */
+export function hasNewerFinalForStrippedThinkingStream(
+    stream: ActiveChatStream,
+    messages: ChatHistoryMessage[],
+    shouldKeepThinking: boolean
+): boolean {
+    return Boolean(
+        !shouldKeepThinking &&
+        stream.message?.thinking?.length &&
+        !stream.message.text.trim() &&
+        !stream.message.toolCalls?.length &&
+        !stream.message.toolResult &&
+        hasNewerAssistantMessageInHistory(messages, stream.updatedAt)
+    );
+}
+
+/** Removes retained thinking from every current chat message. */
+export function stripThinkingFromMessages(
+    messages: ChatHistoryMessage[]
+): ChatHistoryMessage[] {
+    return messages.map((message) => stripThinkingFromMessage(message));
+}
+
 /** Returns refreshed messages, preserving previous state when history is unchanged. */
 export function nextRefreshedChatMessages(
     previousMessages: ChatHistoryMessage[],
@@ -1238,7 +1261,12 @@ export function Chat() {
                                     hasNewerAssistantMessageInHistory(
                                         nextMessages,
                                         stream.updatedAt
-                                    )))
+                                    )) ||
+                                hasNewerFinalForStrippedThinkingStream(
+                                    stream,
+                                    nextMessages,
+                                    keepThinkingAfterFinal
+                                ))
                         );
                     })
                     .map(([key]) => key);
@@ -2217,19 +2245,20 @@ export function Chat() {
                             const shouldShowThinking = !showThinkingOutput;
                             if (!shouldShowThinking) {
                                 setKeepThinkingAfterFinal(false);
-                                setMessages((wasPrevious) =>
-                                    wasPrevious.map((message) =>
-                                        stripThinkingFromMessage(message)
-                                    )
-                                );
+                                setMessages(stripThinkingFromMessages);
                             }
                             setShowThinkingOutput(shouldShowThinking);
                         }}
                         onToggleTools={() => setShowToolOutput((value) => !value)}
                         onToggleKeepThinkingAfterFinal={() => {
-                            if (showThinkingOutput) {
-                                setKeepThinkingAfterFinal((value) => !value);
+                            if (!showThinkingOutput) {
+                                return;
                             }
+                            const shouldKeepThinking = !keepThinkingAfterFinal;
+                            if (!shouldKeepThinking) {
+                                setMessages(stripThinkingFromMessages);
+                            }
+                            setKeepThinkingAfterFinal(shouldKeepThinking);
                         }}
                         onSelectThinkingLevel={(thinkingLevel) =>
                             void patchSelectedSession({
