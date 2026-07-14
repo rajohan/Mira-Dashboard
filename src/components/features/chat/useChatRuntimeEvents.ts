@@ -1474,7 +1474,10 @@ export function useChatRuntimeEvents({
                     )
                 )
                 .map((message) =>
-                    applyFinalThinkingPersistence(message, keepThinkingAfterFinal)
+                    applyFinalThinkingPersistence(
+                        message,
+                        keepThinkingAfterFinal && showThinkingOutput
+                    )
                 )
                 .filter((message) => hasChatMessageDetails(message))
                 .map((message) => ({
@@ -1607,11 +1610,14 @@ export function useChatRuntimeEvents({
                                 eventRunId
                             )
                     );
-                    const terminalDiagnosticMessage = mergeStreamMessage(
-                        existingChannelEntry?.[1].message,
-                        runtimeMessageToApply,
-                        "",
-                        eventRunId
+                    const terminalDiagnosticMessage = applyFinalThinkingPersistence(
+                        mergeStreamMessage(
+                            existingChannelEntry?.[1].message,
+                            runtimeMessageToApply,
+                            "",
+                            eventRunId
+                        ),
+                        keepThinkingAfterFinal && showThinkingOutput
                     );
                     if (
                         isRenderableChatHistoryMessage(
@@ -1628,7 +1634,11 @@ export function useChatRuntimeEvents({
                                     diagnosticMessageIdentity(message) !==
                                     staleDiagnosticIdentity
                             ),
-                            { ...terminalDiagnosticMessage, local: true },
+                            {
+                                ...terminalDiagnosticMessage,
+                                diagnostic: true,
+                                local: true,
+                            },
                         ];
                     }
                 }
@@ -1719,11 +1729,14 @@ export function useChatRuntimeEvents({
                                 eventRunId
                             )
                     );
-                    const terminalDiagnosticMessage = mergeStreamMessage(
-                        existingChannelEntry?.[1].message,
-                        runtimeMessageToApply,
-                        "",
-                        eventRunId
+                    const terminalDiagnosticMessage = applyFinalThinkingPersistence(
+                        mergeStreamMessage(
+                            existingChannelEntry?.[1].message,
+                            runtimeMessageToApply,
+                            "",
+                            eventRunId
+                        ),
+                        keepThinkingAfterFinal && showThinkingOutput
                     );
                     if (
                         isRenderableChatHistoryMessage(
@@ -1740,7 +1753,11 @@ export function useChatRuntimeEvents({
                                     diagnosticMessageIdentity(message) !==
                                     staleDiagnosticIdentity
                             ),
-                            { ...terminalDiagnosticMessage, local: true },
+                            {
+                                ...terminalDiagnosticMessage,
+                                diagnostic: true,
+                                local: true,
+                            },
                         ];
                     }
                 }
@@ -2206,7 +2223,7 @@ export function useChatRuntimeEvents({
                 flushPendingDeltaUpdates();
                 const finalMessage = applyFinalThinkingPersistence(
                     finalMessageFromPayload(payload),
-                    keepThinkingAfterFinal
+                    keepThinkingAfterFinal && showThinkingOutput
                 );
                 const bufferedText = activeAssistantTextForRun(
                     streamSessionKey,

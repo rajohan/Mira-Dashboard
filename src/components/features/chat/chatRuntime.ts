@@ -310,7 +310,7 @@ export function visibleHistoryMessages(
     shouldKeepThinkingAfterFinal = true
 ) {
     const visibleMessages = normalizeVisibleChatHistoryMessages(messages, visibility);
-    if (shouldKeepThinkingAfterFinal) {
+    if (shouldKeepThinkingAfterFinal && visibility.shouldShowThinking) {
         return visibleMessages;
     }
 

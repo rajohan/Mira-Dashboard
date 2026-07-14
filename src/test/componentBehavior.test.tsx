@@ -253,6 +253,15 @@ describe("shared component helpers", () => {
             thinking: true,
             tools: false,
         });
+        localStorage.setItem(
+            storageKey,
+            JSON.stringify({ keepThinkingAfterFinal: true, thinking: false })
+        );
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            keepThinkingAfterFinal: false,
+            thinking: false,
+            tools: false,
+        });
 
         const finalMessage = {
             content: "Answer",
@@ -292,6 +301,13 @@ describe("shared component helpers", () => {
                 ],
                 createChatVisibility(true, false),
                 false
+            )
+        ).toEqual([expect.objectContaining({ text: "Answer", thinking: undefined })]);
+        expect(
+            visibleHistoryMessages(
+                [blockFinalMessage],
+                createChatVisibility(false, false),
+                true
             )
         ).toEqual([expect.objectContaining({ text: "Answer", thinking: undefined })]);
 
@@ -828,6 +844,7 @@ describe("shared component helpers", () => {
                 isSending={false}
                 isTranscribing={false}
                 selectedSessionKey="agent:main:main"
+                shouldShowThinking={true}
                 shouldKeepThinkingAfterFinal={true}
                 slashCommandSuggestions={[
                     {
@@ -4741,6 +4758,86 @@ describe("shared component helpers", () => {
 
         unmount();
         expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it("strips terminal thinking diagnostics when final retention is disabled", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const activeStreamsReference: { current: ActiveChatStreams } = { current: {} };
+        let messages: unknown[] = [];
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return jest.fn();
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                keepThinkingAfterFinal: false,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn((updater) => {
+                    messages =
+                        typeof updater === "function" ? updater(messages) : updater;
+                }),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "temporary reasoning" },
+                    runId: "non-retained-thinking",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: " terminal", phase: "end" },
+                    runId: "non-retained-thinking",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.length > 0
+            )
+        ).toBe(false);
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::non-retained-thinking::thinking"
+            ]
+        ).toBeUndefined();
+        unmount();
     });
 
     it("keeps tool execution errors out of the global chat error", async () => {

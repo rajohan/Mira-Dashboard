@@ -68,6 +68,40 @@ const CHAT_EMOJIS = [
     "🚀",
 ];
 
+/** Provides props for a composer overlay header. */
+interface PanelHeaderProperties {
+    title: string;
+    closeLabel: string;
+    className?: string;
+    onClose: () => void;
+}
+
+/** Renders a consistent title and close action for composer panels. */
+function PanelHeader({
+    title,
+    closeLabel,
+    className = "",
+    onClose,
+}: PanelHeaderProperties) {
+    return (
+        <div className={`flex items-center justify-between ${className}`}>
+            <span className="text-xs font-medium tracking-wide text-primary-400 uppercase">
+                {title}
+            </span>
+            <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onClose}
+                className="p-1 text-primary-400 hover:text-primary-100"
+                aria-label={closeLabel}
+            >
+                <X className="size-4" />
+            </Button>
+        </div>
+    );
+}
+
 /**
  * Returns whether Enter should submit instead of inserting a newline.
  *
@@ -293,21 +327,12 @@ export function ChatComposer({
                             id="chat-slash-command-options"
                             className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-primary-700 bg-primary-900 shadow-2xl outline-none"
                         >
-                            <div className="flex items-center justify-between border-b border-primary-700 px-3 py-2">
-                                <span className="text-xs font-medium tracking-wide text-primary-400 uppercase">
-                                    Slash commands
-                                </span>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setSlashSuggestionsDismissed(true)}
-                                    className="p-1 text-primary-400 hover:text-primary-100"
-                                    aria-label="Close slash commands"
-                                >
-                                    <X className="size-4" />
-                                </Button>
-                            </div>
+                            <PanelHeader
+                                title="Slash commands"
+                                closeLabel="Close slash commands"
+                                onClose={() => setSlashSuggestionsDismissed(true)}
+                                className="border-b border-primary-700 px-3 py-2"
+                            />
                             <div className="max-h-72 overflow-y-auto py-1">
                                 {slashCommandSuggestions.map((suggestion, index) => (
                                     <ComboboxOption
@@ -418,7 +443,7 @@ export function ChatComposer({
                                 : "Choose a session first"
                         }
                         rows={4}
-                        className="block min-h-24 w-full resize-none rounded-t-lg bg-transparent px-3 py-2 text-base text-primary-100 placeholder-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-32 sm:text-sm"
+                        className="block min-h-24 w-full resize-none rounded-t-lg border-0 bg-transparent px-3 py-2 text-base text-primary-100 placeholder-primary-500 hover:border-0 focus:border-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-32 sm:text-sm"
                     />
                     <div className="flex min-h-10 items-center justify-between rounded-b-lg border-t border-primary-600 bg-primary-700 px-2 py-1">
                         <div className="flex items-center gap-1">
@@ -432,24 +457,14 @@ export function ChatComposer({
                                             <Settings2 className="size-4" />
                                         </PopoverButton>
                                         <PopoverPanel
-                                            anchor={{ to: "top start", gap: 8 }}
+                                            anchor={{ to: "top start", gap: 10 }}
                                             className="z-50 w-72 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
                                         >
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-xs font-medium tracking-wide text-primary-400 uppercase">
-                                                    Response settings
-                                                </span>
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => close()}
-                                                    className="p-1 text-primary-400 hover:text-primary-100"
-                                                    aria-label="Close response settings"
-                                                >
-                                                    <X className="size-4" />
-                                                </Button>
-                                            </div>
+                                            <PanelHeader
+                                                title="Response settings"
+                                                closeLabel="Close response settings"
+                                                onClose={() => close()}
+                                            />
                                             <div className="space-y-1">
                                                 <div className="text-xs font-medium text-primary-400">
                                                     Model
@@ -542,8 +557,8 @@ export function ChatComposer({
                                 disabled={!selectedSessionKey}
                                 className={
                                     shouldShowThinking
-                                        ? "p-1.5 text-accent-300"
-                                        : "p-1.5 text-primary-500"
+                                        ? "p-1.5 text-accent-300 hover:bg-primary-600 hover:text-primary-100"
+                                        : "p-1.5 text-primary-500 hover:bg-primary-600 hover:text-primary-100"
                                 }
                                 title="Show thinking"
                             >
@@ -558,8 +573,8 @@ export function ChatComposer({
                                 disabled={!selectedSessionKey}
                                 className={
                                     shouldShowTools
-                                        ? "p-1.5 text-accent-300"
-                                        : "p-1.5 text-primary-500"
+                                        ? "p-1.5 text-accent-300 hover:bg-primary-600 hover:text-primary-100"
+                                        : "p-1.5 text-primary-500 hover:bg-primary-600 hover:text-primary-100"
                                 }
                                 title="Show tools"
                             >
@@ -572,11 +587,11 @@ export function ChatComposer({
                                 aria-pressed={shouldKeepThinkingAfterFinal}
                                 aria-label="Keep thinking after final"
                                 onClick={() => onToggleKeepThinkingAfterFinal?.()}
-                                disabled={!selectedSessionKey}
+                                disabled={!selectedSessionKey || !shouldShowThinking}
                                 className={
                                     shouldKeepThinkingAfterFinal
-                                        ? "p-1.5 text-accent-300"
-                                        : "p-1.5 text-primary-500"
+                                        ? "p-1.5 text-accent-300 hover:bg-primary-600 hover:text-primary-100"
+                                        : "p-1.5 text-primary-500 hover:bg-primary-600 hover:text-primary-100"
                                 }
                                 title="Keep thinking after final"
                             >
@@ -607,21 +622,12 @@ export function ChatComposer({
                                             anchor={{ to: "top end", gap: 8 }}
                                             className="z-50 w-80 rounded-xl border border-primary-700 bg-primary-900 p-2 shadow-2xl outline-none"
                                         >
-                                            <div className="mb-2 flex items-center justify-between px-1">
-                                                <span className="text-xs font-medium tracking-wide text-primary-400 uppercase">
-                                                    Emoji
-                                                </span>
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => close()}
-                                                    className="p-1 text-primary-400 hover:text-primary-100"
-                                                    aria-label="Close emoji picker"
-                                                >
-                                                    <X className="size-4" />
-                                                </Button>
-                                            </div>
+                                            <PanelHeader
+                                                title="Emoji"
+                                                closeLabel="Close emoji picker"
+                                                onClose={() => close()}
+                                                className="mb-2 px-1"
+                                            />
                                             <div className="grid max-h-64 grid-cols-6 gap-1 overflow-y-auto">
                                                 {CHAT_EMOJIS.map((emoji) => (
                                                     <Button
@@ -661,7 +667,7 @@ export function ChatComposer({
                                 aria-label={
                                     isRecording ? "Stop recording" : "Record voice input"
                                 }
-                                className="rounded-full p-2"
+                                className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100"
                             >
                                 {isRecording ? (
                                     <Square className="size-4" />
@@ -683,7 +689,7 @@ export function ChatComposer({
                                 }
                                 title="Attach files"
                                 aria-label="Attach files"
-                                className="rounded-full p-2"
+                                className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100"
                             >
                                 <Paperclip className="size-4" />
                             </Button>

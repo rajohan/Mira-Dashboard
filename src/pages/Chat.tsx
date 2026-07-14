@@ -67,6 +67,18 @@ const LIVE_HISTORY_POLL_MS = 2000;
 const ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS = 120_000;
 const NO_CHAT_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
+/** Returns whether a pending submit must block another message. */
+export function isChatSendBlocked(
+    inFlightSendCount: number,
+    activeStreams: ActiveChatStreams,
+    selectedSessionKey: string
+): boolean {
+    const hasActiveSelectedStream = Object.values(activeStreams).some((stream) =>
+        isSameSessionKey(stream.sessionKey, selectedSessionKey)
+    );
+    return inFlightSendCount > 0 && !hasActiveSelectedStream;
+}
+
 /** Returns visible text carried by active stream message details. */
 export function activeStreamRenderableText(stream: ActiveChatStream): string {
     return uniqueStrings([
@@ -603,9 +615,11 @@ export function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibi
         }
 
         const parsed = JSON.parse(raw) as Partial<StoredChatDiagnosticVisibility>;
+        const isThinkingVisible = parsed.thinking === true;
         return {
-            keepThinkingAfterFinal: parsed.keepThinkingAfterFinal === true,
-            thinking: parsed.thinking === true,
+            keepThinkingAfterFinal:
+                isThinkingVisible && parsed.keepThinkingAfterFinal === true,
+            thinking: isThinkingVisible,
             tools: parsed.tools === true,
         };
     } catch {
@@ -851,7 +865,7 @@ export function Chat() {
             stream,
             visibleMessagesForRows,
             Date.now(),
-            chatVisibility.shouldShowThinking
+            chatVisibility.shouldShowThinking && keepThinkingAfterFinal
         );
     }
 
@@ -1171,7 +1185,7 @@ export function Chat() {
                                 stream,
                                 nextMessages,
                                 Date.now(),
-                                showThinkingOutput
+                                showThinkingOutput && keepThinkingAfterFinal
                             ) ||
                                 (streamText &&
                                     hasRecoveredStreamHistory(
@@ -1754,14 +1768,12 @@ export function Chat() {
     };
 
     /** Returns whether the current in-flight sends should block this draft. */
-    const isBlockedByInFlightSend = (text: string) => {
-        const isSlashCommand = text.startsWith("/") && attachments.length === 0;
-        const hasActiveSelectedStream = Object.hasOwn(activeStreams, selectedSessionKey);
-        return (
-            sendInFlightCountReference.current > 0 &&
-            !(isSlashCommand && hasActiveSelectedStream)
+    const isBlockedByInFlightSend = () =>
+        isChatSendBlocked(
+            sendInFlightCountReference.current,
+            activeStreams,
+            selectedSessionKey
         );
-    };
 
     /** Reconciles an optimistic stream identifier with the Gateway run id. */
     const acknowledgeActiveStreamRun = (
@@ -1807,17 +1819,17 @@ export function Chat() {
         if (!selectedSessionKey) {
             return;
         }
-        const pendingSendSessionKey = selectedSessionKey;
-
-        let text = draft.trim();
-
-        if (isBlockedByInFlightSend(text)) {
+        if (isBlockedByInFlightSend()) {
             return;
         }
+
+        let text = draft.trim();
 
         if (!text && attachments.length === 0) {
             return;
         }
+
+        const pendingSendSessionKey = selectedSessionKey;
 
         const patchResults = await Promise.all(
             pendingSessionPatchesReference.current.get(pendingSendSessionKey) || []
@@ -1831,7 +1843,7 @@ export function Chat() {
 
         text = draftReference.current.trim();
         const currentAttachments = attachmentsReference.current;
-        if (isBlockedByInFlightSend(text) || (!text && currentAttachments.length === 0)) {
+        if (isBlockedByInFlightSend() || (!text && currentAttachments.length === 0)) {
             return;
         }
 
@@ -1964,7 +1976,7 @@ export function Chat() {
     };
 
     const draftText = draft.trim();
-    const blockedByInFlightSend = isBlockedByInFlightSend(draftText);
+    const isBlockedByPendingSend = isBlockedByInFlightSend();
     const isPatchingSession = (pendingSessionPatchCounts[selectedSessionKey] || 0) > 0;
     const isCompactingSession = selectedStreams.some(
         ([, stream]) =>
@@ -1978,7 +1990,7 @@ export function Chat() {
         !isTranscribing &&
         !isPatchingSession &&
         !isCompactingSession &&
-        !blockedByInFlightSend &&
+        !isBlockedByPendingSend &&
         (draftText || attachments.length > 0)
     );
     const isSessionControlsDisabled = Boolean(
@@ -2153,11 +2165,21 @@ export function Chat() {
                         onRemoveAttachment={removeAttachment}
                         onSend={() => void handleSend()}
                         onToggleRecording={() => void handleToggleRecording()}
-                        onToggleThinking={() => setShowThinkingOutput((value) => !value)}
-                        onToggleTools={() => setShowToolOutput((value) => !value)}
-                        onToggleKeepThinkingAfterFinal={() =>
-                            setKeepThinkingAfterFinal((value) => !value)
+                        onToggleThinking={() =>
+                            setShowThinkingOutput((value) => {
+                                const shouldShowThinking = !value;
+                                if (!shouldShowThinking) {
+                                    setKeepThinkingAfterFinal(false);
+                                }
+                                return shouldShowThinking;
+                            })
                         }
+                        onToggleTools={() => setShowToolOutput((value) => !value)}
+                        onToggleKeepThinkingAfterFinal={() => {
+                            if (showThinkingOutput) {
+                                setKeepThinkingAfterFinal((value) => !value);
+                            }
+                        }}
                         onSelectThinkingLevel={(thinkingLevel) =>
                             void patchSelectedSession({
                                 // Gateway uses null to clear an inherited override.

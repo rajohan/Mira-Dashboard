@@ -34,6 +34,7 @@ import { Agents } from "../pages/Agents";
 import {
     Chat,
     hasNewerAssistantMessageInHistory,
+    isChatSendBlocked,
     isSessionActive,
     nextHistoryBottomState,
     nextHistoryLoadSendError,
@@ -2701,10 +2702,21 @@ describe("Mira Dashboard pages", () => {
 
         const thinkingToggle = screen.getByRole("button", { name: "Show thinking" });
         const toolsToggle = screen.getByRole("button", { name: "Show tools" });
+        const keepThinkingToggle = screen.getByRole("button", {
+            name: "Keep thinking after final",
+        });
+        expect(keepThinkingToggle).toBeDisabled();
         await user.click(thinkingToggle);
         await user.click(toolsToggle);
         expect(thinkingToggle).toHaveAttribute("aria-pressed", "true");
         expect(toolsToggle).toHaveAttribute("aria-pressed", "true");
+        expect(keepThinkingToggle).toBeEnabled();
+        await user.click(keepThinkingToggle);
+        expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "true");
+        await user.click(thinkingToggle);
+        expect(keepThinkingToggle).toBeDisabled();
+        expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "false");
+        await user.click(thinkingToggle);
 
         await user.click(screen.getByRole("button", { name: "Send" }));
 
@@ -3196,6 +3208,22 @@ describe("Mira Dashboard pages", () => {
         expect(nextHistoryBottomState(false, false, false)).toBe(false);
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");
         expect(nextHistoryLoadSendError(undefined, false, "new")).toBe("new");
+        expect(isChatSendBlocked(1, {}, "agent:main:main")).toBe(true);
+        expect(
+            isChatSendBlocked(
+                1,
+                {
+                    "agent:main:main::run-1::assistant": {
+                        aliases: [],
+                        runId: "run-1",
+                        sessionKey: "agent:main:main",
+                        text: "Streaming",
+                        updatedAt: "2026-06-24T08:00:00.000Z",
+                    },
+                },
+                "agent:main:main"
+            )
+        ).toBe(false);
         expect(isSessionActive(undefined)).toBe(false);
         expect(
             isSessionActive({ status: "running" } as Parameters<
