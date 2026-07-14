@@ -37,6 +37,7 @@ import {
     hasNewerAssistantMessageInHistory,
     hasNewerFinalForStrippedThinkingStream,
     isSessionActive,
+    messagesAfterDisablingFinalThinkingRetention,
     nextHistoryBottomState,
     nextHistoryLoadSendError,
     optimisticChatStreamKey,
@@ -3345,6 +3346,31 @@ describe("Mira Dashboard pages", () => {
                 },
             ])[0]
         ).toMatchObject({ text: "public answer", thinking: undefined });
+        const activeThinkingOnlyMessage = {
+            content: [{ text: "still working", type: "thinking" as const }],
+            role: "assistant",
+            text: "",
+            thinking: [{ text: "still working" }],
+        };
+        expect(
+            messagesAfterDisablingFinalThinkingRetention(
+                [activeThinkingOnlyMessage],
+                true
+            )[0]
+        ).toMatchObject({ thinking: [{ text: "still working" }] });
+        expect(
+            messagesAfterDisablingFinalThinkingRetention(
+                [
+                    activeThinkingOnlyMessage,
+                    {
+                        content: "done",
+                        role: "assistant",
+                        text: "done",
+                    },
+                ],
+                true
+            )
+        ).toEqual([expect.objectContaining({ text: "done" })]);
         expect(nextHistoryBottomState(false, true, false)).toBe(true);
         expect(nextHistoryBottomState(false, false, false)).toBe(false);
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");

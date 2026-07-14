@@ -123,11 +123,7 @@ function isActiveStreamMatchingRun(
         );
     }
 
-    return (
-        streamEntry.runId === runId ||
-        streamEntry.aliases.includes(runId) ||
-        isProvisionalRunId(sessionKey, streamEntry.runId)
-    );
+    return streamEntry.runId === runId || streamEntry.aliases.includes(runId);
 }
 
 /** Returns an internal active stream key for runtime work. */
@@ -1309,32 +1305,39 @@ export function useChatRuntimeEvents({
                 return runId;
             }
 
-            const recordedProvisionalRunId =
-                provisionalAssistantRunIdsReference.current.get(sessionKey);
-            const sessionStreams = Object.values(activeStreamsReference.current).filter(
-                (streamEntry) => isSameSessionKey(streamEntry.sessionKey, sessionKey)
+            const sessionStreamEntries = Object.entries(
+                activeStreamsReference.current
+            ).filter(
+                ([, streamEntry]) =>
+                    isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
+                    streamEntry.operation !== "compact"
+            );
+            const activeRunIds = uniqueStrings(
+                sessionStreamEntries
+                    .filter(
+                        ([, streamEntry]) =>
+                            !isProvisionalRunId(sessionKey, streamEntry.runId)
+                    )
+                    .map(([, streamEntry]) => streamEntry.runId)
+            );
+            const hasProvisionalAssistantStream = sessionStreamEntries.some(
+                ([activeStreamKey, streamEntry]) =>
+                    isAssistantActiveStreamKey(sessionKey, activeStreamKey) &&
+                    isProvisionalRunId(sessionKey, streamEntry.runId)
             );
             if (
-                recordedProvisionalRunId &&
-                sessionStreams.some(
-                    (streamEntry) =>
-                        streamEntry.runId === recordedProvisionalRunId ||
-                        streamEntry.aliases.includes(recordedProvisionalRunId)
-                )
+                activeRunIds.length > 1 ||
+                (activeRunIds.length > 0 &&
+                    hasProvisionalAssistantStream &&
+                    !(
+                        activeRunIds.length === 1 &&
+                        activeRunIds.some((activeRunId) => isOptimisticRunId(activeRunId))
+                    ))
             ) {
-                return recordedProvisionalRunId;
+                return undefined;
             }
 
-            const concreteRunIds = uniqueStrings(
-                sessionStreams
-                    .filter(
-                        (streamEntry) =>
-                            !isProvisionalRunId(sessionKey, streamEntry.runId) &&
-                            !isOptimisticRunId(streamEntry.runId)
-                    )
-                    .map((streamEntry) => streamEntry.runId)
-            );
-            return concreteRunIds.length === 1 ? concreteRunIds[0] : undefined;
+            return hasProvisionalAssistantStream ? sessionKey : activeRunIds[0];
         };
 
         /** Clears active streams belonging to a finished chat run. */
@@ -1346,6 +1349,9 @@ export function useChatRuntimeEvents({
             const recordedProvisionalRunId =
                 provisionalAssistantRunIdsReference.current.get(sessionKey);
             const resolvedRunId = resolvedActiveAssistantRunId(sessionKey, runId);
+            if (!resolvedRunId) {
+                return;
+            }
             if (isUnscopedEvent) {
                 assistantTextSourcesReference.current.delete(
                     `${sessionKey}::provisional`
@@ -1369,6 +1375,16 @@ export function useChatRuntimeEvents({
                               streamEntry.aliases.includes(resolvedRunId))
                   )
                 : undefined;
+            const optimisticStreams = Object.values(
+                activeStreamsReference.current
+            ).filter(
+                (streamEntry) =>
+                    isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
+                    streamEntry.operation !== "compact" &&
+                    isOptimisticRunId(streamEntry.runId)
+            );
+            const unambiguousOptimisticRunId =
+                optimisticStreams.length === 1 ? optimisticStreams[0]?.runId : undefined;
             const provisionalStream = Object.values(activeStreamsReference.current).find(
                 (streamEntry) =>
                     isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
@@ -1397,8 +1413,10 @@ export function useChatRuntimeEvents({
                     const isRelatedOptimisticBase = Boolean(
                         isUnscopedEvent &&
                         resolvedRunId &&
-                        key === sessionKey &&
                         isOptimisticRunId(streamEntry.runId) &&
+                        (key === sessionKey ||
+                            (isProvisionalRunId(sessionKey, resolvedRunId) &&
+                                streamEntry.runId === unambiguousOptimisticRunId)) &&
                         (!resolvedStream?.updatedAt ||
                             !streamEntry.updatedAt ||
                             streamEntry.updatedAt <= resolvedStream.updatedAt)
@@ -1615,9 +1633,20 @@ export function useChatRuntimeEvents({
 
             if (isChannelTerminalEvent && !isWholeRunTerminalEvent) {
                 flushPendingDeltaUpdates();
+                const resolvedEventRunId = resolvedActiveAssistantRunId(
+                    selectedSessionKey,
+                    eventRunId
+                );
+                if (!resolvedEventRunId) {
+                    refreshSelectedHistorySoon(150);
+                    return;
+                }
                 const existingBufferedText =
                     stream === "assistant"
-                        ? activeAssistantTextForRun(selectedSessionKey, eventRunId)
+                        ? activeAssistantTextForRun(
+                              selectedSessionKey,
+                              resolvedEventRunId
+                          )
                         : "";
                 const isAssistantDelta =
                     stream === "assistant" && rawStringValue(data.delta) !== undefined;
@@ -1633,7 +1662,10 @@ export function useChatRuntimeEvents({
                 let diagnosticMessages =
                     stream === "assistant"
                         ? []
-                        : activeDiagnosticMessagesForRun(selectedSessionKey, eventRunId);
+                        : activeDiagnosticMessagesForRun(
+                              selectedSessionKey,
+                              resolvedEventRunId
+                          );
                 if (stream !== "assistant" && runtimeMessageToApply) {
                     const existingChannelEntry = Object.entries(
                         activeStreamsReference.current
@@ -1647,7 +1679,7 @@ export function useChatRuntimeEvents({
                             isActiveStreamMatchingRun(
                                 selectedSessionKey,
                                 streamEntry,
-                                eventRunId
+                                resolvedEventRunId
                             )
                     );
                     const terminalDiagnosticMessage = applyFinalThinkingPersistence(
@@ -1655,7 +1687,7 @@ export function useChatRuntimeEvents({
                             existingChannelEntry?.[1].message,
                             runtimeMessageToApply,
                             "",
-                            eventRunId
+                            resolvedEventRunId
                         ),
                         keepThinkingAfterFinalReference.current && showThinkingOutput
                     );
@@ -1692,7 +1724,7 @@ export function useChatRuntimeEvents({
                                   images: [],
                                   attachments: [],
                                   timestamp: currentIsoString(),
-                                  runId: eventRunId,
+                                  runId: resolvedEventRunId,
                               },
                           ]
                         : []),
@@ -1716,7 +1748,7 @@ export function useChatRuntimeEvents({
                             !isActiveStreamMatchingRun(
                                 selectedSessionKey,
                                 streamEntry,
-                                eventRunId
+                                resolvedEventRunId
                             )
                         ) {
                             continue;
@@ -1734,9 +1766,17 @@ export function useChatRuntimeEvents({
 
             if (isWholeRunTerminalEvent) {
                 flushPendingDeltaUpdates();
-                const existingBufferedText = activeAssistantTextForRun(
+                const resolvedEventRunId = resolvedActiveAssistantRunId(
                     selectedSessionKey,
                     eventRunId
+                );
+                if (!resolvedEventRunId) {
+                    refreshSelectedHistorySoon(150);
+                    return;
+                }
+                const existingBufferedText = activeAssistantTextForRun(
+                    selectedSessionKey,
+                    resolvedEventRunId
                 );
                 const isAssistantDelta =
                     stream === "assistant" && rawStringValue(data.delta) !== undefined;
@@ -1751,7 +1791,7 @@ export function useChatRuntimeEvents({
                         : existingBufferedText;
                 let diagnosticMessages = activeDiagnosticMessagesForRun(
                     selectedSessionKey,
-                    eventRunId
+                    resolvedEventRunId
                 );
                 if (stream !== "assistant" && runtimeMessageToApply) {
                     const existingChannelEntry = Object.entries(
@@ -1766,7 +1806,7 @@ export function useChatRuntimeEvents({
                             isActiveStreamMatchingRun(
                                 selectedSessionKey,
                                 streamEntry,
-                                eventRunId
+                                resolvedEventRunId
                             )
                     );
                     const terminalDiagnosticMessage = applyFinalThinkingPersistence(
@@ -1774,7 +1814,7 @@ export function useChatRuntimeEvents({
                             existingChannelEntry?.[1].message,
                             runtimeMessageToApply,
                             "",
-                            eventRunId
+                            resolvedEventRunId
                         ),
                         keepThinkingAfterFinalReference.current && showThinkingOutput
                     );
@@ -1811,7 +1851,7 @@ export function useChatRuntimeEvents({
                                   images: [],
                                   attachments: [],
                                   timestamp: currentIsoString(),
-                                  runId: eventRunId,
+                                  runId: resolvedEventRunId,
                               },
                           ]
                         : []),
@@ -1822,7 +1862,11 @@ export function useChatRuntimeEvents({
                         dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
-                clearActiveStreamsForRun(selectedSessionKey, eventRunId);
+                clearActiveStreamsForRun(
+                    selectedSessionKey,
+                    resolvedEventRunId,
+                    !eventRunId
+                );
                 refreshSelectedHistorySoon(150);
                 return;
             }
@@ -2085,13 +2129,16 @@ export function useChatRuntimeEvents({
             const streamSessionKey = eventMatchesSelected
                 ? selectedSessionKey
                 : streamForRun!.sessionKey;
-            const selectedSessionStreams = eventMatchesSelected
-                ? Object.values(streams).filter(
-                      (stream) =>
+            const selectedSessionStreamEntries = eventMatchesSelected
+                ? Object.entries(streams).filter(
+                      ([, stream]) =>
                           isSameSessionKey(stream.sessionKey, selectedSessionKey) &&
                           stream.operation !== "compact"
                   )
                 : [];
+            const selectedSessionStreams = selectedSessionStreamEntries.map(
+                ([, stream]) => stream
+            );
             const selectedActiveRunIds = uniqueStrings(
                 selectedSessionStreams
                     .filter(
@@ -2099,6 +2146,12 @@ export function useChatRuntimeEvents({
                     )
                     .map((stream) => stream.runId)
             );
+            const hasSelectedProvisionalAssistantStream =
+                selectedSessionStreamEntries.some(
+                    ([activeStreamKey, stream]) =>
+                        isAssistantActiveStreamKey(selectedSessionKey, activeStreamKey) &&
+                        isProvisionalRunId(selectedSessionKey, stream.runId)
+                );
             const selectedStream = eventMatchesSelected
                 ? selectedActiveRunIds.length === 1
                     ? selectedSessionStreams.find(
@@ -2295,12 +2348,22 @@ export function useChatRuntimeEvents({
             const isAmbiguousUnscopedTerminal =
                 !payload.runId &&
                 TERMINAL_CHAT_STATES.has(payload.state || "") &&
-                selectedActiveRunIds.length > 1;
+                (selectedActiveRunIds.length > 1 ||
+                    (selectedActiveRunIds.length > 0 &&
+                        hasSelectedProvisionalAssistantStream &&
+                        !(
+                            selectedActiveRunIds.length === 1 &&
+                            selectedActiveRunIds.some((activeRunId) =>
+                                isOptimisticRunId(activeRunId)
+                            )
+                        )));
             const resolvedTerminalRunId =
                 payload.runId ||
                 (isAmbiguousUnscopedTerminal
                     ? undefined
-                    : selectedActiveRunIds[0] || selectedStream?.runId);
+                    : hasSelectedProvisionalAssistantStream
+                      ? selectedSessionKey
+                      : selectedActiveRunIds[0] || selectedStream?.runId);
 
             /** Performs refresh history after terminal event. */
             const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {

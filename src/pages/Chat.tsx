@@ -673,6 +673,18 @@ export function stripThinkingFromMessages(
     return messages.map((message) => stripThinkingFromMessage(message));
 }
 
+/** Removes retained final thinking while preserving active thinking-only rows. */
+export function messagesAfterDisablingFinalThinkingRetention(
+    messages: ChatHistoryMessage[],
+    shouldShowTools: boolean
+): ChatHistoryMessage[] {
+    return visibleHistoryMessages(
+        messages,
+        createChatVisibility(true, shouldShowTools),
+        false
+    );
+}
+
 /** Returns refreshed messages, preserving previous state when history is unchanged. */
 export function nextRefreshedChatMessages(
     previousMessages: ChatHistoryMessage[],
@@ -2297,7 +2309,12 @@ export function Chat() {
                             }
                             const shouldKeepThinking = !keepThinkingAfterFinal;
                             if (!shouldKeepThinking) {
-                                setMessages(stripThinkingFromMessages);
+                                setMessages(
+                                    messagesAfterDisablingFinalThinkingRetention(
+                                        messages,
+                                        showToolOutput
+                                    )
+                                );
                             }
                             setKeepThinkingAfterFinal(shouldKeepThinking);
                         }}

@@ -4845,9 +4845,7 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(
-            activeStreamsReference.current["agent:main:main::thinking"]
-        ).toBeUndefined();
+        expect(activeStreamsReference.current["agent:main:main::thinking"]).toBeDefined();
         expect(activeStreamsReference.current["agent:main:main"]?.runId).toBe(
             "dashboard-chat-test"
         );
@@ -5337,7 +5335,23 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        expect(Object.keys(activeStreamsReference.current)).toEqual([
+            "agent:main:main",
+            "agent:main:main::acknowledged-run::assistant",
+        ]);
+        expect(setMessages).not.toHaveBeenCalled();
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: { sessionKey: "agent:main:main" },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toEqual([
+            "agent:main:main",
+            "agent:main:main::acknowledged-run::assistant",
+        ]);
+        expect(setMessages).not.toHaveBeenCalled();
 
         unmount();
     });
