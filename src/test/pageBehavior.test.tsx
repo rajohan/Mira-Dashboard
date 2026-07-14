@@ -1855,6 +1855,56 @@ describe("Mira Dashboard pages", () => {
         }
     });
 
+    it("keeps loaded database metrics visible when a refresh fails", async () => {
+        let databaseRequestCount = 0;
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (url === "/api/cache/database.summary") {
+                    databaseRequestCount += 1;
+                    if (databaseRequestCount === 1) {
+                        return apiResponse(url, method, init);
+                    }
+                }
+
+                if (
+                    url === "/api/cache/database.summary" ||
+                    url === "/api/cache/database.summary/refresh"
+                ) {
+                    throw new Error("Database metrics temporarily unavailable");
+                }
+
+                return apiResponse(url, method, init);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Database));
+
+        const databaseRows = await screen.findAllByText("metabase");
+        expect(databaseRows.length).toBeGreaterThan(0);
+        await act(async () => {
+            await view.queryClient.invalidateQueries({
+                queryKey: ["cache", "database.summary"],
+            });
+        });
+
+        expect(
+            await screen.findByText(
+                "Database refresh failed. Showing the last loaded metrics. Database metrics temporarily unavailable"
+            )
+        ).toBeInTheDocument();
+        expect(screen.getAllByText("metabase").length).toBeGreaterThan(0);
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("shows the agents error state without the configured-agents empty state", async () => {
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
