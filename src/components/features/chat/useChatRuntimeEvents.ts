@@ -21,6 +21,7 @@ import {
     type ChatHistoryMessage,
     type ChatStreamEventMessage,
     extractImages,
+    hasPrimaryChatMessageContent,
     isRenderableChatHistoryMessage,
     normalizeText,
     type RawChatHistoryMessage,
@@ -2084,20 +2085,27 @@ export function useChatRuntimeEvents({
             const streamSessionKey = eventMatchesSelected
                 ? selectedSessionKey
                 : streamForRun!.sessionKey;
-            const selectedBaseStream = streams[selectedSessionKey];
-            const selectedOptimisticStreams = eventMatchesSelected
+            const selectedSessionStreams = eventMatchesSelected
                 ? Object.values(streams).filter(
                       (stream) =>
                           isSameSessionKey(stream.sessionKey, selectedSessionKey) &&
-                          isOptimisticRunId(stream.runId) &&
                           stream.operation !== "compact"
                   )
                 : [];
+            const selectedActiveRunIds = uniqueStrings(
+                selectedSessionStreams
+                    .filter(
+                        (stream) => !isProvisionalRunId(selectedSessionKey, stream.runId)
+                    )
+                    .map((stream) => stream.runId)
+            );
             const selectedStream = eventMatchesSelected
-                ? selectedBaseStream && !isOptimisticRunId(selectedBaseStream.runId)
-                    ? selectedBaseStream
-                    : selectedOptimisticStreams.length === 1
-                      ? selectedOptimisticStreams[0]
+                ? selectedActiveRunIds.length === 1
+                    ? selectedSessionStreams.find(
+                          (stream) => stream.runId === selectedActiveRunIds[0]
+                      )
+                    : selectedActiveRunIds.length === 0
+                      ? selectedSessionStreams[0]
                       : undefined
                 : undefined;
             const shouldAliasOptimisticTerminal =
@@ -2126,16 +2134,11 @@ export function useChatRuntimeEvents({
                 payload.runId &&
                 TERMINAL_CHAT_STATES.has(payload.state || "") &&
                 !selectedStreamRunIds.includes(payload.runId) &&
-                !isOptimisticRunId(selectedStream.runId);
+                !isOptimisticRunId(selectedStream.runId) &&
+                !isProvisionalRunId(selectedSessionKey, selectedStream.runId);
             if (isStaleSelectedTerminalEvent) {
                 return;
             }
-            const resolvedTerminalRunId = payload.runId || selectedStream?.runId;
-            const isAmbiguousUnscopedTerminal =
-                !resolvedTerminalRunId &&
-                TERMINAL_CHAT_STATES.has(payload.state || "") &&
-                selectedOptimisticStreams.length > 1;
-
             if (payload.state === "delta") {
                 const deltaMessage = normalizeAssistantPayload(
                     payload.message ??
@@ -2289,6 +2292,16 @@ export function useChatRuntimeEvents({
                 return;
             }
 
+            const isAmbiguousUnscopedTerminal =
+                !payload.runId &&
+                TERMINAL_CHAT_STATES.has(payload.state || "") &&
+                selectedActiveRunIds.length > 1;
+            const resolvedTerminalRunId =
+                payload.runId ||
+                (isAmbiguousUnscopedTerminal
+                    ? undefined
+                    : selectedActiveRunIds[0] || selectedStream?.runId);
+
             /** Performs refresh history after terminal event. */
             const refreshHistoryAfterTerminalEvent = (sessionKey: string) => {
                 setTimeout(async () => {
@@ -2338,19 +2351,22 @@ export function useChatRuntimeEvents({
 
             if (payload.state === "final") {
                 flushPendingDeltaUpdates();
+                if (isAmbiguousUnscopedTerminal) {
+                    refreshHistoryAfterTerminalEvent(streamSessionKey);
+                    return;
+                }
                 const finalMessage = applyFinalThinkingPersistence(
                     finalMessageFromPayload(payload),
                     keepThinkingAfterFinalReference.current && showThinkingOutput
                 );
-                const bufferedText = isAmbiguousUnscopedTerminal
-                    ? ""
-                    : activeAssistantTextForRun(streamSessionKey, resolvedTerminalRunId);
-                const diagnosticMessages = isAmbiguousUnscopedTerminal
-                    ? []
-                    : activeDiagnosticMessagesForRun(
-                          streamSessionKey,
-                          resolvedTerminalRunId
-                      );
+                const bufferedText = activeAssistantTextForRun(
+                    streamSessionKey,
+                    resolvedTerminalRunId
+                );
+                const diagnosticMessages = activeDiagnosticMessagesForRun(
+                    streamSessionKey,
+                    resolvedTerminalRunId
+                );
                 const messageToAppend = isCommandMessagePayload(payload.message)
                     ? createLocalSystemMessage(finalMessage.text)
                     : isRenderableChatHistoryMessage(
@@ -2373,7 +2389,7 @@ export function useChatRuntimeEvents({
                     messageToAppend?.role.toLowerCase() === "assistant"
                         ? messageToAppend.text.trim()
                         : "";
-                if (completedAssistantText && !isAmbiguousUnscopedTerminal) {
+                if (completedAssistantText) {
                     completedAssistantTextsReference.current.set(streamSessionKey, {
                         runIds: uniqueStrings([
                             payload.runId,
@@ -2445,14 +2461,14 @@ export function useChatRuntimeEvents({
                         let didMergeFinalMessage = false;
                         const finalAssistantMessage =
                             finalMessageToAppend?.role.toLowerCase() === "assistant" &&
-                            finalMessageToAppend.text.trim()
+                            hasPrimaryChatMessageContent(finalMessageToAppend)
                                 ? finalMessageToAppend
                                 : undefined;
                         const lastAssistantMessageIndex = finalAssistantMessage
                             ? wasPrevious.findLastIndex(
                                   (message) =>
                                       message.role.toLowerCase() === "assistant" &&
-                                      message.text.trim()
+                                      hasPrimaryChatMessageContent(message)
                               )
                             : -1;
                         const nextPrevious = finalAssistantMessage
@@ -2468,7 +2484,8 @@ export function useChatRuntimeEvents({
                                       Boolean(message.runId) &&
                                       Boolean(finalAssistantMessage.runId) &&
                                       message.runId === finalAssistantMessage.runId;
-                                  const hasPrimaryText = Boolean(message.text.trim());
+                                  const hasPrimaryContent =
+                                      hasPrimaryChatMessageContent(message);
                                   const isRecoveredLocalText =
                                       message.local === true &&
                                       isRecoveredAssistantText(
@@ -2485,7 +2502,7 @@ export function useChatRuntimeEvents({
                                           finalAssistantMessage.text
                                       );
                                   if (
-                                      !(isSameRun && hasPrimaryText) &&
+                                      !(isSameRun && hasPrimaryContent) &&
                                       !isRecoveredLocalText &&
                                       !isRecoveredRecentFinalEcho
                                   ) {
@@ -2523,28 +2540,29 @@ export function useChatRuntimeEvents({
                     });
                 }
 
-                if (!isAmbiguousUnscopedTerminal) {
-                    clearActiveStreamsForRun(
-                        streamSessionKey,
-                        resolvedTerminalRunId,
-                        !payload.runId
-                    );
-                }
+                clearActiveStreamsForRun(
+                    streamSessionKey,
+                    resolvedTerminalRunId,
+                    !payload.runId
+                );
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
 
             if (payload.state === "aborted") {
                 flushPendingDeltaUpdates();
-                const bufferedText = isAmbiguousUnscopedTerminal
-                    ? ""
-                    : activeAssistantTextForRun(streamSessionKey, resolvedTerminalRunId);
-                const diagnosticMessages = isAmbiguousUnscopedTerminal
-                    ? []
-                    : activeDiagnosticMessagesForRun(
-                          streamSessionKey,
-                          resolvedTerminalRunId
-                      );
+                if (isAmbiguousUnscopedTerminal) {
+                    refreshHistoryAfterTerminalEvent(streamSessionKey);
+                    return;
+                }
+                const bufferedText = activeAssistantTextForRun(
+                    streamSessionKey,
+                    resolvedTerminalRunId
+                );
+                const diagnosticMessages = activeDiagnosticMessagesForRun(
+                    streamSessionKey,
+                    resolvedTerminalRunId
+                );
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()
                         ? [
@@ -2566,28 +2584,29 @@ export function useChatRuntimeEvents({
                         dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
-                if (!isAmbiguousUnscopedTerminal) {
-                    clearActiveStreamsForRun(
-                        streamSessionKey,
-                        resolvedTerminalRunId,
-                        !payload.runId
-                    );
-                }
+                clearActiveStreamsForRun(
+                    streamSessionKey,
+                    resolvedTerminalRunId,
+                    !payload.runId
+                );
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
 
             if (payload.state === "error") {
                 flushPendingDeltaUpdates();
-                const bufferedText = isAmbiguousUnscopedTerminal
-                    ? ""
-                    : activeAssistantTextForRun(streamSessionKey, resolvedTerminalRunId);
-                const diagnosticMessages = isAmbiguousUnscopedTerminal
-                    ? []
-                    : activeDiagnosticMessagesForRun(
-                          streamSessionKey,
-                          resolvedTerminalRunId
-                      );
+                if (isAmbiguousUnscopedTerminal) {
+                    refreshHistoryAfterTerminalEvent(streamSessionKey);
+                    return;
+                }
+                const bufferedText = activeAssistantTextForRun(
+                    streamSessionKey,
+                    resolvedTerminalRunId
+                );
+                const diagnosticMessages = activeDiagnosticMessagesForRun(
+                    streamSessionKey,
+                    resolvedTerminalRunId
+                );
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()
                         ? [
@@ -2631,13 +2650,11 @@ export function useChatRuntimeEvents({
                 ) {
                     setSendError(payload.errorMessage || "Chat request failed");
                 }
-                if (!isAmbiguousUnscopedTerminal) {
-                    clearActiveStreamsForRun(
-                        streamSessionKey,
-                        resolvedTerminalRunId,
-                        !payload.runId
-                    );
-                }
+                clearActiveStreamsForRun(
+                    streamSessionKey,
+                    resolvedTerminalRunId,
+                    !payload.runId
+                );
             }
         });
 

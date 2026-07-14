@@ -26,6 +26,7 @@ import {
     type ChatRow,
     type ChatSendAttachment,
     gatewayAttachments,
+    hasPrimaryChatMessageContent,
     isRenderableChatHistoryMessage,
     optimisticAttachmentDisplay,
     type RawChatHistoryMessage,
@@ -200,16 +201,17 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
         const hasToolDetails = Boolean(
             row.message.toolCalls?.length || row.message.toolResult
         );
-        return Boolean(
+        const hasPrimaryContent = hasPrimaryChatMessageContent(row.message);
+        return (
             TOOL_ROLE_VARIANTS.includes(role) ||
-            (hasToolDetails && (row.message.diagnostic || !row.message.text.trim()))
+            (hasToolDetails && (row.message.diagnostic || !hasPrimaryContent))
         );
     };
     const finalRowIndex = responseRows.findLastIndex(
         (row) =>
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
-            Boolean(row.message.text.trim()) &&
+            hasPrimaryChatMessageContent(row.message) &&
             !isToolDiagnosticRow(row)
     );
     if (finalRowIndex === -1) {
@@ -222,7 +224,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
             rowIndex < finalRowIndex &&
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
-            Boolean(row.message.text.trim()) &&
+            hasPrimaryChatMessageContent(row.message) &&
             !isToolDiagnosticRow(row)
     );
     const currentResponseStartIndex = previousAssistantTextRowIndex + 1;
@@ -530,6 +532,82 @@ export function sessionTimestampMs(value: unknown): number | undefined {
     return undefined;
 }
 
+/** Removes one failed send and provisional runtime work attributable to it. */
+export function activeStreamsAfterFailedSend(
+    streams: ActiveChatStreams,
+    sessionKey: string,
+    runId?: string
+): ActiveChatStreams {
+    if (!runId) {
+        return streams;
+    }
+
+    let failedSendUpdatedAt: number | undefined;
+    for (const stream of Object.values(streams)) {
+        if (
+            !isSameSessionKey(stream.sessionKey, sessionKey) ||
+            (stream.runId !== runId && !stream.aliases.includes(runId))
+        ) {
+            continue;
+        }
+
+        const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
+        if (
+            streamUpdatedAt !== undefined &&
+            (failedSendUpdatedAt === undefined || streamUpdatedAt < failedSendUpdatedAt)
+        ) {
+            failedSendUpdatedAt = streamUpdatedAt;
+        }
+    }
+
+    return Object.fromEntries(
+        Object.entries(streams).filter(([streamKey, stream]) => {
+            if (!isSameSessionKey(stream.sessionKey, sessionKey)) {
+                return true;
+            }
+
+            if (stream.runId === runId || stream.aliases.includes(runId)) {
+                return false;
+            }
+
+            const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
+            const hasCompetingSendAtProvisionalTime = Object.values(streams).some(
+                (candidate) => {
+                    if (
+                        !isSameSessionKey(candidate.sessionKey, sessionKey) ||
+                        candidate.runId === runId ||
+                        candidate.aliases.includes(runId) ||
+                        !(
+                            candidate.runId.startsWith("dashboard-chat-") ||
+                            candidate.aliases.some((alias) =>
+                                alias.startsWith("dashboard-chat-")
+                            )
+                        )
+                    ) {
+                        return false;
+                    }
+
+                    const candidateUpdatedAt = sessionTimestampMs(candidate.updatedAt);
+                    return (
+                        streamUpdatedAt === undefined ||
+                        candidateUpdatedAt === undefined ||
+                        candidateUpdatedAt <= streamUpdatedAt
+                    );
+                }
+            );
+            const isFailedSendProvisionalRuntimeStream =
+                !hasCompetingSendAtProvisionalTime &&
+                streamKey.startsWith(`${sessionKey}::`) &&
+                stream.runId === sessionKey &&
+                failedSendUpdatedAt !== undefined &&
+                streamUpdatedAt !== undefined &&
+                streamUpdatedAt >= failedSendUpdatedAt;
+
+            return !isFailedSendProvisionalRuntimeStream;
+        })
+    );
+}
+
 /** Performs history has newer assistant message. */
 export function hasNewerAssistantMessageInHistory(
     messages: ChatHistoryMessage[],
@@ -545,9 +623,7 @@ export function hasNewerAssistantMessageInHistory(
 
     return messages.some((message) => {
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
-        const hasPrimaryAssistantContent = Boolean(
-            message.text.trim() || message.images?.length || message.attachments?.length
-        );
+        const hasPrimaryAssistantContent = hasPrimaryChatMessageContent(message);
         if (
             message.role.toLowerCase() !== "assistant" ||
             !hasPrimaryAssistantContent ||
@@ -846,51 +922,9 @@ export function Chat() {
     };
     /** Clears only the optimistic stream created for one send attempt. */
     const clearOptimisticSendStream = (sessionKey: string, runId?: string) => {
-        if (!runId) {
-            return;
-        }
-
-        updateActiveStreams((wasPrevious) => {
-            const optimisticStream = Object.values(wasPrevious).find(
-                (stream) =>
-                    isSameSessionKey(stream.sessionKey, sessionKey) &&
-                    (stream.runId === runId || stream.aliases.includes(runId))
-            );
-            const optimisticUpdatedAt = sessionTimestampMs(optimisticStream?.updatedAt);
-            const hasOtherOptimisticSend = Object.values(wasPrevious).some(
-                (stream) =>
-                    isSameSessionKey(stream.sessionKey, sessionKey) &&
-                    stream.runId !== runId &&
-                    !stream.aliases.includes(runId) &&
-                    (stream.runId.startsWith("dashboard-chat-") ||
-                        stream.aliases.some((alias) =>
-                            alias.startsWith("dashboard-chat-")
-                        ))
-            );
-
-            return Object.fromEntries(
-                Object.entries(wasPrevious).filter(([streamKey, stream]) => {
-                    if (!isSameSessionKey(stream.sessionKey, sessionKey)) {
-                        return true;
-                    }
-
-                    if (stream.runId === runId || stream.aliases.includes(runId)) {
-                        return false;
-                    }
-
-                    const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
-                    const isSameSendProvisionalRuntimeStream =
-                        !hasOtherOptimisticSend &&
-                        streamKey.startsWith(`${sessionKey}::`) &&
-                        stream.runId === sessionKey &&
-                        optimisticUpdatedAt !== undefined &&
-                        streamUpdatedAt !== undefined &&
-                        streamUpdatedAt >= optimisticUpdatedAt;
-
-                    return !isSameSendProvisionalRuntimeStream;
-                })
-            );
-        });
+        updateActiveStreams((wasPrevious) =>
+            activeStreamsAfterFailedSend(wasPrevious, sessionKey, runId)
+        );
     };
 
     const sortedSessions = sortSessionsByTypeAndActivity(sessions);

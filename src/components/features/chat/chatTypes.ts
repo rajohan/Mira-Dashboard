@@ -628,6 +628,13 @@ export function isRenderableChatHistoryMessage(
     );
 }
 
+/** Returns whether a message carries primary text or media content. */
+export function hasPrimaryChatMessageContent(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        message.text.trim() || message.images?.length || message.attachments?.length
+    );
+}
+
 /** Returns whether a tool result belongs to a tool call row. */
 function matchingToolCallIndex(
     toolCalls: ChatToolCallDisplay[] | undefined,

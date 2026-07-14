@@ -32,6 +32,7 @@ import {
 import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
 import { Agents } from "../pages/Agents";
 import {
+    activeStreamsAfterFailedSend,
     Chat,
     hasNewerAssistantMessageInHistory,
     hasNewerFinalForStrippedThinkingStream,
@@ -3351,6 +3352,55 @@ describe("Mira Dashboard pages", () => {
         expect(
             optimisticChatStreamKey("agent:main:main", "dashboard-chat-first")
         ).not.toBe(optimisticChatStreamKey("agent:main:main", "dashboard-chat-second"));
+        const failedSendStreams = {
+            "agent:main:main::dashboard-chat-a::assistant": {
+                aliases: ["dashboard-chat-a"],
+                runId: "dashboard-chat-a",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: "2026-06-24T08:00:00.000Z",
+            },
+            "agent:main:main::assistant": {
+                aliases: [],
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                text: "Provisional A",
+                updatedAt: "2026-06-24T08:00:01.000Z",
+            },
+            "agent:main:main::dashboard-chat-b::assistant": {
+                aliases: ["dashboard-chat-b"],
+                runId: "dashboard-chat-b",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: "2026-06-24T08:00:02.000Z",
+            },
+        };
+        expect(
+            Object.keys(
+                activeStreamsAfterFailedSend(
+                    failedSendStreams,
+                    "agent:main:main",
+                    "dashboard-chat-a"
+                )
+            )
+        ).toEqual(["agent:main:main::dashboard-chat-b::assistant"]);
+        expect(
+            activeStreamsAfterFailedSend(
+                {
+                    ...failedSendStreams,
+                    "agent:main:main::dashboard-chat-b::assistant": {
+                        ...failedSendStreams[
+                            "agent:main:main::dashboard-chat-b::assistant"
+                        ],
+                        updatedAt: "2026-06-24T08:00:00.500Z",
+                    },
+                },
+                "agent:main:main",
+                "dashboard-chat-a"
+            )["agent:main:main::assistant"]?.text
+        ).toBe("Provisional A");
         expect(isSessionActive(undefined)).toBe(false);
         expect(
             isSessionActive({ status: "running" } as Parameters<

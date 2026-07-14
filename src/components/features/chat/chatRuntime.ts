@@ -4,6 +4,7 @@ import {
     type ChatHistoryMessage,
     type ChatStreamEventMessage,
     type ChatVisibilitySettings,
+    hasPrimaryChatMessageContent,
     isRenderableChatHistoryMessage,
     mergeChatAttachments,
     mergeChatImages,
@@ -375,11 +376,8 @@ export function visibleHistoryMessages(
         }
 
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
-        const hasPrimaryAssistantContent = Boolean(
-            messageWithoutThinking.text.trim() ||
-            messageWithoutThinking.images?.length ||
-            messageWithoutThinking.attachments?.length
-        );
+        const hasPrimaryAssistantContent =
+            hasPrimaryChatMessageContent(messageWithoutThinking);
         const isDiagnosticToolMessage = Boolean(
             hasToolDetails && (message.diagnostic || !hasPrimaryAssistantContent)
         );

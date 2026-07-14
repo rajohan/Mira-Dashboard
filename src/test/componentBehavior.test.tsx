@@ -5212,6 +5212,7 @@ describe("shared component helpers", () => {
         const updateActiveStreams = jest.fn((updater) => {
             activeStreamsReference.current = updater(activeStreamsReference.current);
         });
+        const setMessages = jest.fn();
         const { unmount } = renderHook(() =>
             useChatRuntimeEvents({
                 activeStreamsReference,
@@ -5222,7 +5223,7 @@ describe("shared component helpers", () => {
                 selectedSessionKey: "agent:main:main",
                 setHistoryLoadVersion: jest.fn(),
                 setIsAtBottom: jest.fn(),
-                setMessages: jest.fn(),
+                setMessages,
                 setSendError: jest.fn(),
                 shouldStickToBottomReference: { current: true },
                 showThinkingOutput: true,
@@ -5269,7 +5270,74 @@ describe("shared component helpers", () => {
                 "agent:main:main::dashboard-chat-first::assistant",
                 "agent:main:main::dashboard-chat-second::assistant",
             ]);
+            expect(setMessages).not.toHaveBeenCalled();
+
+            activeStreamsReference.current = {
+                "agent:main:main": {
+                    aliases: ["dashboard-chat-first"],
+                    runId: "acknowledged-first",
+                    sessionKey: "agent:main:main",
+                    statusText: "Thinking",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+                "agent:main:main::acknowledged-second::assistant": {
+                    aliases: ["dashboard-chat-second"],
+                    runId: "acknowledged-second",
+                    sessionKey: "agent:main:main",
+                    statusText: "Thinking",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+            };
+            act(() => {
+                listener?.({
+                    event: "chat",
+                    payload: {
+                        errorMessage:
+                            terminalState === "error" ? "ambiguous error" : undefined,
+                        message: terminalState === "final" ? "Unscoped final" : undefined,
+                        sessionKey: "agent:main:main",
+                        state: terminalState,
+                    },
+                    type: "event",
+                });
+            });
+            expect(Object.keys(activeStreamsReference.current)).toEqual([
+                "agent:main:main",
+                "agent:main:main::acknowledged-second::assistant",
+            ]);
+            expect(setMessages).not.toHaveBeenCalled();
         }
+
+        activeStreamsReference.current = {
+            "agent:main:main": {
+                aliases: [],
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                text: "Provisional answer",
+                updatedAt: new Date().toISOString(),
+            },
+            "agent:main:main::acknowledged-run::assistant": {
+                aliases: ["dashboard-chat-acknowledged"],
+                runId: "acknowledged-run",
+                sessionKey: "agent:main:main",
+                text: "Acknowledged answer",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Acknowledged answer",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
         unmount();
     });
@@ -7537,6 +7605,22 @@ describe("shared component helpers", () => {
                 (row) => row.key
             )
         ).toEqual(["user", "tool", "final-history"]);
+        const mediaFinalRow = {
+            ...finalHistoryRow,
+            key: "media-final",
+            message: {
+                ...finalHistoryRow.message,
+                content: [],
+                images: [{ type: "image" as const, url: "/media/final.png" }],
+                text: "",
+                toolCalls: [{ id: "tool-media", name: "image" }],
+            },
+        };
+        expect(
+            orderCurrentResponseRows([userRow, mediaFinalRow, toolRow]).map(
+                (row) => row.key
+            )
+        ).toEqual(["user", "tool", "media-final"]);
         const lateThinkingRow = {
             ...thinkingRow,
             key: "late-thinking",
