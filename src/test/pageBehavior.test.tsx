@@ -1866,12 +1866,18 @@ describe("Mira Dashboard pages", () => {
                     if (databaseRequestCount === 1) {
                         return apiResponse(url, method, init);
                     }
+
+                    const response = await apiResponse(url, method, init);
+                    const envelope = (await response.json()) as Record<string, unknown>;
+                    return Response.json({
+                        ...envelope,
+                        status: "error",
+                        errorMessage: "Database metrics temporarily unavailable",
+                        consecutiveFailures: 1,
+                    });
                 }
 
-                if (
-                    url === "/api/cache/database.summary" ||
-                    url === "/api/cache/database.summary/refresh"
-                ) {
+                if (url === "/api/cache/database.summary/refresh") {
                     throw new Error("Database metrics temporarily unavailable");
                 }
 

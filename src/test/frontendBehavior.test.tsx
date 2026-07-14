@@ -2481,6 +2481,57 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(database.result.current.data).toBeUndefined();
     });
 
+    it("keeps valid database data from an error cache envelope", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (url === "/api/cache/database.summary" && method === "GET") {
+                    return Response.json({
+                        data: {
+                            overview: {
+                                totalDatabaseSizeBytes: 1024,
+                                totalBackends: 2,
+                                averageCacheHitRatio: 99,
+                                connections: {},
+                                pgStatStatementsEnabled: true,
+                                torrentCounts: { comet: 1, bitmagnet: 2 },
+                                pgbouncer: {
+                                    clientConnections: 1,
+                                    serverConnections: 1,
+                                    waitingClients: 0,
+                                    maxWait: 0,
+                                    avgQueryTime: 1,
+                                    avgTransactionTime: 2,
+                                },
+                            },
+                            databases: [],
+                            deadTuples: [],
+                            topQueries: [],
+                            pgbouncerPools: [],
+                            pgbouncerStats: [],
+                        },
+                        errorMessage: "Database metrics temporarily unavailable",
+                        key: "database.summary",
+                        status: "error",
+                    });
+                }
+
+                throw new Error(`Unexpected database API call: ${method} ${url}`);
+            }),
+            writable: true,
+        });
+
+        const database = renderHookWithQueryClient(() => useDatabaseOverview());
+
+        await waitFor(() => expect(database.result.current.isSuccess).toBe(true));
+        expect(database.result.current.data?.overview.totalBackends).toBe(2);
+        expect(database.result.current.error?.message).toBe(
+            "Database metrics temporarily unavailable"
+        );
+    });
+
     it("runs terminal and exec operations through hooks", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {
