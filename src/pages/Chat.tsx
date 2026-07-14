@@ -79,6 +79,14 @@ export function isChatSendBlocked(
     return inFlightSendCount > 0 && !hasActiveSelectedStream;
 }
 
+/** Returns a collision-free active-stream key for an optimistic chat send. */
+export function optimisticChatStreamKey(
+    sessionKey: string,
+    idempotencyKey: string
+): string {
+    return `${sessionKey}::${idempotencyKey}::assistant`;
+}
+
 /** Returns visible text carried by active stream message details. */
 export function activeStreamRenderableText(stream: ActiveChatStream): string {
     return uniqueStrings([
@@ -382,7 +390,18 @@ export function isActiveStreamRecoveredInMessages(
                                 ? isMatchingToolResult(
                                       streamToolCall.toolResult,
                                       toolCall.toolResult
-                                  )
+                                  ) ||
+                                      visibleMessages.some(
+                                          (resultMessage) =>
+                                              (!stream.message?.runId ||
+                                                  !resultMessage.runId ||
+                                                  stream.message.runId ===
+                                                      resultMessage.runId) &&
+                                              isMatchingToolResult(
+                                                  streamToolCall.toolResult,
+                                                  resultMessage.toolResult
+                                              )
+                                      )
                                 : true;
                         });
 
@@ -547,12 +566,14 @@ export function hasNewerAssistantMessageInHistory(
 export function nextRefreshedChatMessages(
     previousMessages: ChatHistoryMessage[],
     nextMessages: ChatHistoryMessage[],
-    shouldForceMerge = false
+    shouldForceMerge = false,
+    shouldMergeThinking = true
 ): ChatHistoryMessage[] {
     const previousLast = previousMessages.at(-1)?.timestamp;
     const nextLast = nextMessages.at(-1)?.timestamp;
 
     if (
+        shouldMergeThinking &&
         !shouldForceMerge &&
         previousMessages.length === nextMessages.length &&
         previousLast === nextLast
@@ -560,7 +581,11 @@ export function nextRefreshedChatMessages(
         return previousMessages;
     }
 
-    return mergeWithRecentOptimisticMessages(previousMessages, nextMessages);
+    return mergeWithRecentOptimisticMessages(
+        previousMessages,
+        nextMessages,
+        shouldMergeThinking
+    );
 }
 
 /** Returns the next history-load bottom-following state. */
@@ -791,10 +816,21 @@ export function Chat() {
         }
 
         updateActiveStreams((wasPrevious) => {
-            const optimisticUpdatedAt = sessionTimestampMs(
-                wasPrevious[sessionKey]?.runId === runId
-                    ? wasPrevious[sessionKey]?.updatedAt
-                    : undefined
+            const optimisticStream = Object.values(wasPrevious).find(
+                (stream) =>
+                    isSameSessionKey(stream.sessionKey, sessionKey) &&
+                    (stream.runId === runId || stream.aliases.includes(runId))
+            );
+            const optimisticUpdatedAt = sessionTimestampMs(optimisticStream?.updatedAt);
+            const hasOtherOptimisticSend = Object.values(wasPrevious).some(
+                (stream) =>
+                    isSameSessionKey(stream.sessionKey, sessionKey) &&
+                    stream.runId !== runId &&
+                    !stream.aliases.includes(runId) &&
+                    (stream.runId.startsWith("dashboard-chat-") ||
+                        stream.aliases.some((alias) =>
+                            alias.startsWith("dashboard-chat-")
+                        ))
             );
 
             return Object.fromEntries(
@@ -809,6 +845,7 @@ export function Chat() {
 
                     const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
                     const isSameSendProvisionalRuntimeStream =
+                        !hasOtherOptimisticSend &&
                         streamKey.startsWith(`${sessionKey}::`) &&
                         stream.runId === sessionKey &&
                         optimisticUpdatedAt !== undefined &&
@@ -1079,7 +1116,11 @@ export function Chat() {
                         return nextMessages;
                     }
 
-                    return mergeWithRecentOptimisticMessages(wasPrevious, nextMessages);
+                    return mergeWithRecentOptimisticMessages(
+                        wasPrevious,
+                        nextMessages,
+                        keepThinkingAfterFinal && showThinkingOutput
+                    );
                 });
                 if (isNewSession) {
                     shouldStickToBottomReference.current = true;
@@ -1205,7 +1246,8 @@ export function Chat() {
                     nextRefreshedChatMessages(
                         wasPrevious,
                         nextMessages,
-                        isRecoveredStreamInHistory
+                        isRecoveredStreamInHistory,
+                        keepThinkingAfterFinal && showThinkingOutput
                     )
                 );
                 setIsAtBottom(shouldStickToBottomReference.current);
@@ -1282,7 +1324,12 @@ export function Chat() {
                 );
 
                 setMessages((wasPrevious) =>
-                    nextRefreshedChatMessages(wasPrevious, nextMessages)
+                    nextRefreshedChatMessages(
+                        wasPrevious,
+                        nextMessages,
+                        false,
+                        keepThinkingAfterFinal && showThinkingOutput
+                    )
                 );
 
                 setIsAtBottom(shouldStickToBottomReference.current);
@@ -1907,7 +1954,7 @@ export function Chat() {
         if (idempotencyKey) {
             updateActiveStreams((wasPrevious) => ({
                 ...wasPrevious,
-                [selectedSessionKey]: {
+                [optimisticChatStreamKey(selectedSessionKey, idempotencyKey)]: {
                     sessionKey: selectedSessionKey,
                     runId: idempotencyKey,
                     aliases: [idempotencyKey],

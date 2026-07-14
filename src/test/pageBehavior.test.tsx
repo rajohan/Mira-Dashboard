@@ -38,6 +38,7 @@ import {
     isSessionActive,
     nextHistoryBottomState,
     nextHistoryLoadSendError,
+    optimisticChatStreamKey,
     readDeletedMessageKeys,
     scheduleBottomFollowWhenNeeded,
     sessionTimestampMs,
@@ -3209,6 +3210,9 @@ describe("Mira Dashboard pages", () => {
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");
         expect(nextHistoryLoadSendError(undefined, false, "new")).toBe("new");
         expect(isChatSendBlocked(1, {}, "agent:main:main")).toBe(true);
+        expect(
+            optimisticChatStreamKey("agent:main:main", "dashboard-chat-first")
+        ).not.toBe(optimisticChatStreamKey("agent:main:main", "dashboard-chat-second"));
         expect(
             isChatSendBlocked(
                 1,

@@ -1,5 +1,6 @@
 import type { Session } from "../../../types/session";
 import { timestampFromDateString } from "../../../utils/date";
+import { stripThinkingFromMessage } from "./chatRuntime";
 import {
     chatAttachmentIdentity,
     chatContentFingerprint,
@@ -548,19 +549,23 @@ function mergeToolCallResults(
 /** Performs merge with recent optimistic messages. */
 export function mergeWithRecentOptimisticMessages(
     previousMessages: ChatHistoryMessage[],
-    nextMessages: ChatHistoryMessage[]
+    nextMessages: ChatHistoryMessage[],
+    shouldMergeThinking = true
 ): ChatHistoryMessage[] {
+    const mergeablePreviousMessages = shouldMergeThinking
+        ? previousMessages
+        : previousMessages.map((message) => stripThinkingFromMessage(message));
     if (previousMessages.length === 0) {
         return dedupeMessages(nextMessages);
     }
 
     if (nextMessages.length === 0) {
-        return previousMessages;
+        return mergeablePreviousMessages;
     }
 
     const enrichedNextMessages = mergeDiagnosticDetails(
-        previousMessages,
-        mergeToolCallResults(previousMessages, nextMessages)
+        mergeablePreviousMessages,
+        mergeToolCallResults(mergeablePreviousMessages, nextMessages)
     );
     const nextIdentities = new Set(
         enrichedNextMessages.map((message) => messageIdentity(message))
@@ -581,7 +586,7 @@ export function mergeWithRecentOptimisticMessages(
             );
         }
     }
-    for (const message of previousMessages) {
+    for (const message of mergeablePreviousMessages) {
         if (message.local === true) {
             continue;
         }
@@ -615,7 +620,7 @@ export function mergeWithRecentOptimisticMessages(
         .filter((message) => message.role.toLowerCase() === "assistant")
         .map((message) => message.text);
     const now = Date.now();
-    const recentMissingMessages = previousMessages.filter((message) => {
+    const recentMissingMessages = mergeablePreviousMessages.filter((message) => {
         const role = message.role.toLowerCase();
         const isOptimisticRole = role === "user" || role === "assistant";
         const isLocalMessage = message.local === true;

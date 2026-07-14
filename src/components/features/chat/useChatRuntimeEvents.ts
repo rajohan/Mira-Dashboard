@@ -1212,7 +1212,8 @@ export function useChatRuntimeEvents({
                                         showToolOutput
                                     ),
                                     keepThinkingAfterFinal
-                                )
+                                ),
+                                keepThinkingAfterFinal && showThinkingOutput
                             )
                         );
 
@@ -2207,7 +2208,8 @@ export function useChatRuntimeEvents({
                                             showToolOutput
                                         ),
                                         keepThinkingAfterFinal
-                                    )
+                                    ),
+                                    keepThinkingAfterFinal && showThinkingOutput
                                 )
                             );
                             setIsAtBottom(shouldStickToBottomReference.current);

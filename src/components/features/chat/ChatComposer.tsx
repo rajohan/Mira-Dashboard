@@ -457,7 +457,7 @@ export function ChatComposer({
                                             <Settings2 className="size-4" />
                                         </PopoverButton>
                                         <PopoverPanel
-                                            anchor={{ to: "top start", gap: 10 }}
+                                            anchor={{ to: "top start", gap: 11 }}
                                             className="z-50 w-72 space-y-3 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
                                         >
                                             <PanelHeader

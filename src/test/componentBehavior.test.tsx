@@ -5806,6 +5806,16 @@ describe("shared component helpers", () => {
         expect(
             mergeWithRecentOptimisticMessages(
                 [mixedDiagnosticLocalRow],
+                [mixedDiagnosticHistoryRow],
+                false
+            )[0]?.thinking
+        ).toBeUndefined();
+        expect(
+            mergeWithRecentOptimisticMessages([mixedDiagnosticLocalRow], [], false)[0]
+        ).toMatchObject({ text: "same visible text", thinking: undefined });
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [mixedDiagnosticLocalRow],
                 [mixedDiagnosticHistoryRow]
             )[0]
         ).toMatchObject({
@@ -5906,6 +5916,14 @@ describe("shared component helpers", () => {
             nextRefreshedChatMessages(previousMessages, diagnosticMessages, true)[0]
                 ?.thinking?.[0]?.text
         ).toBe("recovered reasoning");
+        expect(
+            nextRefreshedChatMessages(
+                diagnosticMessages,
+                previousMessages,
+                false,
+                false
+            )[0]?.thinking
+        ).toBeUndefined();
     });
 
     it("detects recovered thinking-only active streams", () => {
@@ -6218,6 +6236,34 @@ describe("shared component helpers", () => {
                 now
             )
         ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                toolCallWithResultStream,
+                [
+                    {
+                        attachments: [],
+                        content: "",
+                        images: [],
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [{ id: "call-1", name: "exec" }],
+                    },
+                    {
+                        attachments: [],
+                        content: "ok",
+                        images: [],
+                        role: "toolResult",
+                        text: "ok",
+                        toolResult: {
+                            content: "ok",
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    },
+                ],
+                now
+            )
+        ).toBe(true);
         expect(
             isActiveStreamRecoveredInMessages(
                 toolCallWithResultStream,
