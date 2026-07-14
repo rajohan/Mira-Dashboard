@@ -1973,13 +1973,6 @@ export function Chat() {
             try {
                 await request("sessions.patch", {
                     key: patchSessionKey,
-                    sessionId:
-                        selectedSession?.sessionId ||
-                        (selectedSession?.id &&
-                        selectedSession.id !== "unknown" &&
-                        selectedSession.id !== selectedSessionKey
-                            ? selectedSession.id
-                            : undefined),
                     ...patch,
                 });
                 return true;

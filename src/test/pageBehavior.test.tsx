@@ -2661,9 +2661,8 @@ describe("Mira Dashboard pages", () => {
                     (entry) => JSON.parse(entry) as { method?: string; params?: unknown }
                 )
                 .findLast((entry) => entry.method === "sessions.patch")?.params
-        ).toMatchObject({
+        ).toEqual({
             key: "agent:main:main",
-            sessionId: "session-main",
             thinkingLevel: "high",
         });
         await respondToSocketRequest(socket, "sessions.patch", {});
@@ -2682,10 +2681,9 @@ describe("Mira Dashboard pages", () => {
                     (entry) => JSON.parse(entry) as { method?: string; params?: unknown }
                 )
                 .findLast((entry) => entry.method === "sessions.patch")?.params
-        ).toMatchObject({
+        ).toEqual({
             fastMode: true,
             key: "agent:main:main",
-            sessionId: "session-main",
         });
         await user.type(
             screen.getByPlaceholderText(
