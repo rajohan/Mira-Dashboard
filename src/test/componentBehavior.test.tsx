@@ -311,6 +311,54 @@ describe("shared component helpers", () => {
                 thinking: [{ text: "Only reasoning" }],
             }),
         ]);
+        const scopedThinkingMessage = {
+            role: "assistant",
+            runId: "active-thinking-run",
+            content: [{ type: "thinking", text: "Active reasoning" }],
+        };
+        const otherRunFinalMessage = {
+            role: "assistant",
+            runId: "completed-other-run",
+            content: "Other answer",
+        };
+        expect(
+            visibleHistoryMessages(
+                [
+                    { role: "user", content: "Concurrent work" },
+                    scopedThinkingMessage,
+                    otherRunFinalMessage,
+                ],
+                createChatVisibility(true, false),
+                false
+            )
+        ).toEqual([
+            expect.objectContaining({ role: "user" }),
+            expect.objectContaining({
+                runId: "active-thinking-run",
+                thinking: [{ text: "Active reasoning" }],
+            }),
+            expect.objectContaining({
+                runId: "completed-other-run",
+                text: "Other answer",
+            }),
+        ]);
+        expect(
+            visibleHistoryMessages(
+                [
+                    { role: "user", content: "One run" },
+                    scopedThinkingMessage,
+                    { ...otherRunFinalMessage, runId: "active-thinking-run" },
+                ],
+                createChatVisibility(true, false),
+                false
+            )
+        ).toEqual([
+            expect.objectContaining({ role: "user" }),
+            expect.objectContaining({
+                runId: "active-thinking-run",
+                text: "Other answer",
+            }),
+        ]);
         expect(
             visibleHistoryMessages(
                 [
@@ -3871,6 +3919,36 @@ describe("shared component helpers", () => {
         ).toBe(true);
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
+        for (const [runId, message] of [
+            ["concurrent-completed-a", "Concurrent answer A"],
+            ["concurrent-completed-b", "Concurrent answer B"],
+        ] as const) {
+            act(() => {
+                listener?.({
+                    event: "chat",
+                    payload: {
+                        message,
+                        runId,
+                        sessionKey: "agent:main:main",
+                        state: "final",
+                    },
+                    type: "event",
+                });
+            });
+        }
+        act(() => {
+            listener?.({
+                event: "session.message",
+                payload: {
+                    message: { content: "Concurrent answer A", role: "assistant" },
+                    runId: "concurrent-completed-a",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
         activeStreamsReference.current["agent:main:main"] = {
             aliases: ["dashboard-chat-runtime-first"],
             runId: "dashboard-chat-runtime-first",
@@ -5203,6 +5281,9 @@ describe("shared component helpers", () => {
     it("keeps ambiguous unscoped terminal events from clearing optimistic runs", async () => {
         let listener: ((data: unknown) => void) | undefined;
         const activeStreamsReference: { current: ActiveChatStreams } = { current: {} };
+        const pendingTerminalRunIdsReference = {
+            current: new Map<string, Set<string>>(),
+        };
         const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
             listener = nextListener;
             return jest.fn();
@@ -5217,6 +5298,7 @@ describe("shared component helpers", () => {
                 connectionId: 1,
                 isConnected: true,
                 liveHistoryRefreshTimerReference: { current: undefined },
+                pendingTerminalRunIdsReference,
                 request: jest.fn(),
                 selectedSessionKey: "agent:main:main",
                 setHistoryLoadVersion: jest.fn(),
@@ -5352,6 +5434,180 @@ describe("shared component helpers", () => {
             "agent:main:main::acknowledged-run::assistant",
         ]);
         expect(setMessages).not.toHaveBeenCalled();
+
+        activeStreamsReference.current = {
+            "agent:main:main::dashboard-chat-selected::assistant": {
+                aliases: ["dashboard-chat-selected"],
+                runId: "dashboard-chat-selected",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+            "agent:other:main::same-real-run::assistant": {
+                aliases: ["same-real-run"],
+                runId: "same-real-run",
+                sessionKey: "agent:other:main",
+                text: "Other session answer",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Selected session answer",
+                    runId: "same-real-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toEqual([
+            "agent:other:main::same-real-run::assistant",
+        ]);
+
+        activeStreamsReference.current = {
+            "agent:main:main::dashboard-chat-first::assistant": {
+                aliases: ["dashboard-chat-first"],
+                runId: "dashboard-chat-first",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+            "agent:main:main::dashboard-chat-second::assistant": {
+                aliases: ["dashboard-chat-second"],
+                runId: "dashboard-chat-second",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Second answer completed before ACK",
+                    runId: "real-second",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(pendingTerminalRunIdsReference.current.get("agent:main:main")).toEqual(
+            new Set(["real-second"])
+        );
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(2);
+
+        activeStreamsReference.current = {
+            "agent:main:main": {
+                aliases: [],
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                text: "Provisional answer",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: [
+                        {
+                            data: "generated-image",
+                            media_type: "image/png",
+                            type: "image",
+                        },
+                    ],
+                    runId: "real-after-provisional",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        const finalMessageUpdater = setMessages.mock.calls.at(-1)?.[0] as (
+            previous: ChatHistoryMessage[]
+        ) => ChatHistoryMessage[];
+        expect(finalMessageUpdater([]).at(-1)).toMatchObject({
+            runId: "real-after-provisional",
+        });
+
+        activeStreamsReference.current = {
+            "agent:main:main": {
+                aliases: [],
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                text: "Buffered provisional answer",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "real-buffered-provisional",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+        const bufferedFinalUpdater = setMessages.mock.calls.at(-1)?.[0] as (
+            previous: ChatHistoryMessage[]
+        ) => ChatHistoryMessage[];
+        expect(bufferedFinalUpdater([]).at(-1)).toMatchObject({
+            runId: "real-buffered-provisional",
+            text: "Buffered provisional answer",
+        });
+
+        activeStreamsReference.current = {
+            "agent:main:main::resolved-media-run::assistant": {
+                aliases: ["resolved-media-run"],
+                message: {
+                    content: [],
+                    images: [{ data: "same-generated-image", type: "image" }],
+                    role: "assistant",
+                    runId: "resolved-media-run",
+                    text: "",
+                },
+                runId: "resolved-media-run",
+                sessionKey: "agent:main:main",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: [
+                        {
+                            data: "same-generated-image",
+                            media_type: "image/png",
+                            type: "image",
+                        },
+                    ],
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        const runlessMediaFinalUpdater = setMessages.mock.calls.at(-1)?.[0] as (
+            previous: ChatHistoryMessage[]
+        ) => ChatHistoryMessage[];
+        const runlessMediaMessages = runlessMediaFinalUpdater([]);
+        expect(runlessMediaMessages).toHaveLength(1);
+        expect(runlessMediaMessages[0]).toMatchObject({
+            runId: "resolved-media-run",
+        });
 
         unmount();
     });
@@ -7619,6 +7875,18 @@ describe("shared component helpers", () => {
                 (row) => row.key
             )
         ).toEqual(["user", "tool", "final-history"]);
+        const scopedToolFromAnotherRun = {
+            ...toolRow,
+            key: "other-run-tool",
+            message: { ...toolRow.message, runId: "compaction-run" },
+        };
+        expect(
+            orderCurrentResponseRows([
+                userRow,
+                finalHistoryRow,
+                scopedToolFromAnotherRun,
+            ]).map((row) => row.key)
+        ).toEqual(["user", "final-history", "other-run-tool"]);
         const mediaFinalRow = {
             ...finalHistoryRow,
             key: "media-final",

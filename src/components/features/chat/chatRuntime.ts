@@ -349,17 +349,25 @@ export function visibleHistoryMessages(
         isThinkingOnlyAssistant: boolean;
     }> = [];
     let hasPrimaryAssistantAnswer = false;
+    let hasUnscopedPrimaryAssistantAnswer = false;
+    let primaryAssistantRunIds = new Set<string>();
 
     const flushResponseSegment = () => {
         for (const entry of responseSegment) {
+            const isThinkingSuperseded = entry.message.runId
+                ? hasUnscopedPrimaryAssistantAnswer ||
+                  primaryAssistantRunIds.has(entry.message.runId)
+                : hasPrimaryAssistantAnswer;
             nextMessages.push(
-                entry.isThinkingOnlyAssistant && !hasPrimaryAssistantAnswer
+                entry.isThinkingOnlyAssistant && !isThinkingSuperseded
                     ? entry.message
                     : entry.messageWithoutThinking
             );
         }
         responseSegment = [];
         hasPrimaryAssistantAnswer = false;
+        hasUnscopedPrimaryAssistantAnswer = false;
+        primaryAssistantRunIds = new Set();
     };
 
     for (
@@ -387,6 +395,11 @@ export function visibleHistoryMessages(
             isRenderableChatHistoryMessage(messageWithoutThinking, visibility)
         ) {
             hasPrimaryAssistantAnswer = true;
+            if (message.runId) {
+                primaryAssistantRunIds.add(message.runId);
+            } else {
+                hasUnscopedPrimaryAssistantAnswer = true;
+            }
         }
         responseSegment.push({
             message,

@@ -32,6 +32,7 @@ import {
 import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
 import { Agents } from "../pages/Agents";
 import {
+    acknowledgedActiveStreams,
     activeStreamsAfterFailedSend,
     Chat,
     hasNewerAssistantMessageInHistory,
@@ -3378,6 +3379,47 @@ describe("Mira Dashboard pages", () => {
         expect(
             optimisticChatStreamKey("agent:main:main", "dashboard-chat-first")
         ).not.toBe(optimisticChatStreamKey("agent:main:main", "dashboard-chat-second"));
+        const optimisticStreams = {
+            [optimisticChatStreamKey("agent:main:main", "dashboard-chat-first")]: {
+                aliases: ["dashboard-chat-first"],
+                runId: "dashboard-chat-first",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: "2026-06-24T08:00:00.000Z",
+            },
+            [optimisticChatStreamKey("agent:main:main", "dashboard-chat-second")]: {
+                aliases: ["dashboard-chat-second"],
+                runId: "dashboard-chat-second",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: "2026-06-24T08:00:01.000Z",
+            },
+        };
+        expect(
+            Object.keys(
+                acknowledgedActiveStreams(
+                    optimisticStreams,
+                    "agent:main:main",
+                    "dashboard-chat-second",
+                    "real-second",
+                    true
+                )
+            )
+        ).toEqual([optimisticChatStreamKey("agent:main:main", "dashboard-chat-first")]);
+        expect(
+            acknowledgedActiveStreams(
+                optimisticStreams,
+                "agent:main:main",
+                "dashboard-chat-second",
+                "real-second",
+                false
+            )[optimisticChatStreamKey("agent:main:main", "dashboard-chat-second")]
+        ).toMatchObject({
+            aliases: ["dashboard-chat-second", "real-second"],
+            runId: "real-second",
+        });
         const failedSendStreams = {
             "agent:main:main::dashboard-chat-a::assistant": {
                 aliases: ["dashboard-chat-a"],

@@ -129,7 +129,7 @@ When changing chat event handling, test these cases:
 - live tool result updates merge into the matching row;
 - failed tool results stay visible when tool output is enabled;
 - hiding tool output does not also hide a real terminal chat error;
-- run IDs are scoped by session, not treated as globally unique.
+- run IDs are scoped by session, not treated as globally unique;
 - socket reconnects, compaction replacement runs, and selected-session changes
   cannot leak control or stream state between sessions.
 

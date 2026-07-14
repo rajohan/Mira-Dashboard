@@ -77,6 +77,44 @@ export function optimisticChatStreamKey(
     return `${sessionKey}::${idempotencyKey}::assistant`;
 }
 
+/** Reconciles one optimistic stream after the Gateway acknowledges its run id. */
+export function acknowledgedActiveStreams(
+    streams: ActiveChatStreams,
+    sessionKey: string,
+    optimisticRunId: string,
+    acknowledgedRunId: string,
+    didTerminateBeforeAck: boolean
+): ActiveChatStreams {
+    let hasChanged = false;
+    const next = { ...streams };
+    for (const [key, stream] of Object.entries(streams)) {
+        if (
+            !isSameSessionKey(stream.sessionKey, sessionKey) ||
+            (stream.runId !== optimisticRunId &&
+                !stream.aliases.includes(optimisticRunId))
+        ) {
+            continue;
+        }
+
+        hasChanged = true;
+        if (didTerminateBeforeAck) {
+            delete next[key];
+            continue;
+        }
+        next[key] = {
+            ...stream,
+            runId: stream.runId === optimisticRunId ? acknowledgedRunId : stream.runId,
+            aliases: uniqueStrings([
+                ...stream.aliases,
+                optimisticRunId,
+                acknowledgedRunId,
+            ]),
+        };
+    }
+
+    return hasChanged ? next : streams;
+}
+
 /** Returns visible text carried by active stream message details. */
 export function activeStreamRenderableText(stream: ActiveChatStream): string {
     return uniqueStrings([
@@ -230,9 +268,8 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     const currentResponseStartIndex = previousAssistantTextRowIndex + 1;
     const currentResponseRows = responseRows.slice(currentResponseStartIndex);
     const isRowInCurrentResponse = (row: ChatRow) =>
-        !finalRow.message.runId ||
         !row.message.runId ||
-        row.message.runId === finalRow.message.runId;
+        Boolean(finalRow.message.runId && row.message.runId === finalRow.message.runId);
     const activityRows = currentResponseRows.filter(
         (row) => row.kind === "typing" && isRowInCurrentResponse(row)
     );
@@ -841,6 +878,7 @@ export function Chat() {
     const shouldStickToBottomReference = useRef(true);
     const lastKnownMessagesScrollTopReference = useRef(0);
     const activeStreamsReference = useRef<ActiveChatStreams>({});
+    const pendingTerminalRunIdsReference = useRef(new Map<string, Set<string>>());
     const liveHistoryRefreshTimerReference = useRef<
         ReturnType<typeof setTimeout> | undefined
     >(undefined);
@@ -924,6 +962,7 @@ export function Chat() {
     };
     /** Clears active streams for a session, including per-stream diagnostic keys. */
     const clearActiveStreamsForSession = (sessionKey: string) => {
+        pendingTerminalRunIdsReference.current.delete(sessionKey);
         updateActiveStreams((wasPrevious) =>
             Object.fromEntries(
                 Object.entries(wasPrevious).filter(
@@ -1104,6 +1143,7 @@ export function Chat() {
             setIsSending(false);
 
             updateActiveStreams(() => ({}));
+            pendingTerminalRunIdsReference.current.clear();
 
             if (liveHistoryRefreshTimerReference.current !== undefined) {
                 clearTimeout(liveHistoryRefreshTimerReference.current);
@@ -1280,14 +1320,27 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput),
                     keepThinkingAfterFinal
                 );
+                const activeSessionStreams = Object.values(
+                    activeStreamsReference.current
+                ).filter((stream) =>
+                    isSameSessionKey(stream.sessionKey, requestSessionKey)
+                );
                 const activeSessionRunIds = new Set(
-                    Object.values(activeStreamsReference.current)
-                        .filter((stream) =>
-                            isSameSessionKey(stream.sessionKey, requestSessionKey)
-                        )
+                    activeSessionStreams
+                        .filter((stream) => stream.runId !== requestSessionKey)
                         .map((stream) => stream.runId)
                 );
-                const shouldAllowUnscopedHistory = activeSessionRunIds.size <= 1;
+                const hasProvisionalAssistantStream = activeSessionStreams.some(
+                    (stream) => stream.runId === requestSessionKey
+                );
+                const onlyActiveSessionRunId = activeSessionRunIds.values().next().value;
+                const shouldAllowUnscopedHistory =
+                    activeSessionRunIds.size <= 1 &&
+                    !(
+                        hasProvisionalAssistantStream &&
+                        activeSessionRunIds.size === 1 &&
+                        !onlyActiveSessionRunId?.startsWith("dashboard-chat-")
+                    );
                 const recoveredStreamKeys = Object.entries(activeStreamsReference.current)
                     .filter(([, stream]) =>
                         isSameSessionKey(stream.sessionKey, requestSessionKey)
@@ -1466,6 +1519,7 @@ export function Chat() {
         showThinkingOutput,
         showToolOutput,
         activeStreamsReference,
+        pendingTerminalRunIdsReference,
         liveHistoryRefreshTimerReference,
         shouldStickToBottomReference,
         updateActiveStreams,
@@ -1919,35 +1973,23 @@ export function Chat() {
     ) => {
         if (!acknowledgedRunId) return;
 
-        updateActiveStreams((wasPrevious) => {
-            let hasChanged = false;
-            const next = { ...wasPrevious };
-            for (const [key, stream] of Object.entries(wasPrevious)) {
-                if (
-                    !isSameSessionKey(stream.sessionKey, sessionKey) ||
-                    (stream.runId !== optimisticRunId &&
-                        !stream.aliases.includes(optimisticRunId))
-                ) {
-                    continue;
-                }
+        const pendingTerminalRunIds =
+            pendingTerminalRunIdsReference.current.get(sessionKey);
+        const didTerminateBeforeAck =
+            pendingTerminalRunIds?.delete(acknowledgedRunId) || false;
+        if (pendingTerminalRunIds?.size === 0) {
+            pendingTerminalRunIdsReference.current.delete(sessionKey);
+        }
 
-                hasChanged = true;
-                next[key] = {
-                    ...stream,
-                    runId:
-                        stream.runId === optimisticRunId
-                            ? acknowledgedRunId
-                            : stream.runId,
-                    aliases: uniqueStrings([
-                        ...stream.aliases,
-                        optimisticRunId,
-                        acknowledgedRunId,
-                    ]),
-                };
-            }
-
-            return hasChanged ? next : wasPrevious;
-        });
+        updateActiveStreams((wasPrevious) =>
+            acknowledgedActiveStreams(
+                wasPrevious,
+                sessionKey,
+                optimisticRunId,
+                acknowledgedRunId,
+                didTerminateBeforeAck
+            )
+        );
     };
 
     /** Responds to send events. */
@@ -2120,7 +2162,6 @@ export function Chat() {
         !isRecording &&
         !isTranscribing &&
         !isPatchingSession &&
-        !isCompactingSession &&
         (draftText || attachments.length > 0)
     );
     const isSessionControlsDisabled = Boolean(
@@ -2309,9 +2350,9 @@ export function Chat() {
                             }
                             const shouldKeepThinking = !keepThinkingAfterFinal;
                             if (!shouldKeepThinking) {
-                                setMessages(
+                                setMessages((wasPrevious) =>
                                     messagesAfterDisablingFinalThinkingRetention(
-                                        messages,
+                                        wasPrevious,
                                         showToolOutput
                                     )
                                 );
