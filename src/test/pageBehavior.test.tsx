@@ -2723,7 +2723,9 @@ describe("Mira Dashboard pages", () => {
         expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "false");
         await user.click(thinkingToggle);
 
-        await user.click(screen.getByRole("button", { name: "Send" }));
+        const sendButton = screen.getByRole("button", { name: "Send" });
+        fireEvent.click(sendButton);
+        fireEvent.click(sendButton);
 
         await waitFor(() => {
             expect(
@@ -3364,6 +3366,19 @@ describe("Mira Dashboard pages", () => {
                 [
                     activeThinkingOnlyMessage,
                     {
+                        content: [],
+                        diagnostic: true,
+                        role: "assistant",
+                        text: "",
+                        toolCalls: [
+                            {
+                                arguments: {},
+                                id: "live-tool",
+                                name: "Bash",
+                            },
+                        ],
+                    },
+                    {
                         content: "done",
                         role: "assistant",
                         text: "done",
@@ -3371,7 +3386,12 @@ describe("Mira Dashboard pages", () => {
                 ],
                 true
             )
-        ).toEqual([expect.objectContaining({ text: "done" })]);
+        ).toEqual([
+            expect.objectContaining({
+                toolCalls: [expect.objectContaining({ id: "live-tool" })],
+            }),
+            expect.objectContaining({ text: "done" }),
+        ]);
         expect(nextHistoryBottomState(false, true, false)).toBe(true);
         expect(nextHistoryBottomState(false, false, false)).toBe(false);
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");

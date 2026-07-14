@@ -14,6 +14,7 @@ import {
     createChatVisibility,
     hasRecoveredStreamHistory,
     isSameSessionKey,
+    messagesWithFinalThinkingPersistence,
     shouldShowStreamRow as shouldRenderStreamRow,
     stripThinkingFromMessage,
     uniqueStrings,
@@ -715,7 +716,7 @@ export function messagesAfterDisablingFinalThinkingRetention(
     messages: ChatHistoryMessage[],
     shouldShowTools: boolean
 ): ChatHistoryMessage[] {
-    return visibleHistoryMessages(
+    return messagesWithFinalThinkingPersistence(
         messages,
         createChatVisibility(true, shouldShowTools),
         false
@@ -879,6 +880,7 @@ export function Chat() {
     const lastKnownMessagesScrollTopReference = useRef(0);
     const activeStreamsReference = useRef<ActiveChatStreams>({});
     const pendingTerminalRunIdsReference = useRef(new Map<string, Set<string>>());
+    const isClaimingComposerSubmissionReference = useRef(false);
     const liveHistoryRefreshTimerReference = useRef<
         ReturnType<typeof setTimeout> | undefined
     >(undefined);
@@ -1994,7 +1996,7 @@ export function Chat() {
 
     /** Responds to send events. */
     const handleSend = async () => {
-        if (!selectedSessionKey) {
+        if (!selectedSessionKey || isClaimingComposerSubmissionReference.current) {
             return;
         }
         let text = draft.trim();
@@ -2003,6 +2005,7 @@ export function Chat() {
             return;
         }
 
+        isClaimingComposerSubmissionReference.current = true;
         const pendingSendSessionKey = selectedSessionKey;
 
         const patchResults = await Promise.all(
@@ -2012,12 +2015,14 @@ export function Chat() {
             patchResults.includes(false) ||
             selectedSessionKeyReference.current !== pendingSendSessionKey
         ) {
+            isClaimingComposerSubmissionReference.current = false;
             return;
         }
 
         text = draftReference.current.trim();
         const currentAttachments = attachmentsReference.current;
         if (!text && currentAttachments.length === 0) {
+            isClaimingComposerSubmissionReference.current = false;
             return;
         }
 
@@ -2029,11 +2034,13 @@ export function Chat() {
                 isHandledCommand = await handleSlashCommand(text, currentAttachments);
             } catch (error_) {
                 setSendError(chatErrorMessage(error_, "Failed to run slash command"));
+                isClaimingComposerSubmissionReference.current = false;
                 endSend(sendEpoch);
                 return;
             }
 
             if (isHandledCommand) {
+                isClaimingComposerSubmissionReference.current = false;
                 endSend(sendEpoch);
                 return;
             }
@@ -2070,6 +2077,9 @@ export function Chat() {
         }
         setDraft("");
         setAttachments([]);
+        draftReference.current = "";
+        attachmentsReference.current = [];
+        isClaimingComposerSubmissionReference.current = false;
         setSendError(undefined);
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
@@ -2156,12 +2166,16 @@ export function Chat() {
             stream.operation === "compact" ||
             stream.statusText?.toLowerCase().includes("compact")
     );
+    const isManualCompactionInFlight = selectedStreams.some(
+        ([, stream]) => stream.operation === "compact"
+    );
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
         !isPatchingSession &&
+        !isManualCompactionInFlight &&
         (draftText || attachments.length > 0)
     );
     const isSessionControlsDisabled = Boolean(

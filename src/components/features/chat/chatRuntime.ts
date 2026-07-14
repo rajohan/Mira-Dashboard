@@ -331,13 +331,12 @@ export function hasRecoveredStreamHistory(
     );
 }
 
-/** Performs visible history messages. */
-export function visibleHistoryMessages(
-    messages: RawChatHistoryMessage[] = [],
+/** Applies final-thinking retention to already-normalized visible messages. */
+export function messagesWithFinalThinkingPersistence(
+    visibleMessages: ChatHistoryMessage[],
     visibility: ChatVisibilitySettings,
     shouldKeepThinkingAfterFinal = true
-) {
-    const visibleMessages = normalizeVisibleChatHistoryMessages(messages, visibility);
+): ChatHistoryMessage[] {
     if (shouldKeepThinkingAfterFinal && visibility.shouldShowThinking) {
         return visibleMessages;
     }
@@ -417,6 +416,19 @@ export function visibleHistoryMessages(
     return nextMessages
         .toReversed()
         .filter((message) => isRenderableChatHistoryMessage(message, visibility));
+}
+
+/** Performs visible history messages. */
+export function visibleHistoryMessages(
+    messages: RawChatHistoryMessage[] = [],
+    visibility: ChatVisibilitySettings,
+    shouldKeepThinkingAfterFinal = true
+) {
+    return messagesWithFinalThinkingPersistence(
+        normalizeVisibleChatHistoryMessages(messages, visibility),
+        visibility,
+        shouldKeepThinkingAfterFinal
+    );
 }
 
 /** Creates chat visibility. */
