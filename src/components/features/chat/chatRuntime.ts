@@ -1,5 +1,6 @@
 import { currentIsoString } from "../../../utils/date";
 import {
+    chatAttachmentIdentity,
     type ChatHistoryMessage,
     type ChatStreamEventMessage,
     type ChatVisibilitySettings,
@@ -198,6 +199,10 @@ export function finalMessageFromPayload(
 export function stripThinkingFromMessage(
     message: ChatHistoryMessage
 ): ChatHistoryMessage {
+    if (!Array.isArray(message.content)) {
+        return { ...message, thinking: undefined };
+    }
+
     const content = Array.isArray(message.content)
         ? message.content.filter(
               (block) =>
@@ -205,17 +210,39 @@ export function stripThinkingFromMessage(
                   (block as Record<string, unknown>).type !== "thinking"
           )
         : message.content;
+    const normalizedWithThinking = normalizeChatHistoryMessage({
+        ...message,
+        content: message.content,
+    });
     const normalizedWithoutThinking = normalizeChatHistoryMessage({
         ...message,
         content,
     });
-    const text = (Array.isArray(message.content) ? normalizedWithoutThinking : message)
-        .text;
+    const derivedAttachmentIdentities = new Set(
+        (normalizedWithThinking.attachments || []).map((attachment) =>
+            chatAttachmentIdentity(attachment)
+        )
+    );
+    const explicitAttachments = (message.attachments || []).filter(
+        (attachment) =>
+            !derivedAttachmentIdentities.has(chatAttachmentIdentity(attachment))
+    );
+    const derivedImageIdentities = new Set(
+        (normalizedWithThinking.images || []).map((image) => JSON.stringify(image))
+    );
+    const explicitImages = (message.images || []).filter(
+        (image) => !derivedImageIdentities.has(JSON.stringify(image))
+    );
 
     return {
         ...message,
+        attachments: mergeChatAttachments(
+            explicitAttachments,
+            normalizedWithoutThinking.attachments
+        ),
         content,
-        text,
+        images: mergeChatImages(explicitImages, normalizedWithoutThinking.images),
+        text: normalizedWithoutThinking.text,
         thinking: undefined,
     };
 }

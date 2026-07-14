@@ -33,10 +33,12 @@ import {
     applyFinalThinkingPersistence,
     createChatVisibility,
     mergeStreamMessage,
+    stripThinkingFromMessage,
     visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
 import {
     type ChatHistoryMessage,
+    normalizeChatHistoryMessage,
     normalizeVisibleChatHistoryMessages,
 } from "../components/features/chat/chatTypes";
 import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
@@ -1135,6 +1137,34 @@ describe("shared component helpers", () => {
     });
 
     it("normalizes chat runtime event helper output", () => {
+        const normalizedReasoningAttachment = normalizeChatHistoryMessage({
+            content: [
+                {
+                    text: '<file name="secret.txt" mime="text/plain">secret</file>',
+                    type: "thinking",
+                },
+                { text: "public answer", type: "text" },
+            ],
+            role: "assistant",
+        });
+        const strippedReasoningAttachment = stripThinkingFromMessage({
+            ...normalizedReasoningAttachment,
+            attachments: [
+                ...(normalizedReasoningAttachment.attachments || []),
+                {
+                    fileName: "public.txt",
+                    id: "explicit-public-file",
+                    kind: "text",
+                },
+            ],
+        });
+        expect(strippedReasoningAttachment.text).toBe("public answer");
+        expect(
+            strippedReasoningAttachment.attachments?.map(
+                (attachment) => attachment.fileName
+            )
+        ).toEqual(["public.txt"]);
+
         expect(compactStatusText("  hello   world  ")).toBe("hello world");
         expect(compactStatusText("x".repeat(140))).toHaveLength(120);
         expect(stringValue(" value ")).toBe("value");
@@ -3402,6 +3432,83 @@ describe("shared component helpers", () => {
                 "agent:main:main::dashboard-chat-optimistic::assistant"
             ]
         ).toBeUndefined();
+        activeStreamsReference.current = {};
+
+        activeStreams = {
+            "agent:main:main::dashboard-chat-first::assistant": {
+                aliases: ["dashboard-chat-first"],
+                runId: "dashboard-chat-first",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+            "agent:main:main::dashboard-chat-second::assistant": {
+                aliases: ["dashboard-chat-second"],
+                runId: "dashboard-chat-second",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "real-second-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::dashboard-chat-first::assistant"
+            ]?.aliases
+        ).not.toContain("real-second-run");
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::dashboard-chat-second::assistant"
+            ]?.aliases
+        ).not.toContain("real-second-run");
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "First answer",
+                    runId: "real-first-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Second answer",
+                    runId: "real-second-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::real-first-run::assistant"
+                ]?.text
+            ).toBe("First answer");
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::real-second-run::assistant"
+                ]?.text
+            ).toBe("Second answer");
+        });
         activeStreamsReference.current = {};
 
         act(() => {

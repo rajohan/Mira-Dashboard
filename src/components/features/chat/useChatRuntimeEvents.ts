@@ -43,6 +43,7 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 
 /** Represents pending delta update. */
 interface PendingDeltaUpdate {
+    sessionKey: string;
     runId: string;
     aliases: string[];
     deltas: ChatHistoryMessage[];
@@ -1084,8 +1085,9 @@ export function useChatRuntimeEvents({
 
             const next = { ...activeStreamsReference.current };
 
-            for (const [streamSessionKey, pending] of Object.entries(pendingUpdates)) {
-                const existing = next[streamSessionKey];
+            for (const [activeStreamKey, pending] of Object.entries(pendingUpdates)) {
+                const existing = next[activeStreamKey];
+                const streamSessionKey = pending.sessionKey;
                 const incomingRunId = pending.runId;
                 const isStartsNewRun = isNewRunForStream(existing, incomingRunId);
                 const runId = isStartsNewRun
@@ -1108,7 +1110,7 @@ export function useChatRuntimeEvents({
                     message = mergeStreamMessage(message, deltaMessage, text, runId);
                 }
 
-                next[streamSessionKey] = {
+                next[activeStreamKey] = {
                     sessionKey: streamSessionKey,
                     runId,
                     aliases: uniqueStrings([
@@ -1133,12 +1135,12 @@ export function useChatRuntimeEvents({
 
         /** Performs queue delta update. */
         const queueDeltaUpdate = (
+            activeStreamKey: string,
             streamSessionKey: string,
             runId: string,
             deltaMessage: ChatHistoryMessage
         ) => {
-            const existingPending =
-                pendingDeltaUpdatesReference.current[streamSessionKey];
+            const existingPending = pendingDeltaUpdatesReference.current[activeStreamKey];
             const migratesProvisionalRun =
                 existingPending &&
                 isProvisionalRunId(streamSessionKey, existingPending.runId) &&
@@ -1155,15 +1157,16 @@ export function useChatRuntimeEvents({
                 flushPendingDeltaUpdates();
             }
 
-            const pending = pendingDeltaUpdatesReference.current[streamSessionKey] || {
+            const pending = pendingDeltaUpdatesReference.current[activeStreamKey] || {
                 aliases: [],
                 deltas: [],
                 runId,
+                sessionKey: streamSessionKey,
             };
 
             pending.aliases = uniqueStrings([...pending.aliases, runId]);
             pending.deltas = [...pending.deltas, deltaMessage];
-            pendingDeltaUpdatesReference.current[streamSessionKey] = pending;
+            pendingDeltaUpdatesReference.current[activeStreamKey] = pending;
 
             if (pendingDeltaFlushTimerReference.current === undefined) {
                 pendingDeltaFlushTimerReference.current = setTimeout(
@@ -2023,13 +2026,14 @@ export function useChatRuntimeEvents({
             }
 
             const streams = activeStreamsReference.current;
-            const streamForRun = payload.runId
-                ? Object.values(streams).find(
-                      (stream) =>
+            const streamForRunEntry = payload.runId
+                ? Object.entries(streams).find(
+                      ([, stream]) =>
                           stream.runId === payload.runId ||
                           stream.aliases.includes(payload.runId as string)
                   )
                 : undefined;
+            const streamForRun = streamForRunEntry?.[1];
             const eventSessionKey = payload.sessionKey || streamForRun?.sessionKey;
 
             if (!eventSessionKey) {
@@ -2048,14 +2052,21 @@ export function useChatRuntimeEvents({
             const streamSessionKey = eventMatchesSelected
                 ? selectedSessionKey
                 : streamForRun!.sessionKey;
-            const selectedStream = eventMatchesSelected
-                ? streams[selectedSessionKey] ||
-                  Object.values(streams).find(
+            const selectedBaseStream = streams[selectedSessionKey];
+            const selectedOptimisticStreams = eventMatchesSelected
+                ? Object.values(streams).filter(
                       (stream) =>
                           isSameSessionKey(stream.sessionKey, selectedSessionKey) &&
                           isOptimisticRunId(stream.runId) &&
                           stream.operation !== "compact"
                   )
+                : [];
+            const selectedStream = eventMatchesSelected
+                ? selectedBaseStream && !isOptimisticRunId(selectedBaseStream.runId)
+                    ? selectedBaseStream
+                    : selectedOptimisticStreams.length === 1
+                      ? selectedOptimisticStreams[0]
+                      : undefined
                 : undefined;
             const shouldAliasOptimisticTerminal =
                 eventMatchesSelected &&
@@ -2124,21 +2135,38 @@ export function useChatRuntimeEvents({
                         : deltaMessage;
                     const textToApply = deltaMessageToApply.text;
 
-                    const existing = activeStreamsReference.current[streamSessionKey];
+                    const sessionRunIds = uniqueStrings(
+                        Object.values(activeStreamsReference.current)
+                            .filter((stream) =>
+                                isSameSessionKey(stream.sessionKey, streamSessionKey)
+                            )
+                            .map((stream) => stream.runId)
+                    );
                     const runId =
                         payload.runId ||
                         provisionalAssistantRunIdsReference.current.get(
                             streamSessionKey
                         ) ||
-                        existing?.runId ||
+                        streamForRun?.runId ||
                         streamSessionKey;
+                    const activeStreamKey =
+                        streamForRunEntry?.[0] ||
+                        (payload.runId && sessionRunIds.length > 1
+                            ? runtimeWorkStreamKey(
+                                  streamSessionKey,
+                                  "assistant",
+                                  "chat",
+                                  runId
+                              )
+                            : streamSessionKey);
+                    const existing = activeStreamsReference.current[activeStreamKey];
                     if (
                         !hasCompetingTextSource &&
                         payload.replace === true &&
                         payload.message === undefined &&
                         typeof payload.deltaText === "string"
                     ) {
-                        delete pendingDeltaUpdatesReference.current[streamSessionKey];
+                        delete pendingDeltaUpdatesReference.current[activeStreamKey];
                         if (
                             pendingDeltaFlushTimerReference.current !== undefined &&
                             Object.keys(pendingDeltaUpdatesReference.current).length === 0
@@ -2160,7 +2188,7 @@ export function useChatRuntimeEvents({
                             isCompactOptimisticRunId(existing.runId);
                         updateActiveStreamsReference.current((wasPrevious) => ({
                             ...wasPrevious,
-                            [streamSessionKey]: {
+                            [activeStreamKey]: {
                                 sessionKey: streamSessionKey,
                                 runId,
                                 aliases: uniqueStrings([
@@ -2179,7 +2207,12 @@ export function useChatRuntimeEvents({
                         }));
                         return;
                     }
-                    queueDeltaUpdate(streamSessionKey, runId, deltaMessageToApply);
+                    queueDeltaUpdate(
+                        activeStreamKey,
+                        streamSessionKey,
+                        runId,
+                        deltaMessageToApply
+                    );
                 }
                 return;
             }
