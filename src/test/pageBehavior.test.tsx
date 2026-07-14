@@ -2706,7 +2706,7 @@ describe("Mira Dashboard pages", () => {
         const thinkingToggle = screen.getByRole("button", { name: "Show thinking" });
         const toolsToggle = screen.getByRole("button", { name: "Show tools" });
         const keepThinkingToggle = screen.getByRole("button", {
-            name: "Keep thinking after final",
+            name: "Keep thinking after final answer",
         });
         expect(keepThinkingToggle).toBeDisabled();
         await user.click(thinkingToggle);

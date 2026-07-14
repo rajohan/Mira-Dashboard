@@ -304,7 +304,33 @@ describe("shared component helpers", () => {
                 createChatVisibility(true, false),
                 false
             )
-        ).toEqual([expect.objectContaining({ text: "Answer", thinking: undefined })]);
+        ).toEqual([
+            expect.objectContaining({ text: "Answer", thinking: undefined }),
+            expect.objectContaining({
+                text: "Only reasoning",
+                thinking: [{ text: "Only reasoning" }],
+            }),
+        ]);
+        expect(
+            visibleHistoryMessages(
+                [
+                    {
+                        role: "user",
+                        content: "Question",
+                    },
+                    {
+                        role: "assistant",
+                        content: [{ type: "thinking", text: "Only reasoning" }],
+                    },
+                    blockFinalMessage,
+                ],
+                createChatVisibility(true, false),
+                false
+            )
+        ).toEqual([
+            expect.objectContaining({ role: "user", text: "Question" }),
+            expect.objectContaining({ text: "Answer", thinking: undefined }),
+        ]);
         expect(
             visibleHistoryMessages(
                 [blockFinalMessage],
@@ -941,7 +967,7 @@ describe("shared component helpers", () => {
         expect(onSend).toHaveBeenCalledTimes(2);
 
         await user.click(
-            screen.getByRole("button", { name: "Keep thinking after final" })
+            screen.getByRole("button", { name: "Keep thinking after final answer" })
         );
         expect(onToggleKeepThinkingAfterFinal).toHaveBeenCalledTimes(1);
     });

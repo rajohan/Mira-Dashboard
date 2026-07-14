@@ -590,7 +590,7 @@ export function ChatComposer({
                                 variant="ghost"
                                 size="sm"
                                 aria-pressed={shouldKeepThinkingAfterFinal}
-                                aria-label="Keep thinking after final"
+                                aria-label="Keep thinking after final answer"
                                 onClick={() => onToggleKeepThinkingAfterFinal?.()}
                                 disabled={!selectedSessionKey || !shouldShowThinking}
                                 className={
@@ -598,7 +598,7 @@ export function ChatComposer({
                                         ? "p-1.5 text-accent-300 hover:bg-primary-600 hover:text-primary-100"
                                         : "p-1.5 text-primary-500 hover:bg-primary-600 hover:text-primary-100"
                                 }
-                                title="Keep thinking after final"
+                                title="Keep thinking after final answer"
                             >
                                 <Pin className="size-4" />
                             </Button>

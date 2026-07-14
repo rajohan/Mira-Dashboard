@@ -330,6 +330,30 @@ export function hasRecoveredStreamHistory(
     );
 }
 
+/** Returns whether a later primary answer supersedes a thinking-only history row. */
+function hasLaterAssistantAnswer(
+    messages: ChatHistoryMessage[],
+    messageIndex: number
+): boolean {
+    const laterMessages = messages.slice(messageIndex + 1);
+    for (const message of laterMessages) {
+        if (message.role.toLowerCase() === "user") {
+            return false;
+        }
+
+        const messageWithoutThinking = stripThinkingFromMessage(message);
+        if (
+            message.role.toLowerCase() === "assistant" &&
+            messageWithoutThinking.text.trim() &&
+            !(message.diagnostic && (message.toolCalls?.length || message.toolResult))
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /** Performs visible history messages. */
 export function visibleHistoryMessages(
     messages: RawChatHistoryMessage[] = [],
@@ -342,7 +366,20 @@ export function visibleHistoryMessages(
     }
 
     return visibleMessages
-        .map((message) => stripThinkingFromMessage(message))
+        .map((message, messageIndex) => {
+            const messageWithoutThinking = stripThinkingFromMessage(message);
+            const isThinkingOnlyAssistant = Boolean(
+                visibility.shouldShowThinking &&
+                message.role.toLowerCase() === "assistant" &&
+                message.thinking?.length &&
+                !isRenderableChatHistoryMessage(messageWithoutThinking, visibility)
+            );
+
+            return isThinkingOnlyAssistant &&
+                !hasLaterAssistantAnswer(visibleMessages, messageIndex)
+                ? message
+                : messageWithoutThinking;
+        })
         .filter((message) => isRenderableChatHistoryMessage(message, visibility));
 }
 
