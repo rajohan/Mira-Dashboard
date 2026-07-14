@@ -47,6 +47,7 @@ function writeFakeDocker(binaryPath: string): void {
             [
                 "schemaname",
                 "relname",
+                "physical_bytes",
                 "n_live_tup",
                 "n_dead_tup",
                 "dead_pct",
@@ -54,8 +55,28 @@ function writeFakeDocker(binaryPath: string): void {
                 "last_autoanalyze",
             ],
             [
-                ["public", "tasks", "100", "5", "5", "2026-06-23", ""],
-                ["public", "logs", "2000", "1001", "50.05", "", "2026-06-22"],
+                ["public", "tasks", "1048576", "100", "5", "5", "2026-06-23", ""],
+                [
+                    "public",
+                    "alerts",
+                    "3045068",
+                    "4482",
+                    "1008",
+                    "22.49",
+                    "",
+                    "2026-07-14",
+                ],
+                ...Array.from({ length: 25 }, (_, index) => [
+                    "public",
+                    `small_churn_${index}`,
+                    "1048576",
+                    "5000",
+                    String(2000 + index),
+                    "40",
+                    "",
+                    "2026-07-14",
+                ]),
+                ["public", "logs", "67108864", "2000", "1001", "50.05", "", "2026-06-22"],
             ]
         ),
         extensions: table(["extname"], [["pg_stat_statements"]]),
@@ -198,11 +219,17 @@ describe("database overview service", () => {
                 },
             });
             expect(overview.databases).toHaveLength(2);
-            expect(overview.deadTuples[0]).toMatchObject({
+            expect(overview.deadTuples).toHaveLength(25);
+            expect(
+                overview.deadTuples.find((table) => table.relname === "small_churn_24")
+            ).toMatchObject({
                 database: "mira",
-                relname: "logs",
-                n_dead_tup: "1001",
+                physical_bytes: "1048576",
+                n_dead_tup: "2024",
             });
+            expect(
+                overview.deadTuples.find((table) => table.relname === "logs")
+            ).toBeUndefined();
             expect(overview.overview.maintenance).toMatchObject({
                 status: "review",
                 hintCount: 4,
