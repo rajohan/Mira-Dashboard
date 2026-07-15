@@ -1119,6 +1119,20 @@ describe("shared component helpers", () => {
                     text: "run",
                     updatedAt: "now",
                 },
+                "agent:main:main::r1::assistant": {
+                    aliases: [],
+                    runId: "r1",
+                    sessionKey: "agent:main:main",
+                    text: "streamed answer",
+                    updatedAt: "now",
+                },
+                "agent:other:main": {
+                    aliases: [],
+                    runId: "r2",
+                    sessionKey: "agent:other:main",
+                    text: "other run",
+                    updatedAt: "now",
+                },
             })
         );
         const setMessages = jest.fn((updater) => updater([]));
@@ -1145,6 +1159,9 @@ describe("shared component helpers", () => {
             "chat.abort",
             { sessionKey: "agent:main:main" },
         ]);
+        expect(updateActiveStreams.mock.results[0]?.value).toEqual({
+            "agent:other:main": expect.objectContaining({ runId: "r2" }),
+        });
 
         const blocked = useChatSlashCommands({
             attachments: [
