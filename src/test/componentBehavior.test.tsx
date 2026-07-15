@@ -6173,6 +6173,55 @@ describe("shared component helpers", () => {
 
         messages = [];
         activeStreamsReference.current = {
+            "agent:main:main": {
+                aliases: [],
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "First unscoped final",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        activeStreamsReference.current = {
+            "agent:main:main": {
+                aliases: [],
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Second unscoped final",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(messages.map((message) => message.text)).toEqual([
+            "First unscoped final",
+            "Second unscoped final",
+        ]);
+        expect(messages.every((message) => message.runId === undefined)).toBe(true);
+
+        messages = [];
+        activeStreamsReference.current = {
             "agent:main:main::thinking": {
                 aliases: [],
                 message: {

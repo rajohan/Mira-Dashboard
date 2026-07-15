@@ -2858,11 +2858,17 @@ export function useChatRuntimeEvents({
                     return;
                 }
                 const payloadFinalMessage = finalMessageFromPayload(payload);
+                const concreteTerminalRunId =
+                    resolvedTerminalRunId &&
+                    !isProvisionalRunId(streamSessionKey, resolvedTerminalRunId) &&
+                    !isOptimisticRunId(resolvedTerminalRunId)
+                        ? resolvedTerminalRunId
+                        : undefined;
                 const finalMessage = applyFinalThinkingPersistence(
-                    resolvedTerminalRunId && !payloadFinalMessage.runId
+                    concreteTerminalRunId && !payloadFinalMessage.runId
                         ? {
                               ...payloadFinalMessage,
-                              runId: resolvedTerminalRunId,
+                              runId: concreteTerminalRunId,
                           }
                         : payloadFinalMessage,
                     keepThinkingAfterFinalReference.current && showThinkingOutput
@@ -2890,7 +2896,7 @@ export function useChatRuntimeEvents({
                               images: [],
                               attachments: [],
                               timestamp: currentIsoString(),
-                              runId: resolvedTerminalRunId,
+                              runId: concreteTerminalRunId,
                           }
                         : undefined;
                 const completedAssistantText =
