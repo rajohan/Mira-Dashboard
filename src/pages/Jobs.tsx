@@ -690,9 +690,7 @@ export function Jobs() {
     const isLoading = view === "scheduled" ? scheduledLoading : cronLoading;
     const error = view === "scheduled" ? scheduledError : cronError;
     const hasLoadedJobs =
-        view === "scheduled"
-            ? scheduledJobsData !== undefined
-            : cronJobsData !== undefined;
+        (view === "scheduled" ? scheduledJobsData : cronJobsData) !== undefined;
     const activeViewLabel = view === "scheduled" ? "Dashboard jobs" : "OpenClaw cron";
     const isEmpty =
         (view === "scheduled" && sortedScheduledJobs.length === 0) ||

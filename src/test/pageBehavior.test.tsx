@@ -1979,7 +1979,8 @@ describe("Mira Dashboard pages", () => {
 
         const view = renderPage(createElement(Jobs));
 
-        expect((await screen.findAllByText("Heartbeat")).length).toBeGreaterThan(0);
+        const scheduledJobRows = await screen.findAllByText("Heartbeat");
+        expect(scheduledJobRows.length).toBeGreaterThan(0);
         await act(async () => {
             await view.queryClient.invalidateQueries({
                 queryKey: ["scheduled-jobs", "list"],
@@ -1994,7 +1995,8 @@ describe("Mira Dashboard pages", () => {
         expect(screen.getAllByText("Heartbeat").length).toBeGreaterThan(0);
 
         await user.click(screen.getByRole("button", { name: /openclaw cron/i }));
-        expect((await screen.findAllByText("heartbeat")).length).toBeGreaterThan(0);
+        const cronJobRows = await screen.findAllByText("heartbeat");
+        expect(cronJobRows.length).toBeGreaterThan(0);
         await act(async () => {
             await view.queryClient.invalidateQueries({ queryKey: ["cron", "jobs"] });
         });
