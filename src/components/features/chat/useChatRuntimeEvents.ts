@@ -152,6 +152,26 @@ function isAssistantActiveStreamKey(
     );
 }
 
+/** Returns the sole optimistic assistant row when no other response can own an event. */
+function unambiguousOptimisticAssistantStream(
+    sessionKey: string,
+    streamEntries: Array<[string, ActiveChatStream]>
+): [string, ActiveChatStream] | undefined {
+    const assistantEntries = streamEntries.filter(
+        ([activeStreamKey, streamEntry]) =>
+            isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
+            isAssistantActiveStreamKey(sessionKey, activeStreamKey) &&
+            streamEntry.operation !== "compact"
+    );
+    if (assistantEntries.length !== 1) {
+        return undefined;
+    }
+
+    return isOptimisticRunId(assistantEntries[0]![1].runId)
+        ? assistantEntries[0]
+        : undefined;
+}
+
 /** Resolves one active assistant run unless concurrent state is ambiguous. */
 function resolvedAssistantRunIdFromActiveState(
     sessionKey: string,
@@ -2220,22 +2240,25 @@ export function useChatRuntimeEvents({
                                     : existing?.statusText) ||
                                 "Thinking"
                               : statusText;
-                    const optimisticAssistantStreams = Object.entries(wasPrevious).filter(
-                        ([activeStreamKey, streamEntry]) =>
-                            isAssistantActiveStreamKey(
-                                selectedSessionKey,
-                                activeStreamKey
-                            ) &&
-                            streamEntry.operation !== "compact" &&
-                            isOptimisticRunId(streamEntry.runId)
-                    );
+                    const soleOptimisticAssistantStream =
+                        unambiguousOptimisticAssistantStream(
+                            selectedSessionKey,
+                            Object.entries(wasPrevious)
+                        );
                     const associatedOptimisticRunId =
-                        !eventRunId &&
-                        stream === "assistant" &&
-                        optimisticAssistantStreams.length === 1
-                            ? optimisticAssistantStreams[0]?.[1].runId
+                        stream === "assistant" && soleOptimisticAssistantStream
+                            ? soleOptimisticAssistantStream[1].runId
                             : undefined;
                     const next = { ...wasPrevious };
+                    if (soleOptimisticAssistantStream && eventRunId) {
+                        next[soleOptimisticAssistantStream[0]] = {
+                            ...soleOptimisticAssistantStream[1],
+                            aliases: uniqueStrings([
+                                ...soleOptimisticAssistantStream[1].aliases,
+                                eventRunId,
+                            ]),
+                        };
+                    }
                     if (fallbackStreamKey !== streamKey) {
                         delete next[fallbackStreamKey];
                     }
@@ -2488,20 +2511,34 @@ export function useChatRuntimeEvents({
                                   ) && isProvisionalRunId(streamSessionKey, stream.runId)
                           )
                         : [];
+                    const soleProvisionalAssistantStream =
+                        provisionalAssistantStreamEntries.length === 1
+                            ? provisionalAssistantStreamEntries[0]
+                            : undefined;
+                    const scopedOptimisticAssistantStream =
+                        payload.runId && optimisticAssistantStreamEntries.length === 1
+                            ? optimisticAssistantStreamEntries[0]
+                            : undefined;
+                    let unscopedOptimisticAssistantStream:
+                        [string, ActiveChatStream] | undefined;
+                    if (!payload.runId) {
+                        unscopedOptimisticAssistantStream =
+                            unambiguousOptimisticAssistantStream(
+                                streamSessionKey,
+                                sessionStreamEntries
+                            );
+                    }
                     const resolvedAssistantStreamEntry =
                         assistantStreamForRunEntry ||
-                        (provisionalAssistantStreamEntries.length === 1
-                            ? provisionalAssistantStreamEntries[0]
-                            : optimisticAssistantStreamEntries.length === 1
-                              ? optimisticAssistantStreamEntries[0]
-                              : undefined);
+                        soleProvisionalAssistantStream ||
+                        scopedOptimisticAssistantStream ||
+                        unscopedOptimisticAssistantStream;
                     const associatedOptimisticRunId =
                         resolvedAssistantStreamEntry &&
                         isOptimisticRunId(resolvedAssistantStreamEntry[1].runId)
                             ? resolvedAssistantStreamEntry[1].runId
-                            : !payload.runId &&
-                                optimisticAssistantStreamEntries.length === 1
-                              ? optimisticAssistantStreamEntries[0]?.[1].runId
+                            : unscopedOptimisticAssistantStream
+                              ? unscopedOptimisticAssistantStream[1].runId
                               : undefined;
                     const hasAnotherActiveRun = Boolean(
                         payload.runId &&
@@ -2513,6 +2550,17 @@ export function useChatRuntimeEvents({
                                 !isProvisionalRunId(streamSessionKey, stream.runId)
                         )
                     );
+                    const requiresSeparateProvisionalStream = Boolean(
+                        !payload.runId &&
+                        !resolvedAssistantStreamEntry &&
+                        sessionStreamEntries.some(
+                            ([activeStreamKey, stream]) =>
+                                isAssistantActiveStreamKey(
+                                    streamSessionKey,
+                                    activeStreamKey
+                                ) && stream.operation !== "compact"
+                        )
+                    );
                     const activeStreamKey =
                         resolvedAssistantStreamEntry?.[0] ||
                         (hasAnotherActiveRun
@@ -2522,7 +2570,13 @@ export function useChatRuntimeEvents({
                                   "chat",
                                   runId
                               )
-                            : streamSessionKey);
+                            : requiresSeparateProvisionalStream
+                              ? runtimeWorkStreamKey(
+                                    streamSessionKey,
+                                    "assistant",
+                                    "chat"
+                                )
+                              : streamSessionKey);
                     const existing = activeStreamsReference.current[activeStreamKey];
                     if (
                         !hasCompetingTextSource &&

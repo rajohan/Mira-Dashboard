@@ -4033,6 +4033,9 @@ describe("shared component helpers", () => {
                 ]?.text
             ).toBe("Runtime-first answer");
         });
+        expect(activeStreamsReference.current["agent:main:main"]?.aliases).toContain(
+            "runtime-first-run"
+        );
         act(() => {
             listener?.({
                 event: "chat",
@@ -4070,22 +4073,24 @@ describe("shared component helpers", () => {
         ).toBe("Runtime-first answer");
         await waitFor(() => {
             expect(
-                activeStreamsReference.current["agent:main:main"]?.message?.thinking?.[0]
-                    ?.text
+                activeStreamsReference.current["agent:main:main::assistant"]?.message
+                    ?.thinking?.[0]?.text
             ).toBe("Chat-only thinking");
             expect(
-                activeStreamsReference.current["agent:main:main"]?.message?.toolCalls?.[0]
-                    ?.id
+                activeStreamsReference.current["agent:main:main::assistant"]?.message
+                    ?.toolCalls?.[0]?.id
             ).toBe("chat-only-tool");
             expect(
-                activeStreamsReference.current["agent:main:main"]?.message?.images?.[0]
-                    ?.data
+                activeStreamsReference.current["agent:main:main::assistant"]?.message
+                    ?.images?.[0]?.data
             ).toBe("generated-image");
             expect(
-                activeStreamsReference.current["agent:main:main"]?.message
+                activeStreamsReference.current["agent:main:main::assistant"]?.message
                     ?.attachments?.[0]?.fileName
             ).toBe("generated.txt");
-            expect(activeStreamsReference.current["agent:main:main"]?.text).toBe("");
+            expect(
+                activeStreamsReference.current["agent:main:main::assistant"]?.text
+            ).toBe("");
         });
         act(() => {
             listener?.({
@@ -5775,6 +5780,30 @@ describe("shared component helpers", () => {
                 ]?.text
             ).toBe("Second pending answer");
         });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Unscoped concurrent answer",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() =>
+            expect(
+                activeStreamsReference.current["agent:main:main::assistant"]?.text
+            ).toBe("Unscoped concurrent answer")
+        );
+        expect(activeStreamsReference.current["agent:main:main"]?.text).toBe(
+            "First pending answer"
+        );
+        expect(
+            activeStreamsReference.current[
+                "agent:main:main::second-pending-run::assistant"
+            ]?.text
+        ).toBe("Second pending answer");
 
         unmount();
     });
