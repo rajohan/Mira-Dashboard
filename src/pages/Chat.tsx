@@ -276,9 +276,9 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     const currentResponseStartIndex = previousAssistantTextRowIndex + 1;
     const currentResponseRows = responseRows.slice(currentResponseStartIndex);
     const isRowInCurrentResponse = (row: ChatRow) =>
-        !finalRow.message.runId ||
-        !row.message.runId ||
-        Boolean(finalRow.message.runId && row.message.runId === finalRow.message.runId);
+        finalRow.message.runId
+            ? !row.message.runId || row.message.runId === finalRow.message.runId
+            : !row.message.runId;
     const activityRows = currentResponseRows.filter(
         (row) => row.kind === "typing" && isRowInCurrentResponse(row)
     );
@@ -430,10 +430,11 @@ export function isActiveStreamRecoveredInMessages(
                                   ) ||
                                       visibleMessages.some(
                                           (resultMessage) =>
-                                              (!stream.message?.runId ||
-                                                  !resultMessage.runId ||
-                                                  stream.message.runId ===
-                                                      resultMessage.runId) &&
+                                              (stream.message?.runId
+                                                  ? !resultMessage.runId ||
+                                                    stream.message.runId ===
+                                                        resultMessage.runId
+                                                  : !resultMessage.runId) &&
                                               isMatchingToolResult(
                                                   streamToolCall.toolResult,
                                                   resultMessage.toolResult

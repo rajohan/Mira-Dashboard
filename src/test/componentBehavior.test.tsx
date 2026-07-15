@@ -8207,6 +8207,55 @@ describe("shared component helpers", () => {
                 },
             ])
         ).toBe(true);
+        const unscopedToolStream = {
+            ...diagnosticStream,
+            message: {
+                ...diagnosticStream.message,
+                runId: undefined,
+                thinking: undefined,
+                toolCalls: [
+                    {
+                        arguments: { command: "status" },
+                        id: "unscoped-tool",
+                        name: "functions.exec_command",
+                        toolResult: {
+                            content: "status output",
+                            id: "unscoped-tool",
+                            name: "functions.exec_command",
+                        },
+                    },
+                ],
+            },
+            runId: "agent:main:main",
+            text: "",
+        };
+        expect(
+            isActiveStreamRecoveredInMessages(unscopedToolStream, [
+                {
+                    content: [],
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: { command: "status" },
+                            id: "unscoped-tool",
+                            name: "functions.exec_command",
+                        },
+                    ],
+                },
+                {
+                    content: "status output",
+                    role: "tool",
+                    runId: "different-concurrent-run",
+                    text: "status output",
+                    toolResult: {
+                        content: "status output",
+                        id: "unscoped-tool",
+                        name: "functions.exec_command",
+                    },
+                },
+            ])
+        ).toBe(false);
     });
 
     it("keeps current thinking after tools and before final text", () => {
@@ -8272,6 +8321,23 @@ describe("shared component helpers", () => {
                 text: "Thinking",
             },
         };
+        const scopedActivityFromAnotherRun = {
+            ...activityRow,
+            key: "other-run-activity",
+            message: {
+                ...activityRow.message,
+                runId: "different-concurrent-run",
+            },
+        };
+
+        expect(
+            orderCurrentResponseRows([
+                userRow,
+                finalStreamRow,
+                scopedActivityFromAnotherRun,
+                thinkingRow,
+            ]).map((row) => row.key)
+        ).toEqual(["user", "other-run-activity", "thinking", "final-stream"]);
 
         expect(
             orderCurrentResponseRows([
@@ -8376,7 +8442,7 @@ describe("shared component helpers", () => {
                 finalHistoryRow,
                 scopedToolFromAnotherRun,
             ]).map((row) => row.key)
-        ).toEqual(["user", "other-run-tool", "final-history"]);
+        ).toEqual(["user", "final-history", "other-run-tool"]);
         const mediaFinalRow = {
             ...finalHistoryRow,
             key: "media-final",
