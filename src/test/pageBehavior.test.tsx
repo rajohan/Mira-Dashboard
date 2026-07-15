@@ -2887,6 +2887,25 @@ describe("Mira Dashboard pages", () => {
             ).toHaveValue("");
         });
 
+        const activeRunDraft = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        await user.type(activeRunDraft, "Follow-up while running");
+        expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+        await user.click(screen.getByRole("button", { name: "Stop current run" }));
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"chat.abort"'))
+            ).toBe(true);
+        });
+        expect(findSocketRequest(socket, "chat.abort")?.params).toEqual({
+            sessionKey: "agent:main:main",
+        });
+        await respondToSocketRequest(socket, "chat.abort", {});
+        await flushQueuedTimers();
+        expect(activeRunDraft).toHaveValue("Follow-up while running");
+        await user.clear(activeRunDraft);
+
         const fileInput = view.container.querySelector<HTMLInputElement>(
             'input[type="file"][multiple]'
         );
