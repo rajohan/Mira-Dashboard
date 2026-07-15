@@ -2705,6 +2705,41 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
         });
 
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({
+                    event: "session.event",
+                    payload: {
+                        data: { phase: "start" },
+                        sessionKey: "agent:main:main",
+                        stream: "compaction",
+                    },
+                    type: "event",
+                }),
+            });
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+        });
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({
+                    event: "session.event",
+                    payload: {
+                        data: { phase: "end" },
+                        sessionKey: "agent:main:main",
+                        stream: "compaction",
+                    },
+                    type: "event",
+                }),
+            });
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+        });
+
         const thinkingToggle = screen.getByRole("button", { name: "Show thinking" });
         const toolsToggle = screen.getByRole("button", { name: "Show tools" });
         const keepThinkingToggle = screen.getByRole("button", {
@@ -2804,9 +2839,47 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText("Failed to send message")).toBeInTheDocument();
         });
 
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({
+                    event: "chat",
+                    payload: {
+                        message: "Ship it complete",
+                        runId: "run-123",
+                        sessionKey: "agent:main:main",
+                        state: "final",
+                    },
+                    type: "event",
+                }),
+            });
+            await Promise.resolve();
+        });
+
+        const composer = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        await user.type(composer, "/reset");
+        await user.click(screen.getByRole("button", { name: "Send" }));
+        const resetDialog = await screen.findByRole("dialog", {
+            name: "Reset chat session",
+        });
+        await user.click(within(resetDialog).getByRole("button", { name: "Reset" }));
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"chat.send"'))
+            ).toHaveLength(3);
+        });
+        await user.type(composer, "Message after reset");
+        expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+        await respondToSocketRequest(socket, "chat.send", {});
+        await flushQueuedTimers();
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+        });
+
         view.unmount();
         view.queryClient.clear();
-    });
+    }, 10_000);
 
     it("clears chat history loading when the selected session disappears", async () => {
         const view = renderPage(createElement(Chat), { withSocket: true });
@@ -3439,6 +3512,33 @@ describe("Mira Dashboard pages", () => {
         ).toMatchObject({
             aliases: ["dashboard-chat-second", "real-second"],
             runId: "real-second",
+        });
+        expect(
+            acknowledgedActiveStreams(
+                {
+                    "agent:main:main::dashboard-chat-provisional::assistant": {
+                        aliases: ["dashboard-chat-provisional"],
+                        message: {
+                            content: "Pre-ACK answer",
+                            role: "assistant",
+                            runId: "agent:main:main",
+                            text: "Pre-ACK answer",
+                        },
+                        runId: "agent:main:main",
+                        sessionKey: "agent:main:main",
+                        text: "Pre-ACK answer",
+                        updatedAt: "2026-06-24T08:00:00.000Z",
+                    },
+                },
+                "agent:main:main",
+                "dashboard-chat-provisional",
+                "real-provisional-run",
+                false
+            )["agent:main:main::dashboard-chat-provisional::assistant"]
+        ).toMatchObject({
+            aliases: ["dashboard-chat-provisional", "real-provisional-run"],
+            message: expect.objectContaining({ runId: "real-provisional-run" }),
+            runId: "real-provisional-run",
         });
         const failedSendStreams = {
             "agent:main:main::dashboard-chat-a::assistant": {

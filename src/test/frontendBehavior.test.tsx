@@ -57,6 +57,7 @@ import {
     isRecoveredAssistantText,
     mergeWithRecentOptimisticMessages,
     messageDeleteKey,
+    messageDeleteKeys,
     messageIdentity,
     readFileAsDataUrl,
 } from "../components/features/chat/chatUtilities";
@@ -3561,6 +3562,14 @@ describe("Mira Dashboard frontend behavior", () => {
         });
         expect(messageIdentity(toolResult)).toContain("tool-result::tool-1::exec");
         expect(messageDeleteKey(toolResult)).toContain("tool-result::tool-1::exec");
+        const runScopedDeleteKeys = messageDeleteKeys({
+            ...toolResult,
+            runId: "tool-run",
+        });
+        expect(runScopedDeleteKeys).toHaveLength(2);
+        expect(runScopedDeleteKeys[0]).toContain("::tool-run::");
+        expect(runScopedDeleteKeys[1]).toContain("::no-run::");
+        expect(messageDeleteKeys(toolResult)).toEqual([messageDeleteKey(toolResult)]);
 
         const duplicateMessages = dedupeMessages([
             chatMessage({ role: "assistant", text: "same" }),

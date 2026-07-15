@@ -2114,6 +2114,30 @@ export function useChatRuntimeEvents({
                 }
             }
 
+            const isStatusOnlyTerminalEvent =
+                !runtimeMessageToApply &&
+                TERMINAL_LIFECYCLE_PHASES.has(phase) &&
+                !isWholeRunTerminalEvent &&
+                !isChannelTerminalEvent;
+            if (isStatusOnlyTerminalEvent) {
+                const streamKey = runtimeWorkStreamKey(
+                    selectedSessionKey,
+                    stream,
+                    eventName,
+                    eventRunId
+                );
+                const fallbackStreamKey = eventRunId
+                    ? runtimeWorkStreamKey(selectedSessionKey, stream, eventName)
+                    : streamKey;
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const next = { ...wasPrevious };
+                    delete next[streamKey];
+                    delete next[fallbackStreamKey];
+                    return next;
+                });
+                return;
+            }
+
             const statusText = runtimeProgressText(eventName, stream, phase, data);
             const shouldTrackActivity =
                 !shouldIgnoreRuntimeAssistantText &&

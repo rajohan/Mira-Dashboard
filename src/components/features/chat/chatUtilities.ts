@@ -380,6 +380,17 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
     ].join("::");
 }
 
+/** Returns current and legacy local-delete identities for one message. */
+export function messageDeleteKeys(message: ChatHistoryMessage): string[] {
+    const currentKey = messageDeleteKey(message);
+    if (!message.runId) {
+        return [currentKey];
+    }
+
+    const legacyKey = messageDeleteKey({ ...message, runId: undefined });
+    return currentKey === legacyKey ? [currentKey] : [currentKey, legacyKey];
+}
+
 /** Performs assistant text looks recovered. */
 export function isRecoveredAssistantText(left: string, right: string): boolean {
     const normalizedLeft = left.trim();

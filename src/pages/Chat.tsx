@@ -45,6 +45,7 @@ import {
     MAX_ATTACHMENTS,
     mergeWithRecentOptimisticMessages,
     messageDeleteKey,
+    messageDeleteKeys,
     messageIdentity,
     readFileAsDataUrl,
 } from "../components/features/chat/chatUtilities";
@@ -102,9 +103,15 @@ export function acknowledgedActiveStreams(
             delete next[key];
             continue;
         }
+        const shouldPromoteRunId =
+            stream.runId === optimisticRunId || stream.runId === sessionKey;
         next[key] = {
             ...stream,
-            runId: stream.runId === optimisticRunId ? acknowledgedRunId : stream.runId,
+            runId: shouldPromoteRunId ? acknowledgedRunId : stream.runId,
+            message:
+                shouldPromoteRunId && stream.message
+                    ? { ...stream.message, runId: acknowledgedRunId }
+                    : stream.message,
             aliases: uniqueStrings([
                 ...stream.aliases,
                 optimisticRunId,
@@ -828,6 +835,7 @@ export function Chat() {
     const activeStreamsReference = useRef<ActiveChatStreams>({});
     const pendingTerminalRunIdsReference = useRef(new Map<string, Set<string>>());
     const isClaimingComposerSubmissionReference = useRef(false);
+    const isResettingSessionReference = useRef(false);
     const liveHistoryRefreshTimerReference = useRef<
         ReturnType<typeof setTimeout> | undefined
     >(undefined);
@@ -870,6 +878,7 @@ export function Chat() {
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
+    const [isResettingSession, setIsResettingSession] = useState(false);
     const [pendingSessionPatchCounts, setPendingSessionPatchCounts] = useState<
         Record<string, number>
     >({});
@@ -960,9 +969,16 @@ export function Chat() {
         .filter(Boolean)
         .join("\n");
     const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
-    const visibleMessagesForRows = dedupeMessages(messages).filter(
+    const dedupedMessages = dedupeMessages(messages);
+    const deleteKeyAliases = new Map(
+        dedupedMessages.map((message) => [
+            messageDeleteKey(message),
+            messageDeleteKeys(message),
+        ])
+    );
+    const visibleMessagesForRows = dedupedMessages.filter(
         (message) =>
-            !deletedMessageKeys.has(messageDeleteKey(message)) &&
+            messageDeleteKeys(message).every((key) => !deletedMessageKeys.has(key)) &&
             isRenderableChatHistoryMessage(message, chatVisibility)
     );
     /** Returns whether active stream text is already represented in history. */
@@ -1089,7 +1105,9 @@ export function Chat() {
         if (!isConnected) {
             sendEpochReference.current += 1;
             sendInFlightCountReference.current = 0;
+            isResettingSessionReference.current = false;
             setIsSending(false);
+            setIsResettingSession(false);
 
             updateActiveStreams(() => ({}));
             pendingTerminalRunIdsReference.current.clear();
@@ -1658,7 +1676,12 @@ export function Chat() {
 
         setDeletedMessageKeys((wasPrevious) => {
             const next = new Set(wasPrevious);
-            next.add(pendingDeleteMessageKey);
+            const keysToDelete = deleteKeyAliases.get(pendingDeleteMessageKey) || [
+                pendingDeleteMessageKey,
+            ];
+            for (const key of keysToDelete) {
+                next.add(key);
+            }
             writeDeletedMessageKeys(selectedSessionKey, next);
             return next;
         });
@@ -1944,7 +1967,11 @@ export function Chat() {
 
     /** Responds to send events. */
     const handleSend = async () => {
-        if (!selectedSessionKey || isClaimingComposerSubmissionReference.current) {
+        if (
+            !selectedSessionKey ||
+            isClaimingComposerSubmissionReference.current ||
+            isResettingSessionReference.current
+        ) {
             return;
         }
         let text = draft.trim();
@@ -1974,6 +2001,21 @@ export function Chat() {
             return;
         }
 
+        const isResetCommand = isResetSlashCommand(text);
+        const hasActiveSessionStream = Object.values(
+            activeStreamsReference.current
+        ).some((stream) =>
+            isSameSessionKey(stream.sessionKey, pendingSendSessionKey)
+        );
+        if (
+            isResetCommand &&
+            (sendInFlightCountReference.current > 0 || hasActiveSessionStream)
+        ) {
+            setSendError("Stop the active response before resetting this chat.");
+            isClaimingComposerSubmissionReference.current = false;
+            return;
+        }
+
         const sendEpoch = beginSend();
 
         if (text.startsWith("/")) {
@@ -1996,7 +2038,10 @@ export function Chat() {
 
         const messageText = text;
         const sendAttachments = currentAttachments;
-        const isResetCommand = isResetSlashCommand(messageText);
+        if (isResetCommand) {
+            isResettingSessionReference.current = true;
+            setIsResettingSession(true);
+        }
         const shouldAppendOptimisticMessage = !isResetCommand;
         const userMessage: ChatHistoryMessage = {
             role: "user",
@@ -2103,6 +2148,10 @@ export function Chat() {
                 );
             }
         } finally {
+            if (isResetCommand) {
+                isResettingSessionReference.current = false;
+                setIsResettingSession(false);
+            }
             endSend(sendEpoch);
         }
     };
@@ -2114,16 +2163,14 @@ export function Chat() {
             stream.operation === "compact" ||
             stream.statusText?.toLowerCase().includes("compact")
     );
-    const isManualCompactionInFlight = selectedStreams.some(
-        ([, stream]) => stream.operation === "compact"
-    );
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
         !isPatchingSession &&
-        !isManualCompactionInFlight &&
+        !isCompactingSession &&
+        !isResettingSession &&
         (draftText || attachments.length > 0)
     );
     const isSessionControlsDisabled = Boolean(
