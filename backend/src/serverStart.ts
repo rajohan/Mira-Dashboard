@@ -3,18 +3,10 @@ import gateway from "./gateway.ts";
 import { createServer, resolveListenPort } from "./server.ts";
 import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
 import { registerBackupScheduledJobs } from "./services/backups.ts";
-import {
-    registerCacheRefreshScheduledJobs,
-    waitForLocalCacheSeed,
-} from "./services/cacheRefresh.ts";
+import { registerCacheRefreshScheduledJobs } from "./services/cacheRefresh.ts";
 import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.ts";
 import { registerGitHygieneScheduledJobs } from "./services/gitHygiene.ts";
 import { registerLogRotationScheduledJobs } from "./services/logRotation.ts";
-import { registerOpenClawNotificationScheduledJobs } from "./services/openclawNotifications.ts";
-import {
-    runQuotaNotificationCheck,
-    shouldRegisterQuotaNotificationScheduledJobs,
-} from "./services/quotaNotifications.ts";
 import {
     startScheduledJobScheduler,
     stopScheduledJobScheduler,
@@ -57,27 +49,6 @@ function removeSchedulerCloseCleanup(): void {
     serverStartState.stopSchedulerOnServerClose = undefined;
 }
 
-function queueQuotaNotificationCheckAfterSeed(
-    seedPromise = waitForLocalCacheSeed("quotas.summary"),
-    notificationCheck = runQuotaNotificationCheck
-): void {
-    void (async () => {
-        try {
-            await seedPromise;
-            try {
-                await notificationCheck();
-            } catch (error) {
-                console.warn("[Backend] Startup quota notification check failed:", error);
-            }
-        } catch (error) {
-            console.warn(
-                "[Backend] Skipping startup quota notification check after cache seed failure:",
-                error
-            );
-        }
-    })();
-}
-
 export function resolveGatewayToken(
     environment = process.env,
     persistedToken = getPersistedGatewayToken
@@ -94,7 +65,6 @@ export function resolveGatewayToken(
 export function handleServerListening(): void {
     let isGatewayStarted = false;
     let isScheduledJobSchedulerStarted = false;
-    let shouldQueueStartupQuotaCheck = true;
     try {
         const token = resolveGatewayToken();
         if (token) {
@@ -112,14 +82,9 @@ export function handleServerListening(): void {
             registerDockerUpdaterScheduledJobs();
             registerGitHygieneScheduledJobs();
             registerLogRotationScheduledJobs();
-            shouldQueueStartupQuotaCheck = shouldRegisterQuotaNotificationScheduledJobs();
-            registerOpenClawNotificationScheduledJobs();
             startScheduledJobScheduler();
             isScheduledJobSchedulerStarted = true;
             installSchedulerCloseCleanup();
-        }
-        if (shouldQueueStartupQuotaCheck) {
-            queueQuotaNotificationCheckAfterSeed();
         }
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);

@@ -23,6 +23,8 @@ import {
 } from "../routes/dockerRoutes.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import { getDatabaseOverview } from "./databaseOverview.ts";
+import { evaluateOpenClawNotifications } from "./openclawNotifications.ts";
+import { evaluateQuotaNotifications } from "./quotaNotifications.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -1057,6 +1059,7 @@ async function refreshSystemCache() {
             },
         },
     });
+    evaluateOpenClawNotifications(hostPayload);
     return { refreshed: ["system.openclaw", "system.host"] };
 }
 
@@ -1285,7 +1288,7 @@ async function refreshWalgBackupCache() {
 
 async function checkOpenRouterQuota() {
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-    if (!apiKey) return { status: "not_configured" };
+    if (!apiKey) return { status: "not_configured" as const };
     const [keyInfo, creditsInfo] = await Promise.all([
         fetchJson("https://openrouter.ai/api/v1/key", {
             Authorization: `Bearer ${apiKey}`,
@@ -1319,7 +1322,7 @@ async function checkOpenRouterQuota() {
 
 async function checkElevenLabsQuota() {
     const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
-    if (!apiKey) return { status: "not_configured" };
+    if (!apiKey) return { status: "not_configured" as const };
     const data = asRecord(
         await fetchJson("https://api.elevenlabs.io/v1/user", {
             "xi-api-key": apiKey,
@@ -1338,7 +1341,7 @@ async function checkElevenLabsQuota() {
         used,
         total,
         remaining: Math.max(total - used, 0),
-        tier: subscription.tier || "unknown",
+        tier: toOptionalString(subscription.tier) || "unknown",
         percentUsed: total > 0 ? Math.round((used / total) * 100) : undefined,
         resetAt:
             resetMsCandidate !== undefined && resetMsCandidate > 0
@@ -1351,7 +1354,7 @@ async function checkElevenLabsQuota() {
 
 async function checkSyntheticQuota() {
     const apiKey = process.env.SYNTHETIC_API_KEY?.trim();
-    if (!apiKey) return { status: "not_configured" };
+    if (!apiKey) return { status: "not_configured" as const };
     const data = asRecord(
         await fetchJson("https://api.synthetic.new/v2/quotas", {
             Authorization: `Bearer ${apiKey}`,
@@ -1382,7 +1385,7 @@ async function checkSyntheticQuota() {
         explicitWeeklyPercentRemaining ?? computedWeeklyPercentRemaining;
     if (weeklyPercentRemaining === undefined) {
         return {
-            status: "error",
+            status: "error" as const,
             note: "Synthetic weekly token percentage missing",
         };
     }
@@ -1391,7 +1394,7 @@ async function checkSyntheticQuota() {
             limit: subscriptionLimit,
             requests: subscriptionRequests,
             remaining: Math.max(subscriptionLimit - subscriptionRequests, 0),
-            renewsAt: subscription.renewsAt || undefined,
+            renewsAt: toOptionalString(subscription.renewsAt),
             percentUsed:
                 subscriptionLimit > 0
                     ? Math.round((subscriptionRequests / subscriptionLimit) * 100)
@@ -1401,7 +1404,7 @@ async function checkSyntheticQuota() {
             limit: searchHourlyLimit,
             requests: searchHourlyRequests,
             remaining: Math.max(searchHourlyLimit - searchHourlyRequests, 0),
-            renewsAt: searchHourly.renewsAt || undefined,
+            renewsAt: toOptionalString(searchHourly.renewsAt),
             percentUsed:
                 searchHourlyLimit > 0
                     ? Math.round((searchHourlyRequests / searchHourlyLimit) * 100)
@@ -1409,10 +1412,10 @@ async function checkSyntheticQuota() {
         },
         weeklyTokenLimit: {
             percentRemaining: weeklyPercentRemaining,
-            nextRegenAt: weeklyTokenLimit.nextRegenAt || undefined,
-            maxCredits: weeklyTokenLimit.maxCredits || undefined,
-            remainingCredits: weeklyTokenLimit.remainingCredits || undefined,
-            nextRegenCredits: weeklyTokenLimit.nextRegenCredits || undefined,
+            nextRegenAt: toOptionalString(weeklyTokenLimit.nextRegenAt),
+            maxCredits: toOptionalString(weeklyTokenLimit.maxCredits),
+            remainingCredits: toOptionalString(weeklyTokenLimit.remainingCredits),
+            nextRegenCredits: toOptionalString(weeklyTokenLimit.nextRegenCredits),
             nextRegenPercent:
                 weeklyMaxCredits && weeklyNextRegenCredits !== undefined
                     ? (weeklyNextRegenCredits / weeklyMaxCredits) * 100
@@ -1422,7 +1425,7 @@ async function checkSyntheticQuota() {
             remaining: rollingFiveHourRemaining,
             max: rollingFiveHourMax,
             limited: Boolean(rollingFiveHourLimit.limited),
-            nextTickAt: rollingFiveHourLimit.nextTickAt || undefined,
+            nextTickAt: toOptionalString(rollingFiveHourLimit.nextTickAt),
             tickPercent: toNumber(rollingFiveHourLimit.tickPercent, 0),
             percentUsed:
                 rollingFiveHourMax > 0
@@ -1598,10 +1601,13 @@ function cleanPanelText(value: string | undefined) {
 
 function parseOpenAiQuotaOutput(output: string) {
     if (output.includes("__ERR__:tmux_not_found")) {
-        return { status: "error", note: "tmux not found" };
+        return { status: "error" as const, note: "tmux not found" };
     }
     if (output.includes("__ERR__:codex_not_found")) {
-        return { status: "not_configured", note: "codex binary not found" };
+        return {
+            status: "not_configured" as const,
+            note: "codex binary not found",
+        };
     }
     function parseLimit(prefix: string) {
         const lines = output
@@ -1634,7 +1640,10 @@ function parseOpenAiQuotaOutput(output: string) {
     const fiveHour = parseLimit("5h limit:");
     const weekly = parseLimit("weekly limit:");
     if (!weekly || (hasFiveHourLimit && !fiveHour)) {
-        return { status: "error", note: "Could not parse Codex /status output" };
+        return {
+            status: "error" as const,
+            note: "Could not parse Codex /status output",
+        };
     }
     return {
         account: cleanPanelText(output.match(/Account:\s*(.+)/iu)?.[1]),
@@ -1699,7 +1708,7 @@ tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIR
                     .trim()
                     .slice(-1000);
                 return {
-                    status: "error",
+                    status: "error" as const,
                     note: `codex quota exited ${code}${output ? `: ${output}` : ""}`,
                 };
             }
@@ -1708,9 +1717,12 @@ tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIR
                 return parsed;
             }
         }
-        return { status: "error", note: "Could not parse Codex /status output" };
+        return {
+            status: "error" as const,
+            note: "Could not parse Codex /status output",
+        };
     } catch (error) {
-        return { status: "error", note: errorMessage(error) };
+        return { status: "error" as const, note: errorMessage(error) };
     }
 }
 
@@ -1774,6 +1786,7 @@ async function refreshQuotasCache() {
             ),
         },
     });
+    evaluateQuotaNotifications(payload);
     return { refreshed: ["quotas.summary"] };
 }
 
@@ -1866,7 +1879,7 @@ function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQ
     }
     const { account, ...redacted } = openai;
     void account;
-    return redacted;
+    return { ...redacted, account: undefined };
 }
 
 const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();

@@ -3397,14 +3397,10 @@ describe("backend route and service behavior", () => {
         const { fetchCachedQuotas, hasQuotaStatus } =
             await import("../src/lib/quotasCache.ts");
         const { fetchCachedSystemHost } = await import("../src/lib/systemCache.ts");
-        const { runQuotaNotificationCheck } =
+        const { evaluateQuotaNotifications } =
             await import("../src/services/quotaNotifications.ts");
-        const {
-            registerOpenClawNotificationScheduledJobs,
-            runOpenClawNotificationCheck,
-        } = await import("../src/services/openclawNotifications.ts");
-        const { getScheduledJob, runScheduledJob } =
-            await import("../src/services/scheduledJobs.ts");
+        const { evaluateOpenClawNotifications } =
+            await import("../src/services/openclawNotifications.ts");
 
         expect(TASK_ASSIGNEE_IDS).toContain(TASK_ASSIGNEES.mira.id);
         expect(hasQuotaStatus({ status: "not_configured" })).toBe(true);
@@ -3479,7 +3475,7 @@ describe("backend route and service behavior", () => {
 
         const quotas = await fetchCachedQuotas();
         expect(quotas.cacheAgeMs).toBeGreaterThanOrEqual(0);
-        expect(await runQuotaNotificationCheck()).toBe(true);
+        evaluateQuotaNotifications(quotas);
         const quotaNotifications = database
             .prepare(
                 "SELECT title FROM notifications WHERE source = 'quota' ORDER BY title"
@@ -3517,7 +3513,7 @@ describe("backend route and service behavior", () => {
         const systemHost = await fetchCachedSystemHost();
         expect(systemHost.data.gateway).toBeUndefined();
         expect(systemHost.meta).toEqual({ source: "test" });
-        expect(await runOpenClawNotificationCheck()).toBe(true);
+        evaluateOpenClawNotifications(systemHost.data);
         const openClawNotification = database
             .prepare(
                 "SELECT title, description FROM notifications WHERE source = 'openclaw' LIMIT 1"
@@ -3545,18 +3541,13 @@ describe("backend route and service behavior", () => {
             ttl: 1,
             ttlUnit: "hours",
         });
-        expect(await runOpenClawNotificationCheck()).toBe(true);
-
-        registerOpenClawNotificationScheduledJobs();
-        expect(getScheduledJob("notifications.openclaw")).toMatchObject({
-            actionKey: "notifications.openclaw",
-            enabled: true,
-            intervalSeconds: 3600,
-        });
-        const notificationRun = await runScheduledJob("notifications.openclaw");
-        expect(notificationRun).toMatchObject({
-            jobId: "notifications.openclaw",
-            status: "success",
+        evaluateOpenClawNotifications({
+            version: {
+                checkedAt,
+                current: "1.1.0",
+                latest: "1.1.0",
+                updateAvailable: false,
+            },
         });
 
         writeCacheSuccess({
@@ -3572,7 +3563,8 @@ describe("backend route and service behavior", () => {
         });
         const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
-            expect(await runOpenClawNotificationCheck()).toBe(false);
+            evaluateOpenClawNotifications({});
+            expect(consoleSpy).toHaveBeenCalled();
         } finally {
             consoleSpy.mockRestore();
         }
@@ -3899,6 +3891,13 @@ esac
             latest: "1.1.0",
             updateAvailable: true,
         });
+        expect(
+            database
+                .prepare(
+                    "SELECT title FROM notifications WHERE source = 'openclaw' LIMIT 1"
+                )
+                .get()
+        ).toEqual({ title: "OpenClaw update available" });
     });
 
     it("cache refresh scheduled job registration preserves disabled jobs", async () => {
