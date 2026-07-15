@@ -13,6 +13,7 @@ import {
     isSameSessionKey,
     mergeStreamMessage,
     mergeStreamText,
+    messagesWithFinalThinkingPersistence,
     normalizeAssistantPayload,
     uniqueStrings,
     visibleHistoryMessages,
@@ -1272,7 +1273,8 @@ export function useChatRuntimeEvents({
                                     keepThinkingAfterFinalReference.current
                                 ),
                                 keepThinkingAfterFinalReference.current &&
-                                    showThinkingOutput
+                                    showThinkingOutput,
+                                true
                             )
                         );
 
@@ -1403,7 +1405,7 @@ export function useChatRuntimeEvents({
             runId: string | undefined,
             hasMatchingStream: boolean
         ): boolean => {
-            if (!runId || hasMatchingStream) {
+            if (!runId) {
                 return false;
             }
 
@@ -1427,12 +1429,20 @@ export function useChatRuntimeEvents({
                     )
                     .map(([, streamEntry]) => streamEntry.runId)
             );
+            const hasUnrelatedNonProvisionalRun = sessionStreamEntries.some(
+                ([, streamEntry]) =>
+                    !isProvisionalRunId(sessionKey, streamEntry.runId) &&
+                    streamEntry.runId !== runId &&
+                    !streamEntry.aliases.includes(runId)
+            );
             return (
                 hasProvisionalAssistant &&
-                nonProvisionalRunIds.length <= 1 &&
-                nonProvisionalRunIds.every((activeRunId) =>
-                    isOptimisticRunId(activeRunId)
-                )
+                (hasMatchingStream
+                    ? !hasUnrelatedNonProvisionalRun
+                    : nonProvisionalRunIds.length <= 1 &&
+                      nonProvisionalRunIds.every((activeRunId) =>
+                          isOptimisticRunId(activeRunId)
+                      ))
             );
         };
 
@@ -1446,26 +1456,28 @@ export function useChatRuntimeEvents({
                 return;
             }
 
-            updateActiveStreamsReference.current((wasPrevious) => {
-                let hasChanged = false;
-                const next = { ...wasPrevious };
-                for (const [key, streamEntry] of Object.entries(wasPrevious)) {
-                    if (
-                        !isSameSessionKey(streamEntry.sessionKey, sessionKey) ||
-                        !isAssistantActiveStreamKey(sessionKey, key) ||
-                        !isProvisionalRunId(sessionKey, streamEntry.runId)
-                    ) {
-                        continue;
-                    }
-
-                    hasChanged = true;
-                    next[key] = {
-                        ...streamEntry,
-                        aliases: uniqueStrings([...streamEntry.aliases, runId]),
-                    };
+            const wasPrevious = activeStreamsReference.current;
+            let hasChanged = false;
+            const next = { ...wasPrevious };
+            for (const [key, streamEntry] of Object.entries(wasPrevious)) {
+                if (
+                    !isSameSessionKey(streamEntry.sessionKey, sessionKey) ||
+                    !isAssistantActiveStreamKey(sessionKey, key) ||
+                    !isProvisionalRunId(sessionKey, streamEntry.runId)
+                ) {
+                    continue;
                 }
-                return hasChanged ? next : wasPrevious;
-            });
+
+                hasChanged = true;
+                next[key] = {
+                    ...streamEntry,
+                    aliases: uniqueStrings([...streamEntry.aliases, runId]),
+                };
+            }
+            if (hasChanged) {
+                activeStreamsReference.current = next;
+                updateActiveStreamsReference.current(() => next);
+            }
         };
 
         /** Clears active streams belonging to a finished chat run. */
@@ -1841,7 +1853,7 @@ export function useChatRuntimeEvents({
                             "",
                             resolvedEventRunId
                         ),
-                        keepThinkingAfterFinalReference.current && showThinkingOutput
+                        showThinkingOutput
                     );
                     if (
                         isRenderableChatHistoryMessage(
@@ -2600,7 +2612,8 @@ export function useChatRuntimeEvents({
                                         keepThinkingAfterFinalReference.current
                                     ),
                                     keepThinkingAfterFinalReference.current &&
-                                        showThinkingOutput
+                                        showThinkingOutput,
+                                    true
                                 )
                             );
                             setIsAtBottom(shouldStickToBottomReference.current);
@@ -2812,13 +2825,18 @@ export function useChatRuntimeEvents({
                               })
                             : wasPrevious;
 
-                        return dedupeMessages([
+                        const nextMessages = dedupeMessages([
                             ...nextPrevious,
                             ...remainingDiagnosticMessages,
                             ...(finalMessageToAppend && !didMergeFinalMessage
                                 ? [finalMessageToAppend]
                                 : []),
                         ]);
+                        return messagesWithFinalThinkingPersistence(
+                            nextMessages,
+                            createChatVisibility(showThinkingOutput, showToolOutput),
+                            keepThinkingAfterFinalReference.current && showThinkingOutput
+                        );
                     });
                 }
 

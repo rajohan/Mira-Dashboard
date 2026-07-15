@@ -550,12 +550,13 @@ function mergeToolCallResults(
 export function mergeWithRecentOptimisticMessages(
     previousMessages: ChatHistoryMessage[],
     nextMessages: ChatHistoryMessage[],
-    shouldMergeThinking = true
+    shouldMergeThinking = true,
+    shouldPreserveNextThinking = shouldMergeThinking
 ): ChatHistoryMessage[] {
     const mergeablePreviousMessages = shouldMergeThinking
         ? previousMessages
         : previousMessages.map((message) => stripThinkingFromMessage(message));
-    const mergeableNextMessages = shouldMergeThinking
+    const mergeableNextMessages = shouldPreserveNextThinking
         ? nextMessages
         : nextMessages.map((message) => stripThinkingFromMessage(message));
     if (previousMessages.length === 0) {

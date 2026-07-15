@@ -745,7 +745,8 @@ export function nextRefreshedChatMessages(
     return mergeWithRecentOptimisticMessages(
         previousMessages,
         nextMessages,
-        shouldMergeThinking
+        shouldMergeThinking,
+        true
     );
 }
 
@@ -1242,7 +1243,8 @@ export function Chat() {
                     return mergeWithRecentOptimisticMessages(
                         wasPrevious,
                         nextMessages,
-                        keepThinkingAfterFinal && showThinkingOutput
+                        keepThinkingAfterFinal && showThinkingOutput,
+                        true
                     );
                 });
                 if (isNewSession) {

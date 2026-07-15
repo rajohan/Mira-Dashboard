@@ -4133,6 +4133,51 @@ describe("shared component helpers", () => {
         });
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
+        activeStreams = {
+            "agent:main:main::real-acked-provisional::assistant": {
+                aliases: ["real-acked-provisional"],
+                runId: "real-acked-provisional",
+                sessionKey: "agent:main:main",
+                statusText: "Thinking",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+            "agent:main:main::assistant": {
+                aliases: ["agent:main:main"],
+                message: {
+                    content: "Buffered after ACK",
+                    role: "assistant",
+                    text: "Buffered after ACK",
+                },
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                text: "Buffered after ACK",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "real-acked-provisional",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "Buffered after ACK"
+            )
+        ).toBe(true);
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
         act(() => {
             listener?.({
                 event: "chat",
@@ -5684,7 +5729,7 @@ describe("shared component helpers", () => {
         unmount();
     });
 
-    it("strips terminal thinking diagnostics when final retention is disabled", async () => {
+    it("keeps channel thinking until final retention is applied", async () => {
         let listener: ((data: unknown) => void) | undefined;
         const activeStreamsReference: { current: ActiveChatStreams } = { current: {} };
         let messages: unknown[] = [];
@@ -5755,12 +5800,43 @@ describe("shared component helpers", () => {
                     Array.isArray(message.thinking) &&
                     message.thinking.length > 0
             )
-        ).toBe(false);
+        ).toBe(true);
         expect(
             activeStreamsReference.current[
                 "agent:main:main::non-retained-thinking::thinking"
             ]
         ).toBeUndefined();
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "public answer",
+                    runId: "non-retained-thinking",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking.length > 0
+            )
+        ).toBe(false);
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "public answer"
+            )
+        ).toBe(true);
         unmount();
     });
 
@@ -6750,6 +6826,21 @@ describe("shared component helpers", () => {
                 false
             )[0]
         ).toMatchObject({ text: "same visible text", thinking: undefined });
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [],
+                [
+                    {
+                        content: [{ text: "active reasoning", type: "thinking" }],
+                        role: "assistant",
+                        text: "",
+                        thinking: [{ text: "active reasoning" }],
+                    },
+                ],
+                false,
+                true
+            )[0]?.thinking
+        ).toEqual([{ text: "active reasoning" }]);
         expect(
             mergeWithRecentOptimisticMessages(
                 [mixedDiagnosticLocalRow],
