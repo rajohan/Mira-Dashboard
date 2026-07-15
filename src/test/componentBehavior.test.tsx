@@ -758,6 +758,11 @@ describe("shared component helpers", () => {
                         title: "/help",
                         value: "/help",
                     },
+                    {
+                        description: "Show health",
+                        title: "/health",
+                        value: "/health",
+                    },
                 ]}
                 onApplySlashSuggestion={onApplySlashSuggestion}
                 onAttachFiles={onAttachFiles}
@@ -775,15 +780,66 @@ describe("shared component helpers", () => {
         );
         await user.click(screen.getByRole("button", { name: /remove note.txt/i }));
         expect(onRemoveAttachment).toHaveBeenCalledWith("a1");
-        await user.click(screen.getByRole("button", { name: /help/i }));
+        const textarea = screen.getByRole("combobox");
+        fireEvent.change(textarea, { target: { value: "/hel" } });
+        await user.click(await screen.findByRole("option", { name: /help/i }));
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/help");
 
-        const textarea = screen.getByPlaceholderText(/Message, attach files/i);
-        fireEvent.change(textarea, { target: { value: "/help" } });
-        fireEvent.keyDown(textarea, { key: "Enter" });
-        expect(onChangeDraft).toHaveBeenCalledWith("/help");
+        fireEvent.change(textarea, { target: { value: "/hea" } });
+        expect(textarea.getAttribute("aria-expanded")).toBe("true");
+        expect(fireEvent.keyDown(textarea, { key: "ArrowDown" })).toBe(false);
+        expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
+        expect(onApplySlashSuggestion).toHaveBeenLastCalledWith("/health");
+        expect(onSend).not.toHaveBeenCalled();
+
+        fireEvent.change(textarea, { target: { value: "/he-shift" } });
+        const bubbledEnter = jest.fn();
+        document.addEventListener("keydown", bubbledEnter);
+        expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
+        expect(bubbledEnter).not.toHaveBeenCalled();
+        document.removeEventListener("keydown", bubbledEnter);
+        expect(onApplySlashSuggestion).toHaveBeenCalledTimes(2);
+        fireEvent.pointerDown(document.body);
+        expect(textarea.getAttribute("aria-expanded")).toBe("false");
+        fireEvent.change(textarea, { target: { value: "/he-blur" } });
+        fireEvent.blur(textarea, { relatedTarget: document.body });
+        expect(textarea.getAttribute("aria-expanded")).toBe("false");
+        fireEvent.change(textarea, { target: { value: "/he-close" } });
+        await user.click(screen.getByRole("button", { name: /close slash commands/i }));
+        expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
         expect(onSend).toHaveBeenCalledTimes(1);
 
+        const originalMatchMedia = Object.getOwnPropertyDescriptor(
+            globalThis,
+            "matchMedia"
+        );
+        Object.defineProperty(globalThis, "matchMedia", {
+            configurable: true,
+            value: jest.fn(() => ({ matches: true })),
+        });
+        fireEvent.change(textarea, { target: { value: "/he-mobile" } });
+        document.addEventListener("keydown", bubbledEnter);
+        expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(true);
+        expect(bubbledEnter).not.toHaveBeenCalled();
+        document.removeEventListener("keydown", bubbledEnter);
+        expect(onSend).toHaveBeenCalledTimes(1);
+        if (originalMatchMedia) {
+            Object.defineProperty(globalThis, "matchMedia", originalMatchMedia);
+        } else {
+            Reflect.deleteProperty(globalThis, "matchMedia");
+        }
+
+        await user.click(screen.getByRole("button", { name: /response settings/i }));
+        await user.click(
+            screen.getByRole("button", { name: /close response settings/i })
+        );
+        expect(
+            screen.queryByRole("button", { name: /close response settings/i })
+        ).toBeNull();
+
+        await user.click(screen.getByRole("button", { name: /insert emoji/i }));
+        await user.click(screen.getByRole("button", { name: /close emoji picker/i }));
+        expect(screen.queryByRole("button", { name: /close emoji picker/i })).toBeNull();
         await user.click(screen.getByRole("button", { name: /insert emoji/i }));
         const emojiButton = screen.getByRole("button", { name: "Insert 😀" });
         (textarea as HTMLTextAreaElement).setSelectionRange(0, 0);
@@ -795,6 +851,121 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: /send/i }));
         expect(onToggleRecording).toHaveBeenCalledTimes(1);
         expect(onSend).toHaveBeenCalledTimes(2);
+    });
+
+    it("submits an exact slash command on the first Enter", () => {
+        const onApplySlashSuggestion = jest.fn();
+        const onSend = jest.fn();
+
+        render(
+            <ChatComposer
+                attachments={[]}
+                canSend={true}
+                draft="/help"
+                fileInputReference={{ current: undefined }}
+                isConnected={true}
+                isRecording={false}
+                isSending={false}
+                isTranscribing={false}
+                selectedSessionKey="agent:main:main"
+                slashCommandSuggestions={[
+                    {
+                        description: "Show commands",
+                        title: "/help",
+                        value: "/help",
+                    },
+                ]}
+                onApplySlashSuggestion={onApplySlashSuggestion}
+                onAttachFiles={jest.fn()}
+                onChangeDraft={jest.fn()}
+                onPreview={jest.fn()}
+                onRemoveAttachment={jest.fn()}
+                onSend={onSend}
+                onToggleRecording={jest.fn()}
+            />
+        );
+
+        expect(fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" })).toBe(
+            false
+        );
+        expect(onApplySlashSuggestion).not.toHaveBeenCalled();
+        expect(onSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps slash argument suggestions open after command completion", async () => {
+        const user = userEvent.setup();
+        const onApplySlashSuggestion = jest.fn();
+
+        render(
+            <ChatComposer
+                attachments={[]}
+                canSend={true}
+                draft="/thi"
+                fileInputReference={{ current: undefined }}
+                isConnected={true}
+                isRecording={false}
+                isSending={false}
+                isTranscribing={false}
+                selectedSessionKey="agent:main:main"
+                slashCommandSuggestions={[
+                    {
+                        description: "Show or set thinking level",
+                        title: "/think [level]",
+                        value: "/think ",
+                    },
+                ]}
+                onApplySlashSuggestion={onApplySlashSuggestion}
+                onAttachFiles={jest.fn()}
+                onChangeDraft={jest.fn()}
+                onPreview={jest.fn()}
+                onRemoveAttachment={jest.fn()}
+                onSend={jest.fn()}
+                onToggleRecording={jest.fn()}
+            />
+        );
+
+        await user.click(screen.getByRole("option", { name: /think/i }));
+        expect(onApplySlashSuggestion).toHaveBeenCalledWith("/think ");
+        expect(screen.getByRole("combobox")).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("applies an exact argument command before sending", () => {
+        const onApplySlashSuggestion = jest.fn();
+        const onSend = jest.fn();
+
+        render(
+            <ChatComposer
+                attachments={[]}
+                canSend={true}
+                draft="/think"
+                fileInputReference={{ current: undefined }}
+                isConnected={true}
+                isRecording={false}
+                isSending={false}
+                isTranscribing={false}
+                selectedSessionKey="agent:main:main"
+                slashCommandSuggestions={[
+                    {
+                        description: "Show or set thinking level",
+                        title: "/think [level]",
+                        value: "/think ",
+                    },
+                ]}
+                onApplySlashSuggestion={onApplySlashSuggestion}
+                onAttachFiles={jest.fn()}
+                onChangeDraft={jest.fn()}
+                onPreview={jest.fn()}
+                onRemoveAttachment={jest.fn()}
+                onSend={onSend}
+                onToggleRecording={jest.fn()}
+            />
+        );
+
+        expect(fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" })).toBe(
+            false
+        );
+        expect(onApplySlashSuggestion).toHaveBeenCalledWith("/think ");
+        expect(onSend).not.toHaveBeenCalled();
     });
 
     it("handles chat slash commands without rendering the page", async () => {
