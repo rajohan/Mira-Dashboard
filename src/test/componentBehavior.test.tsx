@@ -32,9 +32,12 @@ import {
     type ActiveChatStreams,
     createChatVisibility,
     mergeStreamMessage,
+    stripThinkingFromMessage,
+    visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
 import {
     type ChatHistoryMessage,
+    normalizeChatHistoryMessage,
     normalizeVisibleChatHistoryMessages,
 } from "../components/features/chat/chatTypes";
 import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
@@ -871,6 +874,50 @@ describe("shared component helpers", () => {
         expect(onSend).toHaveBeenCalledTimes(2);
     });
 
+    it("exposes final-thinking retention only while thinking is visible", async () => {
+        const user = userEvent.setup();
+        const onToggleKeepThinkingAfterFinal = jest.fn();
+        const properties = {
+            attachments: [],
+            canSend: false,
+            draft: "",
+            fileInputReference: { current: undefined },
+            isConnected: true,
+            isRecording: false,
+            isSending: false,
+            isTranscribing: false,
+            selectedSessionKey: "agent:main:main",
+            slashCommandSuggestions: [],
+            onApplySlashSuggestion: jest.fn(),
+            onAttachFiles: jest.fn(),
+            onChangeDraft: jest.fn(),
+            onPreview: jest.fn(),
+            onRemoveAttachment: jest.fn(),
+            onSend: jest.fn(),
+            onToggleRecording: jest.fn(),
+            onToggleKeepThinkingAfterFinal,
+        };
+        const { rerender } = render(
+            <ChatComposer {...properties} shouldShowThinking={false} />
+        );
+        const toggle = screen.getByRole("button", {
+            name: "Keep thinking after final answer",
+        });
+        expect(toggle).toBeDisabled();
+
+        rerender(
+            <ChatComposer
+                {...properties}
+                shouldShowThinking={true}
+                shouldKeepThinkingAfterFinal={true}
+            />
+        );
+        expect(toggle).toBeEnabled();
+        expect(toggle).toHaveAttribute("aria-pressed", "true");
+        await user.click(toggle);
+        expect(onToggleKeepThinkingAfterFinal).toHaveBeenCalledTimes(1);
+    });
+
     it("submits an exact slash command on the first Enter", () => {
         const onApplySlashSuggestion = jest.fn();
         const onSend = jest.fn();
@@ -1149,6 +1196,17 @@ describe("shared component helpers", () => {
     });
 
     it("normalizes chat runtime event helper output", () => {
+        const thinkingFileMessage = normalizeChatHistoryMessage({
+            role: "assistant",
+            content: [
+                {
+                    type: "thinking",
+                    text: '<file name="hidden.txt" mime="text/plain">hidden</file>',
+                },
+            ],
+        });
+        expect(stripThinkingFromMessage(thinkingFileMessage).attachments).toEqual([]);
+
         expect(compactStatusText("  hello   world  ")).toBe("hello world");
         expect(compactStatusText("x".repeat(140))).toHaveLength(120);
         expect(stringValue(" value ")).toBe("value");
@@ -1338,6 +1396,7 @@ describe("shared component helpers", () => {
                 activeStreamsReference,
                 connectionId: 1,
                 isConnected: true,
+                keepThinkingAfterFinal: true,
                 liveHistoryRefreshTimerReference,
                 request,
                 selectedSessionKey: "agent:main:main",
@@ -4860,6 +4919,114 @@ describe("shared component helpers", () => {
         expect(unsubscribe).toHaveBeenCalledTimes(1);
     });
 
+    it("re-stamps provisional diagnostics before final-thinking retention", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const activeStreamsReference: { current: ActiveChatStreams } = {
+            current: {
+                "agent:main:main::assistant": {
+                    aliases: [],
+                    message: {
+                        content: "final answer",
+                        role: "assistant",
+                        runId: "agent:main:main",
+                        text: "final answer",
+                    },
+                    runId: "agent:main:main",
+                    sessionKey: "agent:main:main",
+                    text: "final answer",
+                    updatedAt: new Date().toISOString(),
+                },
+                "agent:main:main::thinking": {
+                    aliases: [],
+                    message: {
+                        content: [{ text: "provisional reasoning", type: "thinking" }],
+                        role: "assistant",
+                        runId: "agent:main:main",
+                        text: "",
+                        thinking: [{ text: "provisional reasoning" }],
+                    },
+                    runId: "agent:main:main",
+                    sessionKey: "agent:main:main",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        };
+        let messages: ChatHistoryMessage[] = [];
+        const setMessages = jest.fn((updater) => {
+            messages = typeof updater === "function" ? updater(messages) : updater;
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                keepThinkingAfterFinal: false,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages,
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe: (nextListener) => {
+                    listener = nextListener;
+                    return jest.fn();
+                },
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(listener).toBeDefined());
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "resolved-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+
+        expect(messages.map((message) => message.text)).toContain("final answer");
+        expect(messages.some((message) => message.thinking?.length)).toBe(false);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "late channel reasoning" },
+                    runId: "resolved-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "end" },
+                    runId: "resolved-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        expect(messages.some((message) => message.thinking?.length)).toBe(false);
+        unmount();
+    });
+
     it("keeps tool execution errors out of the global chat error", async () => {
         let listener: ((data: unknown) => void) | undefined;
         const unsubscribe = jest.fn();
@@ -5972,6 +6139,86 @@ describe("shared component helpers", () => {
             })
         ).toBe("Done");
         expect(isActiveStreamRecoveredInMessages(stream, visibleMessages, now)).toBe(
+            false
+        );
+        const completedHistory = [
+            {
+                content: "Question",
+                role: "user",
+                timestamp: new Date(now - 140_000).toISOString(),
+            },
+            {
+                content: [{ text: "thinking recovered prefix", type: "thinking" }],
+                role: "assistant",
+                timestamp: quietUpdatedAt,
+            },
+            {
+                content: "Final answer",
+                role: "assistant",
+                timestamp: new Date(now - 120_000).toISOString(),
+            },
+        ];
+        const recoveryHistory = visibleHistoryMessages(
+            completedHistory,
+            createChatVisibility(true, true)
+        );
+        const renderedHistory = visibleHistoryMessages(
+            completedHistory,
+            createChatVisibility(true, true),
+            false
+        );
+        expect(isActiveStreamRecoveredInMessages(stream, recoveryHistory, now)).toBe(
+            true
+        );
+        expect(
+            isActiveStreamRecoveredInMessages(
+                { ...stream, updatedAt: quietUpdatedAt },
+                recoveryHistory,
+                now,
+                true,
+                true
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    runId: "run-b",
+                    aliases: [],
+                    updatedAt: quietUpdatedAt,
+                },
+                recoveryHistory.map((message, index) => ({
+                    ...message,
+                    runId: index === recoveryHistory.length - 1 ? "run-a" : "run-b",
+                })),
+                now,
+                true,
+                true,
+                ["run-b"]
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                { ...stream, runId: "run-b", updatedAt: quietUpdatedAt },
+                recoveryHistory,
+                now,
+                true,
+                true,
+                ["run-b"]
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                { ...stream, runId: "run-b", updatedAt: quietUpdatedAt },
+                recoveryHistory,
+                now,
+                true,
+                true,
+                ["run-b"],
+                true
+            )
+        ).toBe(true);
+        expect(isActiveStreamRecoveredInMessages(stream, renderedHistory, now)).toBe(
             false
         );
         expect(

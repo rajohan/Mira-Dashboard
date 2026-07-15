@@ -154,6 +154,8 @@ export interface ChatHistoryMessage {
     text: string;
     images?: ChatImageBlock[];
     attachments?: ChatAttachmentDisplay[];
+    /** True when every attachment was carried over from hidden tool output. */
+    hasOnlyHiddenToolAttachments?: boolean;
     thinking?: ChatThinkingDisplay[];
     toolCalls?: ChatToolCallDisplay[];
     toolResult?: ChatToolResultDisplay;
@@ -178,6 +180,7 @@ export interface RawChatHistoryMessage {
     MediaPaths?: string[];
     MediaType?: string;
     MediaTypes?: string[];
+    runId?: string;
 }
 
 /** Represents chat stream event message. */
@@ -548,6 +551,7 @@ export function normalizeChatHistoryMessage(
         thinking,
         toolCalls,
         toolResult,
+        runId: message.runId,
         timestamp:
             typeof message.timestamp === "number"
                 ? isoStringFromDate(message.timestamp)
@@ -735,6 +739,7 @@ export function normalizeVisibleChatHistoryMessages(
             visibleMessages.push({
                 ...message,
                 attachments: [...message.attachments!, ...pendingHiddenToolMedia],
+                hasOnlyHiddenToolAttachments: message.attachments!.length === 0,
             });
             pendingHiddenToolMedia = [];
             continue;
@@ -749,6 +754,7 @@ export function normalizeVisibleChatHistoryMessages(
             content: "",
             text: "",
             attachments: pendingHiddenToolMedia,
+            hasOnlyHiddenToolAttachments: true,
         });
     }
 

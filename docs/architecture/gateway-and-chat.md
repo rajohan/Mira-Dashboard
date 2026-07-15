@@ -99,6 +99,10 @@ Thinking/reasoning and tool diagnostics have separate visibility toggles stored
 in browser local storage. The composer owns these controls so the setting and
 the message it affects stay in one interaction surface.
 
+Keeping thinking after the final answer is a separate persisted preference. It
+is available only while thinking is visible, defaults off, and preserves an
+in-progress thinking row until a primary assistant answer supersedes it.
+
 Tool-call failures should render as tool diagnostics, not as the global chat
 error banner. The global error banner is reserved for send failures, Gateway
 disconnects, and terminal chat/runtime failures that are not already represented

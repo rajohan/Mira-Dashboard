@@ -3568,6 +3568,47 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(messageIdentity(toolResult)).toContain("tool-result::tool-1::exec");
         expect(messageDeleteKey(toolResult)).toContain("tool-result::tool-1::exec");
 
+        const textToolMessage = chatMessage({
+            role: "assistant",
+            text: "Checking",
+            timestamp: "2026-06-23T08:00:01.000Z",
+            toolCalls: [{ id: "tool-a", name: "exec" }],
+        });
+        expect(messageDeleteKey(textToolMessage)).toContain("tool-a");
+        expect(
+            messageDeleteKey({
+                ...textToolMessage,
+                toolCalls: [{ id: "tool-b", name: "exec" }],
+            })
+        ).not.toBe(messageDeleteKey(textToolMessage));
+
+        const textMediaMessage = chatMessage({
+            attachments: [
+                {
+                    fileName: "first.txt",
+                    id: "first",
+                    kind: "file",
+                    mimeType: "text/plain",
+                },
+            ],
+            role: "assistant",
+            text: "Generated file",
+            timestamp: "2026-06-23T08:00:02.000Z",
+        });
+        expect(
+            messageDeleteKey({
+                ...textMediaMessage,
+                attachments: [
+                    {
+                        fileName: "second.txt",
+                        id: "second",
+                        kind: "file",
+                        mimeType: "text/plain",
+                    },
+                ],
+            })
+        ).not.toBe(messageDeleteKey(textMediaMessage));
+
         const duplicateMessages = dedupeMessages([
             chatMessage({ role: "assistant", text: "same" }),
             chatMessage({ role: "assistant", text: "same" }),
