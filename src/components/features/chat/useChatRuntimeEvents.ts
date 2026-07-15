@@ -12,6 +12,7 @@ import {
     isSameSessionKey,
     mergeStreamMessage,
     mergeStreamText,
+    messagesWithFinalThinkingPersistence,
     normalizeAssistantPayload,
     uniqueStrings,
     visibleHistoryMessages,
@@ -1009,6 +1010,7 @@ interface UseChatRuntimeEventsParameters {
     ) => Promise<T>;
     subscribe: (listener: (data: unknown) => void) => () => void;
     selectedSessionKey: string;
+    keepThinkingAfterFinal?: boolean;
     showThinkingOutput: boolean;
     showToolOutput: boolean;
     activeStreamsReference: MutableReference<ActiveChatStreams>;
@@ -1030,6 +1032,7 @@ export function useChatRuntimeEvents({
     request,
     subscribe,
     selectedSessionKey,
+    keepThinkingAfterFinal = false,
     showThinkingOutput,
     showToolOutput,
     activeStreamsReference,
@@ -1052,9 +1055,11 @@ export function useChatRuntimeEvents({
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
     const toolErrorRunKeysReference = useRef(new Set<string>());
+    const keepThinkingAfterFinalReference = useRef(keepThinkingAfterFinal);
 
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
+    keepThinkingAfterFinalReference.current = keepThinkingAfterFinal;
 
     useEffect(() => {
         selectedSessionKeyReference.current = selectedSessionKey;
@@ -1199,16 +1204,24 @@ export function useChatRuntimeEvents({
                         );
 
                     if (shouldApplyResult) {
+                        const historyVisibility = createChatVisibility(
+                            showThinkingOutput,
+                            showToolOutput
+                        );
+                        const visibleMessages = visibleHistoryMessages(
+                            result.messages,
+                            historyVisibility,
+                            keepThinkingAfterFinalReference.current
+                        );
                         setMessages((wasPrevious) =>
-                            mergeWithRecentOptimisticMessages(
-                                wasPrevious,
-                                visibleHistoryMessages(
-                                    result.messages,
-                                    createChatVisibility(
-                                        showThinkingOutput,
-                                        showToolOutput
-                                    )
-                                )
+                            messagesWithFinalThinkingPersistence(
+                                mergeWithRecentOptimisticMessages(
+                                    wasPrevious,
+                                    visibleMessages
+                                ),
+                                historyVisibility,
+                                keepThinkingAfterFinalReference.current &&
+                                    showThinkingOutput
                             )
                         );
 
@@ -1620,6 +1633,9 @@ export function useChatRuntimeEvents({
                         ];
                     }
                 }
+                diagnosticMessages = diagnosticMessages.map((message) =>
+                    eventRunId ? { ...message, runId: eventRunId } : message
+                );
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()
                         ? [
@@ -1638,7 +1654,11 @@ export function useChatRuntimeEvents({
                 ];
                 if (messagesToAppend.length > 0) {
                     setMessages((wasPrevious) =>
-                        dedupeMessages([...wasPrevious, ...messagesToAppend])
+                        messagesWithFinalThinkingPersistence(
+                            dedupeMessages([...wasPrevious, ...messagesToAppend]),
+                            createChatVisibility(showThinkingOutput, showToolOutput),
+                            keepThinkingAfterFinalReference.current && showThinkingOutput
+                        )
                     );
                 }
                 updateActiveStreamsReference.current((wasPrevious) => {
@@ -1732,6 +1752,9 @@ export function useChatRuntimeEvents({
                         ];
                     }
                 }
+                diagnosticMessages = diagnosticMessages.map((message) =>
+                    eventRunId ? { ...message, runId: eventRunId } : message
+                );
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()
                         ? [
@@ -1750,7 +1773,11 @@ export function useChatRuntimeEvents({
                 ];
                 if (messagesToAppend.length > 0) {
                     setMessages((wasPrevious) =>
-                        dedupeMessages([...wasPrevious, ...messagesToAppend])
+                        messagesWithFinalThinkingPersistence(
+                            dedupeMessages([...wasPrevious, ...messagesToAppend]),
+                            createChatVisibility(showThinkingOutput, showToolOutput),
+                            keepThinkingAfterFinalReference.current && showThinkingOutput
+                        )
                     );
                 }
                 clearActiveStreamsForRun(selectedSessionKey, eventRunId);
@@ -2168,16 +2195,24 @@ export function useChatRuntimeEvents({
                             );
 
                         if (shouldApplyResult) {
+                            const historyVisibility = createChatVisibility(
+                                showThinkingOutput,
+                                showToolOutput
+                            );
+                            const visibleMessages = visibleHistoryMessages(
+                                result.messages,
+                                historyVisibility,
+                                keepThinkingAfterFinalReference.current
+                            );
                             setMessages((wasPrevious) =>
-                                mergeWithRecentOptimisticMessages(
-                                    wasPrevious,
-                                    visibleHistoryMessages(
-                                        result.messages,
-                                        createChatVisibility(
-                                            showThinkingOutput,
-                                            showToolOutput
-                                        )
-                                    )
+                                messagesWithFinalThinkingPersistence(
+                                    mergeWithRecentOptimisticMessages(
+                                        wasPrevious,
+                                        visibleMessages
+                                    ),
+                                    historyVisibility,
+                                    keepThinkingAfterFinalReference.current &&
+                                        showThinkingOutput
                                 )
                             );
                             setIsAtBottom(shouldStickToBottomReference.current);
@@ -2238,7 +2273,9 @@ export function useChatRuntimeEvents({
                 }
 
                 let finalMessageToAppend = messageToAppend;
-                const remainingDiagnosticMessages = [...diagnosticMessages];
+                const remainingDiagnosticMessages = diagnosticMessages.map((message) =>
+                    payload.runId ? { ...message, runId: payload.runId } : message
+                );
                 if (
                     finalMessageToAppend &&
                     finalMessageToAppend.role.toLowerCase() === "assistant" &&
@@ -2362,13 +2399,17 @@ export function useChatRuntimeEvents({
                               })
                             : wasPrevious;
 
-                        return dedupeMessages([
-                            ...nextPrevious,
-                            ...remainingDiagnosticMessages,
-                            ...(finalMessageToAppend && !didMergeFinalMessage
-                                ? [finalMessageToAppend]
-                                : []),
-                        ]);
+                        return messagesWithFinalThinkingPersistence(
+                            dedupeMessages([
+                                ...nextPrevious,
+                                ...remainingDiagnosticMessages,
+                                ...(finalMessageToAppend && !didMergeFinalMessage
+                                    ? [finalMessageToAppend]
+                                    : []),
+                            ]),
+                            createChatVisibility(showThinkingOutput, showToolOutput),
+                            keepThinkingAfterFinalReference.current && showThinkingOutput
+                        );
                     });
                 }
 

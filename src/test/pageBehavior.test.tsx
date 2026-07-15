@@ -23,12 +23,16 @@ import {
     isSameSessionKey,
     mergeStreamMessage,
     mergeStreamText,
+    messagesWithFinalThinkingPersistence,
     normalizeAssistantPayload,
     parseAgentSessionKey,
     shouldShowStreamRow,
+    stripThinkingFromMessage,
     uniqueStrings,
     visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
+import { normalizeChatHistoryMessage } from "../components/features/chat/chatTypes";
+import { messageDeleteKey } from "../components/features/chat/chatUtilities";
 import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
 import { Agents } from "../pages/Agents";
 import {
@@ -38,6 +42,7 @@ import {
     nextHistoryBottomState,
     nextHistoryLoadSendError,
     readDeletedMessageKeys,
+    readStoredChatDiagnosticVisibility,
     scheduleBottomFollowWhenNeeded,
     sessionTimestampMs,
     writeDeletedMessageKeys,
@@ -153,6 +158,7 @@ class FakeWebSocket {
     static instances: FakeWebSocket[] = [];
 
     private readonly listeners = new Map<string, FakeWebSocketListener[]>();
+    readonly respondedRequestIds = new Set<string>();
     readonly sent: string[] = [];
     readonly url: string;
     readyState = FakeWebSocket.CONNECTING;
@@ -182,6 +188,9 @@ class FakeWebSocket {
 
     respondToLastRequest(payload: unknown = {}) {
         const request = JSON.parse(this.sent.at(-1) || "{}") as { id?: string };
+        if (request.id) {
+            this.respondedRequestIds.add(request.id);
+        }
         this.emit("message", {
             data: JSON.stringify({
                 type: "response",
@@ -209,6 +218,7 @@ async function respondToSocketRequest(
     if (!request?.id) {
         throw new Error(`No socket request found for ${method}`);
     }
+    socket.respondedRequestIds.add(request.id);
 
     await act(async () => {
         socket.emit("message", {
@@ -235,7 +245,12 @@ function findSocketRequest(socket: FakeWebSocket, method: string) {
                     type?: string;
                 }
         )
-        .find((entry) => entry.type === "req" && entry.method === method);
+        .find(
+            (entry) =>
+                entry.type === "req" &&
+                entry.method === method &&
+                Boolean(entry.id && !socket.respondedRequestIds.has(entry.id))
+        );
 }
 
 function parseRequestBody(init: RequestInit | undefined) {
@@ -2679,6 +2694,26 @@ describe("Mira Dashboard pages", () => {
             ],
         });
         await flushQueuedTimers();
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"chat.history"'))
+            ).toHaveLength(2);
+        });
+        await respondToSocketRequest(socket, "chat.history", {
+            messages: [
+                {
+                    role: "user",
+                    content: "Previous question",
+                    timestamp: "2026-06-24T08:00:00.000Z",
+                },
+                {
+                    role: "assistant",
+                    content: "Previous answer",
+                    timestamp: "2026-06-24T08:00:01.000Z",
+                },
+            ],
+        });
+        await flushQueuedTimers();
 
         await waitFor(() => {
             expect(
@@ -2774,10 +2809,44 @@ describe("Mira Dashboard pages", () => {
 
         const thinkingToggle = screen.getByRole("button", { name: "Show thinking" });
         const toolsToggle = screen.getByRole("button", { name: "Show tools" });
+        const historyRequestsBeforeToggles = socket.sent.filter((entry) =>
+            entry.includes('"method":"chat.history"')
+        ).length;
         await user.click(thinkingToggle);
         await user.click(toolsToggle);
         expect(thinkingToggle).toHaveAttribute("aria-pressed", "true");
         expect(toolsToggle).toHaveAttribute("aria-pressed", "true");
+        const keepThinkingToggle = screen.getByRole("button", {
+            name: "Keep thinking after final answer",
+        });
+        await user.click(keepThinkingToggle);
+        expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "true");
+        await user.click(thinkingToggle);
+        expect(thinkingToggle).toHaveAttribute("aria-pressed", "false");
+        expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "false");
+        expect(keepThinkingToggle).toBeDisabled();
+        await user.click(thinkingToggle);
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"chat.history"'))
+                    .length
+            ).toBeGreaterThan(historyRequestsBeforeToggles);
+        });
+        await respondToSocketRequest(socket, "chat.history", {
+            messages: [
+                {
+                    role: "user",
+                    content: "Previous question",
+                    timestamp: "2026-06-24T08:00:00.000Z",
+                },
+                {
+                    role: "assistant",
+                    content: "Previous answer",
+                    timestamp: "2026-06-24T08:00:01.000Z",
+                },
+            ],
+        });
+        await flushQueuedTimers();
 
         await user.click(screen.getByRole("button", { name: "Send" }));
 
@@ -3243,6 +3312,20 @@ describe("Mira Dashboard pages", () => {
     });
 
     it("keeps chat page storage and history helpers deterministic", () => {
+        const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+        try {
+            Reflect.deleteProperty(globalThis, "window");
+            expect(readStoredChatDiagnosticVisibility()).toEqual({
+                keepThinkingAfterFinal: false,
+                thinking: false,
+                tools: false,
+            });
+        } finally {
+            if (originalWindow) {
+                Object.defineProperty(globalThis, "window", originalWindow);
+            }
+        }
+
         expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set());
 
         writeDeletedMessageKeys("agent:main:main", new Set(["message-1"]));
@@ -3263,6 +3346,52 @@ describe("Mira Dashboard pages", () => {
                     },
                 ],
                 "2026-06-24T08:00:00.000Z"
+            )
+        ).toBe(true);
+        const runScopedHistory = [
+            {
+                role: "assistant",
+                text: "done",
+                content: "done",
+                runId: "run-a",
+                timestamp: "2026-06-24T08:01:00.000Z",
+            },
+        ];
+        expect(
+            hasNewerAssistantMessageInHistory(
+                runScopedHistory,
+                "2026-06-24T08:00:00.000Z",
+                ["run-a"]
+            )
+        ).toBe(true);
+        expect(
+            hasNewerAssistantMessageInHistory(
+                runScopedHistory,
+                "2026-06-24T08:00:00.000Z",
+                ["run-b"]
+            )
+        ).toBe(false);
+        const unscopedHistory = [
+            {
+                role: "assistant",
+                text: "done",
+                content: "done",
+                timestamp: "2026-06-24T08:01:00.000Z",
+            },
+        ];
+        expect(
+            hasNewerAssistantMessageInHistory(
+                unscopedHistory,
+                "2026-06-24T08:00:00.000Z",
+                ["run-a"]
+            )
+        ).toBe(false);
+        expect(
+            hasNewerAssistantMessageInHistory(
+                unscopedHistory,
+                "2026-06-24T08:00:00.000Z",
+                ["run-a"],
+                true
             )
         ).toBe(true);
         expect(nextHistoryBottomState(false, true, false)).toBe(true);
@@ -3415,6 +3544,250 @@ describe("Mira Dashboard pages", () => {
                 visibility
             )
         ).toBe(true);
+    });
+
+    it("keeps active thinking but removes it after a final answer by default", () => {
+        const visibility = createChatVisibility(true, true);
+        const activeThinking = {
+            role: "assistant",
+            content: [{ type: "thinking", text: "still working" }],
+            text: "",
+            thinking: [{ text: "still working" }],
+        };
+
+        expect(
+            messagesWithFinalThinkingPersistence([activeThinking], visibility, false)
+        ).toEqual([activeThinking]);
+
+        const completed = messagesWithFinalThinkingPersistence(
+            [
+                { role: "user", content: "question", text: "question" },
+                activeThinking,
+                { role: "assistant", content: "answer", text: "answer" },
+            ],
+            visibility,
+            false
+        );
+        expect(completed).toHaveLength(2);
+        expect(completed.some((message) => message.thinking?.length)).toBe(false);
+        expect(completed.at(-1)?.text).toBe("answer");
+
+        expect(
+            messagesWithFinalThinkingPersistence(
+                [
+                    activeThinking,
+                    { role: "assistant", content: "answer", text: "answer" },
+                ],
+                visibility,
+                true
+            )
+        ).toHaveLength(2);
+
+        const concurrentThinking = {
+            ...activeThinking,
+            runId: "run-b",
+        };
+        const concurrentMessages = messagesWithFinalThinkingPersistence(
+            [
+                { role: "user", content: "question", text: "question" },
+                concurrentThinking,
+                {
+                    role: "assistant",
+                    content: "answer a",
+                    text: "answer a",
+                    runId: "run-a",
+                },
+            ],
+            visibility,
+            false
+        );
+        expect(concurrentMessages).toContain(concurrentThinking);
+
+        const matchingRunMessages = messagesWithFinalThinkingPersistence(
+            [
+                concurrentThinking,
+                {
+                    role: "assistant",
+                    content: "answer b",
+                    text: "answer b",
+                    runId: "run-b",
+                },
+            ],
+            visibility,
+            false
+        );
+        expect(matchingRunMessages.some((message) => message.thinking?.length)).toBe(
+            false
+        );
+        const ambiguousUnscopedFinal = messagesWithFinalThinkingPersistence(
+            [
+                { ...activeThinking, runId: "run-a" },
+                concurrentThinking,
+                { role: "assistant", content: "answer", text: "answer" },
+            ],
+            visibility,
+            false
+        );
+        expect(
+            ambiguousUnscopedFinal.filter((message) => message.thinking?.length)
+        ).toHaveLength(2);
+        expect(
+            normalizeChatHistoryMessage({
+                content: "answer",
+                role: "assistant",
+                runId: "history-run",
+            }).runId
+        ).toBe("history-run");
+
+        const thinkingWithHiddenToolMedia = visibleHistoryMessages(
+            [
+                {
+                    content: [{ type: "thinking", text: "working" }],
+                    role: "assistant",
+                    runId: "media-run",
+                },
+                {
+                    MediaPath: "/tmp/result.png",
+                    role: "tool",
+                    runId: "media-run",
+                },
+            ],
+            visibility,
+            false
+        );
+        expect(
+            thinkingWithHiddenToolMedia.some((message) => message.thinking?.length)
+        ).toBe(true);
+
+        const hiddenToolMediaOnly = messagesWithFinalThinkingPersistence(
+            [
+                { ...activeThinking, runId: "hidden-media-run" },
+                {
+                    attachments: [
+                        {
+                            fileName: "tool-output.txt",
+                            id: "tool-output",
+                            kind: "file" as const,
+                        },
+                    ],
+                    content: "",
+                    hasOnlyHiddenToolAttachments: true,
+                    role: "assistant",
+                    text: "",
+                },
+            ],
+            visibility,
+            false
+        );
+        expect(hiddenToolMediaOnly.some((message) => message.thinking?.length)).toBe(
+            true
+        );
+
+        const deletedMessage = {
+            content: [
+                { type: "text", text: "answer" },
+                { type: "thinking", text: "details" },
+            ],
+            role: "assistant",
+            text: "answer",
+            thinking: [{ text: "details" }],
+            timestamp: "2026-06-24T08:02:00.000Z",
+        };
+        const deletedKeys = new Set([messageDeleteKey(deletedMessage)]);
+        const transformedDeletedMessage = stripThinkingFromMessage(deletedMessage);
+        expect(messageDeleteKey(transformedDeletedMessage)).toBe(
+            messageDeleteKey(deletedMessage)
+        );
+        expect(
+            [transformedDeletedMessage].filter(
+                (message) => !deletedKeys.has(messageDeleteKey(message))
+            )
+        ).toEqual([]);
+
+        const attachmentAnswer = {
+            attachments: [
+                {
+                    fileName: "report.pdf",
+                    id: "report",
+                    kind: "file" as const,
+                    mimeType: "application/pdf",
+                },
+            ],
+            content: "",
+            role: "assistant",
+            runId: "attachment-run",
+            text: "",
+        };
+        const attachmentThinking = {
+            ...activeThinking,
+            runId: "attachment-run",
+        };
+        expect(
+            messagesWithFinalThinkingPersistence(
+                [attachmentThinking, attachmentAnswer],
+                visibility,
+                false
+            ).some((message) => message.thinking?.length)
+        ).toBe(false);
+        expect(
+            messagesWithFinalThinkingPersistence(
+                [
+                    attachmentThinking,
+                    {
+                        ...attachmentAnswer,
+                        toolCalls: [{ id: "file-tool", name: "write" }],
+                    },
+                ],
+                visibility,
+                false
+            ).some((message) => message.thinking?.length)
+        ).toBe(true);
+
+        const deletedPrompt = {
+            content: "new question",
+            role: "user",
+            text: "new question",
+            timestamp: "2026-06-24T08:03:00.000Z",
+        };
+        const laterThinking = {
+            ...activeThinking,
+            timestamp: "2026-06-24T08:04:00.000Z",
+        };
+        const retainedBeforeDeletion = messagesWithFinalThinkingPersistence(
+            [
+                {
+                    content: "previous answer",
+                    role: "assistant",
+                    text: "previous answer",
+                },
+                deletedPrompt,
+                laterThinking,
+            ],
+            visibility,
+            false
+        ).filter(
+            (message) => messageDeleteKey(message) !== messageDeleteKey(deletedPrompt)
+        );
+        expect(retainedBeforeDeletion.at(-1)?.thinking).toEqual([
+            { text: "still working" },
+        ]);
+    });
+
+    it("normalizes stored final-thinking retention when thinking is hidden", () => {
+        localStorage.setItem(
+            "mira-dashboard-chat-diagnostic-visibility",
+            JSON.stringify({
+                keepThinkingAfterFinal: true,
+                thinking: false,
+                tools: true,
+            })
+        );
+
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            keepThinkingAfterFinal: false,
+            thinking: false,
+            tools: true,
+        });
     });
 
     it("keeps settings and terminal page helpers stable", () => {
