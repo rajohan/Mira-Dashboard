@@ -188,10 +188,19 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     }
 
     const responseRows = rows.slice(lastUserRowIndex + 1);
+    const isToolRow = (row: ChatRow) => {
+        const role = row.message.role.toLowerCase();
+        return Boolean(
+            TOOL_ROLE_VARIANTS.includes(role) ||
+            row.message.toolCalls?.length ||
+            row.message.toolResult
+        );
+    };
     const finalRowIndex = responseRows.findLastIndex(
         (row) =>
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
+            !isToolRow(row) &&
             Boolean(row.message.text.trim())
     );
     if (finalRowIndex === -1) {
@@ -226,12 +235,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
         if (row === finalRow || !isRowInCurrentResponse(row)) {
             return false;
         }
-        const role = row.message.role.toLowerCase();
-        return Boolean(
-            TOOL_ROLE_VARIANTS.includes(role) ||
-            row.message.toolCalls?.length ||
-            row.message.toolResult
-        );
+        return isToolRow(row);
     });
     if (thinkingRows.length === 0 && toolRows.length === 0) {
         return rows;
@@ -1833,8 +1837,12 @@ export function Chat() {
     const isBlockedByInFlightSend = (text: string) => {
         const isSlashCommand = text.startsWith("/") && attachments.length === 0;
         const hasActiveSelectedStream = Object.hasOwn(activeStreams, selectedSessionKey);
+        const hasConfirmedActiveSelectedRun =
+            isSessionActive(selectedSession) ||
+            selectedStreams.some(([streamKey]) => streamKey !== selectedSessionKey);
         return (
             sendInFlightCountReference.current > 0 &&
+            !hasConfirmedActiveSelectedRun &&
             !(isSlashCommand && hasActiveSelectedStream)
         );
     };

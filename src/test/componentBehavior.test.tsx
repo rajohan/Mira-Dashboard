@@ -7173,6 +7173,19 @@ describe("shared component helpers", () => {
                 (row) => row.key
             )
         ).toEqual(["user", "tool", "final-history"]);
+        const textBearingToolRow = {
+            ...toolRow,
+            key: "text-tool",
+            message: {
+                ...toolRow.message,
+                text: "Shell command",
+            },
+        };
+        expect(
+            orderCurrentResponseRows([userRow, finalHistoryRow, textBearingToolRow]).map(
+                (row) => row.key
+            )
+        ).toEqual(["user", "text-tool", "final-history"]);
         const lateThinkingRow = {
             ...thinkingRow,
             key: "late-thinking",

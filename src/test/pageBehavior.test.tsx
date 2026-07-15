@@ -2877,6 +2877,35 @@ describe("Mira Dashboard pages", () => {
             message: "Ship it",
         });
         expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+        const composerWhileSending = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        await user.type(composerWhileSending, "Steer the active run");
+        expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({
+                    type: "state",
+                    sessions: [
+                        {
+                            id: "session-main",
+                            key: "agent:main:main",
+                            type: "main",
+                            agentType: "main",
+                            displayLabel: "Main chat",
+                            model: "codex",
+                            status: "running",
+                            updatedAt: "2026-06-24T08:00:02.000Z",
+                        },
+                    ],
+                }),
+            });
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+        });
+        await user.clear(composerWhileSending);
         await respondToSocketRequest(socket, "chat.send", { runId: "run-123" });
         await flushQueuedTimers();
 
