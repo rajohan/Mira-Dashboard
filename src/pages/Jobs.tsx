@@ -2,6 +2,7 @@ import { Play, RotateCw, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { CronJobDetails, CronJobList } from "../components/features/cron";
+import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -465,13 +466,13 @@ function getErrorMessage(error: unknown, fallback: string): string {
 /** Renders the jobs UI. */
 export function Jobs() {
     const {
-        data: scheduledJobs = [],
+        data: scheduledJobsData,
         isLoading: scheduledLoading,
         error: scheduledError,
         refetch: refetchScheduledJobs,
     } = useScheduledJobs();
     const {
-        data: cronJobs = [],
+        data: cronJobsData,
         isLoading: cronLoading,
         error: cronError,
         refetch: refetchCronJobs,
@@ -483,6 +484,8 @@ export function Jobs() {
     const updateCronJob = useUpdateCronJob();
     const deleteCronJob = useDeleteCronJob();
 
+    const scheduledJobs = scheduledJobsData ?? [];
+    const cronJobs = cronJobsData ?? [];
     const sortedScheduledJobs = sortScheduledJobs(scheduledJobs);
     const sortedCronJobs = sortCronJobs(cronJobs);
     const [view, setView] = useState<JobsView>(getInitialJobsView);
@@ -686,6 +689,11 @@ export function Jobs() {
 
     const isLoading = view === "scheduled" ? scheduledLoading : cronLoading;
     const error = view === "scheduled" ? scheduledError : cronError;
+    const hasLoadedJobs =
+        view === "scheduled"
+            ? scheduledJobsData !== undefined
+            : cronJobsData !== undefined;
+    const activeViewLabel = view === "scheduled" ? "Dashboard jobs" : "OpenClaw cron";
     const isEmpty =
         (view === "scheduled" && sortedScheduledJobs.length === 0) ||
         (view === "openclaw" && sortedCronJobs.length === 0);
@@ -703,6 +711,13 @@ export function Jobs() {
                 <Card variant="bordered" className="border-red-500/40 bg-red-500/10 p-3">
                     <p className="text-sm text-red-300">{actionError}</p>
                 </Card>
+            ) : undefined}
+
+            {error && hasLoadedJobs ? (
+                <Alert variant="warning">
+                    {activeViewLabel} refresh failed. Showing the last loaded jobs.{" "}
+                    {error.message}
+                </Alert>
             ) : undefined}
 
             <Card variant="bordered" className="p-2">
@@ -732,7 +747,7 @@ export function Jobs() {
                 <div className="flex min-h-80 items-center justify-center">
                     <LoadingState size="lg" />
                 </div>
-            ) : error ? (
+            ) : error && !hasLoadedJobs ? (
                 <div className="flex min-h-80 flex-col items-center justify-center gap-4">
                     <p className="text-red-400">{error.message}</p>
                     <Button variant="secondary" onClick={retryActiveView}>

@@ -38,6 +38,8 @@ cannot infer.
   refresh failures; the error is non-blocking when cached rows exist.
 - Database metrics keep the last successful cache entry visible during transient
   refresh failures and show a non-blocking warning.
+- Jobs keep the active view's last successful list visible during transient
+  refresh failures and show a non-blocking warning.
 - Dashboard cache badges poll the lightweight `/api/cache/status` endpoint.
   Heartbeat automation uses `/api/cache/heartbeat`; it is not the UI polling
   endpoint.

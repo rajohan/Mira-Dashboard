@@ -1939,6 +1939,77 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("keeps loaded jobs visible when active view refreshes fail", async () => {
+        const user = userEvent.setup();
+        let scheduledJobsRequestCount = 0;
+        let cronJobsRequestCount = 0;
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/jobs" && method === "GET") {
+                    scheduledJobsRequestCount += 1;
+                    if (scheduledJobsRequestCount > 1) {
+                        return Response.json(
+                            { error: "Scheduled jobs temporarily unavailable" },
+                            { status: 503 }
+                        );
+                    }
+                }
+
+                if (url === "/api/cron/jobs" && method === "GET") {
+                    cronJobsRequestCount += 1;
+                    if (cronJobsRequestCount > 1) {
+                        return Response.json(
+                            { error: "Cron jobs temporarily unavailable" },
+                            { status: 503 }
+                        );
+                    }
+                }
+
+                return apiResponse(url, method, init);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Jobs));
+
+        expect((await screen.findAllByText("Heartbeat")).length).toBeGreaterThan(0);
+        await act(async () => {
+            await view.queryClient.invalidateQueries({
+                queryKey: ["scheduled-jobs", "list"],
+            });
+        });
+
+        expect(
+            await screen.findByText(
+                "Dashboard jobs refresh failed. Showing the last loaded jobs. Scheduled jobs temporarily unavailable"
+            )
+        ).toBeInTheDocument();
+        expect(screen.getAllByText("Heartbeat").length).toBeGreaterThan(0);
+
+        await user.click(screen.getByRole("button", { name: /openclaw cron/i }));
+        expect((await screen.findAllByText("heartbeat")).length).toBeGreaterThan(0);
+        await act(async () => {
+            await view.queryClient.invalidateQueries({ queryKey: ["cron", "jobs"] });
+        });
+
+        expect(
+            await screen.findByText(
+                "OpenClaw cron refresh failed. Showing the last loaded jobs. Cron jobs temporarily unavailable"
+            )
+        ).toBeInTheDocument();
+        expect(screen.getAllByText("heartbeat").length).toBeGreaterThan(0);
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("links git workspace repositories to GitHub remotes", async () => {
         const view = renderPage(createElement(Dashboard), { withSocket: true });
 
