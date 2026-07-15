@@ -37,15 +37,17 @@ function cronTimestamp(job: CronJob, key: "lastRunAtMs" | "nextRunAtMs") {
 /** Renders the scheduled jobs overview card UI. */
 export function JobsOverviewCard() {
     const {
-        data: jobs = [],
+        data: jobsData,
         isError: isJobsError,
         isLoading: isJobsLoading,
     } = useScheduledJobs();
     const {
-        data: cronJobs = [],
+        data: cronJobsData,
         isError: isCronError,
         isLoading: isCronLoading,
     } = useCronJobs();
+    const jobs = jobsData ?? [];
+    const cronJobs = cronJobsData ?? [];
 
     const enabledCount = jobs.filter((job) => job.enabled).length;
     const cronEnabledCount = cronJobs.filter((job) => job.enabled !== false).length;
@@ -118,7 +120,7 @@ export function JobsOverviewCard() {
 
             {isJobsLoading || isCronLoading ? (
                 <div className="text-sm text-primary-300">Loading jobs…</div>
-            ) : isJobsError || isCronError ? (
+            ) : (isJobsError && !jobsData) || (isCronError && !cronJobsData) ? (
                 <div className="text-sm text-rose-300">Jobs unavailable.</div>
             ) : (
                 <div className="space-y-2 text-sm text-primary-200">

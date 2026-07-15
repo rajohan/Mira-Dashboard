@@ -116,8 +116,11 @@ import { ConnectionStatus } from "../components/ui/ConnectionStatus";
 import { ExpandableCard, ReadOnlyField } from "../components/ui/ExpandableCard";
 import { FilterButtonGroup } from "../components/ui/FilterButtonGroup";
 import { getProgressColor, ProgressBar } from "../components/ui/ProgressBar";
+import { cacheKeys } from "../hooks/useCache";
+import { cronKeys } from "../hooks/useCron";
 import { useFileExplorerState } from "../hooks/useFileExplorerState";
 import { reportKeys } from "../hooks/useReports";
+import { scheduledJobKeys } from "../hooks/useScheduledJobs";
 import { useSessionActions } from "../hooks/useSessionActions";
 import {
     activeStreamRenderableText,
@@ -7690,6 +7693,158 @@ describe("shared component helpers", () => {
         queryClient.clear();
     });
 
+    it("keeps cached operations metrics visible when cache refreshes fail", async () => {
+        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+            throw new Error(`Cache refresh failed: ${String(input)}`);
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const queryClient = createQueryClient();
+        queryClient.setQueryData(cacheKeys.entry("docker.summary"), {
+            data: {
+                containers: [{ health: "healthy", state: "running" }],
+                images: [{ size: 2048 }],
+                updaterSummary: { updateAvailable: 1 },
+                volumes: [{}],
+            },
+            key: "docker.summary",
+        });
+        queryClient.setQueryData(cacheKeys.entry("git.workspace"), {
+            data: {
+                checkedAt: "2026-07-15T12:00:00.000Z",
+                dirtyCount: 0,
+                dirtyRepos: [],
+                missingRepos: [],
+                repos: [
+                    {
+                        branch: "main",
+                        dirty: false,
+                        exists: true,
+                        key: "workspace",
+                        name: "Cached workspace",
+                        remote: undefined,
+                        statusSummary: {
+                            conflicted: 0,
+                            deleted: 0,
+                            modified: 0,
+                            renamed: 0,
+                            staged: 0,
+                            total: 0,
+                            untracked: 0,
+                        },
+                    },
+                ],
+            },
+            key: "git.workspace",
+        });
+        queryClient.setQueryData(cacheKeys.entry("database.summary"), {
+            data: {
+                databases: [{}],
+                deadTuples: [],
+                overview: {
+                    averageCacheHitRatio: 99.5,
+                    pgbouncer: { waitingClients: 0 },
+                    totalBackends: 3,
+                    totalDatabaseSizeBytes: 4096,
+                },
+                topQueries: [],
+            },
+            key: "database.summary",
+        });
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <DockerOverviewCard />
+                <GitOverviewCard />
+                <DatabaseOverviewCard />
+            </QueryClientProvider>
+        );
+
+        for (const key of ["docker.summary", "git.workspace", "database.summary"]) {
+            await act(async () => {
+                await queryClient.invalidateQueries({ queryKey: cacheKeys.entry(key) });
+            });
+        }
+        await waitFor(() => {
+            expect(
+                queryClient.getQueryState(cacheKeys.entry("docker.summary"))?.status
+            ).toBe("error");
+            expect(
+                queryClient.getQueryState(cacheKeys.entry("git.workspace"))?.status
+            ).toBe("error");
+            expect(
+                queryClient.getQueryState(cacheKeys.entry("database.summary"))?.status
+            ).toBe("error");
+        });
+
+        expect(screen.queryByText("Docker cache unavailable.")).not.toBeInTheDocument();
+        expect(screen.queryByText("Git cache unavailable.")).not.toBeInTheDocument();
+        expect(screen.queryByText("Database cache unavailable.")).not.toBeInTheDocument();
+        expect(screen.getByText("Cached workspace")).toBeInTheDocument();
+        expect(screen.getByText("99.5%")).toBeInTheDocument();
+        expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+
+        queryClient.clear();
+    });
+
+    it("keeps cached job metrics visible when job refreshes fail", async () => {
+        const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+            throw new Error(`Job refresh failed: ${String(input)}`);
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const queryClient = createQueryClient();
+        queryClient.setQueryData(scheduledJobKeys.list(), {
+            jobs: [
+                {
+                    enabled: true,
+                    isRunning: false,
+                    name: "Cached dashboard job",
+                },
+            ],
+        });
+        queryClient.setQueryData(cronKeys.jobs(), {
+            jobs: [{ enabled: true, id: "cached-cron", name: "Cached cron job" }],
+        });
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <JobsOverviewCard />
+            </QueryClientProvider>
+        );
+
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() });
+        });
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
+        });
+        await waitFor(() => {
+            expect(queryClient.getQueryState(scheduledJobKeys.list())?.status).toBe(
+                "error"
+            );
+            expect(queryClient.getQueryState(cronKeys.jobs())?.status).toBe("error");
+        });
+
+        expect(screen.queryByText("Jobs unavailable.")).not.toBeInTheDocument();
+        expect(screen.getByText("Dashboard jobs").nextElementSibling).toHaveTextContent(
+            "1"
+        );
+        expect(screen.getByText("OpenClaw cron").nextElementSibling).toHaveTextContent(
+            "1"
+        );
+
+        queryClient.clear();
+    });
+
     it("marks unavailable Git repositories as missing instead of clean", async () => {
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
@@ -7766,6 +7921,27 @@ describe("shared component helpers", () => {
             "1"
         );
         expect(screen.getByText("Clean")).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("shows Git cache unavailable for an empty cache payload", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    data: "",
+                    key: "git.workspace",
+                    source: "backend",
+                    status: "error",
+                })
+            ),
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<GitOverviewCard />);
+
+        expect(await screen.findByText("Git cache unavailable.")).toBeInTheDocument();
         view.unmount();
         view.queryClient.clear();
     });

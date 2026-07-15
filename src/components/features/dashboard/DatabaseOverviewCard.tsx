@@ -19,7 +19,7 @@ function isDatabaseOverviewResponse(value: unknown): value is DatabaseOverviewRe
 
 /** Renders the database overview card UI. */
 export function DatabaseOverviewCard() {
-    const { data, isError, isLoading } = useCacheEntry<DatabaseOverviewResponse>(
+    const { data, isLoading } = useCacheEntry<DatabaseOverviewResponse>(
         "database.summary",
         60_000
     );
@@ -41,7 +41,7 @@ export function DatabaseOverviewCard() {
 
             {isLoading ? (
                 <div className="text-sm text-primary-300">Loading database cache…</div>
-            ) : isError || !database || !overview ? (
+            ) : !database || !overview ? (
                 <div className="text-sm text-rose-300">Database cache unavailable.</div>
             ) : (
                 <div className="space-y-2 text-sm text-primary-200">

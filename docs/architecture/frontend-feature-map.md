@@ -43,6 +43,8 @@ cannot infer.
 - Dashboard cache badges poll the lightweight `/api/cache/status` endpoint.
   Heartbeat automation uses `/api/cache/heartbeat`; it is not the UI polling
   endpoint.
+- Dashboard overview cards keep their last successful operational values visible
+  when Docker, Git, Database, or Jobs background refreshes fail.
 - Notifications poll separately from Reports.
 - Global `refetchOnWindowFocus` is disabled; pages that need freshness should
   configure their own intervals or explicit invalidation.
