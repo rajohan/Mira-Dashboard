@@ -350,8 +350,12 @@ export function messageIdentity(message: ChatHistoryMessage): string {
     const role = message.role.toLowerCase();
     const diagnosticIdentity = diagnosticMessageIdentity(message);
     const mediaIdentity = messageMediaIdentity(message);
-    const textIdentity =
+    const normalizedTextIdentity =
         role === "user" ? userMessageTextIdentity(message.text) : message.text.trim();
+    const textIdentity =
+        role === "user" && normalizedTextIdentity && message.runId
+            ? `${normalizedTextIdentity}::${message.runId}`
+            : normalizedTextIdentity;
     const userMediaTurnIdentity =
         role === "user" && !textIdentity && mediaIdentity
             ? [mediaIdentity, message.runId || message.timestamp || "no-turn"].join("::")

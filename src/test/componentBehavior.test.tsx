@@ -41,8 +41,9 @@ import {
     normalizeChatHistoryMessage,
     normalizeVisibleChatHistoryMessages,
 } from "../components/features/chat/chatTypes";
-import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
 import {
+    chatThinkingOptions,
+    dedupeMessages,
     mergeWithRecentOptimisticMessages,
     messageIdentity,
 } from "../components/features/chat/chatUtilities";
@@ -6051,6 +6052,128 @@ describe("shared component helpers", () => {
         unmount();
     });
 
+    it("retains provisional diagnostics when a scoped final arrives before ACK", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const optimisticKey = "agent:main:main::dashboard-chat-terminal-race::assistant";
+        const activeStreamsReference: { current: ActiveChatStreams } = {
+            current: {
+                [optimisticKey]: {
+                    aliases: ["dashboard-chat-terminal-race"],
+                    runId: "dashboard-chat-terminal-race",
+                    sessionKey: "agent:main:main",
+                    statusText: "Thinking",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        };
+        let messages: ChatHistoryMessage[] = [];
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return jest.fn();
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                keepThinkingAfterFinal: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn((updater) => {
+                    messages =
+                        typeof updater === "function" ? updater(messages) : updater;
+                }),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Pending answer",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() =>
+            expect(activeStreamsReference.current[optimisticKey]?.runId).toBe(
+                "agent:main:main"
+            )
+        );
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "Pre-ACK reasoning" },
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() =>
+            expect(
+                Object.values(activeStreamsReference.current).some(
+                    (stream) =>
+                        stream.message?.thinking?.[0]?.text === "Pre-ACK reasoning"
+                )
+            ).toBe(true)
+        );
+        const provisionalThinkingStream = Object.values(
+            activeStreamsReference.current
+        ).find((stream) => stream.message?.thinking?.[0]?.text === "Pre-ACK reasoning");
+        expect(provisionalThinkingStream?.aliases).toContain(
+            "dashboard-chat-terminal-race"
+        );
+        expect(provisionalThinkingStream?.runId).toBe("agent:main:main");
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Final answer",
+                    runId: "real-terminal-race-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        expect(
+            messages.some(
+                (message) =>
+                    message.runId === "real-terminal-race-run" &&
+                    message.thinking?.[0]?.text === "Pre-ACK reasoning"
+            )
+        ).toBe(true);
+        expect(
+            messages.some(
+                (message) =>
+                    message.runId === "real-terminal-race-run" &&
+                    message.text === "Final answer"
+            )
+        ).toBe(true);
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        unmount();
+    });
+
     it("records a compact terminal that arrives before its send ACK", async () => {
         let listener: ((data: unknown) => void) | undefined;
         const pendingTerminalRunIdsReference = {
@@ -8602,6 +8725,26 @@ describe("shared component helpers", () => {
     });
 
     it("restores a prior same-identity prompt when an optimistic retry fails", () => {
+        const concurrentRepeatedPrompts = dedupeMessages([
+            {
+                content: "Repeat this",
+                role: "user",
+                runId: "dashboard-chat-first",
+                text: "Repeat this",
+            },
+            {
+                content: "Repeat this",
+                role: "user",
+                runId: "dashboard-chat-second",
+                text: "Repeat this",
+            },
+        ]);
+        expect(concurrentRepeatedPrompts).toHaveLength(2);
+        expect(concurrentRepeatedPrompts.map((message) => message.runId)).toEqual([
+            "dashboard-chat-first",
+            "dashboard-chat-second",
+        ]);
+
         const previousMessage = {
             content: "Retry this",
             role: "user",

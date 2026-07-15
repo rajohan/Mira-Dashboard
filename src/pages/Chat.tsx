@@ -1978,6 +1978,16 @@ export function Chat() {
                 didTerminateBeforeAck
             )
         );
+        setMessages((wasPrevious) =>
+            dedupeMessages(
+                wasPrevious.map((message) =>
+                    message.role.toLowerCase() === "user" &&
+                    message.runId === optimisticRunId
+                        ? { ...message, runId: acknowledgedRunId }
+                        : message
+                )
+            )
+        );
     };
 
     /** Responds to send events. */
@@ -2056,6 +2066,9 @@ export function Chat() {
             setIsResettingSession(true);
         }
         const shouldAppendOptimisticMessage = !isResetCommand;
+        const idempotencyKey = isResetCommand
+            ? undefined
+            : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const userMessage: ChatHistoryMessage = {
             role: "user",
             content: messageText,
@@ -2063,6 +2076,7 @@ export function Chat() {
             images: [],
             attachments: optimisticAttachmentDisplay(sendAttachments),
             local: messageText ? undefined : true,
+            runId: idempotencyKey,
             timestamp: currentIsoString(),
         };
         const optimisticIdentity = messageIdentity(userMessage);
@@ -2091,9 +2105,6 @@ export function Chat() {
         setIsAtBottom(true);
         scheduleBottomFollow();
 
-        const idempotencyKey = isResetCommand
-            ? undefined
-            : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         if (idempotencyKey) {
             updateActiveStreams((wasPrevious) => ({
                 ...wasPrevious,

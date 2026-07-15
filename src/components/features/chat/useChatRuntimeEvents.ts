@@ -1482,8 +1482,8 @@ export function useChatRuntimeEvents({
             );
         };
 
-        /** Gives an unambiguous provisional assistant row its terminal run alias. */
-        const aliasProvisionalAssistantForTerminal = (
+        /** Gives one provisional send and its diagnostics a terminal run alias. */
+        const aliasProvisionalStreamsForTerminal = (
             sessionKey: string,
             runId: string,
             shouldAlias: boolean
@@ -1493,13 +1493,35 @@ export function useChatRuntimeEvents({
             }
 
             const wasPrevious = activeStreamsReference.current;
+            const provisionalAssistantEntries = Object.entries(wasPrevious).filter(
+                ([key, streamEntry]) =>
+                    isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
+                    isAssistantActiveStreamKey(sessionKey, key) &&
+                    isProvisionalRunId(sessionKey, streamEntry.runId)
+            );
+            if (provisionalAssistantEntries.length !== 1) {
+                return;
+            }
+
+            const [provisionalAssistantKey, provisionalAssistant] =
+                provisionalAssistantEntries[0]!;
+            const optimisticAliases = new Set(
+                uniqueStrings([
+                    provisionalAssistant.runId,
+                    ...provisionalAssistant.aliases,
+                ]).filter((alias) => isOptimisticRunId(alias))
+            );
             let hasChanged = false;
             const next = { ...wasPrevious };
             for (const [key, streamEntry] of Object.entries(wasPrevious)) {
+                const isOwnedProvisionalStream = Boolean(
+                    key === provisionalAssistantKey ||
+                    streamEntry.aliases.some((alias) => optimisticAliases.has(alias))
+                );
                 if (
                     !isSameSessionKey(streamEntry.sessionKey, sessionKey) ||
-                    !isAssistantActiveStreamKey(sessionKey, key) ||
-                    !isProvisionalRunId(sessionKey, streamEntry.runId)
+                    !isProvisionalRunId(sessionKey, streamEntry.runId) ||
+                    !isOwnedProvisionalStream
                 ) {
                     continue;
                 }
@@ -1508,6 +1530,9 @@ export function useChatRuntimeEvents({
                 next[key] = {
                     ...streamEntry,
                     aliases: uniqueStrings([...streamEntry.aliases, runId]),
+                    message: streamEntry.message
+                        ? { ...streamEntry.message, runId }
+                        : undefined,
                 };
             }
             if (hasChanged) {
@@ -2033,7 +2058,7 @@ export function useChatRuntimeEvents({
                         Boolean(streamForRun)
                     );
                 if (eventRunId) {
-                    aliasProvisionalAssistantForTerminal(
+                    aliasProvisionalStreamsForTerminal(
                         selectedSessionKey,
                         eventRunId,
                         shouldAliasProvisionalAssistant
@@ -2750,7 +2775,7 @@ export function useChatRuntimeEvents({
                     Boolean(streamForRun)
                 );
             if (payload.runId) {
-                aliasProvisionalAssistantForTerminal(
+                aliasProvisionalStreamsForTerminal(
                     streamSessionKey,
                     payload.runId,
                     shouldClearProvisionalForScopedTerminal
