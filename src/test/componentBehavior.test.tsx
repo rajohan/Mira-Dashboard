@@ -7678,6 +7678,27 @@ describe("shared component helpers", () => {
         view.queryClient.clear();
     });
 
+    it("shows Git cache unavailable for an empty cache payload", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    data: "",
+                    key: "git.workspace",
+                    source: "backend",
+                    status: "error",
+                })
+            ),
+            writable: true,
+        });
+
+        const view = renderWithQueryClient(<GitOverviewCard />);
+
+        expect(await screen.findByText("Git cache unavailable.")).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("drives dashboard cards, file tree/config branches, and session action hook", async () => {
         const user = userEvent.setup();
         let realRunRequests = 0;

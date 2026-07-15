@@ -34,6 +34,12 @@ interface GitWorkspaceCache {
     checkedAt: string;
 }
 
+function isGitWorkspaceCache(value: unknown): value is GitWorkspaceCache {
+    if (!value || typeof value !== "object") return false;
+    const candidate = value as Partial<GitWorkspaceCache>;
+    return Array.isArray(candidate.repos) && Array.isArray(candidate.missingRepos);
+}
+
 function repoUrlFromRemote(remote: string | undefined): string | undefined {
     if (!remote) {
         return undefined;
@@ -58,7 +64,7 @@ function repoUrlFromRemote(remote: string | undefined): string | undefined {
 export function GitOverviewCard() {
     const { data, isLoading } = useCacheEntry<GitWorkspaceCache>("git.workspace", 60_000);
 
-    const git = data?.data;
+    const git = isGitWorkspaceCache(data?.data) ? data.data : undefined;
     const repos = git?.repos || [];
     const dirtyRepos = repos.filter((repo) => repo.dirty);
     const offMainRepos = repos.filter(
