@@ -3450,7 +3450,7 @@ describe("Mira Dashboard pages", () => {
                 updatedAt: "2026-06-24T08:00:00.000Z",
             },
             "agent:main:main::assistant": {
-                aliases: [],
+                aliases: ["dashboard-chat-a"],
                 runId: "agent:main:main",
                 sessionKey: "agent:main:main",
                 text: "Provisional A",
@@ -3478,6 +3478,10 @@ describe("Mira Dashboard pages", () => {
             activeStreamsAfterFailedSend(
                 {
                     ...failedSendStreams,
+                    "agent:main:main::assistant": {
+                        ...failedSendStreams["agent:main:main::assistant"],
+                        aliases: [],
+                    },
                     "agent:main:main::dashboard-chat-b::assistant": {
                         ...failedSendStreams[
                             "agent:main:main::dashboard-chat-b::assistant"

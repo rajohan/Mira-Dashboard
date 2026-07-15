@@ -345,7 +345,7 @@ export function messagesWithFinalThinkingPersistence(
     let responseSegment: Array<{
         message: ChatHistoryMessage;
         messageWithoutThinking: ChatHistoryMessage;
-        isThinkingOnlyAssistant: boolean;
+        hasRetainableAssistantThinking: boolean;
     }> = [];
     let hasPrimaryAssistantAnswer = false;
     let hasUnscopedPrimaryAssistantAnswer = false;
@@ -358,7 +358,7 @@ export function messagesWithFinalThinkingPersistence(
                   primaryAssistantRunIds.has(entry.message.runId)
                 : hasPrimaryAssistantAnswer;
             nextMessages.push(
-                entry.isThinkingOnlyAssistant && !isThinkingSuperseded
+                entry.hasRetainableAssistantThinking && !isThinkingSuperseded
                     ? entry.message
                     : entry.messageWithoutThinking
             );
@@ -403,11 +403,11 @@ export function messagesWithFinalThinkingPersistence(
         responseSegment.push({
             message,
             messageWithoutThinking,
-            isThinkingOnlyAssistant: Boolean(
+            hasRetainableAssistantThinking: Boolean(
                 visibility.shouldShowThinking &&
                 message.role.toLowerCase() === "assistant" &&
                 message.thinking?.length &&
-                !isRenderableChatHistoryMessage(messageWithoutThinking, visibility)
+                (isDiagnosticToolMessage || !hasPrimaryAssistantContent)
             ),
         });
     }

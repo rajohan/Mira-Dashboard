@@ -449,6 +449,50 @@ describe("shared component helpers", () => {
                 toolCalls: [expect.objectContaining({ name: "exec" })],
             }),
         ]);
+        const thinkingToolMessage = {
+            role: "assistant",
+            runId: "thinking-tool-run",
+            content: [
+                { type: "thinking", text: "Inspecting tool output" },
+                { type: "toolCall", id: "call-2", name: "exec" },
+            ],
+            diagnostic: true,
+        };
+        expect(
+            visibleHistoryMessages(
+                [{ role: "user", content: "Keep working" }, thinkingToolMessage],
+                createChatVisibility(true, true),
+                false
+            )
+        ).toEqual([
+            expect.objectContaining({ role: "user" }),
+            expect.objectContaining({
+                thinking: [{ text: "Inspecting tool output" }],
+                toolCalls: [expect.objectContaining({ id: "call-2" })],
+            }),
+        ]);
+        expect(
+            visibleHistoryMessages(
+                [
+                    { role: "user", content: "Keep working" },
+                    thinkingToolMessage,
+                    {
+                        role: "assistant",
+                        runId: "thinking-tool-run",
+                        content: "Finished",
+                    },
+                ],
+                createChatVisibility(true, true),
+                false
+            )
+        ).toEqual([
+            expect.objectContaining({ role: "user" }),
+            expect.objectContaining({
+                thinking: undefined,
+                toolCalls: [expect.objectContaining({ id: "call-2" })],
+            }),
+            expect.objectContaining({ text: "Finished" }),
+        ]);
         expect(
             visibleHistoryMessages(
                 [blockFinalMessage],
@@ -5731,6 +5775,232 @@ describe("shared component helpers", () => {
                 ]?.text
             ).toBe("Second pending answer");
         });
+
+        unmount();
+    });
+
+    it("promotes the only provisional assistant stream when its run id arrives", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const activeStreamsReference: { current: ActiveChatStreams } = {
+            current: {
+                "agent:main:main": {
+                    aliases: [],
+                    runId: "agent:main:main",
+                    sessionKey: "agent:main:main",
+                    text: "First ",
+                    updatedAt: new Date().toISOString(),
+                },
+                "agent:main:main::other-run::assistant": {
+                    aliases: ["other-run"],
+                    runId: "other-run",
+                    sessionKey: "agent:main:main",
+                    text: "Other answer",
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        };
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return jest.fn();
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "answer",
+                    runId: "first-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() =>
+            expect(activeStreamsReference.current["agent:main:main"]).toMatchObject({
+                aliases: expect.arrayContaining(["first-run"]),
+                runId: "first-run",
+                text: "First answer",
+            })
+        );
+        expect(
+            activeStreamsReference.current["agent:main:main::first-run::assistant"]
+        ).toBeUndefined();
+
+        unmount();
+    });
+
+    it("keeps the optimistic send alias on pre-ACK scoped deltas", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const optimisticKey = "agent:main:main::dashboard-chat-pre-ack::assistant";
+        const activeStreamsReference: { current: ActiveChatStreams } = {
+            current: {
+                [optimisticKey]: {
+                    aliases: ["dashboard-chat-pre-ack"],
+                    runId: "dashboard-chat-pre-ack",
+                    sessionKey: "agent:main:main",
+                    statusText: "Thinking",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        };
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return jest.fn();
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Pre-ACK",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() =>
+            expect(activeStreamsReference.current[optimisticKey]?.runId).toBe(
+                "agent:main:main"
+            )
+        );
+        expect(activeStreamsReference.current[optimisticKey]).toMatchObject({
+            aliases: ["dashboard-chat-pre-ack", "agent:main:main"],
+            text: "Pre-ACK",
+        });
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    deltaText: "Pre-ACK answer",
+                    runId: "real-pre-ack-run",
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() =>
+            expect(activeStreamsReference.current[optimisticKey]?.runId).toBe(
+                "real-pre-ack-run"
+            )
+        );
+        expect(activeStreamsReference.current[optimisticKey]).toMatchObject({
+            aliases: ["dashboard-chat-pre-ack", "agent:main:main", "real-pre-ack-run"],
+            text: "Pre-ACK answer",
+        });
+
+        unmount();
+    });
+
+    it("records a compact terminal that arrives before its send ACK", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const pendingTerminalRunIdsReference = {
+            current: new Map<string, Set<string>>(),
+        };
+        const activeStreamsReference: { current: ActiveChatStreams } = {
+            current: {
+                "agent:main:main": {
+                    aliases: ["dashboard-compact-pending"],
+                    operation: "compact",
+                    runId: "dashboard-compact-pending",
+                    sessionKey: "agent:main:main",
+                    statusText: "Compacting context",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        };
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return jest.fn();
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                pendingTerminalRunIdsReference,
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "real-compact-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+        });
+        expect(pendingTerminalRunIdsReference.current.get("agent:main:main")).toEqual(
+            new Set(["real-compact-run"])
+        );
 
         unmount();
     });

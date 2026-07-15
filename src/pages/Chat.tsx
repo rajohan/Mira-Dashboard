@@ -581,68 +581,13 @@ export function activeStreamsAfterFailedSend(
         return streams;
     }
 
-    let failedSendUpdatedAt: number | undefined;
-    for (const stream of Object.values(streams)) {
-        if (
-            !isSameSessionKey(stream.sessionKey, sessionKey) ||
-            (stream.runId !== runId && !stream.aliases.includes(runId))
-        ) {
-            continue;
-        }
-
-        const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
-        if (
-            streamUpdatedAt !== undefined &&
-            (failedSendUpdatedAt === undefined || streamUpdatedAt < failedSendUpdatedAt)
-        ) {
-            failedSendUpdatedAt = streamUpdatedAt;
-        }
-    }
-
     return Object.fromEntries(
-        Object.entries(streams).filter(([streamKey, stream]) => {
+        Object.entries(streams).filter(([, stream]) => {
             if (!isSameSessionKey(stream.sessionKey, sessionKey)) {
                 return true;
             }
 
-            if (stream.runId === runId || stream.aliases.includes(runId)) {
-                return false;
-            }
-
-            const streamUpdatedAt = sessionTimestampMs(stream.updatedAt);
-            const hasCompetingSendAtProvisionalTime = Object.values(streams).some(
-                (candidate) => {
-                    if (
-                        !isSameSessionKey(candidate.sessionKey, sessionKey) ||
-                        candidate.runId === runId ||
-                        candidate.aliases.includes(runId) ||
-                        !(
-                            candidate.runId.startsWith("dashboard-chat-") ||
-                            candidate.aliases.some((alias) =>
-                                alias.startsWith("dashboard-chat-")
-                            )
-                        )
-                    ) {
-                        return false;
-                    }
-
-                    const candidateUpdatedAt = sessionTimestampMs(candidate.updatedAt);
-                    return (
-                        streamUpdatedAt === undefined ||
-                        candidateUpdatedAt === undefined ||
-                        candidateUpdatedAt <= streamUpdatedAt
-                    );
-                }
-            );
-            const isFailedSendProvisionalRuntimeStream =
-                !hasCompetingSendAtProvisionalTime &&
-                streamKey.startsWith(`${sessionKey}::`) &&
-                stream.runId === sessionKey &&
-                failedSendUpdatedAt !== undefined &&
-                streamUpdatedAt !== undefined &&
-                streamUpdatedAt >= failedSendUpdatedAt;
-
-            return !isFailedSendProvisionalRuntimeStream;
+            return stream.runId !== runId && !stream.aliases.includes(runId);
         })
     );
 }
