@@ -299,7 +299,8 @@ export function isActiveStreamRecoveredInMessages(
     now = Date.now(),
     shouldRequireThinking = true,
     shouldRequireNewerFinalForThinking = false,
-    matchingRunIds: string[] = []
+    matchingRunIds: string[] = [],
+    shouldAllowUnscopedFinal = false
 ): boolean {
     const streamText = activeStreamRenderableText(stream);
     const streamThinkingText =
@@ -325,7 +326,8 @@ export function isActiveStreamRecoveredInMessages(
         !hasNewerAssistantMessageInHistory(
             visibleMessages,
             stream.updatedAt,
-            matchingRunIds
+            matchingRunIds,
+            shouldAllowUnscopedFinal
         )
     ) {
         return false;
@@ -1239,7 +1241,8 @@ export function Chat() {
                                 Date.now(),
                                 showThinkingOutput,
                                 !keepThinkingAfterFinal,
-                                streamRunIds
+                                streamRunIds,
+                                sessionActiveStreams.length === 1
                             ) ||
                                 (streamText &&
                                     hasRecoveredStreamHistory(

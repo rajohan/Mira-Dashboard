@@ -4987,6 +4987,32 @@ describe("shared component helpers", () => {
 
         expect(messages.map((message) => message.text)).toContain("final answer");
         expect(messages.some((message) => message.thinking?.length)).toBe(false);
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "late channel reasoning" },
+                    runId: "resolved-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "end" },
+                    runId: "resolved-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        expect(messages.some((message) => message.thinking?.length)).toBe(false);
         unmount();
     });
 
@@ -6160,6 +6186,27 @@ describe("shared component helpers", () => {
                 ["run-b"]
             )
         ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                { ...stream, runId: "run-b", updatedAt: quietUpdatedAt },
+                recoveryHistory,
+                now,
+                true,
+                true,
+                ["run-b"]
+            )
+        ).toBe(false);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                { ...stream, runId: "run-b", updatedAt: quietUpdatedAt },
+                recoveryHistory,
+                now,
+                true,
+                true,
+                ["run-b"],
+                true
+            )
+        ).toBe(true);
         expect(isActiveStreamRecoveredInMessages(stream, renderedHistory, now)).toBe(
             false
         );
