@@ -2879,6 +2879,15 @@ describe("Mira Dashboard pages", () => {
         expect(
             screen.queryByRole("button", { name: "Stop current run" })
         ).not.toBeInTheDocument();
+        const pendingSendDraft = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        await user.type(pendingSendDraft, "/stop");
+        await user.click(screen.getByRole("button", { name: "Send" }));
+        expect(findSocketRequest(socket, "chat.abort")).toBeUndefined();
+        expect(
+            screen.getByText(/Wait for the current send to start before stopping it/)
+        ).toBeInTheDocument();
         await respondToSocketRequest(socket, "chat.send", { runId: "run-123" });
         await flushQueuedTimers();
 

@@ -1430,7 +1430,10 @@ export function Chat() {
                     ([stoppingSessionKey, runGroups]) =>
                         isSameSessionKey(stoppingSessionKey, sessionKey) &&
                         runGroups.some(
-                            (runGroup) => runGroup.has(runId || "") || runGroup.has("")
+                            (runGroup) =>
+                                runGroup.has(runId || "") ||
+                                runGroup.has("") ||
+                                (!runId && runGroups.length === 1)
                         )
                 )?.[0],
         onRunTerminal: (sessionKey, runId) =>
@@ -1444,7 +1447,10 @@ export function Chat() {
                 const runGroups =
                     stoppingRunGroupsReference.current.get(matchingKey) || [];
                 const matchingGroupIndex = runGroups.findIndex(
-                    (runGroup) => runGroup.has(runId || "") || runGroup.has("")
+                    (runGroup) =>
+                        runGroup.has(runId || "") ||
+                        runGroup.has("") ||
+                        (!runId && runGroups.length === 1)
                 );
                 if (matchingGroupIndex === -1) return wasStopping;
                 const nextRunGroups = runGroups.filter(
@@ -1868,6 +1874,9 @@ export function Chat() {
 
     /** Stops one session while retaining its buffered output until terminal cleanup. */
     const stopCurrentRun = async (sessionKey: string) => {
+        if (pendingSendSessionCountsReference.current.has(sessionKey)) {
+            throw new Error("Wait for the current send to start before stopping it");
+        }
         const sessionStreams = Object.values(activeStreamsReference.current).filter(
             (stream) => isSameSessionKey(stream.sessionKey, sessionKey)
         );
@@ -2038,23 +2047,21 @@ export function Chat() {
             return;
         }
 
-        const sendEpoch = beginSend(pendingSendSessionKey);
-
         if (text.startsWith("/")) {
             let isHandledCommand: boolean;
             try {
                 isHandledCommand = await handleSlashCommand(text, currentAttachments);
             } catch (error_) {
                 setSendError(chatErrorMessage(error_, "Failed to run slash command"));
-                endSend(sendEpoch, pendingSendSessionKey);
                 return;
             }
 
             if (isHandledCommand) {
-                endSend(sendEpoch, pendingSendSessionKey);
                 return;
             }
         }
+
+        const sendEpoch = beginSend(pendingSendSessionKey);
 
         const messageText = text;
         const sendAttachments = currentAttachments;
