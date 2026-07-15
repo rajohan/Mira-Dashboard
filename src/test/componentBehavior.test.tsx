@@ -1111,26 +1111,6 @@ describe("shared component helpers", () => {
             requestCalls.push([method, parameters]);
             return { ok: true } as T;
         };
-        let updatedActiveStreams: ActiveChatStreams = {};
-        const updateActiveStreams = jest.fn((updater) => {
-            updatedActiveStreams = updater({
-                "agent:main:main": {
-                    aliases: [],
-                    runId: "r1",
-                    sessionKey: "agent:main:main",
-                    text: "run",
-                    updatedAt: "now",
-                },
-                "agent:main:main::thinking": {
-                    aliases: [],
-                    runId: "r1",
-                    sessionKey: "agent:main:main",
-                    text: "buffered reasoning",
-                    updatedAt: "now",
-                },
-            });
-            return updatedActiveStreams;
-        });
         const setMessages = jest.fn((updater) => updater([]));
         const setDraft = jest.fn();
         const setSendError = jest.fn();
@@ -1143,7 +1123,6 @@ describe("shared component helpers", () => {
             setDraft,
             setMessages,
             setSendError,
-            updateActiveStreams,
         });
 
         await expect(runSlashCommand("hello")).resolves.toBe(false);
@@ -1155,10 +1134,6 @@ describe("shared component helpers", () => {
             "chat.abort",
             { sessionKey: "agent:main:main" },
         ]);
-        expect(updatedActiveStreams["agent:main:main"]).toBeUndefined();
-        expect(updatedActiveStreams["agent:main:main::thinking"]?.text).toBe(
-            "buffered reasoning"
-        );
         setDraft.mockClear();
         await expect(runSlashCommand("/stop", [], { preserveDraft: true })).resolves.toBe(
             true
@@ -1183,7 +1158,6 @@ describe("shared component helpers", () => {
             setDraft,
             setMessages,
             setSendError,
-            updateActiveStreams,
         });
         await expect(blocked("/stop")).resolves.toBe(true);
         expect(setSendError).toHaveBeenCalledWith("/stop cannot include attachments.");

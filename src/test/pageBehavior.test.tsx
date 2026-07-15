@@ -2876,8 +2876,17 @@ describe("Mira Dashboard pages", () => {
             sessionId: "session-main",
             message: "Ship it",
         });
+        expect(
+            screen.queryByRole("button", { name: "Stop current run" })
+        ).not.toBeInTheDocument();
         await respondToSocketRequest(socket, "chat.send", { runId: "run-123" });
         await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "Stop current run" })
+            ).toBeInTheDocument();
+        });
 
         await waitFor(() => {
             expect(

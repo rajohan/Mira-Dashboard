@@ -1802,7 +1802,6 @@ export function Chat() {
         request,
         selectedSessionKey,
         attachments,
-        updateActiveStreams,
         setMessages,
         setDraft,
         setSendError,
@@ -2050,6 +2049,7 @@ export function Chat() {
     const canStop = Boolean(
         isConnected &&
         selectedSessionKey &&
+        !isSending &&
         (selectedStreams.length > 0 || isSessionActive(selectedSession))
     );
     const canSend = Boolean(
