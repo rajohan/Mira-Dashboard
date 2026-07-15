@@ -242,23 +242,38 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     }
 
     const responseRows = rows.slice(lastUserRowIndex + 1);
-    const isToolDiagnosticRow = (row: ChatRow) => {
+    const isToolDiagnosticRow = (row: ChatRow, rowIndex: number) => {
         const role = row.message.role.toLowerCase();
         const hasToolDetails = Boolean(
             row.message.toolCalls?.length || row.message.toolResult
         );
         const hasPrimaryContent = hasPrimaryChatMessageContent(row.message);
+        const hasLaterCompatiblePrimaryAnswer = responseRows.some(
+            (candidate, candidateIndex) =>
+                candidateIndex > rowIndex &&
+                candidate.kind !== "typing" &&
+                candidate.message.role.toLowerCase() === "assistant" &&
+                !candidate.message.diagnostic &&
+                hasPrimaryChatMessageContent(candidate.message) &&
+                (row.message.runId
+                    ? !candidate.message.runId ||
+                      candidate.message.runId === row.message.runId
+                    : !candidate.message.runId)
+        );
         return (
             TOOL_ROLE_VARIANTS.includes(role) ||
-            (hasToolDetails && (row.message.diagnostic || !hasPrimaryContent))
+            (hasToolDetails &&
+                (row.message.diagnostic ||
+                    !hasPrimaryContent ||
+                    (!row.message.text.trim() && hasLaterCompatiblePrimaryAnswer)))
         );
     };
     const finalRowIndex = responseRows.findLastIndex(
-        (row) =>
+        (row, rowIndex) =>
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
             hasPrimaryChatMessageContent(row.message) &&
-            !isToolDiagnosticRow(row)
+            !isToolDiagnosticRow(row, rowIndex)
     );
     if (finalRowIndex === -1) {
         return rows;
@@ -271,7 +286,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
             row.kind !== "typing" &&
             row.message.role.toLowerCase() === "assistant" &&
             hasPrimaryChatMessageContent(row.message) &&
-            !isToolDiagnosticRow(row)
+            !isToolDiagnosticRow(row, rowIndex)
     );
     const currentResponseStartIndex = previousAssistantTextRowIndex + 1;
     const currentResponseRows = responseRows.slice(currentResponseStartIndex);
@@ -293,7 +308,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
         if (row === finalRow || !isRowInCurrentResponse(row)) {
             return false;
         }
-        return isToolDiagnosticRow(row);
+        return isToolDiagnosticRow(row, responseRows.indexOf(row));
     });
     if (thinkingRows.length === 0 && toolRows.length === 0) {
         return rows;

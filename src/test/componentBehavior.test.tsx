@@ -495,6 +495,25 @@ describe("shared component helpers", () => {
         ]);
         expect(
             visibleHistoryMessages(
+                [
+                    { role: "user", content: "First overlapping prompt" },
+                    scopedThinkingMessage,
+                    { role: "user", content: "Second overlapping prompt" },
+                    { ...otherRunFinalMessage, runId: "active-thinking-run" },
+                ],
+                createChatVisibility(true, false),
+                false
+            )
+        ).toEqual([
+            expect.objectContaining({ text: "First overlapping prompt" }),
+            expect.objectContaining({ text: "Second overlapping prompt" }),
+            expect.objectContaining({
+                runId: "active-thinking-run",
+                text: "Other answer",
+            }),
+        ]);
+        expect(
+            visibleHistoryMessages(
                 [blockFinalMessage],
                 createChatVisibility(false, false),
                 true
@@ -6586,6 +6605,60 @@ describe("shared component helpers", () => {
             "older delayed output"
         );
 
+        const concurrentToolResultVisible = normalizeVisibleChatHistoryMessages(
+            [
+                {
+                    content: [
+                        {
+                            arguments: { command: "status" },
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    runId: "run-a",
+                },
+                {
+                    content: [
+                        {
+                            arguments: { command: "status" },
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    runId: "run-b",
+                },
+                {
+                    content: [
+                        {
+                            arguments: { command: "status" },
+                            name: "functions.exec_command",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                },
+                {
+                    content: "run-a output",
+                    role: "tool",
+                    runId: "run-a",
+                    toolName: "functions.exec_command",
+                },
+            ],
+            createChatVisibility(true, true)
+        );
+        expect(concurrentToolResultVisible).toHaveLength(3);
+        expect(concurrentToolResultVisible[0]?.toolCalls?.[0]?.toolResult?.content).toBe(
+            "run-a output"
+        );
+        expect(
+            concurrentToolResultVisible[1]?.toolCalls?.[0]?.toolResult
+        ).toBeUndefined();
+        expect(
+            concurrentToolResultVisible[2]?.toolCalls?.[0]?.toolResult
+        ).toBeUndefined();
+
         const foldedTimestampVisible = normalizeVisibleChatHistoryMessages(
             [
                 {
@@ -8466,6 +8539,31 @@ describe("shared component helpers", () => {
                 (row) => row.key
             )
         ).toEqual(["user", "tool", "media-final"]);
+        const mediaToolRow = {
+            ...toolRow,
+            key: "media-tool",
+            message: {
+                ...toolRow.message,
+                attachments: [
+                    {
+                        fileName: "tool-output.png",
+                        id: "tool-output",
+                        kind: "image" as const,
+                    },
+                ],
+                content: [],
+                diagnostic: undefined,
+                text: "",
+            },
+        };
+        expect(
+            orderCurrentResponseRows([
+                userRow,
+                thinkingRow,
+                mediaToolRow,
+                finalHistoryRow,
+            ]).map((row) => row.key)
+        ).toEqual(["user", "media-tool", "thinking", "final-history"]);
         const lateThinkingRow = {
             ...thinkingRow,
             key: "late-thinking",

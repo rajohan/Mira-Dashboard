@@ -681,6 +681,11 @@ function pushVisibleMessage(
         return;
     }
 
+    const candidates: Array<{
+        messageIndex: number;
+        toolCallIndex: number;
+        runId?: string;
+    }> = [];
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const existing = messages[index];
         const matchingIndex =
@@ -691,26 +696,46 @@ function pushVisibleMessage(
             continue;
         }
 
-        const nextToolCalls = [...(existing.toolCalls || [])];
-        const matchingToolCall = nextToolCalls[matchingIndex]!;
-        nextToolCalls[matchingIndex] = {
-            ...matchingToolCall,
-            toolResult: message.toolResult,
-        };
+        candidates.push({
+            messageIndex: index,
+            runId: existing.runId,
+            toolCallIndex: matchingIndex,
+        });
+    }
 
-        messages[index] = {
-            ...existing,
-            attachments: mergeChatAttachments(existing.attachments, message.attachments),
-            toolCalls: nextToolCalls,
-            toolResult:
-                existing.toolResult ||
-                (nextToolCalls.length === 1 ? message.toolResult : undefined),
-            timestamp: message.timestamp || existing.timestamp,
-        };
+    const exactRunCandidate = message.runId
+        ? candidates.find((candidate) => candidate.runId === message.runId)
+        : undefined;
+    const unscopedCandidates = candidates.filter((candidate) => !candidate.runId);
+    const selectedCandidate = message.runId
+        ? exactRunCandidate ||
+          (candidates.length === unscopedCandidates.length
+              ? unscopedCandidates[0]
+              : undefined)
+        : unscopedCandidates[0] || (candidates.length === 1 ? candidates[0] : undefined);
+    if (!selectedCandidate) {
+        messages.push(message);
         return;
     }
 
-    messages.push(message);
+    const existing = messages[selectedCandidate.messageIndex]!;
+    const matchingIndex = selectedCandidate.toolCallIndex;
+    const nextToolCalls = [...(existing.toolCalls || [])];
+    const matchingToolCall = nextToolCalls[matchingIndex]!;
+    nextToolCalls[matchingIndex] = {
+        ...matchingToolCall,
+        toolResult: message.toolResult,
+    };
+
+    messages[selectedCandidate.messageIndex] = {
+        ...existing,
+        attachments: mergeChatAttachments(existing.attachments, message.attachments),
+        toolCalls: nextToolCalls,
+        toolResult:
+            existing.toolResult ||
+            (nextToolCalls.length === 1 ? message.toolResult : undefined),
+        timestamp: message.timestamp || existing.timestamp,
+    };
 }
 
 /** Normalizes visible chat history messages. */

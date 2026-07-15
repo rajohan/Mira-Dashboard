@@ -349,7 +349,7 @@ export function messagesWithFinalThinkingPersistence(
     }> = [];
     let hasPrimaryAssistantAnswer = false;
     let hasUnscopedPrimaryAssistantAnswer = false;
-    let primaryAssistantRunIds = new Set<string>();
+    const primaryAssistantRunIds = new Set<string>();
 
     const flushResponseSegment = () => {
         for (const entry of responseSegment) {
@@ -366,7 +366,6 @@ export function messagesWithFinalThinkingPersistence(
         responseSegment = [];
         hasPrimaryAssistantAnswer = false;
         hasUnscopedPrimaryAssistantAnswer = false;
-        primaryAssistantRunIds = new Set();
     };
 
     for (
