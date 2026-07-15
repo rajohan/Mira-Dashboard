@@ -573,6 +573,24 @@ describe("Mira Dashboard backend integration", () => {
         expect(clearCache.status).toBe(200);
         expect(clearCache.body).toEqual({ deleted: 1, isOk: true });
 
+        const clearAllCandidate = await api<{ id: number; isOk: boolean }>(
+            "/api/notifications",
+            json("POST", {
+                title: "Read notification to clear",
+                source: "test",
+            })
+        );
+        await api<{ isOk: boolean }>(
+            `/api/notifications/${clearAllCandidate.body.id}/read`,
+            { method: "POST" }
+        );
+        const clearAllRead = await api<{ deleted: number; isOk: boolean }>(
+            "/api/notifications/clear-read",
+            json("POST", {})
+        );
+        expect(clearAllRead.status).toBe(200);
+        expect(clearAllRead.body).toEqual({ deleted: 1, isOk: true });
+
         const deleteUnread = await api<{ deleted: number; isOk: boolean }>(
             `/api/notifications/${second.body.id}`,
             { method: "DELETE" }
