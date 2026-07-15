@@ -261,6 +261,9 @@ describe("database overview service", () => {
             });
             const invocationLogContents = await Bun.file(invocationLog).text();
             expect(invocationLogContents).toContain("classes.reltuples::numeric");
+            expect(invocationLogContents).toContain(
+                "tables.n_mod_since_analyze::numeric"
+            );
             const torrentCountQueries = invocationLogContents
                 .split("\n")
                 .filter((line) =>
