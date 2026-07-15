@@ -725,6 +725,7 @@ describe("shared component helpers", () => {
         const onPreview = jest.fn();
         const onRemoveAttachment = jest.fn();
         const onSend = jest.fn();
+        const onStop = jest.fn();
         const onToggleRecording = jest.fn();
 
         render(
@@ -751,6 +752,7 @@ describe("shared component helpers", () => {
                     },
                 ]}
                 canSend={true}
+                canStop={true}
                 draft="/he"
                 fileInputReference={fileInputReference}
                 isConnected={true}
@@ -776,6 +778,7 @@ describe("shared component helpers", () => {
                 onPreview={onPreview}
                 onRemoveAttachment={onRemoveAttachment}
                 onSend={onSend}
+                onStop={onStop}
                 onToggleRecording={onToggleRecording}
             />
         );
@@ -799,6 +802,10 @@ describe("shared component helpers", () => {
         expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
         expect(onApplySlashSuggestion).toHaveBeenLastCalledWith("/health");
         expect(onSend).not.toHaveBeenCalled();
+
+        await user.click(screen.getByRole("button", { name: "Stop current run" }));
+        expect(onStop).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
 
         const bubbledEnter = jest.fn();
         fireEvent.change(textarea, { target: { value: "/he-shift" } });
@@ -1139,6 +1146,11 @@ describe("shared component helpers", () => {
             "chat.abort",
             { sessionKey: "agent:main:main" },
         ]);
+        setDraft.mockClear();
+        await expect(runSlashCommand("/stop", [], { preserveDraft: true })).resolves.toBe(
+            true
+        );
+        expect(setDraft).not.toHaveBeenCalled();
 
         const blocked = useChatSlashCommands({
             attachments: [

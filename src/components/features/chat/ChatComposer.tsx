@@ -127,6 +127,8 @@ interface ChatComposerProperties {
     isConnected: boolean;
     isRecording: boolean;
     isSending: boolean;
+    canStop?: boolean;
+    isStopping?: boolean;
     isTranscribing: boolean;
     selectedSessionKey: string;
     selectedSession?: Session;
@@ -143,6 +145,7 @@ interface ChatComposerProperties {
     onPreview: (isPreview: ChatPreviewItem) => void;
     onRemoveAttachment: (attachmentId: string) => void;
     onSend: () => void;
+    onStop?: () => void;
     onToggleRecording: () => void;
     onToggleThinking?: () => void;
     onToggleTools?: () => void;
@@ -162,6 +165,8 @@ export function ChatComposer({
     isConnected,
     isRecording,
     isSending,
+    canStop = false,
+    isStopping = false,
     isTranscribing,
     selectedSessionKey,
     selectedSession,
@@ -178,6 +183,7 @@ export function ChatComposer({
     onPreview,
     onRemoveAttachment,
     onSend,
+    onStop,
     onToggleRecording,
     onToggleThinking,
     onToggleTools,
@@ -753,6 +759,28 @@ export function ChatComposer({
                             >
                                 <Paperclip className="size-4" />
                             </Button>
+                            {canStop || isStopping ? (
+                                <Button
+                                    type="button"
+                                    variant="danger"
+                                    size="sm"
+                                    onClick={() => onStop?.()}
+                                    disabled={isStopping}
+                                    title={
+                                        isStopping
+                                            ? "Stopping current run"
+                                            : "Stop current run"
+                                    }
+                                    aria-label={
+                                        isStopping
+                                            ? "Stopping current run"
+                                            : "Stop current run"
+                                    }
+                                    className="size-8 shrink-0 rounded-full p-0"
+                                >
+                                    <Square className="size-3.5 fill-current" />
+                                </Button>
+                            ) : undefined}
                             <Button
                                 type="button"
                                 variant="primary"

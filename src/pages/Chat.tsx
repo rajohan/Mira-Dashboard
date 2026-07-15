@@ -755,6 +755,7 @@ export function Chat() {
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
+    const [isStopping, setIsStopping] = useState(false);
     const [pendingSessionPatchCounts, setPendingSessionPatchCounts] = useState<
         Record<string, number>
     >({});
@@ -2046,6 +2047,11 @@ export function Chat() {
             stream.operation === "compact" ||
             stream.statusText?.toLowerCase().includes("compact")
     );
+    const canStop = Boolean(
+        isConnected &&
+        selectedSessionKey &&
+        (selectedStreams.length > 0 || isSessionActive(selectedSession))
+    );
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
@@ -2063,6 +2069,20 @@ export function Chat() {
         selectedStreams.length > 0 ||
         isSessionActive(selectedSession)
     );
+
+    /** Stops the active run without changing the current draft. */
+    const handleStop = async () => {
+        if (!canStop || isStopping) {
+            return;
+        }
+
+        setIsStopping(true);
+        try {
+            await handleSlashCommand("/stop", [], { preserveDraft: true });
+        } finally {
+            setIsStopping(false);
+        }
+    };
 
     /** Updates one OpenClaw session preference without interrupting the chat. */
     const patchSelectedSession = async (patch: Record<string, unknown>) => {
@@ -2212,6 +2232,8 @@ export function Chat() {
                         isConnected={isConnected}
                         isRecording={isRecording}
                         isSending={isSending}
+                        canStop={canStop}
+                        isStopping={isStopping}
                         isTranscribing={isTranscribing}
                         selectedSessionKey={selectedSessionKey}
                         selectedSession={selectedSession}
@@ -2227,6 +2249,7 @@ export function Chat() {
                         onPreview={setPreviewItem}
                         onRemoveAttachment={removeAttachment}
                         onSend={() => void handleSend()}
+                        onStop={() => void handleStop()}
                         onToggleRecording={() => void handleToggleRecording()}
                         onToggleThinking={() => {
                             const shouldShowThinking = !showThinkingOutput;
