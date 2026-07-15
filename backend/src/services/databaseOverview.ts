@@ -351,14 +351,14 @@ export async function getDatabaseOverview() {
             ROUND(
                 CASE WHEN GREATEST(
                     tables.n_live_tup::numeric,
-                    classes.reltuples::numeric - tables.n_dead_tup::numeric
+                    classes.reltuples::numeric
                 ) <= 0 THEN 0
                 ELSE (
                     tables.n_dead_tup::numeric /
                     NULLIF(
                         GREATEST(
                             tables.n_live_tup::numeric,
-                            classes.reltuples::numeric - tables.n_dead_tup::numeric
+                            classes.reltuples::numeric
                         ),
                         0
                     )
@@ -393,13 +393,13 @@ export async function getDatabaseOverview() {
                 WHEN widths.row_width IS NULL OR
                      GREATEST(
                          tables.n_live_tup::numeric,
-                         classes.reltuples::numeric - tables.n_dead_tup::numeric
+                         classes.reltuples::numeric
                      ) <= 0 THEN ''
                 ELSE GREATEST(
                     pg_relation_size(tables.relid) - CEIL(
                         GREATEST(
                             tables.n_live_tup::numeric,
-                            classes.reltuples::numeric - tables.n_dead_tup::numeric
+                            classes.reltuples::numeric
                         ) *
                         (widths.row_width + 32) * 1.2
                     ),
@@ -409,7 +409,7 @@ export async function getDatabaseOverview() {
             (widths.row_width IS NOT NULL AND
              GREATEST(
                  tables.n_live_tup::numeric,
-                 classes.reltuples::numeric - tables.n_dead_tup::numeric
+                 classes.reltuples::numeric
              ) > 0)::text AS assessed
         FROM pg_stat_user_tables AS tables
         JOIN pg_class AS classes ON classes.oid = tables.relid
