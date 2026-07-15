@@ -56,10 +56,7 @@ function repoUrlFromRemote(remote: string | undefined): string | undefined {
 
 /** Renders the Git overview card UI. */
 export function GitOverviewCard() {
-    const { data, isLoading, isError } = useCacheEntry<GitWorkspaceCache>(
-        "git.workspace",
-        60_000
-    );
+    const { data, isLoading } = useCacheEntry<GitWorkspaceCache>("git.workspace", 60_000);
 
     const git = data?.data;
     const repos = git?.repos || [];
@@ -79,7 +76,7 @@ export function GitOverviewCard() {
 
             {isLoading ? (
                 <div className="text-sm text-primary-300">Loading git cache…</div>
-            ) : isError || !git ? (
+            ) : git === undefined ? (
                 <div className="text-sm text-rose-300">Git cache unavailable.</div>
             ) : (
                 <div className="space-y-3 text-sm text-primary-200">
