@@ -259,19 +259,39 @@ export function messagesWithFinalThinkingPersistence(
         message: ChatHistoryMessage;
         messageWithoutThinking: ChatHistoryMessage;
         hasRetainableAssistantThinking: boolean;
+        hasPrimaryAssistantAnswer: boolean;
     }> = [];
-    let hasPrimaryAssistantAnswer = false;
 
     const flushResponseSegment = () => {
+        const primaryAnswerRunIds = new Set(
+            responseSegment
+                .filter((entry) => entry.hasPrimaryAssistantAnswer)
+                .map((entry) => entry.message.runId)
+                .filter((runId): runId is string => Boolean(runId))
+        );
+        const hasUnscopedPrimaryAnswer = responseSegment.some(
+            (entry) => entry.hasPrimaryAssistantAnswer && !entry.message.runId
+        );
+        const scopedRunIds = new Set(
+            responseSegment
+                .map((entry) => entry.message.runId)
+                .filter((runId): runId is string => Boolean(runId))
+        );
+        const hasAnyPrimaryAnswer = responseSegment.some(
+            (entry) => entry.hasPrimaryAssistantAnswer
+        );
         for (const entry of responseSegment) {
+            const hasSupersedingPrimaryAnswer = entry.message.runId
+                ? primaryAnswerRunIds.has(entry.message.runId) ||
+                  (hasUnscopedPrimaryAnswer && scopedRunIds.size <= 1)
+                : hasAnyPrimaryAnswer;
             nextMessages.push(
-                entry.hasRetainableAssistantThinking && !hasPrimaryAssistantAnswer
+                entry.hasRetainableAssistantThinking && !hasSupersedingPrimaryAnswer
                     ? entry.message
                     : entry.messageWithoutThinking
             );
         }
         responseSegment = [];
-        hasPrimaryAssistantAnswer = false;
     };
 
     for (
@@ -294,16 +314,15 @@ export function messagesWithFinalThinkingPersistence(
         );
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
         const isDiagnosticToolMessage = hasToolDetails && !hasPrimaryAssistantContent;
-        if (
+        const hasPrimaryAssistantAnswer = Boolean(
             message.role.toLowerCase() === "assistant" &&
             !isDiagnosticToolMessage &&
             isRenderableChatHistoryMessage(messageWithoutThinking, visibility)
-        ) {
-            hasPrimaryAssistantAnswer = true;
-        }
+        );
         responseSegment.push({
             message,
             messageWithoutThinking,
+            hasPrimaryAssistantAnswer,
             hasRetainableAssistantThinking: Boolean(
                 visibility.shouldShowThinking &&
                 message.role.toLowerCase() === "assistant" &&

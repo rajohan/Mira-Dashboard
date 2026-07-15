@@ -32,10 +32,12 @@ import {
     type ActiveChatStreams,
     createChatVisibility,
     mergeStreamMessage,
+    stripThinkingFromMessage,
     visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
 import {
     type ChatHistoryMessage,
+    normalizeChatHistoryMessage,
     normalizeVisibleChatHistoryMessages,
 } from "../components/features/chat/chatTypes";
 import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
@@ -1194,6 +1196,17 @@ describe("shared component helpers", () => {
     });
 
     it("normalizes chat runtime event helper output", () => {
+        const thinkingFileMessage = normalizeChatHistoryMessage({
+            role: "assistant",
+            content: [
+                {
+                    type: "thinking",
+                    text: '<file name="hidden.txt" mime="text/plain">hidden</file>',
+                },
+            ],
+        });
+        expect(stripThinkingFromMessage(thinkingFileMessage).attachments).toEqual([]);
+
         expect(compactStatusText("  hello   world  ")).toBe("hello world");
         expect(compactStatusText("x".repeat(140))).toHaveLength(120);
         expect(stringValue(" value ")).toBe("value");
@@ -6049,6 +6062,33 @@ describe("shared component helpers", () => {
         expect(isActiveStreamRecoveredInMessages(stream, recoveryHistory, now)).toBe(
             true
         );
+        expect(
+            isActiveStreamRecoveredInMessages(
+                { ...stream, updatedAt: quietUpdatedAt },
+                recoveryHistory,
+                now,
+                true,
+                true
+            )
+        ).toBe(true);
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    runId: "run-b",
+                    aliases: [],
+                    updatedAt: quietUpdatedAt,
+                },
+                recoveryHistory.map((message, index) => ({
+                    ...message,
+                    runId: index === recoveryHistory.length - 1 ? "run-a" : "run-b",
+                })),
+                now,
+                true,
+                true,
+                ["run-b"]
+            )
+        ).toBe(false);
         expect(isActiveStreamRecoveredInMessages(stream, renderedHistory, now)).toBe(
             false
         );

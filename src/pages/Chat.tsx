@@ -297,7 +297,9 @@ export function isActiveStreamRecoveredInMessages(
     stream: ActiveChatStream,
     visibleMessages: ChatHistoryMessage[],
     now = Date.now(),
-    shouldRequireThinking = true
+    shouldRequireThinking = true,
+    shouldRequireNewerFinalForThinking = false,
+    matchingRunIds: string[] = []
 ): boolean {
     const streamText = activeStreamRenderableText(stream);
     const streamThinkingText =
@@ -310,6 +312,24 @@ export function isActiveStreamRecoveredInMessages(
     const isStreamQuiet =
         streamUpdatedAt === undefined ||
         now - streamUpdatedAt >= ACTIVE_STREAM_HISTORY_RECOVERY_GRACE_MS;
+    const isThinkingOnlyStream = Boolean(
+        stream.message?.thinking?.length &&
+        !stream.message.text.trim() &&
+        !stream.message.toolCalls?.length &&
+        !stream.message.toolResult
+    );
+
+    if (
+        shouldRequireNewerFinalForThinking &&
+        isThinkingOnlyStream &&
+        !hasNewerAssistantMessageInHistory(
+            visibleMessages,
+            stream.updatedAt,
+            matchingRunIds
+        )
+    ) {
+        return false;
+    }
 
     return Boolean(
         (streamText.trim() || hasToolDetails) &&
@@ -508,7 +528,8 @@ export function sessionTimestampMs(value: unknown): number | undefined {
 /** Performs history has newer assistant message. */
 export function hasNewerAssistantMessageInHistory(
     messages: ChatHistoryMessage[],
-    updatedAt?: string
+    updatedAt?: string,
+    matchingRunIds: string[] = []
 ): boolean {
     const streamUpdatedAt = sessionTimestampMs(updatedAt);
 
@@ -517,7 +538,18 @@ export function hasNewerAssistantMessageInHistory(
     }
 
     return messages.some((message) => {
-        if (message.role.toLowerCase() !== "assistant" || !message.text.trim()) {
+        const messageWithoutThinking = stripThinkingFromMessage(message);
+        const hasPrimaryAssistantContent = Boolean(
+            messageWithoutThinking.text.trim() ||
+            messageWithoutThinking.images?.length ||
+            messageWithoutThinking.attachments?.length
+        );
+        if (
+            message.role.toLowerCase() !== "assistant" ||
+            !hasPrimaryAssistantContent ||
+            (matchingRunIds.length > 0 &&
+                (!message.runId || !matchingRunIds.includes(message.runId)))
+        ) {
             return false;
         }
 
@@ -838,14 +870,12 @@ export function Chat() {
         .join("\n");
     const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
     const visibleMessagesForRows = messagesWithFinalThinkingPersistence(
-        dedupeMessages(messages),
+        dedupeMessages(messages).filter(
+            (message) => !deletedMessageKeys.has(messageDeleteKey(message))
+        ),
         chatVisibility,
         keepThinkingAfterFinal
-    ).filter(
-        (message) =>
-            !deletedMessageKeys.has(messageDeleteKey(message)) &&
-            isRenderableChatHistoryMessage(message, chatVisibility)
-    );
+    ).filter((message) => isRenderableChatHistoryMessage(message, chatVisibility));
     /** Returns whether active stream text is already represented in history. */
     function isStreamRecoveredInMessages(stream: ActiveChatStream): boolean {
         return isActiveStreamRecoveredInMessages(
@@ -1157,10 +1187,12 @@ export function Chat() {
                     historyVisibility,
                     keepThinkingAfterFinal
                 );
-                const recoveredStreamKeys = Object.entries(activeStreamsReference.current)
-                    .filter(([, stream]) =>
-                        isSameSessionKey(stream.sessionKey, requestSessionKey)
-                    )
+                const sessionActiveStreams = Object.entries(
+                    activeStreamsReference.current
+                ).filter(([, stream]) =>
+                    isSameSessionKey(stream.sessionKey, requestSessionKey)
+                );
+                const recoveredStreamKeys = sessionActiveStreams
                     .filter(([, stream]) => {
                         const streamText = activeStreamRenderableText(stream);
                         const activeStreamUpdatedAt = sessionTimestampMs(
@@ -1178,24 +1210,33 @@ export function Chat() {
                             : false;
                         const isStatusOnlyStream =
                             !stream.message || !streamMessageIsRenderable;
+                        const streamRunIds = uniqueStrings([
+                            stream.runId,
+                            ...stream.aliases,
+                        ]);
+                        const hasMatchingNewerAssistant =
+                            hasNewerAssistantMessageInHistory(
+                                recoveryMessages,
+                                stream.updatedAt,
+                                sessionActiveStreams.length > 1 ? streamRunIds : []
+                            );
                         return Boolean(
                             isActiveStreamIsQuiet &&
                             (isActiveStreamRecoveredInMessages(
                                 stream,
                                 recoveryMessages,
                                 Date.now(),
-                                showThinkingOutput
+                                showThinkingOutput,
+                                !keepThinkingAfterFinal,
+                                sessionActiveStreams.length > 1 ? streamRunIds : []
                             ) ||
-                                (streamText &&
+                                (!stream.message?.thinking?.length &&
+                                    streamText &&
                                     hasRecoveredStreamHistory(
                                         recoveryMessages,
                                         streamText
                                     )) ||
-                                (isStatusOnlyStream &&
-                                    hasNewerAssistantMessageInHistory(
-                                        recoveryMessages,
-                                        stream.updatedAt
-                                    )))
+                                (isStatusOnlyStream && hasMatchingNewerAssistant))
                         );
                     })
                     .map(([key]) => key);
@@ -2178,11 +2219,6 @@ export function Chat() {
                             const shouldShowThinking = !showThinkingOutput;
                             if (!shouldShowThinking) {
                                 setKeepThinkingAfterFinal(false);
-                                setMessages((wasPrevious) =>
-                                    wasPrevious.map((message) =>
-                                        stripThinkingFromMessage(message)
-                                    )
-                                );
                             }
                             setShowThinkingOutput(shouldShowThinking);
                         }}
@@ -2191,17 +2227,7 @@ export function Chat() {
                             if (!showThinkingOutput) {
                                 return;
                             }
-                            const shouldKeepThinking = !keepThinkingAfterFinal;
-                            if (!shouldKeepThinking) {
-                                setMessages((wasPrevious) =>
-                                    messagesWithFinalThinkingPersistence(
-                                        wasPrevious,
-                                        createChatVisibility(true, showToolOutput),
-                                        false
-                                    )
-                                );
-                            }
-                            setKeepThinkingAfterFinal(shouldKeepThinking);
+                            setKeepThinkingAfterFinal(!keepThinkingAfterFinal);
                         }}
                         onSelectThinkingLevel={(thinkingLevel) =>
                             void patchSelectedSession({
