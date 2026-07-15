@@ -397,9 +397,20 @@ export async function getDatabaseOverview() {
                     tables.n_live_tup < classes.reltuples AND
                     tables.n_dead_tup >= ${HIGH_DEAD_TUPLE_MINIMUM} AND
                     (
-                        tables.n_dead_tup::numeric /
-                        NULLIF(classes.reltuples::numeric, 0)
-                    ) * 100 >= ${HIGH_DEAD_TUPLE_PERCENT}
+                        (
+                            tables.n_dead_tup::numeric /
+                            NULLIF(classes.reltuples::numeric, 0)
+                        ) * 100 >= ${HIGH_DEAD_TUPLE_PERCENT} OR
+                        (
+                            pg_relation_size(tables.relid)::numeric *
+                            tables.n_dead_tup::numeric /
+                            NULLIF(
+                                GREATEST(classes.reltuples::numeric, 0) +
+                                    tables.n_dead_tup::numeric,
+                                0
+                            )
+                        ) >= ${BLOAT_REVIEW_BYTES}
+                    )
                 ) AS catalog_estimate_may_be_stale
             FROM pg_stat_user_tables AS tables
             JOIN pg_class AS classes ON classes.oid = tables.relid
