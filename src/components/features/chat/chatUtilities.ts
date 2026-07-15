@@ -5,6 +5,7 @@ import {
     chatAttachmentIdentity,
     chatContentFingerprint,
     type ChatHistoryMessage,
+    hasPrimaryChatMessageContent,
     mergeChatAttachments,
     mergeChatImages,
     TOOL_ROLE_VARIANTS,
@@ -566,7 +567,15 @@ export function mergeWithRecentOptimisticMessages(
 ): ChatHistoryMessage[] {
     const mergeablePreviousMessages = shouldMergeThinking
         ? previousMessages
-        : previousMessages.map((message) => stripThinkingFromMessage(message));
+        : previousMessages.map((message) => {
+              const messageWithoutThinking = stripThinkingFromMessage(message);
+              const shouldPreserveActiveLocalThinking = Boolean(
+                  message.local === true &&
+                  message.thinking?.length &&
+                  !hasPrimaryChatMessageContent(messageWithoutThinking)
+              );
+              return shouldPreserveActiveLocalThinking ? message : messageWithoutThinking;
+          });
     const mergeableNextMessages = shouldPreserveNextThinking
         ? nextMessages
         : nextMessages.map((message) => stripThinkingFromMessage(message));

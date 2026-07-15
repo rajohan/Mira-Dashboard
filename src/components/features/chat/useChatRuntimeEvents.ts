@@ -156,7 +156,7 @@ function isAssistantActiveStreamKey(
 function unambiguousOptimisticAssistantStream(
     sessionKey: string,
     streamEntries: Array<[string, ActiveChatStream]>
-): [string, ActiveChatStream] | undefined {
+): [string, ActiveChatStream, string] | undefined {
     const assistantEntries = streamEntries.filter(
         ([activeStreamKey, streamEntry]) =>
             isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
@@ -167,8 +167,13 @@ function unambiguousOptimisticAssistantStream(
         return undefined;
     }
 
-    return isOptimisticRunId(assistantEntries[0]![1].runId)
-        ? assistantEntries[0]
+    const [activeStreamKey, streamEntry] = assistantEntries[0]!;
+    const optimisticRunIds = uniqueStrings([
+        streamEntry.runId,
+        ...streamEntry.aliases,
+    ]).filter((runId) => isOptimisticRunId(runId));
+    return optimisticRunIds.length === 1
+        ? [activeStreamKey, streamEntry, optimisticRunIds[0]!]
         : undefined;
 }
 
@@ -1153,19 +1158,26 @@ export function useChatRuntimeEvents({
                 const existing = next[activeStreamKey];
                 const streamSessionKey = pending.sessionKey;
                 const incomingRunId = pending.runId;
-                const isStartsNewRun = isNewRunForStream(existing, incomingRunId);
-                const runId = isStartsNewRun
-                    ? incomingRunId
-                    : existing?.runId || incomingRunId;
-                const promotesProvisionalRun =
-                    isStartsNewRun &&
+                const shouldPromoteProvisionalRun = Boolean(
                     existing &&
                     (isProvisionalRunId(streamSessionKey, existing.runId) ||
-                        isCompactOptimisticRunId(existing.runId));
+                        isCompactOptimisticRunId(existing.runId)) &&
+                    !isProvisionalRunId(streamSessionKey, incomingRunId) &&
+                    !isOptimisticRunId(incomingRunId)
+                );
+                const isStartsNewRun =
+                    !shouldPromoteProvisionalRun &&
+                    isNewRunForStream(existing, incomingRunId);
+                const runId =
+                    isStartsNewRun || shouldPromoteProvisionalRun
+                        ? incomingRunId
+                        : existing?.runId || incomingRunId;
                 let text =
-                    isStartsNewRun && !promotesProvisionalRun ? "" : existing?.text || "";
+                    isStartsNewRun && !shouldPromoteProvisionalRun
+                        ? ""
+                        : existing?.text || "";
                 let message =
-                    isStartsNewRun && !promotesProvisionalRun
+                    isStartsNewRun && !shouldPromoteProvisionalRun
                         ? undefined
                         : existing?.message;
 
@@ -1178,7 +1190,7 @@ export function useChatRuntimeEvents({
                     sessionKey: streamSessionKey,
                     runId,
                     aliases: uniqueStrings([
-                        ...(isStartsNewRun && !promotesProvisionalRun
+                        ...(isStartsNewRun && !shouldPromoteProvisionalRun
                             ? []
                             : existing?.aliases || []),
                         ...pending.aliases,
@@ -1187,7 +1199,7 @@ export function useChatRuntimeEvents({
                     text,
                     message,
                     operation:
-                        isStartsNewRun && !promotesProvisionalRun
+                        isStartsNewRun && !shouldPromoteProvisionalRun
                             ? undefined
                             : existing?.operation,
                     statusText: undefined,
@@ -1440,7 +1452,7 @@ export function useChatRuntimeEvents({
                     isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
                     streamEntry.operation !== "compact"
             );
-            const hasProvisionalAssistant = sessionStreamEntries.some(
+            const provisionalAssistantEntries = sessionStreamEntries.filter(
                 ([activeStreamKey, streamEntry]) =>
                     isAssistantActiveStreamKey(sessionKey, activeStreamKey) &&
                     isProvisionalRunId(sessionKey, streamEntry.runId)
@@ -1460,7 +1472,7 @@ export function useChatRuntimeEvents({
                     !streamEntry.aliases.includes(runId)
             );
             return (
-                hasProvisionalAssistant &&
+                provisionalAssistantEntries.length === 1 &&
                 (hasMatchingStream
                     ? !hasUnrelatedNonProvisionalRun
                     : nonProvisionalRunIds.length <= 1 &&
@@ -1502,6 +1514,47 @@ export function useChatRuntimeEvents({
                 activeStreamsReference.current = next;
                 updateActiveStreamsReference.current(() => next);
             }
+        };
+
+        /** Promotes one provisional runtime channel when its terminal adds a run id. */
+        const promoteProvisionalRuntimeChannel = (
+            sessionKey: string,
+            stream: string,
+            runId: string | undefined,
+            shouldPromote: boolean
+        ) => {
+            if (!runId || !shouldPromote) {
+                return;
+            }
+
+            const provisionalEntries = Object.entries(
+                activeStreamsReference.current
+            ).filter(
+                ([activeStreamKey, streamEntry]) =>
+                    isSameSessionKey(streamEntry.sessionKey, sessionKey) &&
+                    isProvisionalRunId(sessionKey, streamEntry.runId) &&
+                    (stream === "assistant"
+                        ? isAssistantActiveStreamKey(sessionKey, activeStreamKey)
+                        : activeStreamKey.endsWith(`::${stream}`))
+            );
+            if (provisionalEntries.length !== 1) {
+                return;
+            }
+
+            const [activeStreamKey, streamEntry] = provisionalEntries[0]!;
+            const next = {
+                ...activeStreamsReference.current,
+                [activeStreamKey]: {
+                    ...streamEntry,
+                    aliases: uniqueStrings([...streamEntry.aliases, runId]),
+                    message: streamEntry.message
+                        ? { ...streamEntry.message, runId }
+                        : undefined,
+                    runId,
+                },
+            };
+            activeStreamsReference.current = next;
+            updateActiveStreamsReference.current(() => next);
         };
 
         /** Clears active streams belonging to a finished chat run. */
@@ -1758,6 +1811,12 @@ export function useChatRuntimeEvents({
             const isChannelTerminalEvent =
                 (stream === "assistant" || isRuntimeThinkingStream(stream)) &&
                 TERMINAL_LIFECYCLE_PHASES.has(phase);
+            promoteProvisionalRuntimeChannel(
+                selectedSessionKey,
+                stream,
+                eventRunId,
+                TERMINAL_LIFECYCLE_PHASES.has(phase)
+            );
             const runtimeMessage =
                 eventName === "session.message"
                     ? runtimeSessionMessage(payload)
@@ -2269,10 +2328,9 @@ export function useChatRuntimeEvents({
                             selectedSessionKey,
                             Object.entries(wasPrevious)
                         );
-                    const associatedOptimisticRunId =
-                        stream === "assistant" && soleOptimisticAssistantStream
-                            ? soleOptimisticAssistantStream[1].runId
-                            : undefined;
+                    const associatedOptimisticRunId = soleOptimisticAssistantStream
+                        ? soleOptimisticAssistantStream[2]
+                        : undefined;
                     const next = { ...wasPrevious };
                     if (soleOptimisticAssistantStream && eventRunId) {
                         next[soleOptimisticAssistantStream[0]] = {
@@ -2544,7 +2602,7 @@ export function useChatRuntimeEvents({
                             ? optimisticAssistantStreamEntries[0]
                             : undefined;
                     let unscopedOptimisticAssistantStream:
-                        [string, ActiveChatStream] | undefined;
+                        [string, ActiveChatStream, string] | undefined;
                     if (!payload.runId) {
                         unscopedOptimisticAssistantStream =
                             unambiguousOptimisticAssistantStream(
@@ -2556,14 +2614,22 @@ export function useChatRuntimeEvents({
                         assistantStreamForRunEntry ||
                         soleProvisionalAssistantStream ||
                         scopedOptimisticAssistantStream ||
-                        unscopedOptimisticAssistantStream;
+                        (unscopedOptimisticAssistantStream
+                            ? [
+                                  unscopedOptimisticAssistantStream[0],
+                                  unscopedOptimisticAssistantStream[1],
+                              ]
+                            : undefined);
+                    const resolvedOptimisticRunIds = resolvedAssistantStreamEntry
+                        ? uniqueStrings([
+                              resolvedAssistantStreamEntry[1].runId,
+                              ...resolvedAssistantStreamEntry[1].aliases,
+                          ]).filter((activeRunId) => isOptimisticRunId(activeRunId))
+                        : [];
                     const associatedOptimisticRunId =
-                        resolvedAssistantStreamEntry &&
-                        isOptimisticRunId(resolvedAssistantStreamEntry[1].runId)
-                            ? resolvedAssistantStreamEntry[1].runId
-                            : unscopedOptimisticAssistantStream
-                              ? unscopedOptimisticAssistantStream[1].runId
-                              : undefined;
+                        resolvedOptimisticRunIds.length === 1
+                            ? resolvedOptimisticRunIds[0]
+                            : unscopedOptimisticAssistantStream?.[2];
                     const hasAnotherActiveRun = Boolean(
                         payload.runId &&
                         sessionStreamEntries.some(
@@ -2623,18 +2689,23 @@ export function useChatRuntimeEvents({
                             textToApply,
                             runId
                         );
-                        const isStartsNewRun = isNewRunForStream(existing, payload.runId);
-                        const promotesCompactRun =
-                            isStartsNewRun &&
+                        const shouldPromoteProvisionalRun = Boolean(
                             existing &&
-                            isCompactOptimisticRunId(existing.runId);
+                            (isProvisionalRunId(streamSessionKey, existing.runId) ||
+                                isCompactOptimisticRunId(existing.runId)) &&
+                            !isProvisionalRunId(streamSessionKey, runId) &&
+                            !isOptimisticRunId(runId)
+                        );
+                        const isStartsNewRun =
+                            !shouldPromoteProvisionalRun &&
+                            isNewRunForStream(existing, payload.runId);
                         updateActiveStreamsReference.current((wasPrevious) => ({
                             ...wasPrevious,
                             [activeStreamKey]: {
                                 sessionKey: streamSessionKey,
                                 runId,
                                 aliases: uniqueStrings([
-                                    ...(isStartsNewRun && !promotesCompactRun
+                                    ...(isStartsNewRun && !shouldPromoteProvisionalRun
                                         ? []
                                         : existing?.aliases || []),
                                     associatedOptimisticRunId,
@@ -2644,7 +2715,7 @@ export function useChatRuntimeEvents({
                                 text: textToApply,
                                 message,
                                 operation:
-                                    isStartsNewRun && !promotesCompactRun
+                                    isStartsNewRun && !shouldPromoteProvisionalRun
                                         ? undefined
                                         : existing?.operation,
                                 updatedAt: currentIsoString(),

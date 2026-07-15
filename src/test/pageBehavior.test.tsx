@@ -3429,36 +3429,30 @@ describe("Mira Dashboard pages", () => {
             thinking: [{ text: "still working" }],
         };
         expect(
-            messagesAfterDisablingFinalThinkingRetention(
-                [activeThinkingOnlyMessage],
-                true
-            )[0]
+            messagesAfterDisablingFinalThinkingRetention([activeThinkingOnlyMessage])[0]
         ).toMatchObject({ thinking: [{ text: "still working" }] });
         expect(
-            messagesAfterDisablingFinalThinkingRetention(
-                [
-                    activeThinkingOnlyMessage,
-                    {
-                        content: [],
-                        diagnostic: true,
-                        role: "assistant",
-                        text: "",
-                        toolCalls: [
-                            {
-                                arguments: {},
-                                id: "live-tool",
-                                name: "Bash",
-                            },
-                        ],
-                    },
-                    {
-                        content: "done",
-                        role: "assistant",
-                        text: "done",
-                    },
-                ],
-                true
-            )
+            messagesAfterDisablingFinalThinkingRetention([
+                activeThinkingOnlyMessage,
+                {
+                    content: [],
+                    diagnostic: true,
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: {},
+                            id: "live-tool",
+                            name: "Bash",
+                        },
+                    ],
+                },
+                {
+                    content: "done",
+                    role: "assistant",
+                    text: "done",
+                },
+            ])
         ).toEqual([
             expect.objectContaining({
                 toolCalls: [expect.objectContaining({ id: "live-tool" })],

@@ -5613,6 +5613,39 @@ describe("shared component helpers", () => {
                 aliases: [],
                 runId: "agent:main:main",
                 sessionKey: "agent:main:main",
+                text: "First provisional answer",
+                updatedAt: new Date().toISOString(),
+            },
+            "agent:main:main::assistant": {
+                aliases: [],
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                text: "Second provisional answer",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Ambiguous scoped final",
+                    runId: "real-ambiguous-provisional",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(Object.keys(activeStreamsReference.current)).toEqual([
+            "agent:main:main",
+            "agent:main:main::assistant",
+        ]);
+
+        activeStreamsReference.current = {
+            "agent:main:main": {
+                aliases: [],
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
                 text: "Provisional answer",
                 updatedAt: new Date().toISOString(),
             },
@@ -5947,6 +5980,28 @@ describe("shared component helpers", () => {
         });
         act(() => {
             listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "Pre-ACK reasoning" },
+                    runId: "real-pre-ack-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+        });
+        await waitFor(() =>
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::real-pre-ack-run::thinking"
+                ]?.aliases
+            ).toContain("dashboard-chat-pre-ack")
+        );
+        expect(activeStreamsReference.current[optimisticKey]?.aliases).toContain(
+            "real-pre-ack-run"
+        );
+        act(() => {
+            listener?.({
                 event: "chat",
                 payload: {
                     deltaText: "Pre-ACK answer",
@@ -6076,7 +6131,6 @@ describe("shared component helpers", () => {
                 event: "agent",
                 payload: {
                     data: { delta: "temporary reasoning" },
-                    runId: "non-retained-thinking",
                     sessionKey: "agent:main:main",
                     stream: "thinking",
                 },
@@ -6855,6 +6909,31 @@ describe("shared component helpers", () => {
             thinking: [{ text: "Thinking after tool" }],
             timestamp: "2026-07-10T15:00:01.000Z",
         };
+        const activeThinkingRow = {
+            ...localThinkingRow,
+            timestamp: new Date().toISOString(),
+        };
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [activeThinkingRow],
+                [
+                    {
+                        content: "Current prompt",
+                        role: "user",
+                        text: "Current prompt",
+                    },
+                ],
+                false,
+                true
+            )
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ text: "Current prompt" }),
+                expect.objectContaining({
+                    thinking: [{ text: "Thinking after tool" }],
+                }),
+            ])
+        );
         const chronologicalMessages = mergeWithRecentOptimisticMessages(
             [
                 {

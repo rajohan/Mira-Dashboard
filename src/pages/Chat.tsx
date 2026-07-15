@@ -666,12 +666,11 @@ export function stripThinkingFromMessages(
 
 /** Removes retained final thinking while preserving active thinking-only rows. */
 export function messagesAfterDisablingFinalThinkingRetention(
-    messages: ChatHistoryMessage[],
-    shouldShowTools: boolean
+    messages: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {
     return messagesWithFinalThinkingPersistence(
         messages,
-        createChatVisibility(true, shouldShowTools),
+        createChatVisibility(true, true),
         false
     );
 }
@@ -2002,10 +2001,8 @@ export function Chat() {
         }
 
         const isResetCommand = isResetSlashCommand(text);
-        const hasActiveSessionStream = Object.values(
-            activeStreamsReference.current
-        ).some((stream) =>
-            isSameSessionKey(stream.sessionKey, pendingSendSessionKey)
+        const hasActiveSessionStream = Object.values(activeStreamsReference.current).some(
+            (stream) => isSameSessionKey(stream.sessionKey, pendingSendSessionKey)
         );
         if (
             isResetCommand &&
@@ -2361,8 +2358,7 @@ export function Chat() {
                             if (!shouldKeepThinking) {
                                 setMessages((wasPrevious) =>
                                     messagesAfterDisablingFinalThinkingRetention(
-                                        wasPrevious,
-                                        showToolOutput
+                                        wasPrevious
                                     )
                                 );
                             }
