@@ -1037,6 +1037,9 @@ describe("shared component helpers", () => {
         expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
         expect(onApplySlashSuggestion).toHaveBeenCalledTimes(2);
         expect(onSend).not.toHaveBeenCalled();
+        fireEvent.pointerDown(document.body);
+        expect(textarea.getAttribute("aria-expanded")).toBe("false");
+        fireEvent.change(textarea, { target: { value: "/he-close" } });
         await user.click(screen.getByRole("button", { name: /close slash commands/i }));
         expect(fireEvent.keyDown(textarea, { key: "ArrowDown" })).toBe(true);
         expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
@@ -5782,6 +5785,18 @@ describe("shared component helpers", () => {
             listener?.({
                 event: "agent",
                 payload: {
+                    data: { delta: "public answer" },
+                    runId: "non-retained-thinking",
+                    sessionKey: "agent:main:main",
+                    stream: "assistant",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
                     data: { delta: " terminal", phase: "end" },
                     runId: "non-retained-thinking",
                     sessionKey: "agent:main:main",
@@ -5808,12 +5823,10 @@ describe("shared component helpers", () => {
         ).toBeUndefined();
         act(() => {
             listener?.({
-                event: "chat",
+                event: "model.completed",
                 payload: {
-                    message: "public answer",
                     runId: "non-retained-thinking",
                     sessionKey: "agent:main:main",
-                    state: "final",
                 },
                 type: "event",
             });
@@ -7982,7 +7995,7 @@ describe("shared component helpers", () => {
                 finalHistoryRow,
                 scopedToolFromAnotherRun,
             ]).map((row) => row.key)
-        ).toEqual(["user", "final-history", "other-run-tool"]);
+        ).toEqual(["user", "other-run-tool", "final-history"]);
         const mediaFinalRow = {
             ...finalHistoryRow,
             key: "media-final",

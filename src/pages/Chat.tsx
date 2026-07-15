@@ -269,6 +269,7 @@ export function orderCurrentResponseRows(rows: ChatRow[]): ChatRow[] {
     const currentResponseStartIndex = previousAssistantTextRowIndex + 1;
     const currentResponseRows = responseRows.slice(currentResponseStartIndex);
     const isRowInCurrentResponse = (row: ChatRow) =>
+        !finalRow.message.runId ||
         !row.message.runId ||
         Boolean(finalRow.message.runId && row.message.runId === finalRow.message.runId);
     const activityRows = currentResponseRows.filter(

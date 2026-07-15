@@ -2041,7 +2041,11 @@ export function useChatRuntimeEvents({
                 ];
                 if (messagesToAppend.length > 0) {
                     setMessages((wasPrevious) =>
-                        dedupeMessages([...wasPrevious, ...messagesToAppend])
+                        messagesWithFinalThinkingPersistence(
+                            dedupeMessages([...wasPrevious, ...messagesToAppend]),
+                            createChatVisibility(showThinkingOutput, showToolOutput),
+                            keepThinkingAfterFinalReference.current && showThinkingOutput
+                        )
                     );
                 }
                 clearActiveStreamsForRun(

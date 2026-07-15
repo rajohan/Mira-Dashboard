@@ -22,6 +22,7 @@ import {
 import {
     type KeyboardEvent as ReactKeyboardEvent,
     type RefObject,
+    useEffect,
     useRef,
     useState,
 } from "react";
@@ -187,6 +188,7 @@ export function ChatComposer({
     const [activeSlashSuggestionIndex, setActiveSlashSuggestionIndex] = useState(0);
     const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
     const textareaReference = useRef<HTMLTextAreaElement | undefined>(undefined);
+    const slashOptionsReference = useRef<HTMLDivElement | null>(null);
     const shouldShowSlashSuggestions =
         !slashSuggestionsDismissed && slashCommandSuggestions.length > 0;
     const selectedSlashSuggestionIndex = Math.min(
@@ -198,6 +200,35 @@ export function ChatComposer({
         label: option.label || option.name || option.id || "Unknown",
     }));
     const currentModel = selectedSession?.model || "";
+
+    useEffect(() => {
+        if (!shouldShowSlashSuggestions) {
+            return;
+        }
+
+        const dismissSlashSuggestionsOutsideMenu = (event: PointerEvent) => {
+            const target = event.target;
+            if (
+                !(target instanceof Node) ||
+                textareaReference.current?.contains(target) ||
+                slashOptionsReference.current?.contains(target)
+            ) {
+                return;
+            }
+            setSlashSuggestionsDismissed(true);
+        };
+
+        document.addEventListener("pointerdown", dismissSlashSuggestionsOutsideMenu, {
+            capture: true,
+        });
+        return () =>
+            document.removeEventListener(
+                "pointerdown",
+                dismissSlashSuggestionsOutsideMenu,
+                { capture: true }
+            );
+    }, [shouldShowSlashSuggestions]);
+
     if (
         currentModel &&
         modelSelectOptions.every((option) => option.value !== currentModel)
@@ -320,6 +351,7 @@ export function ChatComposer({
                 >
                     {shouldShowSlashSuggestions ? (
                         <ComboboxOptions
+                            ref={slashOptionsReference}
                             static
                             modal={false}
                             id="chat-slash-command-options"
