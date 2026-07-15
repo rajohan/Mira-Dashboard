@@ -3570,23 +3570,39 @@ describe("Mira Dashboard pages", () => {
             {
                 "agent:main:main::dashboard-chat-concurrent::assistant": {
                     aliases: ["dashboard-chat-concurrent"],
+                    message: {
+                        content: "Pre-ACK ",
+                        images: [{ data: "optimistic-image", type: "image" }],
+                        role: "assistant",
+                        runId: "dashboard-chat-concurrent",
+                        text: "Pre-ACK ",
+                        thinking: [{ text: "optimistic reasoning" }],
+                        toolCalls: [{ id: "optimistic-tool", name: "Bash" }],
+                    },
                     runId: "dashboard-chat-concurrent",
                     sessionKey: "agent:main:main",
                     statusText: "Thinking",
-                    text: "",
+                    text: "Pre-ACK ",
                     updatedAt: "2026-06-24T08:00:00.000Z",
                 },
                 "agent:main:main::real-concurrent::assistant": {
-                    aliases: ["real-concurrent"],
+                    aliases: ["dashboard-chat-concurrent", "real-concurrent"],
                     message: {
-                        content: "Pre-ACK real answer",
+                        attachments: [
+                            {
+                                fileName: "real.txt",
+                                id: "real-attachment",
+                                kind: "text",
+                            },
+                        ],
+                        content: "real answer",
                         role: "assistant",
                         runId: "real-concurrent",
-                        text: "Pre-ACK real answer",
+                        text: "real answer",
                     },
                     runId: "real-concurrent",
                     sessionKey: "agent:main:main",
-                    text: "Pre-ACK real answer",
+                    text: "real answer",
                     updatedAt: "2026-06-24T08:00:01.000Z",
                 },
             },
@@ -3602,6 +3618,12 @@ describe("Mira Dashboard pages", () => {
             mergedPreAckStreams["agent:main:main::real-concurrent::assistant"]
         ).toMatchObject({
             aliases: ["dashboard-chat-concurrent", "real-concurrent"],
+            message: {
+                attachments: [expect.objectContaining({ id: "real-attachment" })],
+                images: [expect.objectContaining({ data: "optimistic-image" })],
+                thinking: [expect.objectContaining({ text: "optimistic reasoning" })],
+                toolCalls: [expect.objectContaining({ id: "optimistic-tool" })],
+            },
             runId: "real-concurrent",
             text: "Pre-ACK real answer",
         });

@@ -44,6 +44,7 @@ import {
     isRecoveredAssistantText,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
+    mergeChatMessageDetails,
     mergeWithRecentOptimisticMessages,
     messageDeleteKey,
     messageDeleteKeys,
@@ -109,7 +110,8 @@ export function acknowledgedActiveStreams(
         ([key, stream]) =>
             isSameSessionKey(stream.sessionKey, sessionKey) &&
             key.endsWith("::assistant") &&
-            (stream.runId === optimisticRunId || stream.aliases.includes(optimisticRunId))
+            (stream.runId === optimisticRunId ||
+                (stream.runId === sessionKey && stream.aliases.includes(optimisticRunId)))
     );
     const acknowledgedAssistantEntries = streamEntries.filter(
         ([key, stream]) =>
@@ -158,7 +160,13 @@ export function acknowledgedActiveStreams(
         const [optimisticKey, optimisticStream] = optimisticAssistantEntries[0]!;
         const [acknowledgedKey, acknowledgedStream] = acknowledgedAssistantEntries[0]!;
         const text = mergeStreamText(optimisticStream.text, acknowledgedStream.text);
-        const message = acknowledgedStream.message || optimisticStream.message;
+        const message =
+            acknowledgedStream.message && optimisticStream.message
+                ? mergeChatMessageDetails(
+                      acknowledgedStream.message,
+                      optimisticStream.message
+                  )
+                : acknowledgedStream.message || optimisticStream.message;
         delete next[optimisticKey];
         next[acknowledgedKey] = {
             ...acknowledgedStream,
