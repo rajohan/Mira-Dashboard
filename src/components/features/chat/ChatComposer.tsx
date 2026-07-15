@@ -357,7 +357,12 @@ export function ChatComposer({
                             <PanelHeader
                                 title="Slash commands"
                                 closeLabel="Close slash commands"
-                                onClose={() => setSlashSuggestionsDismissed(true)}
+                                onClose={() => {
+                                    setSlashSuggestionsDismissed(true);
+                                    requestAnimationFrame(() =>
+                                        textareaReference.current?.focus()
+                                    );
+                                }}
                                 className="border-b border-primary-700 px-3 py-2"
                             />
                             <div className="max-h-72 overflow-y-auto py-1">
@@ -457,12 +462,11 @@ export function ChatComposer({
                             const currentDraft = event.currentTarget.value.trim();
                             const isExactSlashSuggestion = slashCommandSuggestions.some(
                                 (suggestion) =>
-                                    !suggestion.value.endsWith(" ") &&
-                                    suggestion.value === currentDraft
+                                    suggestion.value.trimEnd() === currentDraft
                             );
                             if (
                                 shouldShowSlashSuggestions &&
-                                (event.key === "Tab" ||
+                                ((event.key === "Tab" && !event.shiftKey) ||
                                     (shouldUseEnterForAction && !isExactSlashSuggestion))
                             ) {
                                 event.preventDefault();

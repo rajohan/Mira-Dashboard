@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
-import type { ReactNode, RefObject } from "react";
+import { type ReactNode, type RefObject, useState } from "react";
 
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
@@ -788,16 +788,23 @@ describe("shared component helpers", () => {
         fireEvent.change(textarea, { target: { value: "/hea" } });
         expect(textarea.getAttribute("aria-expanded")).toBe("true");
         expect(fireEvent.keyDown(textarea, { key: "ArrowDown" })).toBe(false);
+        expect(fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true })).toBe(true);
+        expect(onApplySlashSuggestion).toHaveBeenCalledTimes(1);
         expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
         expect(onApplySlashSuggestion).toHaveBeenLastCalledWith("/health");
         expect(onSend).not.toHaveBeenCalled();
 
-        fireEvent.change(textarea, { target: { value: "/he-shift" } });
         const bubbledEnter = jest.fn();
+        fireEvent.change(textarea, { target: { value: "/he-shift" } });
         document.addEventListener("keydown", bubbledEnter);
-        expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
-        expect(bubbledEnter).not.toHaveBeenCalled();
-        document.removeEventListener("keydown", bubbledEnter);
+        try {
+            expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(
+                true
+            );
+            expect(bubbledEnter).not.toHaveBeenCalled();
+        } finally {
+            document.removeEventListener("keydown", bubbledEnter);
+        }
         expect(onApplySlashSuggestion).toHaveBeenCalledTimes(2);
         fireEvent.pointerDown(document.body);
         expect(textarea.getAttribute("aria-expanded")).toBe("false");
@@ -806,6 +813,14 @@ describe("shared component helpers", () => {
         expect(textarea.getAttribute("aria-expanded")).toBe("false");
         fireEvent.change(textarea, { target: { value: "/he-close" } });
         await user.click(screen.getByRole("button", { name: /close slash commands/i }));
+        const pendingAnimationFrames = animationFrameState.frames.values().toArray();
+        animationFrameState.frames.clear();
+        act(() => {
+            for (const callback of pendingAnimationFrames) {
+                callback(performance.now());
+            }
+        });
+        expect(textarea).toHaveFocus();
         expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
         expect(onSend).toHaveBeenCalledTimes(1);
 
@@ -819,14 +834,17 @@ describe("shared component helpers", () => {
         });
         fireEvent.change(textarea, { target: { value: "/he-mobile" } });
         document.addEventListener("keydown", bubbledEnter);
-        expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(true);
-        expect(bubbledEnter).not.toHaveBeenCalled();
-        document.removeEventListener("keydown", bubbledEnter);
-        expect(onSend).toHaveBeenCalledTimes(1);
-        if (originalMatchMedia) {
-            Object.defineProperty(globalThis, "matchMedia", originalMatchMedia);
-        } else {
-            Reflect.deleteProperty(globalThis, "matchMedia");
+        try {
+            expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(true);
+            expect(bubbledEnter).not.toHaveBeenCalled();
+            expect(onSend).toHaveBeenCalledTimes(1);
+        } finally {
+            document.removeEventListener("keydown", bubbledEnter);
+            if (originalMatchMedia) {
+                Object.defineProperty(globalThis, "matchMedia", originalMatchMedia);
+            } else {
+                Reflect.deleteProperty(globalThis, "matchMedia");
+            }
         }
 
         await user.click(screen.getByRole("button", { name: /response settings/i }));
@@ -896,40 +914,59 @@ describe("shared component helpers", () => {
         const user = userEvent.setup();
         const onApplySlashSuggestion = jest.fn();
 
-        render(
-            <ChatComposer
-                attachments={[]}
-                canSend={true}
-                draft="/thi"
-                fileInputReference={{ current: undefined }}
-                isConnected={true}
-                isRecording={false}
-                isSending={false}
-                isTranscribing={false}
-                selectedSessionKey="agent:main:main"
-                slashCommandSuggestions={[
-                    {
-                        description: "Show or set thinking level",
-                        title: "/think [level]",
-                        value: "/think ",
-                    },
-                ]}
-                onApplySlashSuggestion={onApplySlashSuggestion}
-                onAttachFiles={jest.fn()}
-                onChangeDraft={jest.fn()}
-                onPreview={jest.fn()}
-                onRemoveAttachment={jest.fn()}
-                onSend={jest.fn()}
-                onToggleRecording={jest.fn()}
-            />
-        );
+        function StatefulComposer() {
+            const [draft, setDraft] = useState("/thi");
+            const slashCommandSuggestions =
+                draft === "/think "
+                    ? [
+                          {
+                              description: "Set thinking level",
+                              title: "/think high",
+                              value: "/think high",
+                          },
+                      ]
+                    : [
+                          {
+                              description: "Show or set thinking level",
+                              title: "/think [level]",
+                              value: "/think ",
+                          },
+                      ];
+
+            return (
+                <ChatComposer
+                    attachments={[]}
+                    canSend={true}
+                    draft={draft}
+                    fileInputReference={{ current: undefined }}
+                    isConnected={true}
+                    isRecording={false}
+                    isSending={false}
+                    isTranscribing={false}
+                    selectedSessionKey="agent:main:main"
+                    slashCommandSuggestions={slashCommandSuggestions}
+                    onApplySlashSuggestion={(suggestion) => {
+                        onApplySlashSuggestion(suggestion);
+                        setDraft(suggestion);
+                    }}
+                    onAttachFiles={jest.fn()}
+                    onChangeDraft={setDraft}
+                    onPreview={jest.fn()}
+                    onRemoveAttachment={jest.fn()}
+                    onSend={jest.fn()}
+                    onToggleRecording={jest.fn()}
+                />
+            );
+        }
+
+        render(<StatefulComposer />);
 
         await user.click(screen.getByRole("option", { name: /think/i }));
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/think ");
         expect(screen.getByRole("combobox")).toHaveAttribute("aria-expanded", "true");
     });
 
-    it("applies an exact argument command before sending", () => {
+    it("submits an exact optional-argument command", () => {
         const onApplySlashSuggestion = jest.fn();
         const onSend = jest.fn();
 
@@ -964,8 +1001,8 @@ describe("shared component helpers", () => {
         expect(fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" })).toBe(
             false
         );
-        expect(onApplySlashSuggestion).toHaveBeenCalledWith("/think ");
-        expect(onSend).not.toHaveBeenCalled();
+        expect(onApplySlashSuggestion).not.toHaveBeenCalled();
+        expect(onSend).toHaveBeenCalledTimes(1);
     });
 
     it("handles chat slash commands without rendering the page", async () => {
