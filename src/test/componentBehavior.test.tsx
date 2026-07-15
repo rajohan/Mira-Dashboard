@@ -1103,14 +1103,7 @@ describe("shared component helpers", () => {
     });
 
     it("handles chat slash commands without rendering the page", async () => {
-        const requestCalls: Array<[string, Record<string, unknown> | undefined]> = [];
-        const request = async <T = unknown,>(
-            method: string,
-            parameters?: Record<string, unknown>
-        ): Promise<T> => {
-            requestCalls.push([method, parameters]);
-            return { ok: true } as T;
-        };
+        const stopCurrentRun = jest.fn(async () => {});
         const setMessages = jest.fn((updater) => updater([]));
         const setDraft = jest.fn();
         const setSendError = jest.fn();
@@ -1118,8 +1111,7 @@ describe("shared component helpers", () => {
         const runSlashCommand = useChatSlashCommands({
             attachments: [],
             confirmResetSession,
-            request,
-            selectedSessionKey: "agent:main:main",
+            stopCurrentRun,
             setDraft,
             setMessages,
             setSendError,
@@ -1130,10 +1122,7 @@ describe("shared component helpers", () => {
         await expect(runSlashCommand("/reset")).resolves.toBe(true);
         expect(setMessages).toHaveBeenCalled();
         await expect(runSlashCommand("/stop")).resolves.toBe(true);
-        expect(requestCalls).toContainEqual([
-            "chat.abort",
-            { sessionKey: "agent:main:main" },
-        ]);
+        expect(stopCurrentRun).toHaveBeenCalledTimes(1);
         const blocked = useChatSlashCommands({
             attachments: [
                 {
@@ -1147,8 +1136,7 @@ describe("shared component helpers", () => {
                 },
             ],
             confirmResetSession,
-            request,
-            selectedSessionKey: "agent:main:main",
+            stopCurrentRun,
             setDraft,
             setMessages,
             setSendError,

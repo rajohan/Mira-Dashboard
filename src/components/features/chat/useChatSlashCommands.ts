@@ -7,11 +7,7 @@ import { slashCommandCanonicalName } from "./slashCommands";
 
 /** Represents use chat slash commands params. */
 interface UseChatSlashCommandsParameters {
-    request: <T = unknown>(
-        method: string,
-        parameters?: Record<string, unknown>
-    ) => Promise<T>;
-    selectedSessionKey: string;
+    stopCurrentRun: () => Promise<void>;
     attachments: ChatSendAttachment[];
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setDraft: Dispatch<SetStateAction<string>>;
@@ -21,8 +17,7 @@ interface UseChatSlashCommandsParameters {
 
 /** Handles Dashboard control commands that need dedicated Gateway RPCs. */
 export function useChatSlashCommands({
-    request,
-    selectedSessionKey,
+    stopCurrentRun,
     attachments,
     setMessages,
     setDraft,
@@ -78,8 +73,7 @@ export function useChatSlashCommands({
         setSendError(undefined);
 
         try {
-            await request("chat.abort", { sessionKey: selectedSessionKey });
-            addSystemMessage("Stopped current run.");
+            await stopCurrentRun();
         } catch (error_) {
             setSendError(chatErrorMessage(error_, `Failed to run ${rawCommand}`));
         }

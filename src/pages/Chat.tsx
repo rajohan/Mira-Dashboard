@@ -756,7 +756,9 @@ export function Chat() {
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
-    const [stoppingSessionKey, setStoppingSessionKey] = useState<string>();
+    const [stoppingSessionKeys, setStoppingSessionKeys] = useState<Set<string>>(
+        () => new Set()
+    );
     const [pendingSessionPatchCounts, setPendingSessionPatchCounts] = useState<
         Record<string, number>
     >({});
@@ -1393,11 +1395,17 @@ export function Chat() {
         setIsAtBottom,
         setHistoryLoadVersion,
         onRunTerminal: (sessionKey) =>
-            setStoppingSessionKey((wasStopping) =>
-                wasStopping && isSameSessionKey(wasStopping, sessionKey)
-                    ? undefined
-                    : wasStopping
-            ),
+            setStoppingSessionKeys((wasStopping) => {
+                const matchingKey = [...wasStopping].find((key) =>
+                    isSameSessionKey(key, sessionKey)
+                );
+                if (!matchingKey) {
+                    return wasStopping;
+                }
+                const next = new Set(wasStopping);
+                next.delete(matchingKey);
+                return next;
+            }),
     });
 
     /** Performs check is at bottom. */
@@ -1805,9 +1813,29 @@ export function Chat() {
         }
     };
 
+    /** Stops one session while retaining its buffered output until terminal cleanup. */
+    const stopCurrentRun = async (sessionKey: string) => {
+        setStoppingSessionKeys((wasStopping) => new Set(wasStopping).add(sessionKey));
+        try {
+            await request("chat.abort", { sessionKey });
+            if (isSameSessionKey(selectedSessionKeyReference.current, sessionKey)) {
+                setMessages((wasPrevious) => [
+                    ...wasPrevious,
+                    createLocalSystemMessage("Stopped current run."),
+                ]);
+            }
+        } catch (error_) {
+            setStoppingSessionKeys((wasStopping) => {
+                const next = new Set(wasStopping);
+                next.delete(sessionKey);
+                return next;
+            });
+            throw error_;
+        }
+    };
+
     const handleSlashCommand = useChatSlashCommands({
-        request,
-        selectedSessionKey,
+        stopCurrentRun: () => stopCurrentRun(selectedSessionKey),
         attachments,
         setMessages,
         setDraft,
@@ -2053,8 +2081,8 @@ export function Chat() {
             stream.operation === "compact" ||
             stream.statusText?.toLowerCase().includes("compact")
     );
-    const isStopping = Boolean(
-        stoppingSessionKey && isSameSessionKey(stoppingSessionKey, selectedSessionKey)
+    const isStopping = [...stoppingSessionKeys].some((sessionKey) =>
+        isSameSessionKey(sessionKey, selectedSessionKey)
     );
     const canStop = Boolean(
         isConnected &&
@@ -2087,25 +2115,10 @@ export function Chat() {
             return;
         }
 
-        const stoppedSessionKey = selectedSessionKey;
-        setStoppingSessionKey(stoppedSessionKey);
         try {
-            await request("chat.abort", { sessionKey: stoppedSessionKey });
-            if (
-                isSameSessionKey(selectedSessionKeyReference.current, stoppedSessionKey)
-            ) {
-                setMessages((wasPrevious) => [
-                    ...wasPrevious,
-                    createLocalSystemMessage("Stopped current run."),
-                ]);
-            }
+            await stopCurrentRun(selectedSessionKey);
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to stop current run"));
-            setStoppingSessionKey((wasStopping) =>
-                wasStopping && isSameSessionKey(wasStopping, stoppedSessionKey)
-                    ? undefined
-                    : wasStopping
-            );
         }
     };
 
