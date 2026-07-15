@@ -260,6 +260,7 @@ describe("database overview service", () => {
                 serverConnections: 6,
             });
             const invocationLogContents = await Bun.file(invocationLog).text();
+            expect(invocationLogContents).toContain("classes.reltuples::numeric");
             const torrentCountQueries = invocationLogContents
                 .split("\n")
                 .filter((line) =>

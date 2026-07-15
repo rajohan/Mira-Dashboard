@@ -343,22 +343,35 @@ export async function getDatabaseOverview() {
 
     const allDeadTupleRows = await queryAllUserDatabases<DeadTupleRow>(`
         SELECT
-            schemaname,
-            relname,
-            pg_relation_size(relid)::text AS physical_bytes,
-            n_live_tup::text,
-            n_dead_tup::text,
+            tables.schemaname,
+            tables.relname,
+            pg_relation_size(tables.relid)::text AS physical_bytes,
+            tables.n_live_tup::text,
+            tables.n_dead_tup::text,
             ROUND(
-                CASE WHEN n_live_tup = 0 THEN 0
-                ELSE (n_dead_tup::numeric / NULLIF(n_live_tup, 0)) * 100
+                CASE WHEN GREATEST(
+                    tables.n_live_tup::numeric,
+                    classes.reltuples::numeric
+                ) = 0 THEN 0
+                ELSE (
+                    tables.n_dead_tup::numeric /
+                    NULLIF(
+                        GREATEST(
+                            tables.n_live_tup::numeric,
+                            classes.reltuples::numeric
+                        ),
+                        0
+                    )
+                ) * 100
                 END,
                 2
             )::text AS dead_pct,
-            COALESCE(last_autovacuum::text, '') AS last_autovacuum,
-            COALESCE(last_autoanalyze::text, '') AS last_autoanalyze
-        FROM pg_stat_user_tables
-        WHERE n_live_tup > 0 OR n_dead_tup > 0
-        ORDER BY n_dead_tup DESC;
+            COALESCE(tables.last_autovacuum::text, '') AS last_autovacuum,
+            COALESCE(tables.last_autoanalyze::text, '') AS last_autoanalyze
+        FROM pg_stat_user_tables AS tables
+        JOIN pg_class AS classes ON classes.oid = tables.relid
+        WHERE tables.n_live_tup > 0 OR tables.n_dead_tup > 0
+        ORDER BY tables.n_dead_tup DESC;
     `);
     const deadTupleRows = allDeadTupleRows
         .toSorted((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
@@ -377,16 +390,29 @@ export async function getDatabaseOverview() {
             tables.relname,
             pg_relation_size(tables.relid)::text AS physical_bytes,
             CASE
-                WHEN widths.row_width IS NULL OR tables.n_live_tup <= 0 THEN ''
+                WHEN widths.row_width IS NULL OR
+                     GREATEST(
+                         tables.n_live_tup::numeric,
+                         classes.reltuples::numeric
+                     ) <= 0 THEN ''
                 ELSE GREATEST(
                     pg_relation_size(tables.relid) - CEIL(
-                        tables.n_live_tup * (widths.row_width + 32) * 1.2
+                        GREATEST(
+                            tables.n_live_tup::numeric,
+                            classes.reltuples::numeric
+                        ) *
+                        (widths.row_width + 32) * 1.2
                     ),
                     0
                 )::bigint::text
             END AS estimated_reclaimable_bytes,
-            (widths.row_width IS NOT NULL AND tables.n_live_tup > 0)::text AS assessed
+            (widths.row_width IS NOT NULL AND
+             GREATEST(
+                 tables.n_live_tup::numeric,
+                 classes.reltuples::numeric
+             ) > 0)::text AS assessed
         FROM pg_stat_user_tables AS tables
+        JOIN pg_class AS classes ON classes.oid = tables.relid
         LEFT JOIN average_row_widths AS widths
           ON widths.schemaname = tables.schemaname
          AND widths.tablename = tables.relname
