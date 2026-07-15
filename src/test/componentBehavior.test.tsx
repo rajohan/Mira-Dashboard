@@ -4919,6 +4919,77 @@ describe("shared component helpers", () => {
         expect(unsubscribe).toHaveBeenCalledTimes(1);
     });
 
+    it("re-stamps provisional diagnostics before final-thinking retention", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const activeStreamsReference: { current: ActiveChatStreams } = {
+            current: {
+                "agent:main:main::thinking": {
+                    aliases: [],
+                    message: {
+                        content: [{ text: "provisional reasoning", type: "thinking" }],
+                        role: "assistant",
+                        runId: "agent:main:main",
+                        text: "",
+                        thinking: [{ text: "provisional reasoning" }],
+                    },
+                    runId: "agent:main:main",
+                    sessionKey: "agent:main:main",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        };
+        let messages: ChatHistoryMessage[] = [];
+        const setMessages = jest.fn((updater) => {
+            messages = typeof updater === "function" ? updater(messages) : updater;
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                keepThinkingAfterFinal: false,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages,
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe: (nextListener) => {
+                    listener = nextListener;
+                    return jest.fn();
+                },
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(listener).toBeDefined());
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: { role: "assistant", text: "final answer" },
+                    runId: "resolved-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        expect(messages.map((message) => message.text)).toContain("final answer");
+        expect(messages.some((message) => message.thinking?.length)).toBe(false);
+        unmount();
+    });
+
     it("keeps tool execution errors out of the global chat error", async () => {
         let listener: ((data: unknown) => void) | undefined;
         const unsubscribe = jest.fn();

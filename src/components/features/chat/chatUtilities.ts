@@ -370,12 +370,20 @@ export function messageIdentity(message: ChatHistoryMessage): string {
 
 /** Performs message delete key. */
 export function messageDeleteKey(message: ChatHistoryMessage): string {
+    const textIdentity = message.text.trim();
     const diagnosticIdentity = diagnosticMessageIdentity(message);
+    const stableTextDiagnosticIdentity =
+        message.toolCalls?.length || message.toolResult
+            ? diagnosticIdentity
+            : messageMediaIdentity(message);
+    const contentIdentity = textIdentity
+        ? [textIdentity, stableTextDiagnosticIdentity].filter(Boolean).join("::")
+        : diagnosticIdentity || "no-text";
     return [
         message.role.toLowerCase(),
         message.timestamp || "no-time",
         message.runId || "no-run",
-        message.text.trim() || diagnosticIdentity || "no-text",
+        contentIdentity,
     ].join("::");
 }
 

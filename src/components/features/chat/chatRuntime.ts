@@ -307,10 +307,12 @@ export function messagesWithFinalThinkingPersistence(
             continue;
         }
 
-        const hasPrimaryAssistantContent = Boolean(
-            messageWithoutThinking.text.trim() || messageWithoutThinking.images?.length
-        );
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
+        const hasPrimaryAssistantContent = Boolean(
+            messageWithoutThinking.text.trim() ||
+            messageWithoutThinking.images?.length ||
+            (messageWithoutThinking.attachments?.length && !hasToolDetails)
+        );
         const isDiagnosticToolMessage = hasToolDetails && !hasPrimaryAssistantContent;
         const hasPrimaryAssistantAnswer = Boolean(
             message.role.toLowerCase() === "assistant" &&

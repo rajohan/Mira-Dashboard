@@ -2263,7 +2263,9 @@ export function useChatRuntimeEvents({
                 }
 
                 let finalMessageToAppend = messageToAppend;
-                const remainingDiagnosticMessages = [...diagnosticMessages];
+                const remainingDiagnosticMessages = diagnosticMessages.map((message) =>
+                    payload.runId ? { ...message, runId: payload.runId } : message
+                );
                 if (
                     finalMessageToAppend &&
                     finalMessageToAppend.role.toLowerCase() === "assistant" &&

@@ -3606,6 +3606,74 @@ describe("Mira Dashboard pages", () => {
                 (message) => !deletedKeys.has(messageDeleteKey(message))
             )
         ).toEqual([]);
+
+        const attachmentAnswer = {
+            attachments: [
+                {
+                    fileName: "report.pdf",
+                    id: "report",
+                    kind: "file" as const,
+                    mimeType: "application/pdf",
+                },
+            ],
+            content: "",
+            role: "assistant",
+            runId: "attachment-run",
+            text: "",
+        };
+        const attachmentThinking = {
+            ...activeThinking,
+            runId: "attachment-run",
+        };
+        expect(
+            messagesWithFinalThinkingPersistence(
+                [attachmentThinking, attachmentAnswer],
+                visibility,
+                false
+            ).some((message) => message.thinking?.length)
+        ).toBe(false);
+        expect(
+            messagesWithFinalThinkingPersistence(
+                [
+                    attachmentThinking,
+                    {
+                        ...attachmentAnswer,
+                        toolCalls: [{ id: "file-tool", name: "write" }],
+                    },
+                ],
+                visibility,
+                false
+            ).some((message) => message.thinking?.length)
+        ).toBe(true);
+
+        const deletedPrompt = {
+            content: "new question",
+            role: "user",
+            text: "new question",
+            timestamp: "2026-06-24T08:03:00.000Z",
+        };
+        const laterThinking = {
+            ...activeThinking,
+            timestamp: "2026-06-24T08:04:00.000Z",
+        };
+        const retainedBeforeDeletion = messagesWithFinalThinkingPersistence(
+            [
+                {
+                    content: "previous answer",
+                    role: "assistant",
+                    text: "previous answer",
+                },
+                deletedPrompt,
+                laterThinking,
+            ],
+            visibility,
+            false
+        ).filter(
+            (message) => messageDeleteKey(message) !== messageDeleteKey(deletedPrompt)
+        );
+        expect(retainedBeforeDeletion.at(-1)?.thinking).toEqual([
+            { text: "still working" },
+        ]);
     });
 
     it("normalizes stored final-thinking retention when thinking is hidden", () => {

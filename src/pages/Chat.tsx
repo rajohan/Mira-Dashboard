@@ -773,9 +773,11 @@ export function Chat() {
     const [chatModelOptions, setChatModelOptions] = useState<ChatModelOption[]>([]);
     const [, setHistoryLoadVersion] = useState(0);
 
-    draftReference.current = draft;
-    attachmentsReference.current = attachments;
-    messagesReference.current = messages;
+    useLayoutEffect(() => {
+        draftReference.current = draft;
+        attachmentsReference.current = attachments;
+        messagesReference.current = messages;
+    }, [attachments, draft, messages]);
 
     const { data: sessions = [] } = useLiveQuery((query) =>
         query.from({ session: sessionsCollection })
@@ -874,12 +876,12 @@ export function Chat() {
         .join("\n");
     const chatVisibility = createChatVisibility(showThinkingOutput, showToolOutput);
     const visibleMessagesForRows = messagesWithFinalThinkingPersistence(
-        dedupeMessages(messages).filter(
-            (message) => !deletedMessageKeys.has(messageDeleteKey(message))
-        ),
+        dedupeMessages(messages),
         chatVisibility,
         keepThinkingAfterFinal
-    ).filter((message) => isRenderableChatHistoryMessage(message, chatVisibility));
+    )
+        .filter((message) => !deletedMessageKeys.has(messageDeleteKey(message)))
+        .filter((message) => isRenderableChatHistoryMessage(message, chatVisibility));
     /** Returns whether active stream text is already represented in history. */
     function isStreamRecoveredInMessages(stream: ActiveChatStream): boolean {
         return isActiveStreamRecoveredInMessages(
