@@ -23,6 +23,7 @@ import {
     isSameSessionKey,
     mergeStreamMessage,
     mergeStreamText,
+    messagesWithFinalThinkingPersistence,
     normalizeAssistantPayload,
     parseAgentSessionKey,
     shouldShowStreamRow,
@@ -37,6 +38,7 @@ import {
     isSessionActive,
     nextHistoryBottomState,
     nextHistoryLoadSendError,
+    readStoredChatDiagnosticVisibility,
     readDeletedMessageKeys,
     scheduleBottomFollowWhenNeeded,
     sessionTimestampMs,
@@ -3342,6 +3344,61 @@ describe("Mira Dashboard pages", () => {
                 visibility
             )
         ).toBe(true);
+    });
+
+    it("keeps active thinking but removes it after a final answer by default", () => {
+        const visibility = createChatVisibility(true, true);
+        const activeThinking = {
+            role: "assistant",
+            content: [{ type: "thinking", text: "still working" }],
+            text: "",
+            thinking: [{ text: "still working" }],
+        };
+
+        expect(
+            messagesWithFinalThinkingPersistence([activeThinking], visibility, false)
+        ).toEqual([activeThinking]);
+
+        const completed = messagesWithFinalThinkingPersistence(
+            [
+                { role: "user", content: "question", text: "question" },
+                activeThinking,
+                { role: "assistant", content: "answer", text: "answer" },
+            ],
+            visibility,
+            false
+        );
+        expect(completed).toHaveLength(2);
+        expect(completed.some((message) => message.thinking?.length)).toBe(false);
+        expect(completed.at(-1)?.text).toBe("answer");
+
+        expect(
+            messagesWithFinalThinkingPersistence(
+                [
+                    activeThinking,
+                    { role: "assistant", content: "answer", text: "answer" },
+                ],
+                visibility,
+                true
+            )
+        ).toHaveLength(2);
+    });
+
+    it("normalizes stored final-thinking retention when thinking is hidden", () => {
+        localStorage.setItem(
+            "mira-dashboard-chat-diagnostic-visibility",
+            JSON.stringify({
+                keepThinkingAfterFinal: true,
+                thinking: false,
+                tools: true,
+            })
+        );
+
+        expect(readStoredChatDiagnosticVisibility()).toEqual({
+            keepThinkingAfterFinal: false,
+            thinking: false,
+            tools: true,
+        });
     });
 
     it("keeps settings and terminal page helpers stable", () => {

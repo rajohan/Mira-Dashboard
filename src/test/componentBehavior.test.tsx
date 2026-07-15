@@ -871,6 +871,50 @@ describe("shared component helpers", () => {
         expect(onSend).toHaveBeenCalledTimes(2);
     });
 
+    it("exposes final-thinking retention only while thinking is visible", async () => {
+        const user = userEvent.setup();
+        const onToggleKeepThinkingAfterFinal = jest.fn();
+        const properties = {
+            attachments: [],
+            canSend: false,
+            draft: "",
+            fileInputReference: { current: undefined },
+            isConnected: true,
+            isRecording: false,
+            isSending: false,
+            isTranscribing: false,
+            selectedSessionKey: "agent:main:main",
+            slashCommandSuggestions: [],
+            onApplySlashSuggestion: jest.fn(),
+            onAttachFiles: jest.fn(),
+            onChangeDraft: jest.fn(),
+            onPreview: jest.fn(),
+            onRemoveAttachment: jest.fn(),
+            onSend: jest.fn(),
+            onToggleRecording: jest.fn(),
+            onToggleKeepThinkingAfterFinal,
+        };
+        const { rerender } = render(
+            <ChatComposer {...properties} shouldShowThinking={false} />
+        );
+        const toggle = screen.getByRole("button", {
+            name: "Keep thinking after final answer",
+        });
+        expect(toggle).toBeDisabled();
+
+        rerender(
+            <ChatComposer
+                {...properties}
+                shouldShowThinking={true}
+                shouldKeepThinkingAfterFinal={true}
+            />
+        );
+        expect(toggle).toBeEnabled();
+        expect(toggle).toHaveAttribute("aria-pressed", "true");
+        await user.click(toggle);
+        expect(onToggleKeepThinkingAfterFinal).toHaveBeenCalledTimes(1);
+    });
+
     it("submits an exact slash command on the first Enter", () => {
         const onApplySlashSuggestion = jest.fn();
         const onSend = jest.fn();
@@ -1338,6 +1382,7 @@ describe("shared component helpers", () => {
                 activeStreamsReference,
                 connectionId: 1,
                 isConnected: true,
+                keepThinkingAfterFinal: true,
                 liveHistoryRefreshTimerReference,
                 request,
                 selectedSessionKey: "agent:main:main",

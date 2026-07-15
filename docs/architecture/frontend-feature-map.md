@@ -80,7 +80,8 @@ For destructive actions:
   whitespace before matching. Automation filters remain distinct from Kanban
   status and assignee filters.
 - Chat composer settings own model, thinking level, speed, and context
-  compaction. Thinking and tool visibility are independent persisted toggles.
+  compaction. Thinking, tool visibility, and retaining thinking after the final
+  answer are independent persisted toggles.
 - The quota card shows provider-specific windows. OpenAI may expose a weekly
   window with an optional five-hour window; a missing five-hour value means
   unlimited, not a parse failure.

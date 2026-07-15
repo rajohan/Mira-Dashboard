@@ -12,6 +12,7 @@ import {
     Mic,
     Minimize2,
     Paperclip,
+    Pin,
     Settings2,
     Smile,
     Square,
@@ -132,6 +133,7 @@ interface ChatComposerProperties {
     modelOptions?: ChatModelOption[];
     shouldShowThinking?: boolean;
     shouldShowTools?: boolean;
+    shouldKeepThinkingAfterFinal?: boolean;
     sessionControlsDisabled?: boolean;
     isCompacting?: boolean;
     slashCommandSuggestions: SlashCommandSuggestion[];
@@ -144,6 +146,7 @@ interface ChatComposerProperties {
     onToggleRecording: () => void;
     onToggleThinking?: () => void;
     onToggleTools?: () => void;
+    onToggleKeepThinkingAfterFinal?: () => void;
     onSelectThinkingLevel?: (value: string) => void;
     onSelectSpeed?: (value: string) => void;
     onSelectModel?: (value: string) => void;
@@ -165,6 +168,7 @@ export function ChatComposer({
     modelOptions = [],
     shouldShowThinking,
     shouldShowTools,
+    shouldKeepThinkingAfterFinal = false,
     sessionControlsDisabled,
     isCompacting,
     slashCommandSuggestions,
@@ -177,6 +181,7 @@ export function ChatComposer({
     onToggleRecording,
     onToggleThinking,
     onToggleTools,
+    onToggleKeepThinkingAfterFinal,
     onSelectThinkingLevel,
     onSelectSpeed,
     onSelectModel,
@@ -634,6 +639,23 @@ export function ChatComposer({
                                 title="Show tools"
                             >
                                 <Wrench className="size-4" />
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                aria-pressed={shouldKeepThinkingAfterFinal}
+                                aria-label="Keep thinking after final answer"
+                                onClick={() => onToggleKeepThinkingAfterFinal?.()}
+                                disabled={!selectedSessionKey || !shouldShowThinking}
+                                className={
+                                    shouldKeepThinkingAfterFinal
+                                        ? "p-1.5 text-accent-300 hover:bg-primary-600 hover:text-primary-100"
+                                        : "p-1.5 text-primary-500 hover:bg-primary-600 hover:text-primary-100"
+                                }
+                                title="Keep thinking after final answer"
+                            >
+                                <Pin className="size-4" />
                             </Button>
                         </div>
                         <div className="flex items-center gap-1">

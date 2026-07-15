@@ -1,5 +1,6 @@
 import { currentIsoString } from "../../../utils/date";
 import {
+    chatAttachmentIdentity,
     type ChatHistoryMessage,
     type ChatStreamEventMessage,
     type ChatVisibilitySettings,
@@ -194,6 +195,130 @@ export function finalMessageFromPayload(
     };
 }
 
+/** Removes thinking metadata and thinking content blocks from a message. */
+export function stripThinkingFromMessage(
+    message: ChatHistoryMessage
+): ChatHistoryMessage {
+    if (!Array.isArray(message.content)) {
+        return { ...message, thinking: undefined };
+    }
+
+    const content = message.content.filter(
+        (block) =>
+            !isRecord(block) || (block as Record<string, unknown>).type !== "thinking"
+    );
+    const normalizedWithThinking = normalizeChatHistoryMessage({
+        ...message,
+        content: message.content,
+    });
+    const normalizedWithoutThinking = normalizeChatHistoryMessage({
+        ...message,
+        content,
+    });
+    const derivedAttachmentIdentities = new Set(
+        (normalizedWithThinking.attachments || []).map((attachment) =>
+            chatAttachmentIdentity(attachment)
+        )
+    );
+    const explicitAttachments = (message.attachments || []).filter(
+        (attachment) =>
+            !derivedAttachmentIdentities.has(chatAttachmentIdentity(attachment))
+    );
+    const derivedImageIdentities = new Set(
+        (normalizedWithThinking.images || []).map((image) => JSON.stringify(image))
+    );
+    const explicitImages = (message.images || []).filter(
+        (image) => !derivedImageIdentities.has(JSON.stringify(image))
+    );
+
+    return {
+        ...message,
+        attachments: mergeChatAttachments(
+            explicitAttachments,
+            normalizedWithoutThinking.attachments
+        ),
+        content,
+        images: mergeChatImages(explicitImages, normalizedWithoutThinking.images),
+        text: normalizedWithoutThinking.text,
+        thinking: undefined,
+    };
+}
+
+/** Applies final-thinking retention to already-normalized visible messages. */
+export function messagesWithFinalThinkingPersistence(
+    visibleMessages: ChatHistoryMessage[],
+    visibility: ChatVisibilitySettings,
+    shouldKeepThinkingAfterFinal = true
+): ChatHistoryMessage[] {
+    if (shouldKeepThinkingAfterFinal && visibility.shouldShowThinking) {
+        return visibleMessages;
+    }
+
+    const nextMessages: ChatHistoryMessage[] = [];
+    let responseSegment: Array<{
+        message: ChatHistoryMessage;
+        messageWithoutThinking: ChatHistoryMessage;
+        hasRetainableAssistantThinking: boolean;
+    }> = [];
+    let hasPrimaryAssistantAnswer = false;
+
+    const flushResponseSegment = () => {
+        for (const entry of responseSegment) {
+            nextMessages.push(
+                entry.hasRetainableAssistantThinking && !hasPrimaryAssistantAnswer
+                    ? entry.message
+                    : entry.messageWithoutThinking
+            );
+        }
+        responseSegment = [];
+        hasPrimaryAssistantAnswer = false;
+    };
+
+    for (
+        let messageIndex = visibleMessages.length - 1;
+        messageIndex >= 0;
+        messageIndex -= 1
+    ) {
+        const message = visibleMessages[messageIndex]!;
+        const messageWithoutThinking = stripThinkingFromMessage(message);
+        if (message.role.toLowerCase() === "user") {
+            flushResponseSegment();
+            nextMessages.push(messageWithoutThinking);
+            continue;
+        }
+
+        const hasPrimaryAssistantContent = Boolean(
+            messageWithoutThinking.text.trim() ||
+            messageWithoutThinking.images?.length ||
+            messageWithoutThinking.attachments?.length
+        );
+        const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
+        const isDiagnosticToolMessage = hasToolDetails && !hasPrimaryAssistantContent;
+        if (
+            message.role.toLowerCase() === "assistant" &&
+            !isDiagnosticToolMessage &&
+            isRenderableChatHistoryMessage(messageWithoutThinking, visibility)
+        ) {
+            hasPrimaryAssistantAnswer = true;
+        }
+        responseSegment.push({
+            message,
+            messageWithoutThinking,
+            hasRetainableAssistantThinking: Boolean(
+                visibility.shouldShowThinking &&
+                message.role.toLowerCase() === "assistant" &&
+                message.thinking?.length &&
+                (isDiagnosticToolMessage || !hasPrimaryAssistantContent)
+            ),
+        });
+    }
+    flushResponseSegment();
+
+    return nextMessages
+        .toReversed()
+        .filter((message) => isRenderableChatHistoryMessage(message, visibility));
+}
+
 /** Performs merge stream message. */
 export function mergeStreamMessage(
     wasPrevious: ChatHistoryMessage | undefined,
@@ -272,9 +397,14 @@ export function hasRecoveredStreamHistory(
 /** Performs visible history messages. */
 export function visibleHistoryMessages(
     messages: RawChatHistoryMessage[] = [],
-    visibility: ChatVisibilitySettings
+    visibility: ChatVisibilitySettings,
+    shouldKeepThinkingAfterFinal = true
 ) {
-    return normalizeVisibleChatHistoryMessages(messages, visibility);
+    return messagesWithFinalThinkingPersistence(
+        normalizeVisibleChatHistoryMessages(messages, visibility),
+        visibility,
+        shouldKeepThinkingAfterFinal
+    );
 }
 
 /** Creates chat visibility. */
