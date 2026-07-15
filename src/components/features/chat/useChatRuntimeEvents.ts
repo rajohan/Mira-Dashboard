@@ -1765,7 +1765,8 @@ export function useChatRuntimeEvents({
         /** Returns renderable non-text diagnostics from active stream rows. */
         const activeDiagnosticMessagesForRun = (
             sessionKey: string,
-            runId?: string
+            runId?: string,
+            shouldApplyFinalRetention = true
         ): ChatHistoryMessage[] => {
             const visibility = createChatVisibility(showThinkingOutput, showToolOutput);
             const resolvedRunId = resolvedActiveAssistantRunId(sessionKey, runId);
@@ -1796,7 +1797,9 @@ export function useChatRuntimeEvents({
                 .map((message) =>
                     applyFinalThinkingPersistence(
                         message,
-                        keepThinkingAfterFinalReference.current && showThinkingOutput
+                        showThinkingOutput &&
+                            (!shouldApplyFinalRetention ||
+                                keepThinkingAfterFinalReference.current)
                     )
                 )
                 .filter((message) => hasChatMessageDetails(message))
@@ -3090,7 +3093,8 @@ export function useChatRuntimeEvents({
                 );
                 const diagnosticMessages = activeDiagnosticMessagesForRun(
                     streamSessionKey,
-                    resolvedTerminalRunId
+                    resolvedTerminalRunId,
+                    false
                 );
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()
@@ -3135,7 +3139,8 @@ export function useChatRuntimeEvents({
                 );
                 const diagnosticMessages = activeDiagnosticMessagesForRun(
                     streamSessionKey,
-                    resolvedTerminalRunId
+                    resolvedTerminalRunId,
+                    false
                 );
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()

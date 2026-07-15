@@ -6528,6 +6528,39 @@ describe("shared component helpers", () => {
                     message.text === "public answer"
             )
         ).toBe(true);
+
+        messages = [];
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "reasoning before abort" },
+                    runId: "aborted-thinking-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "aborted-thinking-run",
+                    sessionKey: "agent:main:main",
+                    state: "aborted",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking[0]?.text === "reasoning before abort"
+            )
+        ).toBe(true);
         unmount();
     });
 
@@ -9118,6 +9151,7 @@ describe("shared component helpers", () => {
                                 images: [{ data: "a", type: "image" }],
                                 role: "assistant",
                                 text: "answer",
+                                thinking: [{ text: "retained working" }],
                                 timestamp: "2026-06-24T10:01:00.000Z",
                                 toolCalls: [{ id: "tool-1", name: "exec" }],
                             },
@@ -9151,6 +9185,7 @@ describe("shared component helpers", () => {
         expect(
             screen.getByText("Exec").closest("[class*='border-amber']")
         ).not.toContainElement(screen.getByText("answer"));
+        expect(screen.getByText("retained working")).toBeInTheDocument();
 
         fireEvent.scroll(messagesContainerReference.current!);
         await user.click(screen.getByRole("button", { name: /follow/i }));
