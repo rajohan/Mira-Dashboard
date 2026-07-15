@@ -1059,6 +1059,7 @@ export function useChatRuntimeEvents({
         new Map<string, CompletedAssistantText>()
     );
     const provisionalAssistantRunIdsReference = useRef(new Map<string, string>());
+    const pendingRuntimeTerminalRunsReference = useRef(new Map<string, Set<string>>());
     const selectedSessionKeyReference = useRef(selectedSessionKey);
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
@@ -1525,6 +1526,43 @@ export function useChatRuntimeEvents({
             );
         };
 
+        /** Records a runtime terminal so a later chat terminal remains relevant. */
+        const markPendingRuntimeTerminal = (sessionKey: string, runId?: string) => {
+            const pendingRuns =
+                pendingRuntimeTerminalRunsReference.current.get(sessionKey) ||
+                new Set<string>();
+            pendingRuns.add(runId || "");
+            pendingRuntimeTerminalRunsReference.current.set(sessionKey, pendingRuns);
+        };
+
+        /** Resolves a canonical session key for a pending runtime terminal. */
+        const pendingRuntimeTerminalSessionKeyFor = (
+            sessionKey: string,
+            runId?: string
+        ) =>
+            pendingRuntimeTerminalRunsReference.current
+                .entries()
+                .find(
+                    ([pendingSessionKey, pendingRuns]) =>
+                        isSameSessionKey(pendingSessionKey, sessionKey) &&
+                        (pendingRuns.has(runId || "") || pendingRuns.has(""))
+                )?.[0];
+
+        /** Clears a runtime-to-chat terminal handoff marker. */
+        const clearPendingRuntimeTerminal = (sessionKey: string, runId?: string) => {
+            const matchingSessionKey = pendingRuntimeTerminalSessionKeyFor(
+                sessionKey,
+                runId
+            );
+            if (!matchingSessionKey) return;
+            const pendingRuns =
+                pendingRuntimeTerminalRunsReference.current.get(matchingSessionKey);
+            pendingRuns?.delete(runId || "");
+            if (!pendingRuns || pendingRuns.size === 0) {
+                pendingRuntimeTerminalRunsReference.current.delete(matchingSessionKey);
+            }
+        };
+
         /** Responds to runtime transcript event events. */
         const handleRuntimeTranscriptEvent = (
             eventName: string | undefined,
@@ -1589,6 +1627,7 @@ export function useChatRuntimeEvents({
                         : []),
                     ...activeDiagnosticMessagesForRun(streamSessionKey, eventRunId),
                 ]);
+                markPendingRuntimeTerminal(streamSessionKey, eventRunId);
                 if (clearActiveStreamsForRun(streamSessionKey, eventRunId)) {
                     onRunTerminalReference.current?.(streamSessionKey);
                 }
@@ -2114,17 +2153,24 @@ export function useChatRuntimeEvents({
             const stoppingSessionKey = isTerminalEvent
                 ? stoppingSessionKeyForReference.current?.(eventSessionKey)
                 : undefined;
+            const pendingRuntimeTerminalSessionKey = isTerminalEvent
+                ? pendingRuntimeTerminalSessionKeyFor(eventSessionKey, payload.runId)
+                : undefined;
             const isRelevantEvent =
                 eventMatchesSelected ||
                 Boolean(streamForRun) ||
-                Boolean(stoppingSessionKey);
+                Boolean(stoppingSessionKey) ||
+                Boolean(pendingRuntimeTerminalSessionKey);
             if (!isRelevantEvent) {
                 return;
             }
 
             const streamSessionKey = eventMatchesSelected
                 ? selectedSessionKey
-                : streamForRun?.sessionKey || stoppingSessionKey || eventSessionKey;
+                : streamForRun?.sessionKey ||
+                  stoppingSessionKey ||
+                  pendingRuntimeTerminalSessionKey ||
+                  eventSessionKey;
             const selectedStream = eventMatchesSelected
                 ? streams[selectedSessionKey]
                 : undefined;
@@ -2502,6 +2548,7 @@ export function useChatRuntimeEvents({
                 if (clearActiveStreamsForRun(streamSessionKey, payload.runId)) {
                     onRunTerminalReference.current?.(streamSessionKey);
                 }
+                clearPendingRuntimeTerminal(streamSessionKey, payload.runId);
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -2543,6 +2590,7 @@ export function useChatRuntimeEvents({
                 if (clearActiveStreamsForRun(streamSessionKey, payload.runId)) {
                     onRunTerminalReference.current?.(streamSessionKey);
                 }
+                clearPendingRuntimeTerminal(streamSessionKey, payload.runId);
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -2606,6 +2654,7 @@ export function useChatRuntimeEvents({
                 if (clearActiveStreamsForRun(streamSessionKey, payload.runId)) {
                     onRunTerminalReference.current?.(streamSessionKey);
                 }
+                clearPendingRuntimeTerminal(streamSessionKey, payload.runId);
             }
         });
 

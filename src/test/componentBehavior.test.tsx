@@ -3209,6 +3209,23 @@ describe("shared component helpers", () => {
                 .get("agent:main:runtime")
                 ?.map((message) => message.text)
         ).toContain("runtime partial");
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: { role: "assistant", text: "richer final" },
+                    runId: "runtime-run",
+                    sessionKey: "runtime",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            pendingTerminalMessagesReference.current
+                .get("agent:main:runtime")
+                ?.map((message) => message.text)
+        ).toContain("richer final");
 
         act(() => {
             listener?.({
