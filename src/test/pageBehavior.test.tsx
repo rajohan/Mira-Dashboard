@@ -2914,7 +2914,24 @@ describe("Mira Dashboard pages", () => {
         await respondToSocketRequest(socket, "chat.abort", {});
         await flushQueuedTimers();
         expect(activeRunDraft).toHaveValue("Follow-up while running");
-        expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({
+                    event: "chat",
+                    payload: {
+                        runId: "run-123",
+                        sessionKey: "agent:main:main",
+                        state: "aborted",
+                    },
+                    type: "event",
+                }),
+            });
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+        });
         await user.clear(activeRunDraft);
 
         const fileInput = view.container.querySelector<HTMLInputElement>(

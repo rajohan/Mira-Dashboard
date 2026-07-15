@@ -12,6 +12,7 @@ import {
     type ActiveChatStream,
     type ActiveChatStreams,
     createChatVisibility,
+    createLocalSystemMessage,
     hasRecoveredStreamHistory,
     isSameSessionKey,
     messagesWithFinalThinkingPersistence,
@@ -1391,6 +1392,7 @@ export function Chat() {
         setSendError,
         setIsAtBottom,
         setHistoryLoadVersion,
+        onRunTerminal: () => setIsStopping(false),
     });
 
     /** Performs check is at bottom. */
@@ -2079,8 +2081,13 @@ export function Chat() {
 
         setIsStopping(true);
         try {
-            await handleSlashCommand("/stop", [], { preserveDraft: true });
-        } finally {
+            await request("chat.abort", { sessionKey: selectedSessionKey });
+            setMessages((wasPrevious) => [
+                ...wasPrevious,
+                createLocalSystemMessage("Stopped current run."),
+            ]);
+        } catch (error_) {
+            setSendError(chatErrorMessage(error_, "Failed to stop current run"));
             setIsStopping(false);
         }
     };

@@ -1134,12 +1134,6 @@ describe("shared component helpers", () => {
             "chat.abort",
             { sessionKey: "agent:main:main" },
         ]);
-        setDraft.mockClear();
-        await expect(runSlashCommand("/stop", [], { preserveDraft: true })).resolves.toBe(
-            true
-        );
-        expect(setDraft).not.toHaveBeenCalled();
-
         const blocked = useChatSlashCommands({
             attachments: [
                 {

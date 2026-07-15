@@ -1023,6 +1023,7 @@ interface UseChatRuntimeEventsParameters {
     setSendError: Dispatch<SetStateAction<string | undefined>>;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
+    onRunTerminal?: (sessionKey: string) => void;
 }
 
 /** Provides chat runtime events. */
@@ -1043,6 +1044,7 @@ export function useChatRuntimeEvents({
     setSendError,
     setIsAtBottom,
     setHistoryLoadVersion,
+    onRunTerminal,
 }: UseChatRuntimeEventsParameters) {
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
     const pendingDeltaFlushTimerReference = useRef<TimerHandle | undefined>(undefined);
@@ -1056,10 +1058,12 @@ export function useChatRuntimeEvents({
     const requestReference = useRef(request);
     const toolErrorRunKeysReference = useRef(new Set<string>());
     const keepThinkingAfterFinalReference = useRef(keepThinkingAfterFinal);
+    const onRunTerminalReference = useRef(onRunTerminal);
 
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
     keepThinkingAfterFinalReference.current = keepThinkingAfterFinal;
+    onRunTerminalReference.current = onRunTerminal;
 
     useEffect(() => {
         selectedSessionKeyReference.current = selectedSessionKey;
@@ -2414,6 +2418,9 @@ export function useChatRuntimeEvents({
                 }
 
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
+                if (eventMatchesSelected) {
+                    onRunTerminalReference.current?.(streamSessionKey);
+                }
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -2450,6 +2457,9 @@ export function useChatRuntimeEvents({
                     );
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
+                if (eventMatchesSelected) {
+                    onRunTerminalReference.current?.(streamSessionKey);
+                }
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -2508,6 +2518,9 @@ export function useChatRuntimeEvents({
                     setSendError(payload.errorMessage || "Chat request failed");
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
+                if (eventMatchesSelected) {
+                    onRunTerminalReference.current?.(streamSessionKey);
+                }
             }
         });
 
