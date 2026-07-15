@@ -40,7 +40,8 @@ export function useChatSlashCommands({
 
     return async (
         commandText: string,
-        currentAttachments: ChatSendAttachment[] = attachments
+        currentAttachments: ChatSendAttachment[] = attachments,
+        options: { preserveDraft?: boolean } = {}
     ): Promise<boolean> => {
         const [rawCommand = ""] = commandText.trim().split(/\s+/);
         const command = slashCommandCanonicalName(rawCommand);
@@ -78,7 +79,7 @@ export function useChatSlashCommands({
             return false;
         }
 
-        setDraft("");
+        if (!options.preserveDraft) setDraft("");
         setSendError(undefined);
 
         try {

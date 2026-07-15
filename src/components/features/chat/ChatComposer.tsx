@@ -122,11 +122,13 @@ function shouldSendFromEnter(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
 interface ChatComposerProperties {
     attachments: ChatSendAttachment[];
     canSend: boolean;
+    canStop?: boolean;
     draft: string;
     fileInputReference: RefObject<HTMLInputElement | undefined>;
     isConnected: boolean;
     isRecording: boolean;
     isSending: boolean;
+    isStopping?: boolean;
     isTranscribing: boolean;
     selectedSessionKey: string;
     selectedSession?: Session;
@@ -143,6 +145,7 @@ interface ChatComposerProperties {
     onPreview: (isPreview: ChatPreviewItem) => void;
     onRemoveAttachment: (attachmentId: string) => void;
     onSend: () => void;
+    onStop?: () => void;
     onToggleRecording: () => void;
     onToggleThinking?: () => void;
     onToggleTools?: () => void;
@@ -157,11 +160,13 @@ interface ChatComposerProperties {
 export function ChatComposer({
     attachments,
     canSend,
+    canStop = false,
     draft,
     fileInputReference,
     isConnected,
     isRecording,
     isSending,
+    isStopping = false,
     isTranscribing,
     selectedSessionKey,
     selectedSession,
@@ -178,6 +183,7 @@ export function ChatComposer({
     onPreview,
     onRemoveAttachment,
     onSend,
+    onStop,
     onToggleRecording,
     onToggleThinking,
     onToggleTools,
@@ -753,12 +759,31 @@ export function ChatComposer({
                             >
                                 <Paperclip className="size-4" />
                             </Button>
+                            {(canStop || isStopping) && (
+                                <Button
+                                    type="button"
+                                    variant="danger"
+                                    size="sm"
+                                    onClick={onStop}
+                                    disabled={!canStop}
+                                    title="Stop"
+                                    aria-label="Stop"
+                                    className="size-8 shrink-0 rounded-full p-0"
+                                >
+                                    <Square className="size-3.5 fill-current" />
+                                </Button>
+                            )}
                             <Button
                                 type="button"
                                 variant="primary"
                                 size="sm"
                                 onClick={onSend}
-                                disabled={!canSend || isRecording || isTranscribing}
+                                disabled={
+                                    !canSend ||
+                                    isRecording ||
+                                    isTranscribing ||
+                                    isStopping
+                                }
                                 title="Send"
                                 aria-label="Send"
                                 className="size-8 shrink-0 rounded-full p-0"

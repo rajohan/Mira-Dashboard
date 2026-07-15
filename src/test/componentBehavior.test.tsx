@@ -725,6 +725,7 @@ describe("shared component helpers", () => {
         const onPreview = jest.fn();
         const onRemoveAttachment = jest.fn();
         const onSend = jest.fn();
+        const onStop = jest.fn();
         const onToggleRecording = jest.fn();
 
         render(
@@ -751,6 +752,7 @@ describe("shared component helpers", () => {
                     },
                 ]}
                 canSend={true}
+                canStop={true}
                 draft="/he"
                 fileInputReference={fileInputReference}
                 isConnected={true}
@@ -776,9 +778,13 @@ describe("shared component helpers", () => {
                 onPreview={onPreview}
                 onRemoveAttachment={onRemoveAttachment}
                 onSend={onSend}
+                onStop={onStop}
                 onToggleRecording={onToggleRecording}
             />
         );
+
+        await user.click(screen.getByRole("button", { name: "Stop" }));
+        expect(onStop).toHaveBeenCalledTimes(1);
 
         await user.click(screen.getAllByRole("button", { name: /note.txt/i })[0]!);
         expect(onPreview).toHaveBeenCalledWith(
