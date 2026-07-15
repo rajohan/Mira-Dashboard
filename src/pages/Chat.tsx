@@ -529,7 +529,8 @@ export function sessionTimestampMs(value: unknown): number | undefined {
 export function hasNewerAssistantMessageInHistory(
     messages: ChatHistoryMessage[],
     updatedAt?: string,
-    matchingRunIds: string[] = []
+    matchingRunIds: string[] = [],
+    shouldAllowUnscoped = false
 ): boolean {
     const streamUpdatedAt = sessionTimestampMs(updatedAt);
 
@@ -548,7 +549,8 @@ export function hasNewerAssistantMessageInHistory(
             message.role.toLowerCase() !== "assistant" ||
             !hasPrimaryAssistantContent ||
             (matchingRunIds.length > 0 &&
-                (!message.runId || !matchingRunIds.includes(message.runId)))
+                ((!message.runId && !shouldAllowUnscoped) ||
+                    (message.runId && !matchingRunIds.includes(message.runId))))
         ) {
             return false;
         }
@@ -1094,19 +1096,20 @@ export function Chat() {
                 );
                 const isFirstHistoryLoad =
                     loadedHistorySessionReference.current !== selectedSessionKey;
-                const preparedMessages = isFirstHistoryLoad
-                    ? nextMessages
-                    : messagesWithFinalThinkingPersistence(
-                          mergeWithRecentOptimisticMessages(
-                              messagesReference.current,
-                              nextMessages
-                          ),
-                          createChatVisibility(showThinkingOutput, showToolOutput),
-                          keepThinkingAfterFinal
-                      );
                 loadedHistorySessionReference.current = selectedSessionKey;
-                messagesReference.current = preparedMessages;
-                setMessages(() => preparedMessages);
+                setMessages((wasPrevious) => {
+                    const preparedMessages = isFirstHistoryLoad
+                        ? nextMessages
+                        : messagesWithFinalThinkingPersistence(
+                              mergeWithRecentOptimisticMessages(
+                                  wasPrevious,
+                                  nextMessages
+                              ),
+                              createChatVisibility(showThinkingOutput, showToolOutput),
+                              keepThinkingAfterFinal
+                          );
+                    return preparedMessages;
+                });
                 if (isNewSession) {
                     shouldStickToBottomReference.current = true;
                 }
@@ -1223,7 +1226,8 @@ export function Chat() {
                             hasNewerAssistantMessageInHistory(
                                 recoveryMessages,
                                 stream.updatedAt,
-                                streamRunIds
+                                streamRunIds,
+                                sessionActiveStreams.length === 1
                             );
                         return Boolean(
                             isActiveStreamIsQuiet &&
@@ -1235,8 +1239,7 @@ export function Chat() {
                                 !keepThinkingAfterFinal,
                                 streamRunIds
                             ) ||
-                                (!stream.message?.thinking?.length &&
-                                    streamText &&
+                                (streamText &&
                                     hasRecoveredStreamHistory(
                                         recoveryMessages,
                                         streamText

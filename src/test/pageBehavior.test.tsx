@@ -3298,6 +3298,29 @@ describe("Mira Dashboard pages", () => {
                 ["run-b"]
             )
         ).toBe(false);
+        const unscopedHistory = [
+            {
+                role: "assistant",
+                text: "done",
+                content: "done",
+                timestamp: "2026-06-24T08:01:00.000Z",
+            },
+        ];
+        expect(
+            hasNewerAssistantMessageInHistory(
+                unscopedHistory,
+                "2026-06-24T08:00:00.000Z",
+                ["run-a"]
+            )
+        ).toBe(false);
+        expect(
+            hasNewerAssistantMessageInHistory(
+                unscopedHistory,
+                "2026-06-24T08:00:00.000Z",
+                ["run-a"],
+                true
+            )
+        ).toBe(true);
         expect(nextHistoryBottomState(false, true, false)).toBe(true);
         expect(nextHistoryBottomState(false, false, false)).toBe(false);
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");
