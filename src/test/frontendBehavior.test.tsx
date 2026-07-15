@@ -3588,6 +3588,12 @@ describe("Mira Dashboard frontend behavior", () => {
             "same",
             "different",
         ]);
+        expect(
+            dedupeMessages([
+                chatMessage({ role: "assistant", runId: "run-a", text: "Done" }),
+                chatMessage({ role: "assistant", runId: "run-b", text: "Done" }),
+            ])
+        ).toHaveLength(2);
 
         expect(
             isRecoveredAssistantText(
@@ -3632,6 +3638,25 @@ describe("Mira Dashboard frontend behavior", () => {
             "no timestamp",
             "local system",
         ]);
+        expect(
+            mergeWithRecentOptimisticMessages(
+                [
+                    chatMessage({
+                        local: true,
+                        role: "assistant",
+                        runId: "concurrent-run-a",
+                        text: "Same concurrent answer",
+                    }),
+                ],
+                [
+                    chatMessage({
+                        role: "assistant",
+                        runId: "concurrent-run-b",
+                        text: "Same concurrent answer",
+                    }),
+                ]
+            )
+        ).toHaveLength(2);
     });
 
     it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {

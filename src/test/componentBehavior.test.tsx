@@ -4031,6 +4031,89 @@ describe("shared component helpers", () => {
         });
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
+        messages = [
+            {
+                content: "Done",
+                role: "assistant",
+                runId: "concurrent-run-a",
+                text: "Done",
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        activeStreams = {
+            "agent:main:main::concurrent-run-b::assistant": {
+                aliases: ["concurrent-run-b"],
+                runId: "concurrent-run-b",
+                sessionKey: "agent:main:main",
+                text: "Done",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Done",
+                    runId: "concurrent-run-b",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages
+                .filter(
+                    (message): message is { runId?: string; text?: string } =>
+                        typeof message === "object" && message !== null
+                )
+                .filter((message) => message.text === "Done")
+                .map((message) => message.runId)
+        ).toEqual(["concurrent-run-a", "concurrent-run-b"]);
+
+        messages = [
+            {
+                content: "Same local answer",
+                local: true,
+                role: "assistant",
+                runId: "concurrent-local-run-a",
+                text: "Same local answer",
+                timestamp: new Date().toISOString(),
+            },
+        ];
+        activeStreams = {
+            "agent:main:main::concurrent-local-run-b::assistant": {
+                aliases: ["concurrent-local-run-b"],
+                runId: "concurrent-local-run-b",
+                sessionKey: "agent:main:main",
+                text: "Same local answer",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        activeStreamsReference.current = activeStreams;
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Same local answer",
+                    runId: "concurrent-local-run-b",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.filter(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "text" in message &&
+                    message.text === "Same local answer"
+            )
+        ).toHaveLength(2);
+
         activeStreamsReference.current["agent:main:main"] = {
             aliases: ["dashboard-chat-runtime-first"],
             runId: "dashboard-chat-runtime-first",
@@ -5091,7 +5174,7 @@ describe("shared component helpers", () => {
                     "duplicate final answer that is still streaming from a local row",
                 local: true,
                 role: "assistant",
-                runId: "local-duplicate-final-run",
+                runId: "dashboard-chat-local-duplicate-final-run",
                 text: "duplicate final answer that is still streaming from a local row",
                 timestamp: new Date().toISOString(),
             },
@@ -5199,9 +5282,12 @@ describe("shared component helpers", () => {
                 typeof message.text === "string" &&
                 message.text.includes("Fikset reviewen og pushet")
         );
-        expect(stableFinalRows).toHaveLength(1);
+        expect(stableFinalRows).toHaveLength(2);
         expect(stableFinalRows[0]).toMatchObject({
             text: stableFinalText,
+        });
+        expect(stableFinalRows[1]).toMatchObject({
+            runId: "late-corrupt-final-run",
         });
 
         messages = [
@@ -6561,6 +6647,40 @@ describe("shared component helpers", () => {
                     message.thinking[0]?.text === "reasoning before abort"
             )
         ).toBe(true);
+
+        messages = [];
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "reasoning before lifecycle failure" },
+                    runId: "lifecycle-error-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                type: "event",
+            });
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "error" },
+                    runId: "lifecycle-error-run",
+                    sessionKey: "agent:main:main",
+                    stream: "lifecycle",
+                },
+                type: "event",
+            });
+        });
+        expect(
+            messages.some(
+                (message) =>
+                    typeof message === "object" &&
+                    message !== null &&
+                    "thinking" in message &&
+                    Array.isArray(message.thinking) &&
+                    message.thinking[0]?.text === "reasoning before lifecycle failure"
+            )
+        ).toBe(true);
         unmount();
     });
 
@@ -7759,12 +7879,19 @@ describe("shared component helpers", () => {
             text: "Done",
             thinking: [{ text: "first done reasoning" }],
         };
+        const differentRunDoneMessages = mergeWithRecentOptimisticMessages(
+            [firstDoneDiagnostic],
+            [{ content: "Done", role: "assistant", runId: "done-2", text: "Done" }]
+        );
+        expect(differentRunDoneMessages).toHaveLength(2);
         expect(
-            mergeWithRecentOptimisticMessages(
-                [firstDoneDiagnostic],
-                [{ content: "Done", role: "assistant", runId: "done-2", text: "Done" }]
-            )[0]?.thinking
+            differentRunDoneMessages.find((message) => message.runId === "done-2")
+                ?.thinking
         ).toBeUndefined();
+        expect(
+            differentRunDoneMessages.find((message) => message.runId === "done-1")
+                ?.thinking?.[0]?.text
+        ).toBe("first done reasoning");
         expect(
             mergeWithRecentOptimisticMessages(
                 [firstDoneDiagnostic],
@@ -7853,6 +7980,28 @@ describe("shared component helpers", () => {
                 text: "Done",
             })
         ).toBe("Done");
+        expect(
+            isActiveStreamRecoveredInMessages(
+                {
+                    ...stream,
+                    message: {
+                        content: "Same concurrent answer",
+                        role: "assistant",
+                        text: "Same concurrent answer",
+                    },
+                    text: "Same concurrent answer",
+                },
+                [
+                    {
+                        content: "Same concurrent answer",
+                        role: "assistant",
+                        runId: "run-2",
+                        text: "Same concurrent answer",
+                    },
+                ],
+                now
+            )
+        ).toBe(false);
         expect(isActiveStreamRecoveredInMessages(stream, visibleMessages, now)).toBe(
             false
         );

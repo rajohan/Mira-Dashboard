@@ -51,7 +51,10 @@ import {
     messageIdentity,
     readFileAsDataUrl,
 } from "../components/features/chat/chatUtilities";
-import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
+import {
+    buildSlashCommandSuggestions,
+    slashCommandCanonicalName,
+} from "../components/features/chat/slashCommands";
 import { useChatRuntimeEvents } from "../components/features/chat/useChatRuntimeEvents";
 import { useChatSlashCommands } from "../components/features/chat/useChatSlashCommands";
 import { Card } from "../components/ui/Card";
@@ -93,6 +96,19 @@ export function hasUnacknowledgedChatSend(
                 (stream.runId === sessionKey &&
                     stream.aliases.some((runId) => runId.startsWith("dashboard-chat-"))))
     );
+}
+
+/** Returns whether a local control command may run before the current send ACK. */
+export function canBypassUnacknowledgedChatSend(draft: string): boolean {
+    return slashCommandCanonicalName(draft.trim().split(/\s+/, 1)[0] || "") === "/stop";
+}
+
+/** Captures delete aliases before an optimistic message can be re-keyed by its ACK. */
+export function pendingMessageDeleteAliases(
+    messageKey: string,
+    aliasesByKey: ReadonlyMap<string, string[]>
+): string[] {
+    return [...(aliasesByKey.get(messageKey) || [messageKey])];
 }
 
 /** Reconciles one optimistic stream after the Gateway acknowledges its run id. */
@@ -465,6 +481,14 @@ export function isActiveStreamRecoveredInMessages(
         (streamText.trim() || hasToolDetails) &&
         visibleMessages.some((message) => {
             if (message.role.toLowerCase() !== "assistant") {
+                return false;
+            }
+            if (
+                message.runId &&
+                stream.runId &&
+                message.runId !== stream.runId &&
+                !stream.aliases.includes(message.runId)
+            ) {
                 return false;
             }
 
@@ -949,6 +973,7 @@ export function Chat() {
     );
     const draftReference = useRef("");
     const attachmentsReference = useRef<ChatSendAttachment[]>([]);
+    const pendingDeleteMessageAliasesReference = useRef<string[]>([]);
 
     const [selectedSessionKey, setSelectedSessionKey] = useState("");
     const [draft, setDraft] = useState("");
@@ -1753,6 +1778,10 @@ export function Chat() {
 
     /** Responds to delete message events. */
     const handleDeleteMessage = (messageKey: string) => {
+        pendingDeleteMessageAliasesReference.current = pendingMessageDeleteAliases(
+            messageKey,
+            deleteKeyAliases
+        );
         setPendingDeleteMessageKey(messageKey);
     };
 
@@ -1764,15 +1793,14 @@ export function Chat() {
 
         setDeletedMessageKeys((wasPrevious) => {
             const next = new Set(wasPrevious);
-            const keysToDelete = deleteKeyAliases.get(pendingDeleteMessageKey) || [
-                pendingDeleteMessageKey,
-            ];
+            const keysToDelete = pendingDeleteMessageAliasesReference.current;
             for (const key of keysToDelete) {
                 next.add(key);
             }
             writeDeletedMessageKeys(selectedSessionKey, next);
             return next;
         });
+        pendingDeleteMessageAliasesReference.current = [];
         setPendingDeleteMessageKey(undefined);
     };
 
@@ -2100,7 +2128,7 @@ export function Chat() {
         }
 
         const isResetCommand = isResetSlashCommand(text);
-        const isSlashCommand = text.startsWith("/");
+        const canBypassUnacknowledgedSend = canBypassUnacknowledgedChatSend(text);
         const hasActiveSessionStream = Object.values(activeStreamsReference.current).some(
             (stream) => isSameSessionKey(stream.sessionKey, pendingSendSessionKey)
         );
@@ -2113,7 +2141,7 @@ export function Chat() {
             return;
         }
         if (
-            !isSlashCommand &&
+            !canBypassUnacknowledgedSend &&
             hasUnacknowledgedChatSend(
                 activeStreamsReference.current,
                 pendingSendSessionKey
@@ -2271,7 +2299,7 @@ export function Chat() {
             stream.operation === "compact" ||
             stream.statusText?.toLowerCase().includes("compact")
     );
-    const isSlashCommandDraft = draftText.startsWith("/");
+    const canBypassUnacknowledgedSend = canBypassUnacknowledgedChatSend(draftText);
     const hasUnacknowledgedSend = hasUnacknowledgedChatSend(
         activeStreams,
         selectedSessionKey
@@ -2284,7 +2312,7 @@ export function Chat() {
         !isPatchingSession &&
         !isCompactingSession &&
         !isResettingSession &&
-        (isSlashCommandDraft || !hasUnacknowledgedSend) &&
+        (canBypassUnacknowledgedSend || !hasUnacknowledgedSend) &&
         (draftText || attachments.length > 0)
     );
     const isSessionControlsDisabled = Boolean(
@@ -2510,7 +2538,10 @@ export function Chat() {
                 message="Delete this message from your chat view?"
                 confirmLabel="Delete"
                 danger
-                onCancel={() => setPendingDeleteMessageKey(undefined)}
+                onCancel={() => {
+                    pendingDeleteMessageAliasesReference.current = [];
+                    setPendingDeleteMessageKey(undefined);
+                }}
                 onConfirm={confirmDeleteMessage}
             />
 

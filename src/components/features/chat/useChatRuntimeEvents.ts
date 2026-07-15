@@ -2093,9 +2093,11 @@ export function useChatRuntimeEvents({
                                   runtimeMessageToApply.text
                               )
                         : existingBufferedText;
+                const shouldPreserveFailureDiagnostics = phase === "error";
                 let diagnosticMessages = activeDiagnosticMessagesForRun(
                     selectedSessionKey,
-                    resolvedEventRunId
+                    resolvedEventRunId,
+                    !shouldPreserveFailureDiagnostics
                 );
                 if (stream !== "assistant" && runtimeMessageToApply) {
                     const existingChannelEntry = Object.entries(
@@ -2120,7 +2122,9 @@ export function useChatRuntimeEvents({
                             "",
                             resolvedEventRunId
                         ),
-                        keepThinkingAfterFinalReference.current && showThinkingOutput
+                        showThinkingOutput &&
+                            (shouldPreserveFailureDiagnostics ||
+                                keepThinkingAfterFinalReference.current)
                     );
                     if (
                         isRenderableChatHistoryMessage(
@@ -3012,8 +3016,15 @@ export function useChatRuntimeEvents({
                                       message.runId === finalAssistantMessage.runId;
                                   const hasPrimaryContent =
                                       hasPrimaryChatMessageContent(message);
+                                  const canReconcileLocalRun =
+                                      !message.runId ||
+                                      !finalAssistantMessage.runId ||
+                                      isSameRun ||
+                                      isOptimisticRunId(message.runId) ||
+                                      isProvisionalRunId(streamSessionKey, message.runId);
                                   const isRecoveredLocalText =
                                       message.local === true &&
+                                      canReconcileLocalRun &&
                                       isRecoveredAssistantText(
                                           message.text,
                                           finalAssistantMessage.text
@@ -3022,6 +3033,7 @@ export function useChatRuntimeEvents({
                                       message.local !== true &&
                                       messageIndex === wasPrevious.length - 1 &&
                                       messageIndex === lastAssistantMessageIndex &&
+                                      (!finalAssistantMessage.runId || isSameRun) &&
                                       isRecentChatRuntimeMessage(message) &&
                                       isRecoveredAssistantText(
                                           message.text,
@@ -3036,10 +3048,6 @@ export function useChatRuntimeEvents({
                                   }
 
                                   didMergeFinalMessage = true;
-                                  if (isRecoveredRecentFinalEcho && !isSameRun) {
-                                      return message;
-                                  }
-
                                   const mergedFinalMessage = mergeChatMessageDetails(
                                       {
                                           ...message,

@@ -29,11 +29,16 @@ import {
     uniqueStrings,
     visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
+import {
+    messageDeleteKey,
+    messageDeleteKeys,
+} from "../components/features/chat/chatUtilities";
 import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
 import { Agents } from "../pages/Agents";
 import {
     acknowledgedActiveStreams,
     activeStreamsAfterFailedSend,
+    canBypassUnacknowledgedChatSend,
     Chat,
     hasNewerAssistantMessageInHistory,
     hasNewerFinalForStrippedThinkingStream,
@@ -43,6 +48,7 @@ import {
     nextHistoryBottomState,
     nextHistoryLoadSendError,
     optimisticChatStreamKey,
+    pendingMessageDeleteAliases,
     readDeletedMessageKeys,
     scheduleBottomFollowWhenNeeded,
     sessionTimestampMs,
@@ -2789,6 +2795,17 @@ describe("Mira Dashboard pages", () => {
             sessionId: "session-main",
             message: "Ship it",
         });
+
+        const composerBeforeAck = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        await user.type(composerBeforeAck, "/model codex");
+        expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+        await user.clear(composerBeforeAck);
+        await user.type(composerBeforeAck, "/stop");
+        expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+        await user.clear(composerBeforeAck);
+
         await respondToSocketRequest(socket, "chat.send", { runId: "run-123" });
         await flushQueuedTimers();
 
@@ -3488,6 +3505,29 @@ describe("Mira Dashboard pages", () => {
         expect(hasUnacknowledgedChatSend(optimisticStreams, "agent:main:main")).toBe(
             true
         );
+        expect(canBypassUnacknowledgedChatSend("/stop")).toBe(true);
+        expect(canBypassUnacknowledgedChatSend("/abort now")).toBe(true);
+        expect(canBypassUnacknowledgedChatSend("/model codex")).toBe(false);
+        expect(canBypassUnacknowledgedChatSend("/compact")).toBe(false);
+        const optimisticDeleteMessage = {
+            content: "Delete after ACK",
+            role: "user",
+            runId: "dashboard-chat-delete",
+            text: "Delete after ACK",
+            timestamp: "2026-06-24T08:00:00.000Z",
+        };
+        const optimisticDeleteKey = messageDeleteKey(optimisticDeleteMessage);
+        const capturedDeleteAliases = pendingMessageDeleteAliases(
+            optimisticDeleteKey,
+            new Map([[optimisticDeleteKey, messageDeleteKeys(optimisticDeleteMessage)]])
+        );
+        const acknowledgedDeleteAliases = messageDeleteKeys({
+            ...optimisticDeleteMessage,
+            runId: "real-delete-run",
+        });
+        expect(
+            capturedDeleteAliases.some((key) => acknowledgedDeleteAliases.includes(key))
+        ).toBe(true);
         expect(
             Object.keys(
                 acknowledgedActiveStreams(

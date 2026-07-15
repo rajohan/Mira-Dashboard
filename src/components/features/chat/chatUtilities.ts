@@ -352,10 +352,12 @@ export function messageIdentity(message: ChatHistoryMessage): string {
     const mediaIdentity = messageMediaIdentity(message);
     const normalizedTextIdentity =
         role === "user" ? userMessageTextIdentity(message.text) : message.text.trim();
-    const userTurnIdentity = message.runId || message.timestamp;
+    const turnIdentity = message.runId || message.timestamp;
     const textIdentity =
-        role === "user" && normalizedTextIdentity && userTurnIdentity
-            ? `${normalizedTextIdentity}::${userTurnIdentity}`
+        (role === "user" || role === "assistant") &&
+        normalizedTextIdentity &&
+        turnIdentity
+            ? `${normalizedTextIdentity}::${turnIdentity}`
             : normalizedTextIdentity;
     const userMediaTurnIdentity =
         role === "user" && !textIdentity && mediaIdentity
@@ -666,9 +668,9 @@ export function mergeWithRecentOptimisticMessages(
             nextToolCallRowsByIdentity.set(identity, message);
         }
     }
-    const nextAssistantTexts = mergeableNextMessages
-        .filter((message) => message.role.toLowerCase() === "assistant")
-        .map((message) => message.text);
+    const nextAssistantMessages = mergeableNextMessages.filter(
+        (message) => message.role.toLowerCase() === "assistant"
+    );
     const now = Date.now();
     const recentMissingMessages = mergeablePreviousMessages.filter((message) => {
         const role = message.role.toLowerCase();
@@ -736,8 +738,12 @@ export function mergeWithRecentOptimisticMessages(
 
         if (
             role === "assistant" &&
-            nextAssistantTexts.some((nextText) =>
-                isRecoveredAssistantText(message.text, nextText)
+            nextAssistantMessages.some(
+                (nextMessage) =>
+                    (!message.runId ||
+                        !nextMessage.runId ||
+                        message.runId === nextMessage.runId) &&
+                    isRecoveredAssistantText(message.text, nextMessage.text)
             )
         ) {
             return false;
