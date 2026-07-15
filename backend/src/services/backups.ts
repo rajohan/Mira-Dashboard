@@ -888,8 +888,8 @@ export async function startManualBackup(type: BackupJob["type"]) {
 const backupScheduledJobs = [
     {
         id: "backup.walg",
-        name: "WAL-G nightly backup",
-        description: "Run the nightly WAL-G PostgreSQL base backup.",
+        name: "WAL-G backup",
+        description: "Run a WAL-G PostgreSQL base backup.",
         scheduleType: "daily",
         intervalSeconds: 24 * 60 * 60,
         timeOfDay: "03:20",
@@ -898,8 +898,8 @@ const backupScheduledJobs = [
     },
     {
         id: "backup.kopia",
-        name: "Kopia nightly backup",
-        description: "Run the nightly Kopia filesystem backup.",
+        name: "Kopia backup",
+        description: "Run a Kopia filesystem backup.",
         scheduleType: "daily",
         intervalSeconds: 24 * 60 * 60,
         timeOfDay: "03:50",
