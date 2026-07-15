@@ -260,6 +260,14 @@ describe("database overview service", () => {
                 serverConnections: 6,
             });
             const invocationLogContents = await Bun.file(invocationLog).text();
+            expect(invocationLogContents).toContain("classes.reltuples::numeric");
+            expect(invocationLogContents).not.toMatch(/classes\.reltuples::numeric\s*-/u);
+            expect(invocationLogContents).toContain("catalog_estimate_may_be_stale");
+            expect(invocationLogContents).toContain("5368709120");
+            expect(invocationLogContents).toContain("ABS(");
+            expect(invocationLogContents).not.toMatch(
+                /classes\.reltuples::numeric\s*\+\s*tables\.n_dead_tup::numeric/u
+            );
             const torrentCountQueries = invocationLogContents
                 .split("\n")
                 .filter((line) =>
