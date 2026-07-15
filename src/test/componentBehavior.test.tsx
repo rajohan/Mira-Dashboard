@@ -1039,6 +1039,9 @@ describe("shared component helpers", () => {
         expect(onSend).not.toHaveBeenCalled();
         fireEvent.pointerDown(document.body);
         expect(textarea.getAttribute("aria-expanded")).toBe("false");
+        fireEvent.change(textarea, { target: { value: "/he-blur" } });
+        fireEvent.blur(textarea, { relatedTarget: document.body });
+        expect(textarea.getAttribute("aria-expanded")).toBe("false");
         fireEvent.change(textarea, { target: { value: "/he-close" } });
         await user.click(screen.getByRole("button", { name: /close slash commands/i }));
         expect(fireEvent.keyDown(textarea, { key: "ArrowDown" })).toBe(true);

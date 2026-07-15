@@ -415,6 +415,18 @@ export function ChatComposer({
                             setActiveSlashSuggestionIndex(0);
                             onChangeDraft(event.target.value);
                         }}
+                        onBlur={(event) => {
+                            const nextFocusedElement = event.relatedTarget;
+                            if (
+                                nextFocusedElement instanceof Node &&
+                                slashOptionsReference.current?.contains(
+                                    nextFocusedElement
+                                )
+                            ) {
+                                return;
+                            }
+                            setSlashSuggestionsDismissed(true);
+                        }}
                         onKeyDown={(event) => {
                             if (event.nativeEvent.isComposing) {
                                 return;
