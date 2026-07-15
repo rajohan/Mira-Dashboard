@@ -2887,6 +2887,25 @@ describe("Mira Dashboard pages", () => {
             ).toHaveValue("");
         });
 
+        const composer = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        await user.type(composer, "Follow up after stop");
+        await user.click(screen.getByRole("button", { name: "Stop" }));
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"chat.abort"'))
+            ).toBe(true);
+        });
+        expect(composer).toHaveValue("Follow up after stop");
+        expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+        await respondToSocketRequest(socket, "chat.abort", {});
+        await flushQueuedTimers();
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+        });
+        await user.clear(composer);
+
         const fileInput = view.container.querySelector<HTMLInputElement>(
             'input[type="file"][multiple]'
         );
