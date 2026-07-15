@@ -1,6 +1,10 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import { type ActiveChatStreams, createLocalSystemMessage } from "./chatRuntime";
+import {
+    type ActiveChatStreams,
+    createLocalSystemMessage,
+    isSameSessionKey,
+} from "./chatRuntime";
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
 import { slashCommandCanonicalName } from "./slashCommands";
@@ -40,7 +44,8 @@ export function useChatSlashCommands({
 
     return async (
         commandText: string,
-        currentAttachments: ChatSendAttachment[] = attachments
+        currentAttachments: ChatSendAttachment[] = attachments,
+        options: { preserveDraft?: boolean } = {}
     ): Promise<boolean> => {
         const [rawCommand = ""] = commandText.trim().split(/\s+/);
         const command = slashCommandCanonicalName(rawCommand);
@@ -78,15 +83,18 @@ export function useChatSlashCommands({
             return false;
         }
 
-        setDraft("");
+        if (!options.preserveDraft) setDraft("");
         setSendError(undefined);
 
         try {
             await request("chat.abort", { sessionKey: selectedSessionKey });
             updateActiveStreams((wasPrevious) => {
-                const next = { ...wasPrevious };
-                delete next[selectedSessionKey];
-                return next;
+                return Object.fromEntries(
+                    Object.entries(wasPrevious).filter(
+                        ([, stream]) =>
+                            !isSameSessionKey(stream.sessionKey, selectedSessionKey)
+                    )
+                );
             });
             addSystemMessage("Stopped current run.");
         } catch (error_) {

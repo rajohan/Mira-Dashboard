@@ -755,6 +755,7 @@ export function Chat() {
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
+    const [stoppingSessionKey, setStoppingSessionKey] = useState("");
     const [pendingSessionPatchCounts, setPendingSessionPatchCounts] = useState<
         Record<string, number>
     >({});
@@ -2039,6 +2040,7 @@ export function Chat() {
     };
 
     const draftText = draft.trim();
+    const isStopping = isSameSessionKey(stoppingSessionKey, selectedSessionKey);
     const blockedByInFlightSend = isBlockedByInFlightSend(draftText);
     const isPatchingSession = (pendingSessionPatchCounts[selectedSessionKey] || 0) > 0;
     const isCompactingSession = selectedStreams.some(
@@ -2053,9 +2055,31 @@ export function Chat() {
         !isTranscribing &&
         !isPatchingSession &&
         !isCompactingSession &&
+        !isStopping &&
         !blockedByInFlightSend &&
         (draftText || attachments.length > 0)
     );
+    const canStop = Boolean(
+        isConnected &&
+        selectedSessionKey &&
+        !isStopping &&
+        (selectedStreams.length > 0 || isSessionActive(selectedSession))
+    );
+
+    /** Stops the selected run without clearing the current draft. */
+    const handleStop = async () => {
+        const sessionKey = selectedSessionKey;
+        if (!canStop || !sessionKey) return;
+
+        setStoppingSessionKey(sessionKey);
+        try {
+            await handleSlashCommand("/stop", [], { preserveDraft: true });
+        } finally {
+            setStoppingSessionKey((current) =>
+                isSameSessionKey(current, sessionKey) ? "" : current
+            );
+        }
+    };
     const isSessionControlsDisabled = Boolean(
         !isConnected ||
         isSending ||
@@ -2207,11 +2231,13 @@ export function Chat() {
                         attachments={attachments}
                         modelOptions={chatModelOptions}
                         canSend={canSend}
+                        canStop={canStop}
                         draft={draft}
                         fileInputReference={fileInputReference}
                         isConnected={isConnected}
                         isRecording={isRecording}
                         isSending={isSending}
+                        isStopping={isStopping}
                         isTranscribing={isTranscribing}
                         selectedSessionKey={selectedSessionKey}
                         selectedSession={selectedSession}
@@ -2227,6 +2253,7 @@ export function Chat() {
                         onPreview={setPreviewItem}
                         onRemoveAttachment={removeAttachment}
                         onSend={() => void handleSend()}
+                        onStop={() => void handleStop()}
                         onToggleRecording={() => void handleToggleRecording()}
                         onToggleThinking={() => {
                             const shouldShowThinking = !showThinkingOutput;
