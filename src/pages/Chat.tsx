@@ -1144,9 +1144,17 @@ export function Chat() {
                     return;
                 }
 
-                const nextMessages = visibleHistoryMessages(
+                const historyVisibility = createChatVisibility(
+                    showThinkingOutput,
+                    showToolOutput
+                );
+                const recoveryMessages = visibleHistoryMessages(
                     result.messages,
-                    createChatVisibility(showThinkingOutput, showToolOutput),
+                    historyVisibility
+                );
+                const nextMessages = messagesWithFinalThinkingPersistence(
+                    recoveryMessages,
+                    historyVisibility,
                     keepThinkingAfterFinal
                 );
                 const recoveredStreamKeys = Object.entries(activeStreamsReference.current)
@@ -1165,7 +1173,7 @@ export function Chat() {
                         const streamMessageIsRenderable = stream.message
                             ? isRenderableChatHistoryMessage(
                                   stream.message,
-                                  createChatVisibility(showThinkingOutput, showToolOutput)
+                                  historyVisibility
                               )
                             : false;
                         const isStatusOnlyStream =
@@ -1174,18 +1182,18 @@ export function Chat() {
                             isActiveStreamIsQuiet &&
                             (isActiveStreamRecoveredInMessages(
                                 stream,
-                                nextMessages,
+                                recoveryMessages,
                                 Date.now(),
                                 showThinkingOutput
                             ) ||
                                 (streamText &&
                                     hasRecoveredStreamHistory(
-                                        nextMessages,
+                                        recoveryMessages,
                                         streamText
                                     )) ||
                                 (isStatusOnlyStream &&
                                     hasNewerAssistantMessageInHistory(
-                                        nextMessages,
+                                        recoveryMessages,
                                         stream.updatedAt
                                     )))
                         );
@@ -1199,7 +1207,7 @@ export function Chat() {
                             nextMessages,
                             isRecoveredStreamInHistory
                         ),
-                        createChatVisibility(showThinkingOutput, showToolOutput),
+                        historyVisibility,
                         keepThinkingAfterFinal
                     )
                 );
@@ -2171,7 +2179,9 @@ export function Chat() {
                             if (!shouldShowThinking) {
                                 setKeepThinkingAfterFinal(false);
                                 setMessages((wasPrevious) =>
-                                    wasPrevious.map(stripThinkingFromMessage)
+                                    wasPrevious.map((message) =>
+                                        stripThinkingFromMessage(message)
+                                    )
                                 );
                             }
                             setShowThinkingOutput(shouldShowThinking);

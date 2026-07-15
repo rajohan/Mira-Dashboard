@@ -32,6 +32,7 @@ import {
     type ActiveChatStreams,
     createChatVisibility,
     mergeStreamMessage,
+    visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
 import {
     type ChatHistoryMessage,
@@ -6017,6 +6018,38 @@ describe("shared component helpers", () => {
             })
         ).toBe("Done");
         expect(isActiveStreamRecoveredInMessages(stream, visibleMessages, now)).toBe(
+            false
+        );
+        const completedHistory = [
+            {
+                content: "Question",
+                role: "user",
+                timestamp: new Date(now - 140_000).toISOString(),
+            },
+            {
+                content: [{ text: "thinking recovered prefix", type: "thinking" }],
+                role: "assistant",
+                timestamp: quietUpdatedAt,
+            },
+            {
+                content: "Final answer",
+                role: "assistant",
+                timestamp: new Date(now - 120_000).toISOString(),
+            },
+        ];
+        const recoveryHistory = visibleHistoryMessages(
+            completedHistory,
+            createChatVisibility(true, true)
+        );
+        const renderedHistory = visibleHistoryMessages(
+            completedHistory,
+            createChatVisibility(true, true),
+            false
+        );
+        expect(isActiveStreamRecoveredInMessages(stream, recoveryHistory, now)).toBe(
+            true
+        );
+        expect(isActiveStreamRecoveredInMessages(stream, renderedHistory, now)).toBe(
             false
         );
         expect(

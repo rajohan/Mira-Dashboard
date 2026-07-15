@@ -1204,20 +1204,22 @@ export function useChatRuntimeEvents({
                         );
 
                     if (shouldApplyResult) {
+                        const historyVisibility = createChatVisibility(
+                            showThinkingOutput,
+                            showToolOutput
+                        );
+                        const visibleMessages = visibleHistoryMessages(
+                            result.messages,
+                            historyVisibility,
+                            keepThinkingAfterFinalReference.current
+                        );
                         setMessages((wasPrevious) =>
                             messagesWithFinalThinkingPersistence(
                                 mergeWithRecentOptimisticMessages(
                                     wasPrevious,
-                                    visibleHistoryMessages(
-                                        result.messages,
-                                        createChatVisibility(
-                                            showThinkingOutput,
-                                            showToolOutput
-                                        ),
-                                        keepThinkingAfterFinalReference.current
-                                    )
+                                    visibleMessages
                                 ),
-                                createChatVisibility(showThinkingOutput, showToolOutput),
+                                historyVisibility,
                                 keepThinkingAfterFinalReference.current &&
                                     showThinkingOutput
                             )
@@ -2183,23 +2185,22 @@ export function useChatRuntimeEvents({
                             );
 
                         if (shouldApplyResult) {
+                            const historyVisibility = createChatVisibility(
+                                showThinkingOutput,
+                                showToolOutput
+                            );
+                            const visibleMessages = visibleHistoryMessages(
+                                result.messages,
+                                historyVisibility,
+                                keepThinkingAfterFinalReference.current
+                            );
                             setMessages((wasPrevious) =>
                                 messagesWithFinalThinkingPersistence(
                                     mergeWithRecentOptimisticMessages(
                                         wasPrevious,
-                                        visibleHistoryMessages(
-                                            result.messages,
-                                            createChatVisibility(
-                                                showThinkingOutput,
-                                                showToolOutput
-                                            ),
-                                            keepThinkingAfterFinalReference.current
-                                        )
+                                        visibleMessages
                                     ),
-                                    createChatVisibility(
-                                        showThinkingOutput,
-                                        showToolOutput
-                                    ),
+                                    historyVisibility,
                                     keepThinkingAfterFinalReference.current &&
                                         showThinkingOutput
                                 )
