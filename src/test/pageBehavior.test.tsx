@@ -3586,6 +3586,30 @@ describe("Mira Dashboard pages", () => {
             thinkingWithHiddenToolMedia.some((message) => message.thinking?.length)
         ).toBe(true);
 
+        const hiddenToolMediaOnly = messagesWithFinalThinkingPersistence(
+            [
+                { ...activeThinking, runId: "hidden-media-run" },
+                {
+                    attachments: [
+                        {
+                            fileName: "tool-output.txt",
+                            id: "tool-output",
+                            kind: "file" as const,
+                        },
+                    ],
+                    content: "",
+                    hasOnlyHiddenToolAttachments: true,
+                    role: "assistant",
+                    text: "",
+                },
+            ],
+            visibility,
+            false
+        );
+        expect(hiddenToolMediaOnly.some((message) => message.thinking?.length)).toBe(
+            true
+        );
+
         const deletedMessage = {
             content: [
                 { type: "text", text: "answer" },

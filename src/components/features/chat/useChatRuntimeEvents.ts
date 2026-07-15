@@ -1633,6 +1633,9 @@ export function useChatRuntimeEvents({
                         ];
                     }
                 }
+                diagnosticMessages = diagnosticMessages.map((message) =>
+                    eventRunId ? { ...message, runId: eventRunId } : message
+                );
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()
                         ? [
@@ -1749,6 +1752,9 @@ export function useChatRuntimeEvents({
                         ];
                     }
                 }
+                diagnosticMessages = diagnosticMessages.map((message) =>
+                    eventRunId ? { ...message, runId: eventRunId } : message
+                );
                 const messagesToAppend: ChatHistoryMessage[] = [
                     ...(bufferedText.trim()
                         ? [

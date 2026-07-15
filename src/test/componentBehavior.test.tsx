@@ -4923,6 +4923,19 @@ describe("shared component helpers", () => {
         let listener: ((data: unknown) => void) | undefined;
         const activeStreamsReference: { current: ActiveChatStreams } = {
             current: {
+                "agent:main:main::assistant": {
+                    aliases: [],
+                    message: {
+                        content: "final answer",
+                        role: "assistant",
+                        runId: "agent:main:main",
+                        text: "final answer",
+                    },
+                    runId: "agent:main:main",
+                    sessionKey: "agent:main:main",
+                    text: "final answer",
+                    updatedAt: new Date().toISOString(),
+                },
                 "agent:main:main::thinking": {
                     aliases: [],
                     message: {
@@ -4974,12 +4987,10 @@ describe("shared component helpers", () => {
         await waitFor(() => expect(listener).toBeDefined());
         act(() => {
             listener?.({
-                event: "chat",
+                event: "model.completed",
                 payload: {
-                    message: { role: "assistant", text: "final answer" },
                     runId: "resolved-run",
                     sessionKey: "agent:main:main",
-                    state: "final",
                 },
                 type: "event",
             });

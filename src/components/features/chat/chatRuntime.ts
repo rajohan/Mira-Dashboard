@@ -311,11 +311,14 @@ export function messagesWithFinalThinkingPersistence(
         const hasPrimaryAssistantContent = Boolean(
             messageWithoutThinking.text.trim() ||
             messageWithoutThinking.images?.length ||
-            (messageWithoutThinking.attachments?.length && !hasToolDetails)
+            (messageWithoutThinking.attachments?.length &&
+                !hasToolDetails &&
+                !messageWithoutThinking.hasOnlyHiddenToolAttachments)
         );
         const isDiagnosticToolMessage = hasToolDetails && !hasPrimaryAssistantContent;
         const hasPrimaryAssistantAnswer = Boolean(
             message.role.toLowerCase() === "assistant" &&
+            hasPrimaryAssistantContent &&
             !isDiagnosticToolMessage &&
             isRenderableChatHistoryMessage(messageWithoutThinking, visibility)
         );
