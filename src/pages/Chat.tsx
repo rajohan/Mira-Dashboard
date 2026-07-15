@@ -1409,6 +1409,10 @@ export function Chat() {
         setSendError,
         setIsAtBottom,
         setHistoryLoadVersion,
+        isSessionStopping: (sessionKey) =>
+            [...stoppingSessionKeys].some((stoppingSessionKey) =>
+                isSameSessionKey(stoppingSessionKey, sessionKey)
+            ),
         onRunTerminal: (sessionKey) =>
             setStoppingSessionKeys((wasStopping) => {
                 const matchingKey = [...wasStopping].find((key) =>

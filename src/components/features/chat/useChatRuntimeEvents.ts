@@ -1026,6 +1026,7 @@ interface UseChatRuntimeEventsParameters {
     setSendError: Dispatch<SetStateAction<string | undefined>>;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
+    isSessionStopping?: (sessionKey: string) => boolean;
     onRunTerminal?: (sessionKey: string) => void;
 }
 
@@ -1048,6 +1049,7 @@ export function useChatRuntimeEvents({
     setSendError,
     setIsAtBottom,
     setHistoryLoadVersion,
+    isSessionStopping,
     onRunTerminal,
 }: UseChatRuntimeEventsParameters) {
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
@@ -1068,11 +1070,13 @@ export function useChatRuntimeEvents({
     const terminalMessagesReference =
         pendingTerminalMessagesReference || fallbackPendingTerminalMessagesReference;
     const onRunTerminalReference = useRef(onRunTerminal);
+    const isSessionStoppingReference = useRef(isSessionStopping);
 
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
     keepThinkingAfterFinalReference.current = keepThinkingAfterFinal;
     onRunTerminalReference.current = onRunTerminal;
+    isSessionStoppingReference.current = isSessionStopping;
 
     useEffect(() => {
         selectedSessionKeyReference.current = selectedSessionKey;
@@ -2088,14 +2092,19 @@ export function useChatRuntimeEvents({
                 eventSessionKey,
                 selectedSessionKey
             );
-            const isRelevantEvent = eventMatchesSelected || Boolean(streamForRun);
+            const isTerminalEvent = TERMINAL_CHAT_STATES.has(payload.state || "");
+            const isRelevantEvent =
+                eventMatchesSelected ||
+                Boolean(streamForRun) ||
+                (isTerminalEvent &&
+                    Boolean(isSessionStoppingReference.current?.(eventSessionKey)));
             if (!isRelevantEvent) {
                 return;
             }
 
             const streamSessionKey = eventMatchesSelected
                 ? selectedSessionKey
-                : streamForRun!.sessionKey;
+                : eventSessionKey;
             const selectedStream = eventMatchesSelected
                 ? streams[selectedSessionKey]
                 : undefined;

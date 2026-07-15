@@ -1385,6 +1385,8 @@ describe("shared component helpers", () => {
                 connectionId: 1,
                 isConnected: true,
                 keepThinkingAfterFinal: true,
+                isSessionStopping: (sessionKey) =>
+                    sessionKey === "agent:main:session-only",
                 liveHistoryRefreshTimerReference,
                 onRunTerminal,
                 pendingTerminalMessagesReference,
@@ -3201,6 +3203,19 @@ describe("shared component helpers", () => {
                 .get("agent:main:runtime")
                 ?.map((message) => message.text)
         ).toContain("runtime partial");
+
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "session-only-run",
+                    sessionKey: "agent:main:session-only",
+                    state: "aborted",
+                },
+                type: "event",
+            });
+        });
+        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:session-only");
         expect(
             messages.some(
                 (message) =>
