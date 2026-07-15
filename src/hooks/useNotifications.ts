@@ -99,7 +99,8 @@ export function useClearReadNotifications() {
     return useMutation({
         mutationFn: () =>
             apiPostRequired<{ isOk: boolean; deleted: number }>(
-                "/notifications/clear-read"
+                "/notifications/clear-read",
+                {}
             ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
