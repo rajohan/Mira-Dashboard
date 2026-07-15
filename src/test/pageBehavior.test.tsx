@@ -2907,12 +2907,14 @@ describe("Mira Dashboard pages", () => {
                 socket.sent.some((entry) => entry.includes('"method":"chat.abort"'))
             ).toBe(true);
         });
+        expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
         expect(findSocketRequest(socket, "chat.abort")?.params).toEqual({
             sessionKey: "agent:main:main",
         });
         await respondToSocketRequest(socket, "chat.abort", {});
         await flushQueuedTimers();
         expect(activeRunDraft).toHaveValue("Follow-up while running");
+        expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
         await user.clear(activeRunDraft);
 
         const fileInput = view.container.querySelector<HTMLInputElement>(

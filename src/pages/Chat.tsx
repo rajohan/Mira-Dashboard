@@ -2057,6 +2057,7 @@ export function Chat() {
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
+        !isStopping &&
         !isPatchingSession &&
         !isCompactingSession &&
         !blockedByInFlightSend &&
