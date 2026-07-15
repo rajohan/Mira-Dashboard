@@ -6171,6 +6171,52 @@ describe("shared component helpers", () => {
         ).toBe(true);
         expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
 
+        messages = [];
+        activeStreamsReference.current = {
+            "agent:main:main::thinking": {
+                aliases: [],
+                message: {
+                    content: [{ text: "First unknown run", type: "thinking" }],
+                    role: "assistant",
+                    runId: "agent:main:main",
+                    text: "",
+                    thinking: [{ text: "First unknown run" }],
+                },
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+            "agent:main:main::reasoning": {
+                aliases: [],
+                message: {
+                    content: [{ text: "Second unknown run", type: "thinking" }],
+                    role: "assistant",
+                    runId: "agent:main:main",
+                    text: "",
+                    thinking: [{ text: "Second unknown run" }],
+                },
+                runId: "agent:main:main",
+                sessionKey: "agent:main:main",
+                text: "",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "Ambiguous external final",
+                    runId: "ambiguous-external-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(messages.some((message) => message.thinking?.length)).toBe(false);
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(2);
+
         unmount();
     });
 
@@ -7544,6 +7590,31 @@ describe("shared component helpers", () => {
             text: "finished answer",
             thinking: undefined,
         });
+        const unscopedActiveThinkingMerge = mergeWithRecentOptimisticMessages(
+            [
+                {
+                    content: [{ text: "current reasoning", type: "thinking" }],
+                    diagnostic: true,
+                    local: true,
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "current reasoning" }],
+                },
+            ],
+            [
+                {
+                    content: "older unscoped answer",
+                    role: "assistant",
+                    text: "older unscoped answer",
+                },
+            ],
+            false
+        );
+        expect(
+            unscopedActiveThinkingMerge.some(
+                (message) => message.thinking?.[0]?.text === "current reasoning"
+            )
+        ).toBe(true);
         expect(
             mergeWithRecentOptimisticMessages(
                 [mixedDiagnosticLocalRow],

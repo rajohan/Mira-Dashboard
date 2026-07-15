@@ -582,7 +582,8 @@ export function mergeWithRecentOptimisticMessages(
         : previousMessages.map((message) => {
               const messageWithoutThinking = stripThinkingFromMessage(message);
               const hasFinalForSameRun = nextPrimaryAssistantMessages.some(
-                  (nextMessage) => nextMessage.runId === message.runId
+                  (nextMessage) =>
+                      message.runId !== undefined && nextMessage.runId === message.runId
               );
               const shouldPreserveActiveLocalThinking = Boolean(
                   message.local === true &&

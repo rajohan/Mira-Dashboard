@@ -37,6 +37,7 @@ import {
     Chat,
     hasNewerAssistantMessageInHistory,
     hasNewerFinalForStrippedThinkingStream,
+    hasUnacknowledgedChatSend,
     isSessionActive,
     messagesAfterDisablingFinalThinkingRetention,
     nextHistoryBottomState,
@@ -3484,6 +3485,9 @@ describe("Mira Dashboard pages", () => {
                 updatedAt: "2026-06-24T08:00:01.000Z",
             },
         };
+        expect(hasUnacknowledgedChatSend(optimisticStreams, "agent:main:main")).toBe(
+            true
+        );
         expect(
             Object.keys(
                 acknowledgedActiveStreams(
@@ -3534,6 +3538,34 @@ describe("Mira Dashboard pages", () => {
             message: expect.objectContaining({ runId: "real-provisional-run" }),
             runId: "real-provisional-run",
         });
+        expect(
+            hasUnacknowledgedChatSend(
+                {
+                    "agent:main:main::assistant": {
+                        aliases: ["dashboard-chat-provisional"],
+                        runId: "agent:main:main",
+                        sessionKey: "agent:main:main",
+                        text: "Pre-ACK provisional answer",
+                        updatedAt: "2026-06-24T08:00:00.000Z",
+                    },
+                },
+                "agent:main:main"
+            )
+        ).toBe(true);
+        expect(
+            hasUnacknowledgedChatSend(
+                {
+                    "agent:main:main::real-provisional-run::assistant": {
+                        aliases: ["dashboard-chat-provisional", "real-provisional-run"],
+                        runId: "real-provisional-run",
+                        sessionKey: "agent:main:main",
+                        text: "Acknowledged answer",
+                        updatedAt: "2026-06-24T08:00:01.000Z",
+                    },
+                },
+                "agent:main:main"
+            )
+        ).toBe(false);
         const mergedPreAckStreams = acknowledgedActiveStreams(
             {
                 "agent:main:main::dashboard-chat-concurrent::assistant": {

@@ -1476,7 +1476,7 @@ export function useChatRuntimeEvents({
             );
             const canAliasDiagnosticOnlyRun =
                 provisionalAssistantEntries.length === 0 &&
-                provisionalEntries.length > 0 &&
+                provisionalEntries.length === 1 &&
                 !hasUnrelatedNonProvisionalRun &&
                 nonProvisionalRunIds.every((activeRunId) => activeRunId === runId);
             return (

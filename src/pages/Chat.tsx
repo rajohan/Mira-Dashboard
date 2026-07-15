@@ -80,6 +80,20 @@ export function optimisticChatStreamKey(
     return `${sessionKey}::${idempotencyKey}::assistant`;
 }
 
+/** Returns whether a session still has a chat send awaiting its run id. */
+export function hasUnacknowledgedChatSend(
+    streams: ActiveChatStreams,
+    sessionKey: string
+): boolean {
+    return Object.values(streams).some(
+        (stream) =>
+            isSameSessionKey(stream.sessionKey, sessionKey) &&
+            (stream.runId.startsWith("dashboard-chat-") ||
+                (stream.runId === sessionKey &&
+                    stream.aliases.some((runId) => runId.startsWith("dashboard-chat-"))))
+    );
+}
+
 /** Reconciles one optimistic stream after the Gateway acknowledges its run id. */
 export function acknowledgedActiveStreams(
     streams: ActiveChatStreams,
@@ -2078,6 +2092,7 @@ export function Chat() {
         }
 
         const isResetCommand = isResetSlashCommand(text);
+        const isSlashCommand = text.startsWith("/");
         const hasActiveSessionStream = Object.values(activeStreamsReference.current).some(
             (stream) => isSameSessionKey(stream.sessionKey, pendingSendSessionKey)
         );
@@ -2086,6 +2101,16 @@ export function Chat() {
             (sendInFlightCountReference.current > 0 || hasActiveSessionStream)
         ) {
             setSendError("Stop the active response before resetting this chat.");
+            isClaimingComposerSubmissionReference.current = false;
+            return;
+        }
+        if (
+            !isSlashCommand &&
+            hasUnacknowledgedChatSend(
+                activeStreamsReference.current,
+                pendingSendSessionKey
+            )
+        ) {
             isClaimingComposerSubmissionReference.current = false;
             return;
         }
@@ -2238,6 +2263,11 @@ export function Chat() {
             stream.operation === "compact" ||
             stream.statusText?.toLowerCase().includes("compact")
     );
+    const isSlashCommandDraft = draftText.startsWith("/");
+    const hasUnacknowledgedSend = hasUnacknowledgedChatSend(
+        activeStreams,
+        selectedSessionKey
+    );
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
@@ -2246,6 +2276,7 @@ export function Chat() {
         !isPatchingSession &&
         !isCompactingSession &&
         !isResettingSession &&
+        (isSlashCommandDraft || !hasUnacknowledgedSend) &&
         (draftText || attachments.length > 0)
     );
     const isSessionControlsDisabled = Boolean(
