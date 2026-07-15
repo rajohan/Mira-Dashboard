@@ -384,39 +384,50 @@ export async function getDatabaseOverview() {
             SELECT schemaname, tablename, SUM(avg_width)::numeric AS row_width
             FROM pg_stats
             GROUP BY schemaname, tablename
+        ), table_estimates AS (
+            SELECT
+                tables.schemaname,
+                tables.relname,
+                tables.relid,
+                GREATEST(
+                    tables.n_live_tup::numeric,
+                    classes.reltuples::numeric
+                ) AS estimated_live_tuples,
+                (
+                    tables.n_live_tup < classes.reltuples AND
+                    tables.n_dead_tup >= ${HIGH_DEAD_TUPLE_MINIMUM} AND
+                    (
+                        tables.n_dead_tup::numeric /
+                        NULLIF(classes.reltuples::numeric, 0)
+                    ) * 100 >= ${HIGH_DEAD_TUPLE_PERCENT}
+                ) AS catalog_estimate_may_be_stale
+            FROM pg_stat_user_tables AS tables
+            JOIN pg_class AS classes ON classes.oid = tables.relid
         )
         SELECT
-            tables.schemaname,
-            tables.relname,
-            pg_relation_size(tables.relid)::text AS physical_bytes,
+            estimates.schemaname,
+            estimates.relname,
+            pg_relation_size(estimates.relid)::text AS physical_bytes,
             CASE
                 WHEN widths.row_width IS NULL OR
-                     GREATEST(
-                         tables.n_live_tup::numeric,
-                         classes.reltuples::numeric
-                     ) <= 0 THEN ''
+                     estimates.estimated_live_tuples <= 0 OR
+                     estimates.catalog_estimate_may_be_stale THEN ''
                 ELSE GREATEST(
-                    pg_relation_size(tables.relid) - CEIL(
-                        GREATEST(
-                            tables.n_live_tup::numeric,
-                            classes.reltuples::numeric
-                        ) *
+                    pg_relation_size(estimates.relid) - CEIL(
+                        estimates.estimated_live_tuples *
                         (widths.row_width + 32) * 1.2
                     ),
                     0
                 )::bigint::text
             END AS estimated_reclaimable_bytes,
             (widths.row_width IS NOT NULL AND
-             GREATEST(
-                 tables.n_live_tup::numeric,
-                 classes.reltuples::numeric
-             ) > 0)::text AS assessed
-        FROM pg_stat_user_tables AS tables
-        JOIN pg_class AS classes ON classes.oid = tables.relid
+             estimates.estimated_live_tuples > 0 AND
+             NOT estimates.catalog_estimate_may_be_stale)::text AS assessed
+        FROM table_estimates AS estimates
         LEFT JOIN average_row_widths AS widths
-          ON widths.schemaname = tables.schemaname
-         AND widths.tablename = tables.relname
-        WHERE pg_relation_size(tables.relid) > 0;
+          ON widths.schemaname = estimates.schemaname
+         AND widths.tablename = estimates.relname
+        WHERE pg_relation_size(estimates.relid) > 0;
     `);
     const assessedBloatEstimates = bloatEstimates.filter(
         (row) => row.assessed === "true"

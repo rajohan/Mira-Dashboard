@@ -262,6 +262,7 @@ describe("database overview service", () => {
             const invocationLogContents = await Bun.file(invocationLog).text();
             expect(invocationLogContents).toContain("classes.reltuples::numeric");
             expect(invocationLogContents).not.toMatch(/classes\.reltuples::numeric\s*-/u);
+            expect(invocationLogContents).toContain("catalog_estimate_may_be_stale");
             const torrentCountQueries = invocationLogContents
                 .split("\n")
                 .filter((line) =>
