@@ -178,6 +178,7 @@ export interface RawChatHistoryMessage {
     MediaPaths?: string[];
     MediaType?: string;
     MediaTypes?: string[];
+    runId?: string;
 }
 
 /** Represents chat stream event message. */
@@ -548,6 +549,7 @@ export function normalizeChatHistoryMessage(
         thinking,
         toolCalls,
         toolResult,
+        runId: message.runId,
         timestamp:
             typeof message.timestamp === "number"
                 ? isoStringFromDate(message.timestamp)

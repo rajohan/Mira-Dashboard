@@ -308,9 +308,7 @@ export function messagesWithFinalThinkingPersistence(
         }
 
         const hasPrimaryAssistantContent = Boolean(
-            messageWithoutThinking.text.trim() ||
-            messageWithoutThinking.images?.length ||
-            messageWithoutThinking.attachments?.length
+            messageWithoutThinking.text.trim() || messageWithoutThinking.images?.length
         );
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
         const isDiagnosticToolMessage = hasToolDetails && !hasPrimaryAssistantContent;

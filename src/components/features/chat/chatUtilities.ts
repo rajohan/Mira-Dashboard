@@ -375,7 +375,7 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
         message.role.toLowerCase(),
         message.timestamp || "no-time",
         message.runId || "no-run",
-        diagnosticIdentity || message.text.trim() || "no-text",
+        message.text.trim() || diagnosticIdentity || "no-text",
     ].join("::");
 }
 

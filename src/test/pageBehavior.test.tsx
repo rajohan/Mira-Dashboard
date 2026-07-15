@@ -27,9 +27,11 @@ import {
     normalizeAssistantPayload,
     parseAgentSessionKey,
     shouldShowStreamRow,
+    stripThinkingFromMessage,
     uniqueStrings,
     visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
+import { normalizeChatHistoryMessage } from "../components/features/chat/chatTypes";
 import { messageDeleteKey } from "../components/features/chat/chatUtilities";
 import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
 import { Agents } from "../pages/Agents";
@@ -2746,10 +2748,10 @@ describe("Mira Dashboard pages", () => {
         });
         await user.click(keepThinkingToggle);
         expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "true");
-        await user.click(keepThinkingToggle);
-        expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "false");
         await user.click(thinkingToggle);
         expect(thinkingToggle).toHaveAttribute("aria-pressed", "false");
+        expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "false");
+        expect(keepThinkingToggle).toBeDisabled();
         await user.click(thinkingToggle);
         await waitFor(() => {
             expect(
@@ -3533,6 +3535,33 @@ describe("Mira Dashboard pages", () => {
         expect(
             ambiguousUnscopedFinal.filter((message) => message.thinking?.length)
         ).toHaveLength(2);
+        expect(
+            normalizeChatHistoryMessage({
+                content: "answer",
+                role: "assistant",
+                runId: "history-run",
+            }).runId
+        ).toBe("history-run");
+
+        const thinkingWithHiddenToolMedia = visibleHistoryMessages(
+            [
+                {
+                    content: [{ type: "thinking", text: "working" }],
+                    role: "assistant",
+                    runId: "media-run",
+                },
+                {
+                    MediaPath: "/tmp/result.png",
+                    role: "tool",
+                    runId: "media-run",
+                },
+            ],
+            visibility,
+            false
+        );
+        expect(
+            thinkingWithHiddenToolMedia.some((message) => message.thinking?.length)
+        ).toBe(true);
 
         const deletedMessage = {
             content: [
@@ -3545,8 +3574,12 @@ describe("Mira Dashboard pages", () => {
             timestamp: "2026-06-24T08:02:00.000Z",
         };
         const deletedKeys = new Set([messageDeleteKey(deletedMessage)]);
+        const transformedDeletedMessage = stripThinkingFromMessage(deletedMessage);
+        expect(messageDeleteKey(transformedDeletedMessage)).toBe(
+            messageDeleteKey(deletedMessage)
+        );
         expect(
-            [deletedMessage].filter(
+            [transformedDeletedMessage].filter(
                 (message) => !deletedKeys.has(messageDeleteKey(message))
             )
         ).toEqual([]);

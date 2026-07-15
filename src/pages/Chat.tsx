@@ -718,6 +718,7 @@ export function Chat() {
     const recordingChunksReference = useRef<Blob[]>([]);
     const voiceFileInputReference = useRef<HTMLInputElement | undefined>(undefined);
     const loadedHistorySessionReference = useRef("");
+    const messagesReference = useRef<ChatHistoryMessage[]>([]);
     const selectedSessionKeyReference = useRef("");
     const previousChatRowsLengthReference = useRef(0);
     const previousSelectedSessionKeyReference = useRef("");
@@ -772,6 +773,7 @@ export function Chat() {
 
     draftReference.current = draft;
     attachmentsReference.current = attachments;
+    messagesReference.current = messages;
 
     const { data: sessions = [] } = useLiveQuery((query) =>
         query.from({ session: sessionsCollection })
@@ -1090,18 +1092,21 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput),
                     keepThinkingAfterFinal
                 );
-                setMessages((wasPrevious) => {
-                    if (loadedHistorySessionReference.current !== selectedSessionKey) {
-                        loadedHistorySessionReference.current = selectedSessionKey;
-                        return nextMessages;
-                    }
-
-                    return messagesWithFinalThinkingPersistence(
-                        mergeWithRecentOptimisticMessages(wasPrevious, nextMessages),
-                        createChatVisibility(showThinkingOutput, showToolOutput),
-                        keepThinkingAfterFinal
-                    );
-                });
+                const isFirstHistoryLoad =
+                    loadedHistorySessionReference.current !== selectedSessionKey;
+                const preparedMessages = isFirstHistoryLoad
+                    ? nextMessages
+                    : messagesWithFinalThinkingPersistence(
+                          mergeWithRecentOptimisticMessages(
+                              messagesReference.current,
+                              nextMessages
+                          ),
+                          createChatVisibility(showThinkingOutput, showToolOutput),
+                          keepThinkingAfterFinal
+                      );
+                loadedHistorySessionReference.current = selectedSessionKey;
+                messagesReference.current = preparedMessages;
+                setMessages(() => preparedMessages);
                 if (isNewSession) {
                     shouldStickToBottomReference.current = true;
                 }
@@ -1218,7 +1223,7 @@ export function Chat() {
                             hasNewerAssistantMessageInHistory(
                                 recoveryMessages,
                                 stream.updatedAt,
-                                sessionActiveStreams.length > 1 ? streamRunIds : []
+                                streamRunIds
                             );
                         return Boolean(
                             isActiveStreamIsQuiet &&
@@ -1228,7 +1233,7 @@ export function Chat() {
                                 Date.now(),
                                 showThinkingOutput,
                                 !keepThinkingAfterFinal,
-                                sessionActiveStreams.length > 1 ? streamRunIds : []
+                                streamRunIds
                             ) ||
                                 (!stream.message?.thinking?.length &&
                                     streamText &&
