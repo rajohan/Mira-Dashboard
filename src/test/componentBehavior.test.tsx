@@ -1385,8 +1385,14 @@ describe("shared component helpers", () => {
                 connectionId: 1,
                 isConnected: true,
                 keepThinkingAfterFinal: true,
-                isSessionStopping: (sessionKey) =>
-                    sessionKey === "agent:main:session-only",
+                stoppingSessionKeyFor: (sessionKey) => {
+                    if (sessionKey === "session-only") {
+                        return "agent:main:session-only";
+                    }
+                    if (sessionKey === "agent:main:session-only") return sessionKey;
+                    if (sessionKey === "agent:main:main") return sessionKey;
+                    return;
+                },
                 liveHistoryRefreshTimerReference,
                 onRunTerminal,
                 pendingTerminalMessagesReference,
@@ -3209,13 +3215,48 @@ describe("shared component helpers", () => {
                 event: "chat",
                 payload: {
                     runId: "session-only-run",
-                    sessionKey: "agent:main:session-only",
+                    sessionKey: "session-only",
                     state: "aborted",
                 },
                 type: "event",
             });
         });
         expect(onRunTerminal).toHaveBeenCalledWith("agent:main:session-only");
+
+        activeStreamsReference.current = {
+            "agent:main:main::current::assistant": {
+                aliases: [],
+                runId: "current-run",
+                sessionKey: "agent:main:main",
+                text: "current partial",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        const terminalCallCount = onRunTerminal.mock.calls.length;
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "stale-run",
+                    sessionKey: "agent:main:main",
+                },
+                type: "event",
+            });
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "stale-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+        expect(onRunTerminal).toHaveBeenCalledTimes(terminalCallCount);
+        expect(
+            activeStreamsReference.current["agent:main:main::current::assistant"]
+        ).toBeDefined();
+        updateActiveStreams(() => ({}));
         expect(
             messages.some(
                 (message) =>

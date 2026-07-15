@@ -1292,6 +1292,17 @@ export function Chat() {
                         }
                         return next;
                     });
+                    if (recoveredStreamKeys.length === sessionActiveStreams.length) {
+                        setStoppingSessionKeys((wasStopping) => {
+                            const matchingKey = [...wasStopping].find((key) =>
+                                isSameSessionKey(key, requestSessionKey)
+                            );
+                            if (!matchingKey) return wasStopping;
+                            const next = new Set(wasStopping);
+                            next.delete(matchingKey);
+                            return next;
+                        });
+                    }
                 }
             } catch {
                 // Ignore background refresh failures.
@@ -1409,8 +1420,8 @@ export function Chat() {
         setSendError,
         setIsAtBottom,
         setHistoryLoadVersion,
-        isSessionStopping: (sessionKey) =>
-            [...stoppingSessionKeys].some((stoppingSessionKey) =>
+        stoppingSessionKeyFor: (sessionKey) =>
+            [...stoppingSessionKeys].find((stoppingSessionKey) =>
                 isSameSessionKey(stoppingSessionKey, sessionKey)
             ),
         onRunTerminal: (sessionKey) =>

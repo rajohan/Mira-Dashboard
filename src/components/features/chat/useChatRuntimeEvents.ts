@@ -1026,7 +1026,7 @@ interface UseChatRuntimeEventsParameters {
     setSendError: Dispatch<SetStateAction<string | undefined>>;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
-    isSessionStopping?: (sessionKey: string) => boolean;
+    stoppingSessionKeyFor?: (sessionKey: string) => string | undefined;
     onRunTerminal?: (sessionKey: string) => void;
 }
 
@@ -1049,7 +1049,7 @@ export function useChatRuntimeEvents({
     setSendError,
     setIsAtBottom,
     setHistoryLoadVersion,
-    isSessionStopping,
+    stoppingSessionKeyFor,
     onRunTerminal,
 }: UseChatRuntimeEventsParameters) {
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
@@ -1070,13 +1070,13 @@ export function useChatRuntimeEvents({
     const terminalMessagesReference =
         pendingTerminalMessagesReference || fallbackPendingTerminalMessagesReference;
     const onRunTerminalReference = useRef(onRunTerminal);
-    const isSessionStoppingReference = useRef(isSessionStopping);
+    const stoppingSessionKeyForReference = useRef(stoppingSessionKeyFor);
 
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
     keepThinkingAfterFinalReference.current = keepThinkingAfterFinal;
     onRunTerminalReference.current = onRunTerminal;
-    isSessionStoppingReference.current = isSessionStopping;
+    stoppingSessionKeyForReference.current = stoppingSessionKeyFor;
 
     useEffect(() => {
         selectedSessionKeyReference.current = selectedSessionKey;
@@ -1368,40 +1368,48 @@ export function useChatRuntimeEvents({
                 provisionalAssistantRunIdsReference.current.delete(sessionKey);
             }
 
-            updateActiveStreamsReference.current((wasPrevious) => {
-                const next = { ...wasPrevious };
-                for (const [key, streamEntry] of Object.entries(wasPrevious)) {
-                    if (!isSameSessionKey(streamEntry.sessionKey, sessionKey)) {
-                        continue;
-                    }
-
-                    const isResolvedStream = isActiveStreamMatchingRun(
-                        sessionKey,
-                        streamEntry,
-                        resolvedRunId
-                    );
-                    const isRelatedOptimisticBase = Boolean(
-                        !runId &&
-                        resolvedRunId &&
-                        key === sessionKey &&
-                        isOptimisticRunId(streamEntry.runId) &&
-                        (!resolvedStream?.updatedAt ||
-                            !streamEntry.updatedAt ||
-                            streamEntry.updatedAt <= resolvedStream.updatedAt)
-                    );
-                    if (!isResolvedStream && !isRelatedOptimisticBase) {
-                        continue;
-                    }
-
-                    if (isRelatedOptimisticBase) {
-                        assistantTextSourcesReference.current.delete(
-                            `${sessionKey}::${streamEntry.runId}`
-                        );
-                    }
-                    delete next[key];
+            const wasPrevious = activeStreamsReference.current;
+            const next = { ...wasPrevious };
+            let removedStreamCount = 0;
+            for (const [key, streamEntry] of Object.entries(wasPrevious)) {
+                if (!isSameSessionKey(streamEntry.sessionKey, sessionKey)) {
+                    continue;
                 }
-                return next;
-            });
+
+                const isResolvedStream = isActiveStreamMatchingRun(
+                    sessionKey,
+                    streamEntry,
+                    resolvedRunId
+                );
+                const isRelatedOptimisticBase = Boolean(
+                    !runId &&
+                    resolvedRunId &&
+                    key === sessionKey &&
+                    isOptimisticRunId(streamEntry.runId) &&
+                    (!resolvedStream?.updatedAt ||
+                        !streamEntry.updatedAt ||
+                        streamEntry.updatedAt <= resolvedStream.updatedAt)
+                );
+                if (!isResolvedStream && !isRelatedOptimisticBase) {
+                    continue;
+                }
+
+                if (isRelatedOptimisticBase) {
+                    assistantTextSourcesReference.current.delete(
+                        `${sessionKey}::${streamEntry.runId}`
+                    );
+                }
+                delete next[key];
+                removedStreamCount += 1;
+            }
+            updateActiveStreamsReference.current(() => next);
+            const isKnownSessionOnlyStop = Boolean(
+                stoppingSessionKeyForReference.current?.(sessionKey) &&
+                Object.values(wasPrevious).every(
+                    (streamEntry) => !isSameSessionKey(streamEntry.sessionKey, sessionKey)
+                )
+            );
+            return removedStreamCount > 0 || isKnownSessionOnlyStop;
         };
 
         /** Adds a canonical run alias to active optimistic streams for one send. */
@@ -1548,8 +1556,16 @@ export function useChatRuntimeEvents({
                 (stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase)) ||
                 TERMINAL_RUNTIME_EVENTS.has(eventName);
             if (!eventMatchesSelected) {
-                const streamSessionKey = eventSessionKey || streamForRun?.sessionKey;
-                if (!isWholeRunTerminalEvent || !streamSessionKey || !streamForRun) {
+                const stoppingSessionKey = eventSessionKey
+                    ? stoppingSessionKeyForReference.current?.(eventSessionKey)
+                    : undefined;
+                const streamSessionKey =
+                    streamForRun?.sessionKey || stoppingSessionKey || eventSessionKey;
+                if (
+                    !isWholeRunTerminalEvent ||
+                    !streamSessionKey ||
+                    (!streamForRun && !stoppingSessionKey)
+                ) {
                     return;
                 }
                 flushPendingDeltaUpdates();
@@ -1573,8 +1589,9 @@ export function useChatRuntimeEvents({
                         : []),
                     ...activeDiagnosticMessagesForRun(streamSessionKey, eventRunId),
                 ]);
-                clearActiveStreamsForRun(streamSessionKey, eventRunId);
-                onRunTerminalReference.current?.(streamSessionKey);
+                if (clearActiveStreamsForRun(streamSessionKey, eventRunId)) {
+                    onRunTerminalReference.current?.(streamSessionKey);
+                }
                 return;
             }
             const isChannelTerminalEvent =
@@ -1837,8 +1854,9 @@ export function useChatRuntimeEvents({
                         )
                     );
                 }
-                clearActiveStreamsForRun(selectedSessionKey, eventRunId);
-                onRunTerminalReference.current?.(selectedSessionKey);
+                if (clearActiveStreamsForRun(selectedSessionKey, eventRunId)) {
+                    onRunTerminalReference.current?.(selectedSessionKey);
+                }
                 refreshSelectedHistorySoon(150);
                 return;
             }
@@ -2093,18 +2111,20 @@ export function useChatRuntimeEvents({
                 selectedSessionKey
             );
             const isTerminalEvent = TERMINAL_CHAT_STATES.has(payload.state || "");
+            const stoppingSessionKey = isTerminalEvent
+                ? stoppingSessionKeyForReference.current?.(eventSessionKey)
+                : undefined;
             const isRelevantEvent =
                 eventMatchesSelected ||
                 Boolean(streamForRun) ||
-                (isTerminalEvent &&
-                    Boolean(isSessionStoppingReference.current?.(eventSessionKey)));
+                Boolean(stoppingSessionKey);
             if (!isRelevantEvent) {
                 return;
             }
 
             const streamSessionKey = eventMatchesSelected
                 ? selectedSessionKey
-                : eventSessionKey;
+                : streamForRun?.sessionKey || stoppingSessionKey || eventSessionKey;
             const selectedStream = eventMatchesSelected
                 ? streams[selectedSessionKey]
                 : undefined;
@@ -2479,8 +2499,9 @@ export function useChatRuntimeEvents({
                     preserveTerminalMessages(streamSessionKey, messagesToAppend);
                 }
 
-                clearActiveStreamsForRun(streamSessionKey, payload.runId);
-                onRunTerminalReference.current?.(streamSessionKey);
+                if (clearActiveStreamsForRun(streamSessionKey, payload.runId)) {
+                    onRunTerminalReference.current?.(streamSessionKey);
+                }
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -2519,8 +2540,9 @@ export function useChatRuntimeEvents({
                 if (!eventMatchesSelected) {
                     preserveTerminalMessages(streamSessionKey, messagesToAppend);
                 }
-                clearActiveStreamsForRun(streamSessionKey, payload.runId);
-                onRunTerminalReference.current?.(streamSessionKey);
+                if (clearActiveStreamsForRun(streamSessionKey, payload.runId)) {
+                    onRunTerminalReference.current?.(streamSessionKey);
+                }
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -2581,8 +2603,9 @@ export function useChatRuntimeEvents({
                 if (!eventMatchesSelected) {
                     preserveTerminalMessages(streamSessionKey, messagesToAppend);
                 }
-                clearActiveStreamsForRun(streamSessionKey, payload.runId);
-                onRunTerminalReference.current?.(streamSessionKey);
+                if (clearActiveStreamsForRun(streamSessionKey, payload.runId)) {
+                    onRunTerminalReference.current?.(streamSessionKey);
+                }
             }
         });
 
