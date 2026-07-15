@@ -12,6 +12,7 @@ const SLOW_QUERY_MEAN_MS = 500;
 const HIGH_DEAD_TUPLE_PERCENT = 20;
 const HIGH_DEAD_TUPLE_MINIMUM = 1000;
 const HIGH_DEAD_TUPLE_MINIMUM_BYTES = 64 * 1024 * 1024;
+const CATALOG_TUPLE_ESTIMATE_TOLERANCE_PERCENT = 10;
 
 /** Represents one PostgreSQL database row from pg_stat_database with numeric values encoded as psql strings. */
 interface PostgresDatabaseRow {
@@ -342,36 +343,53 @@ export async function getDatabaseOverview() {
     ) as ConnectionCountsRow[];
 
     const allDeadTupleRows = await queryAllUserDatabases<DeadTupleRow>(`
-        SELECT
-            tables.schemaname,
-            tables.relname,
-            pg_relation_size(tables.relid)::text AS physical_bytes,
-            tables.n_live_tup::text,
-            tables.n_dead_tup::text,
-            ROUND(
-                CASE WHEN GREATEST(
-                    tables.n_live_tup::numeric,
-                    classes.reltuples::numeric
-                ) <= 0 THEN 0
-                ELSE (
-                    tables.n_dead_tup::numeric /
-                    NULLIF(
-                        GREATEST(
-                            tables.n_live_tup::numeric,
-                            classes.reltuples::numeric
-                        ),
-                        0
+        WITH table_estimates AS (
+            SELECT
+                tables.schemaname,
+                tables.relname,
+                tables.relid,
+                tables.n_live_tup,
+                tables.n_dead_tup,
+                tables.last_autovacuum,
+                tables.last_autoanalyze,
+                CASE
+                    WHEN classes.reltuples > 0 AND
+                         tables.n_live_tup < classes.reltuples AND
+                         ABS(
+                             tables.n_live_tup::numeric +
+                             tables.n_dead_tup::numeric -
+                             classes.reltuples::numeric
+                         ) / classes.reltuples::numeric * 100 <=
+                             ${CATALOG_TUPLE_ESTIMATE_TOLERANCE_PERCENT}
+                    THEN tables.n_live_tup::numeric
+                    ELSE GREATEST(
+                        tables.n_live_tup::numeric,
+                        classes.reltuples::numeric
                     )
+                END AS estimated_live_tuples
+            FROM pg_stat_user_tables AS tables
+            JOIN pg_class AS classes ON classes.oid = tables.relid
+        )
+        SELECT
+            estimates.schemaname,
+            estimates.relname,
+            pg_relation_size(estimates.relid)::text AS physical_bytes,
+            estimates.n_live_tup::text,
+            estimates.n_dead_tup::text,
+            ROUND(
+                CASE WHEN estimates.estimated_live_tuples <= 0 THEN 0
+                ELSE (
+                    estimates.n_dead_tup::numeric /
+                    NULLIF(estimates.estimated_live_tuples, 0)
                 ) * 100
                 END,
                 2
             )::text AS dead_pct,
-            COALESCE(tables.last_autovacuum::text, '') AS last_autovacuum,
-            COALESCE(tables.last_autoanalyze::text, '') AS last_autoanalyze
-        FROM pg_stat_user_tables AS tables
-        JOIN pg_class AS classes ON classes.oid = tables.relid
-        WHERE tables.n_live_tup > 0 OR tables.n_dead_tup > 0
-        ORDER BY tables.n_dead_tup DESC;
+            COALESCE(estimates.last_autovacuum::text, '') AS last_autovacuum,
+            COALESCE(estimates.last_autoanalyze::text, '') AS last_autoanalyze
+        FROM table_estimates AS estimates
+        WHERE estimates.n_live_tup > 0 OR estimates.n_dead_tup > 0
+        ORDER BY estimates.n_dead_tup DESC;
     `);
     const deadTupleRows = allDeadTupleRows
         .toSorted((a, b) => numberFrom(b.n_dead_tup) - numberFrom(a.n_dead_tup))
@@ -404,11 +422,7 @@ export async function getDatabaseOverview() {
                         (
                             pg_relation_size(tables.relid)::numeric *
                             tables.n_dead_tup::numeric /
-                            NULLIF(
-                                GREATEST(classes.reltuples::numeric, 0) +
-                                    tables.n_dead_tup::numeric,
-                                0
-                            )
+                            NULLIF(classes.reltuples::numeric, 0)
                         ) >= ${BLOAT_REVIEW_BYTES}
                     )
                 ) AS catalog_estimate_may_be_stale
