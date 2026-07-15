@@ -19,7 +19,7 @@ function isDockerSummaryCache(value: unknown): value is DockerSummaryCache {
 
 /** Renders the Docker overview card UI. */
 export function DockerOverviewCard() {
-    const { data, isError, isLoading } = useCacheEntry<DockerSummaryCache>(
+    const { data, isLoading } = useCacheEntry<DockerSummaryCache>(
         "docker.summary",
         30_000
     );
@@ -47,7 +47,7 @@ export function DockerOverviewCard() {
 
             {isLoading ? (
                 <div className="text-sm text-primary-300">Loading Docker cache…</div>
-            ) : isError || !docker ? (
+            ) : docker === undefined ? (
                 <div className="text-sm text-rose-300">Docker cache unavailable.</div>
             ) : (
                 <div className="space-y-2 text-sm text-primary-200">
