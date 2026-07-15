@@ -1,16 +1,10 @@
 import { database } from "../database.ts";
 import {
-    fetchCachedQuotas,
     hasQuotaStatus,
+    type QuotasResponse,
     type SyntheticQuota,
 } from "../lib/quotasCache.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
-import {
-    getScheduledJob,
-    registerScheduledJobAction,
-    removeScheduledJobsNotInAction,
-    upsertScheduledJob,
-} from "./scheduledJobs.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -21,7 +15,6 @@ type ProviderKey = "openrouter" | "elevenlabs" | "synthetic" | "openai";
 
 const THRESHOLDS = [80, 90, 95] as const;
 const HYSTERESIS = 5;
-const QUOTA_NOTIFICATION_JOB_ID = "notifications.quota";
 
 /** Formats the Synthetic.new weekly remaining quota. */
 function formatSyntheticWeeklyRemaining(
@@ -33,7 +26,7 @@ function formatSyntheticWeeklyRemaining(
 /** Returns provider percent. */
 function getProviderPercent(
     provider: ProviderKey,
-    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
+    quotas: QuotasResponse
 ): number | undefined {
     if (provider === "openrouter") {
         return hasQuotaStatus(quotas.openrouter)
@@ -63,7 +56,7 @@ function getProviderPercent(
 function getNotificationPayload(
     provider: ProviderKey,
     bucket: number,
-    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
+    quotas: QuotasResponse
 ) {
     if (provider === "openrouter" && !hasQuotaStatus(quotas.openrouter)) {
         const limitRemaining = quotas.openrouter.limitRemaining;
@@ -107,7 +100,7 @@ function getNotificationPayload(
 function getProviderNotificationPayload(
     provider: ProviderKey,
     bucket: number,
-    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>
+    quotas: QuotasResponse
 ) {
     const payload = getNotificationPayload(provider, bucket, quotas);
     if (!payload) {
@@ -196,7 +189,7 @@ function handleQuotaBucket(
     provider: ProviderKey,
     bucket: number,
     percent: number,
-    quotas: Awaited<ReturnType<typeof fetchCachedQuotas>>,
+    quotas: QuotasResponse,
     occurredAt: string
 ): void {
     const payload = getProviderNotificationPayload(provider, bucket, quotas);
@@ -225,18 +218,9 @@ function handleQuotaBucket(
     setState(provider, bucket, armedValue);
 }
 
-const quotaNotificationState = { isRunning: false };
-
-/** Performs run quota notification check. */
-export async function runQuotaNotificationCheck(): Promise<boolean> {
-    if (quotaNotificationState.isRunning) {
-        return true;
-    }
-
-    quotaNotificationState.isRunning = true;
-
+/** Evaluates quota thresholds after a successful quota refresh. */
+export function evaluateQuotaNotifications(quotas: QuotasResponse): void {
     try {
-        const quotas = await fetchCachedQuotas();
         const occurredAt = dateToISOString(new Date(quotas.checkedAt));
         const providers: ProviderKey[] = [
             "openrouter",
@@ -255,46 +239,7 @@ export async function runQuotaNotificationCheck(): Promise<boolean> {
                 handleQuotaBucket(provider, bucket, percent, quotas, occurredAt);
             }
         }
-        return true;
     } catch (error) {
         console.error("[QuotaNotifications] check failed", error);
-        return false;
-    } finally {
-        quotaNotificationState.isRunning = false;
-    }
-}
-
-/** Registers quota notification checks with the shared scheduler. */
-export function shouldRegisterQuotaNotificationScheduledJobs(): boolean {
-    registerScheduledJobAction("notifications.quota", async () => {
-        const isOk = await runQuotaNotificationCheck();
-        if (!isOk) {
-            throw new Error("Quota notification check failed");
-        }
-        return { isOk: true };
-    });
-    database.run("BEGIN");
-    try {
-        removeScheduledJobsNotInAction("notifications.quota", [
-            QUOTA_NOTIFICATION_JOB_ID,
-        ]);
-        const existing = getScheduledJob(QUOTA_NOTIFICATION_JOB_ID);
-        upsertScheduledJob({
-            id: QUOTA_NOTIFICATION_JOB_ID,
-            name: "Quota notifications",
-            description: "Check provider quota thresholds and update notifications.",
-            enabled: existing?.enabled ?? true,
-            scheduleType: existing?.scheduleType ?? "interval",
-            intervalSeconds: existing?.intervalSeconds ?? 15 * 60,
-            timeOfDay: existing?.timeOfDay ?? undefined,
-            cronExpression: existing?.cronExpression ?? undefined,
-            actionKey: "notifications.quota",
-            actionPayload: {},
-        });
-        database.run("COMMIT");
-        return existing?.enabled ?? true;
-    } catch (error) {
-        database.run("ROLLBACK");
-        throw error;
     }
 }

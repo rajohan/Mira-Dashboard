@@ -1,18 +1,10 @@
 import { database, sqlNullable } from "../database.ts";
-import { fetchCachedSystemHost } from "../lib/systemCache.ts";
+import type { CachedOpenClawVersion } from "../lib/systemCache.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
-import {
-    getScheduledJob,
-    registerScheduledJobAction,
-    removeScheduledJobsNotInAction,
-    upsertScheduledJob,
-} from "./scheduledJobs.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
 }
-
-const OPENCLAW_NOTIFICATION_JOB_ID = "notifications.openclaw";
 
 /** Represents alert state. */
 interface AlertState {
@@ -76,18 +68,12 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
     pruneReadNotifications();
 }
 
-const openClawNotificationState = { isRunning: false };
-/** Performs run OpenClaw notification check. */
-export async function runOpenClawNotificationCheck(): Promise<boolean> {
-    if (openClawNotificationState.isRunning) {
-        return true;
-    }
-
-    openClawNotificationState.isRunning = true;
-
+/** Evaluates OpenClaw version state after a successful system refresh. */
+export function evaluateOpenClawNotifications(systemHost: {
+    version?: CachedOpenClawVersion;
+}): void {
     try {
-        const cached = await fetchCachedSystemHost();
-        const version = cached.data.version;
+        const version = systemHost.version;
         if (!version) {
             throw new Error("OpenClaw version missing from system.host cache");
         }
@@ -110,45 +96,7 @@ export async function runOpenClawNotificationCheck(): Promise<boolean> {
                 last_latest: version.latest,
             });
         }
-        return true;
     } catch (error) {
         console.error("[OpenClawNotifications] check failed", error);
-        return false;
-    } finally {
-        openClawNotificationState.isRunning = false;
-    }
-}
-
-/** Registers OpenClaw update notification checks with the shared scheduler. */
-export function registerOpenClawNotificationScheduledJobs(): void {
-    registerScheduledJobAction("notifications.openclaw", async () => {
-        const isOk = await runOpenClawNotificationCheck();
-        if (!isOk) {
-            throw new Error("OpenClaw notification check failed");
-        }
-        return { isOk: true };
-    });
-    database.run("BEGIN");
-    try {
-        removeScheduledJobsNotInAction("notifications.openclaw", [
-            OPENCLAW_NOTIFICATION_JOB_ID,
-        ]);
-        const existing = getScheduledJob(OPENCLAW_NOTIFICATION_JOB_ID);
-        upsertScheduledJob({
-            id: OPENCLAW_NOTIFICATION_JOB_ID,
-            name: "OpenClaw notifications",
-            description: "Check cached OpenClaw version status and update notifications.",
-            enabled: existing?.enabled ?? true,
-            scheduleType: existing?.scheduleType ?? "interval",
-            intervalSeconds: existing?.intervalSeconds ?? 60 * 60,
-            timeOfDay: existing?.timeOfDay ?? undefined,
-            cronExpression: existing?.cronExpression ?? undefined,
-            actionKey: "notifications.openclaw",
-            actionPayload: {},
-        });
-        database.run("COMMIT");
-    } catch (error) {
-        database.run("ROLLBACK");
-        throw error;
     }
 }
