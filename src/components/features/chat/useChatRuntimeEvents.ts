@@ -1471,14 +1471,23 @@ export function useChatRuntimeEvents({
                     streamEntry.runId !== runId &&
                     !streamEntry.aliases.includes(runId)
             );
+            const provisionalEntries = sessionStreamEntries.filter(([, streamEntry]) =>
+                isProvisionalRunId(sessionKey, streamEntry.runId)
+            );
+            const canAliasDiagnosticOnlyRun =
+                provisionalAssistantEntries.length === 0 &&
+                provisionalEntries.length > 0 &&
+                !hasUnrelatedNonProvisionalRun &&
+                nonProvisionalRunIds.every((activeRunId) => activeRunId === runId);
             return (
-                provisionalAssistantEntries.length === 1 &&
-                (hasMatchingStream
-                    ? !hasUnrelatedNonProvisionalRun
-                    : nonProvisionalRunIds.length <= 1 &&
-                      nonProvisionalRunIds.every((activeRunId) =>
-                          isOptimisticRunId(activeRunId)
-                      ))
+                canAliasDiagnosticOnlyRun ||
+                (provisionalAssistantEntries.length === 1 &&
+                    (hasMatchingStream
+                        ? !hasUnrelatedNonProvisionalRun
+                        : nonProvisionalRunIds.length <= 1 &&
+                          nonProvisionalRunIds.every((activeRunId) =>
+                              isOptimisticRunId(activeRunId)
+                          )))
             );
         };
 
@@ -1499,22 +1508,24 @@ export function useChatRuntimeEvents({
                     isAssistantActiveStreamKey(sessionKey, key) &&
                     isProvisionalRunId(sessionKey, streamEntry.runId)
             );
-            if (provisionalAssistantEntries.length !== 1) {
+            if (provisionalAssistantEntries.length > 1) {
                 return;
             }
 
-            const [provisionalAssistantKey, provisionalAssistant] =
-                provisionalAssistantEntries[0]!;
+            const provisionalAssistantEntry = provisionalAssistantEntries[0];
+            const provisionalAssistantKey = provisionalAssistantEntry?.[0];
+            const provisionalAssistant = provisionalAssistantEntry?.[1];
             const optimisticAliases = new Set(
                 uniqueStrings([
-                    provisionalAssistant.runId,
-                    ...provisionalAssistant.aliases,
+                    provisionalAssistant?.runId,
+                    ...(provisionalAssistant?.aliases || []),
                 ]).filter((alias) => isOptimisticRunId(alias))
             );
             let hasChanged = false;
             const next = { ...wasPrevious };
             for (const [key, streamEntry] of Object.entries(wasPrevious)) {
                 const isOwnedProvisionalStream = Boolean(
+                    !provisionalAssistant ||
                     key === provisionalAssistantKey ||
                     streamEntry.aliases.some((alias) => optimisticAliases.has(alias))
                 );

@@ -570,13 +570,24 @@ export function mergeWithRecentOptimisticMessages(
     shouldMergeThinking = true,
     shouldPreserveNextThinking = shouldMergeThinking
 ): ChatHistoryMessage[] {
+    const nextPrimaryAssistantMessages = nextMessages.filter(
+        (message) =>
+            message.role.toLowerCase() === "assistant" &&
+            !message.toolCalls?.length &&
+            !message.toolResult &&
+            hasPrimaryChatMessageContent(stripThinkingFromMessage(message))
+    );
     const mergeablePreviousMessages = shouldMergeThinking
         ? previousMessages
         : previousMessages.map((message) => {
               const messageWithoutThinking = stripThinkingFromMessage(message);
+              const hasFinalForSameRun = nextPrimaryAssistantMessages.some(
+                  (nextMessage) => nextMessage.runId === message.runId
+              );
               const shouldPreserveActiveLocalThinking = Boolean(
                   message.local === true &&
                   message.thinking?.length &&
+                  !hasFinalForSameRun &&
                   !hasPrimaryChatMessageContent(messageWithoutThinking)
               );
               return shouldPreserveActiveLocalThinking ? message : messageWithoutThinking;

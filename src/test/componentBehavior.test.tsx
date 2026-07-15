@@ -6174,6 +6174,84 @@ describe("shared component helpers", () => {
         unmount();
     });
 
+    it("retains provisional diagnostics for a scoped external run", async () => {
+        let listener: ((data: unknown) => void) | undefined;
+        const activeStreamsReference: { current: ActiveChatStreams } = {
+            current: {
+                "agent:main:main::thinking": {
+                    aliases: [],
+                    message: {
+                        content: [{ text: "External reasoning", type: "thinking" }],
+                        role: "assistant",
+                        runId: "agent:main:main",
+                        text: "",
+                        thinking: [{ text: "External reasoning" }],
+                    },
+                    runId: "agent:main:main",
+                    sessionKey: "agent:main:main",
+                    text: "",
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+        };
+        let messages: ChatHistoryMessage[] = [];
+        const subscribe = jest.fn((nextListener: (data: unknown) => void) => {
+            listener = nextListener;
+            return jest.fn();
+        });
+        const updateActiveStreams = jest.fn((updater) => {
+            activeStreamsReference.current = updater(activeStreamsReference.current);
+        });
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                keepThinkingAfterFinal: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request: jest.fn(),
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn((updater) => {
+                    messages =
+                        typeof updater === "function" ? updater(messages) : updater;
+                }),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe,
+                updateActiveStreams,
+            })
+        );
+
+        await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    message: "External final",
+                    runId: "external-real-run",
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+        });
+
+        expect(
+            messages.some(
+                (message) =>
+                    message.runId === "external-real-run" &&
+                    message.thinking?.[0]?.text === "External reasoning"
+            )
+        ).toBe(true);
+        expect(Object.keys(activeStreamsReference.current)).toHaveLength(0);
+
+        unmount();
+    });
+
     it("records a compact terminal that arrives before its send ACK", async () => {
         let listener: ((data: unknown) => void) | undefined;
         const pendingTerminalRunIdsReference = {
@@ -7438,6 +7516,34 @@ describe("shared component helpers", () => {
                 true
             )[0]?.thinking
         ).toEqual([{ text: "active reasoning" }]);
+        const finalizedThinkingMerge = mergeWithRecentOptimisticMessages(
+            [
+                {
+                    content: [{ text: "finished reasoning", type: "thinking" }],
+                    diagnostic: true,
+                    local: true,
+                    role: "assistant",
+                    runId: "finished-run",
+                    text: "",
+                    thinking: [{ text: "finished reasoning" }],
+                },
+            ],
+            [
+                {
+                    content: "finished answer",
+                    role: "assistant",
+                    runId: "finished-run",
+                    text: "finished answer",
+                },
+            ],
+            false
+        );
+        expect(finalizedThinkingMerge).toHaveLength(1);
+        expect(finalizedThinkingMerge[0]).toMatchObject({
+            runId: "finished-run",
+            text: "finished answer",
+            thinking: undefined,
+        });
         expect(
             mergeWithRecentOptimisticMessages(
                 [mixedDiagnosticLocalRow],

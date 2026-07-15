@@ -14,6 +14,7 @@ import {
     createChatVisibility,
     hasRecoveredStreamHistory,
     isSameSessionKey,
+    mergeStreamText,
     messagesWithFinalThinkingPersistence,
     shouldShowStreamRow as shouldRenderStreamRow,
     stripThinkingFromMessage,
@@ -89,6 +90,25 @@ export function acknowledgedActiveStreams(
 ): ActiveChatStreams {
     let hasChanged = false;
     const next = { ...streams };
+    const streamEntries = Object.entries(streams);
+    const optimisticAssistantEntries = streamEntries.filter(
+        ([key, stream]) =>
+            isSameSessionKey(stream.sessionKey, sessionKey) &&
+            key.endsWith("::assistant") &&
+            (stream.runId === optimisticRunId || stream.aliases.includes(optimisticRunId))
+    );
+    const acknowledgedAssistantEntries = streamEntries.filter(
+        ([key, stream]) =>
+            isSameSessionKey(stream.sessionKey, sessionKey) &&
+            key.endsWith("::assistant") &&
+            (stream.runId === acknowledgedRunId ||
+                stream.aliases.includes(acknowledgedRunId))
+    );
+    const shouldMergePreAckAssistant =
+        !didTerminateBeforeAck &&
+        optimisticAssistantEntries.length === 1 &&
+        acknowledgedAssistantEntries.length === 1 &&
+        optimisticAssistantEntries[0]?.[0] !== acknowledgedAssistantEntries[0]?.[0];
     for (const [key, stream] of Object.entries(streams)) {
         if (
             !isSameSessionKey(stream.sessionKey, sessionKey) ||
@@ -118,6 +138,37 @@ export function acknowledgedActiveStreams(
                 acknowledgedRunId,
             ]),
         };
+    }
+
+    if (shouldMergePreAckAssistant) {
+        const [optimisticKey, optimisticStream] = optimisticAssistantEntries[0]!;
+        const [acknowledgedKey, acknowledgedStream] = acknowledgedAssistantEntries[0]!;
+        const text = mergeStreamText(optimisticStream.text, acknowledgedStream.text);
+        const message = acknowledgedStream.message || optimisticStream.message;
+        delete next[optimisticKey];
+        next[acknowledgedKey] = {
+            ...acknowledgedStream,
+            aliases: uniqueStrings([
+                ...optimisticStream.aliases,
+                ...acknowledgedStream.aliases,
+                optimisticRunId,
+                acknowledgedRunId,
+            ]),
+            message: message
+                ? {
+                      ...message,
+                      content: text || message.content,
+                      runId: acknowledgedRunId,
+                      text: text || message.text,
+                  }
+                : undefined,
+            runId: acknowledgedRunId,
+            text,
+            updatedAt: [optimisticStream.updatedAt, acknowledgedStream.updatedAt]
+                .toSorted((left, right) => left.localeCompare(right))
+                .at(-1)!,
+        };
+        hasChanged = true;
     }
 
     return hasChanged ? next : streams;

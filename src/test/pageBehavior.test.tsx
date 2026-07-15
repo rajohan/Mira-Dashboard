@@ -3534,6 +3534,45 @@ describe("Mira Dashboard pages", () => {
             message: expect.objectContaining({ runId: "real-provisional-run" }),
             runId: "real-provisional-run",
         });
+        const mergedPreAckStreams = acknowledgedActiveStreams(
+            {
+                "agent:main:main::dashboard-chat-concurrent::assistant": {
+                    aliases: ["dashboard-chat-concurrent"],
+                    runId: "dashboard-chat-concurrent",
+                    sessionKey: "agent:main:main",
+                    statusText: "Thinking",
+                    text: "",
+                    updatedAt: "2026-06-24T08:00:00.000Z",
+                },
+                "agent:main:main::real-concurrent::assistant": {
+                    aliases: ["real-concurrent"],
+                    message: {
+                        content: "Pre-ACK real answer",
+                        role: "assistant",
+                        runId: "real-concurrent",
+                        text: "Pre-ACK real answer",
+                    },
+                    runId: "real-concurrent",
+                    sessionKey: "agent:main:main",
+                    text: "Pre-ACK real answer",
+                    updatedAt: "2026-06-24T08:00:01.000Z",
+                },
+            },
+            "agent:main:main",
+            "dashboard-chat-concurrent",
+            "real-concurrent",
+            false
+        );
+        expect(Object.keys(mergedPreAckStreams)).toEqual([
+            "agent:main:main::real-concurrent::assistant",
+        ]);
+        expect(
+            mergedPreAckStreams["agent:main:main::real-concurrent::assistant"]
+        ).toMatchObject({
+            aliases: ["dashboard-chat-concurrent", "real-concurrent"],
+            runId: "real-concurrent",
+            text: "Pre-ACK real answer",
+        });
         const failedSendStreams = {
             "agent:main:main::dashboard-chat-a::assistant": {
                 aliases: ["dashboard-chat-a"],
