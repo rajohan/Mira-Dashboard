@@ -3552,6 +3552,12 @@ describe("Mira Dashboard frontend behavior", () => {
             })
         );
         expect(buildSlashCommandSuggestions("hello", [])).toEqual([]);
+        expect(buildSlashCommandSuggestions("/think", [])).toContainEqual(
+            expect.objectContaining({ requiresArgument: false, value: "/think " })
+        );
+        expect(buildSlashCommandSuggestions("/bash", [])).toContainEqual(
+            expect.objectContaining({ requiresArgument: true, value: "/bash " })
+        );
 
         const toolResult = chatMessage({
             role: "tool",

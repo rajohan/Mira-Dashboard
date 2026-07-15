@@ -14,6 +14,7 @@ export interface SlashCommandSuggestion {
     value: string;
     title: string;
     description: string;
+    requiresArgument?: boolean;
 }
 
 /** Defines thinking choices. */
@@ -346,6 +347,7 @@ export function buildSlashCommandSuggestions(
                 value: `${name}${command.args ? " " : ""}`,
                 title: `${name}${command.args ? ` ${command.args}` : ""}`,
                 description: command.description,
+                requiresArgument: command.args?.startsWith("<"),
             }))
     ).slice(0, 10);
 }
