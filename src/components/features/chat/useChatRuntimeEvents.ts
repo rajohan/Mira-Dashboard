@@ -1014,6 +1014,9 @@ interface UseChatRuntimeEventsParameters {
     showThinkingOutput: boolean;
     showToolOutput: boolean;
     activeStreamsReference: MutableReference<ActiveChatStreams>;
+    pendingTerminalMessagesReference?: MutableReference<
+        Map<string, ChatHistoryMessage[]>
+    >;
     liveHistoryRefreshTimerReference: MutableReference<TimerHandle | undefined>;
     shouldStickToBottomReference: MutableReference<boolean>;
     updateActiveStreams: (
@@ -1037,6 +1040,7 @@ export function useChatRuntimeEvents({
     showThinkingOutput,
     showToolOutput,
     activeStreamsReference,
+    pendingTerminalMessagesReference,
     liveHistoryRefreshTimerReference,
     shouldStickToBottomReference,
     updateActiveStreams,
@@ -1058,6 +1062,11 @@ export function useChatRuntimeEvents({
     const requestReference = useRef(request);
     const toolErrorRunKeysReference = useRef(new Set<string>());
     const keepThinkingAfterFinalReference = useRef(keepThinkingAfterFinal);
+    const fallbackPendingTerminalMessagesReference = useRef(
+        new Map<string, ChatHistoryMessage[]>()
+    );
+    const terminalMessagesReference =
+        pendingTerminalMessagesReference || fallbackPendingTerminalMessagesReference;
     const onRunTerminalReference = useRef(onRunTerminal);
 
     updateActiveStreamsReference.current = updateActiveStreams;
@@ -1489,6 +1498,21 @@ export function useChatRuntimeEvents({
                 .map((message) => ({ ...message, local: true }));
         };
 
+        /** Preserves terminal output until its session history is next displayed. */
+        const preserveTerminalMessages = (
+            sessionKey: string,
+            terminalMessages: ChatHistoryMessage[]
+        ) => {
+            if (terminalMessages.length === 0) {
+                return;
+            }
+            const previous = terminalMessagesReference.current.get(sessionKey) || [];
+            terminalMessagesReference.current.set(
+                sessionKey,
+                dedupeMessages([...previous, ...terminalMessages])
+            );
+        };
+
         /** Responds to runtime transcript event events. */
         const handleRuntimeTranscriptEvent = (
             eventName: string | undefined,
@@ -1513,17 +1537,42 @@ export function useChatRuntimeEvents({
                 eventSessionKey || streamForRun?.sessionKey,
                 selectedSessionKey
             );
-
-            if (!eventMatchesSelected) {
-                return;
-            }
-
             const stream = normalizeRuntimeStream(payload.stream);
             const data = isRecord(payload.data) ? payload.data : {};
             const phase = typeof data.phase === "string" ? data.phase : "";
             const isWholeRunTerminalEvent =
                 (stream === "lifecycle" && TERMINAL_LIFECYCLE_PHASES.has(phase)) ||
                 TERMINAL_RUNTIME_EVENTS.has(eventName);
+            if (!eventMatchesSelected) {
+                const streamSessionKey = eventSessionKey || streamForRun?.sessionKey;
+                if (!isWholeRunTerminalEvent || !streamSessionKey || !streamForRun) {
+                    return;
+                }
+                flushPendingDeltaUpdates();
+                const bufferedText = activeAssistantTextForRun(
+                    streamSessionKey,
+                    eventRunId
+                );
+                preserveTerminalMessages(streamSessionKey, [
+                    ...(bufferedText.trim()
+                        ? [
+                              {
+                                  role: "assistant" as const,
+                                  content: bufferedText,
+                                  text: bufferedText,
+                                  images: [],
+                                  attachments: [],
+                                  timestamp: currentIsoString(),
+                                  runId: eventRunId,
+                              },
+                          ]
+                        : []),
+                    ...activeDiagnosticMessagesForRun(streamSessionKey, eventRunId),
+                ]);
+                clearActiveStreamsForRun(streamSessionKey, eventRunId);
+                onRunTerminalReference.current?.(streamSessionKey);
+                return;
+            }
             const isChannelTerminalEvent =
                 (stream === "assistant" || isRuntimeThinkingStream(stream)) &&
                 TERMINAL_LIFECYCLE_PHASES.has(phase);
@@ -2417,6 +2466,9 @@ export function useChatRuntimeEvents({
                         );
                     });
                 }
+                if (!eventMatchesSelected) {
+                    preserveTerminalMessages(streamSessionKey, messagesToAppend);
+                }
 
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
                 onRunTerminalReference.current?.(streamSessionKey);
@@ -2454,6 +2506,9 @@ export function useChatRuntimeEvents({
                     setMessages((wasPrevious) =>
                         dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
+                }
+                if (!eventMatchesSelected) {
+                    preserveTerminalMessages(streamSessionKey, messagesToAppend);
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
                 onRunTerminalReference.current?.(streamSessionKey);
@@ -2513,6 +2568,9 @@ export function useChatRuntimeEvents({
                     !isToolExecutionErrorMessage(payload.errorMessage)
                 ) {
                     setSendError(payload.errorMessage || "Chat request failed");
+                }
+                if (!eventMatchesSelected) {
+                    preserveTerminalMessages(streamSessionKey, messagesToAppend);
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
                 onRunTerminalReference.current?.(streamSessionKey);

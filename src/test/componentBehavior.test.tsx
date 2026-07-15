@@ -1375,6 +1375,9 @@ describe("shared component helpers", () => {
                 typeof updater === "function" ? updater(historyLoadVersion) : updater;
         });
         const onRunTerminal = jest.fn();
+        const pendingTerminalMessagesReference = {
+            current: new Map<string, ChatHistoryMessage[]>(),
+        };
 
         const { unmount } = renderHook(() =>
             useChatRuntimeEvents({
@@ -1384,6 +1387,7 @@ describe("shared component helpers", () => {
                 keepThinkingAfterFinal: true,
                 liveHistoryRefreshTimerReference,
                 onRunTerminal,
+                pendingTerminalMessagesReference,
                 request,
                 selectedSessionKey: "agent:main:main",
                 setHistoryLoadVersion,
@@ -3166,6 +3170,37 @@ describe("shared component helpers", () => {
             });
         });
         expect(onRunTerminal).toHaveBeenCalledWith("agent:main:other");
+        expect(
+            pendingTerminalMessagesReference.current
+                .get("agent:main:other")
+                ?.map((message) => message.text)
+        ).toContain("partial output");
+
+        activeStreamsReference.current = {
+            "agent:main:runtime": {
+                aliases: [],
+                runId: "runtime-run",
+                sessionKey: "agent:main:runtime",
+                text: "runtime partial",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "runtime-run",
+                    sessionKey: "agent:main:runtime",
+                },
+                type: "event",
+            });
+        });
+        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:runtime");
+        expect(
+            pendingTerminalMessagesReference.current
+                .get("agent:main:runtime")
+                ?.map((message) => message.text)
+        ).toContain("runtime partial");
         expect(
             messages.some(
                 (message) =>

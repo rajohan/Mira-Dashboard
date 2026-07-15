@@ -724,12 +724,16 @@ export function Chat() {
     const voiceFileInputReference = useRef<HTMLInputElement | undefined>(undefined);
     const loadedHistorySessionReference = useRef("");
     const messagesReference = useRef<ChatHistoryMessage[]>([]);
+    const pendingTerminalMessagesReference = useRef(
+        new Map<string, ChatHistoryMessage[]>()
+    );
     const selectedSessionKeyReference = useRef("");
     const previousChatRowsLengthReference = useRef(0);
     const previousSelectedSessionKeyReference = useRef("");
     const previousSelectedStreamTextReference = useRef("");
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
     const sendInFlightCountReference = useRef(0);
+    const pendingSendSessionCountsReference = useRef(new Map<string, number>());
     const sendEpochReference = useRef(0);
     const resetConfirmResolverReference = useRef<
         ((wasConfirmed: boolean) => void) | undefined
@@ -1013,6 +1017,8 @@ export function Chat() {
             sendEpochReference.current += 1;
             sendInFlightCountReference.current = 0;
             setIsSending(false);
+            pendingSendSessionCountsReference.current.clear();
+            setStoppingSessionKeys(new Set());
 
             updateActiveStreams(() => ({}));
 
@@ -1102,16 +1108,24 @@ export function Chat() {
                     createChatVisibility(showThinkingOutput, showToolOutput),
                     keepThinkingAfterFinal
                 );
+                const pendingTerminalMessages =
+                    pendingTerminalMessagesReference.current.get(selectedSessionKey) ||
+                    [];
+                pendingTerminalMessagesReference.current.delete(selectedSessionKey);
+                const nextMessagesWithPending = dedupeMessages([
+                    ...nextMessages,
+                    ...pendingTerminalMessages,
+                ]);
                 const isFirstHistoryLoad =
                     loadedHistorySessionReference.current !== selectedSessionKey;
                 loadedHistorySessionReference.current = selectedSessionKey;
                 setMessages((wasPrevious) => {
                     const preparedMessages = isFirstHistoryLoad
-                        ? nextMessages
+                        ? nextMessagesWithPending
                         : messagesWithFinalThinkingPersistence(
                               mergeWithRecentOptimisticMessages(
                                   wasPrevious,
-                                  nextMessages
+                                  nextMessagesWithPending
                               ),
                               createChatVisibility(showThinkingOutput, showToolOutput),
                               keepThinkingAfterFinal
@@ -1387,6 +1401,7 @@ export function Chat() {
         showThinkingOutput,
         showToolOutput,
         activeStreamsReference,
+        pendingTerminalMessagesReference,
         liveHistoryRefreshTimerReference,
         shouldStickToBottomReference,
         updateActiveStreams,
@@ -1844,14 +1859,18 @@ export function Chat() {
     });
 
     /** Marks a chat submit request as in-flight. */
-    const beginSend = () => {
+    const beginSend = (sessionKey: string) => {
         sendInFlightCountReference.current += 1;
+        pendingSendSessionCountsReference.current.set(
+            sessionKey,
+            (pendingSendSessionCountsReference.current.get(sessionKey) || 0) + 1
+        );
         setIsSending(true);
         return sendEpochReference.current;
     };
 
     /** Marks a chat submit request as completed. */
-    const endSend = (sendEpoch: number) => {
+    const endSend = (sendEpoch: number, sessionKey: string) => {
         if (sendEpoch !== sendEpochReference.current) {
             return;
         }
@@ -1860,6 +1879,18 @@ export function Chat() {
             0,
             sendInFlightCountReference.current - 1
         );
+        const remainingSessionSends = Math.max(
+            0,
+            (pendingSendSessionCountsReference.current.get(sessionKey) || 0) - 1
+        );
+        if (remainingSessionSends === 0) {
+            pendingSendSessionCountsReference.current.delete(sessionKey);
+        } else {
+            pendingSendSessionCountsReference.current.set(
+                sessionKey,
+                remainingSessionSends
+            );
+        }
         setIsSending(sendInFlightCountReference.current > 0);
     };
 
@@ -1945,7 +1976,7 @@ export function Chat() {
             return;
         }
 
-        const sendEpoch = beginSend();
+        const sendEpoch = beginSend(pendingSendSessionKey);
 
         if (text.startsWith("/")) {
             let isHandledCommand: boolean;
@@ -1953,12 +1984,12 @@ export function Chat() {
                 isHandledCommand = await handleSlashCommand(text, currentAttachments);
             } catch (error_) {
                 setSendError(chatErrorMessage(error_, "Failed to run slash command"));
-                endSend(sendEpoch);
+                endSend(sendEpoch, pendingSendSessionKey);
                 return;
             }
 
             if (isHandledCommand) {
-                endSend(sendEpoch);
+                endSend(sendEpoch, pendingSendSessionKey);
                 return;
             }
         }
@@ -2069,7 +2100,7 @@ export function Chat() {
                 );
             }
         } finally {
-            endSend(sendEpoch);
+            endSend(sendEpoch, pendingSendSessionKey);
         }
     };
 
@@ -2087,7 +2118,7 @@ export function Chat() {
     const canStop = Boolean(
         isConnected &&
         selectedSessionKey &&
-        !isSending &&
+        !pendingSendSessionCountsReference.current.has(selectedSessionKey) &&
         (selectedStreams.length > 0 || isSessionActive(selectedSession))
     );
     const canSend = Boolean(
