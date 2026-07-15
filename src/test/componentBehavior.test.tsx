@@ -3155,7 +3155,10 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:main");
+        expect(onRunTerminal).toHaveBeenCalledWith(
+            "agent:main:main",
+            "chat-aborted-diagnostic"
+        );
 
         activeStreamsReference.current = {
             "agent:main:other": {
@@ -3177,7 +3180,7 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:other");
+        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:other", "other-run");
         expect(
             pendingTerminalMessagesReference.current
                 .get("agent:main:other")
@@ -3203,7 +3206,7 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:runtime");
+        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:runtime", "runtime-run");
         expect(
             pendingTerminalMessagesReference.current
                 .get("agent:main:runtime")
@@ -3238,7 +3241,10 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:session-only");
+        expect(onRunTerminal).toHaveBeenCalledWith(
+            "agent:main:session-only",
+            "session-only-run"
+        );
 
         activeStreamsReference.current = {
             "agent:main:main::current::assistant": {
@@ -5116,7 +5122,7 @@ describe("shared component helpers", () => {
         });
 
         expect(messages.map((message) => message.text)).toContain("final answer");
-        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:main");
+        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:main", "resolved-run");
         expect(messages.some((message) => message.thinking?.length)).toBe(false);
 
         act(() => {

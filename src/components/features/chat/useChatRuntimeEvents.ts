@@ -1026,8 +1026,8 @@ interface UseChatRuntimeEventsParameters {
     setSendError: Dispatch<SetStateAction<string | undefined>>;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
-    stoppingSessionKeyFor?: (sessionKey: string) => string | undefined;
-    onRunTerminal?: (sessionKey: string) => void;
+    stoppingSessionKeyFor?: (sessionKey: string, runId?: string) => string | undefined;
+    onRunTerminal?: (sessionKey: string, runId?: string) => void;
 }
 
 /** Provides chat runtime events. */
@@ -1520,10 +1520,34 @@ export function useChatRuntimeEvents({
                 return;
             }
             const previous = terminalMessagesReference.current.get(sessionKey) || [];
-            terminalMessagesReference.current.set(
-                sessionKey,
-                dedupeMessages([...previous, ...terminalMessages])
-            );
+            const next = [...previous];
+            for (const terminalMessage of terminalMessages) {
+                const matchingIndexes = next.flatMap((message, index) => {
+                    const hasMatchingAssistantText =
+                        terminalMessage.role.toLowerCase() === "assistant" &&
+                        message.role.toLowerCase() === "assistant" &&
+                        Boolean(terminalMessage.text.trim()) &&
+                        Boolean(message.text.trim()) &&
+                        ((Boolean(terminalMessage.runId) &&
+                            terminalMessage.runId === message.runId) ||
+                            isRecoveredAssistantText(message.text, terminalMessage.text));
+                    return hasMatchingAssistantText ? [index] : [];
+                });
+                if (matchingIndexes.length === 0) {
+                    next.push(terminalMessage);
+                    continue;
+                }
+                const previousMatch = next[matchingIndexes.at(-1)!]!;
+                const mergedMessage = mergeChatMessageDetails(
+                    { ...previousMatch, ...terminalMessage },
+                    previousMatch
+                );
+                for (const index of matchingIndexes.toReversed()) {
+                    next.splice(index, 1);
+                }
+                next.push(mergedMessage);
+            }
+            terminalMessagesReference.current.set(sessionKey, dedupeMessages(next));
         };
 
         /** Records a runtime terminal so a later chat terminal remains relevant. */
@@ -1557,7 +1581,11 @@ export function useChatRuntimeEvents({
             if (!matchingSessionKey) return;
             const pendingRuns =
                 pendingRuntimeTerminalRunsReference.current.get(matchingSessionKey);
-            pendingRuns?.delete(runId || "");
+            if (runId && pendingRuns?.has(runId)) {
+                pendingRuns.delete(runId);
+            } else {
+                pendingRuns?.delete("");
+            }
             if (!pendingRuns || pendingRuns.size === 0) {
                 pendingRuntimeTerminalRunsReference.current.delete(matchingSessionKey);
             }
@@ -1595,7 +1623,10 @@ export function useChatRuntimeEvents({
                 TERMINAL_RUNTIME_EVENTS.has(eventName);
             if (!eventMatchesSelected) {
                 const stoppingSessionKey = eventSessionKey
-                    ? stoppingSessionKeyForReference.current?.(eventSessionKey)
+                    ? stoppingSessionKeyForReference.current?.(
+                          eventSessionKey,
+                          eventRunId
+                      )
                     : undefined;
                 const streamSessionKey =
                     streamForRun?.sessionKey || stoppingSessionKey || eventSessionKey;
@@ -1629,7 +1660,7 @@ export function useChatRuntimeEvents({
                 ]);
                 markPendingRuntimeTerminal(streamSessionKey, eventRunId);
                 if (clearActiveStreamsForRun(streamSessionKey, eventRunId)) {
-                    onRunTerminalReference.current?.(streamSessionKey);
+                    onRunTerminalReference.current?.(streamSessionKey, eventRunId);
                 }
                 return;
             }
@@ -1894,7 +1925,7 @@ export function useChatRuntimeEvents({
                     );
                 }
                 if (clearActiveStreamsForRun(selectedSessionKey, eventRunId)) {
-                    onRunTerminalReference.current?.(selectedSessionKey);
+                    onRunTerminalReference.current?.(selectedSessionKey, eventRunId);
                 }
                 refreshSelectedHistorySoon(150);
                 return;
@@ -2151,7 +2182,7 @@ export function useChatRuntimeEvents({
             );
             const isTerminalEvent = TERMINAL_CHAT_STATES.has(payload.state || "");
             const stoppingSessionKey = isTerminalEvent
-                ? stoppingSessionKeyForReference.current?.(eventSessionKey)
+                ? stoppingSessionKeyForReference.current?.(eventSessionKey, payload.runId)
                 : undefined;
             const pendingRuntimeTerminalSessionKey = isTerminalEvent
                 ? pendingRuntimeTerminalSessionKeyFor(eventSessionKey, payload.runId)
@@ -2546,7 +2577,7 @@ export function useChatRuntimeEvents({
                 }
 
                 if (clearActiveStreamsForRun(streamSessionKey, payload.runId)) {
-                    onRunTerminalReference.current?.(streamSessionKey);
+                    onRunTerminalReference.current?.(streamSessionKey, payload.runId);
                 }
                 clearPendingRuntimeTerminal(streamSessionKey, payload.runId);
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
@@ -2588,7 +2619,7 @@ export function useChatRuntimeEvents({
                     preserveTerminalMessages(streamSessionKey, messagesToAppend);
                 }
                 if (clearActiveStreamsForRun(streamSessionKey, payload.runId)) {
-                    onRunTerminalReference.current?.(streamSessionKey);
+                    onRunTerminalReference.current?.(streamSessionKey, payload.runId);
                 }
                 clearPendingRuntimeTerminal(streamSessionKey, payload.runId);
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
@@ -2652,7 +2683,7 @@ export function useChatRuntimeEvents({
                     preserveTerminalMessages(streamSessionKey, messagesToAppend);
                 }
                 if (clearActiveStreamsForRun(streamSessionKey, payload.runId)) {
-                    onRunTerminalReference.current?.(streamSessionKey);
+                    onRunTerminalReference.current?.(streamSessionKey, payload.runId);
                 }
                 clearPendingRuntimeTerminal(streamSessionKey, payload.runId);
             }

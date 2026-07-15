@@ -734,6 +734,7 @@ export function Chat() {
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
     const sendInFlightCountReference = useRef(0);
     const pendingSendSessionCountsReference = useRef(new Map<string, number>());
+    const stoppingRunGroupsReference = useRef(new Map<string, Array<Set<string>>>());
     const sendEpochReference = useRef(0);
     const resetConfirmResolverReference = useRef<
         ((wasConfirmed: boolean) => void) | undefined
@@ -1018,6 +1019,7 @@ export function Chat() {
             sendInFlightCountReference.current = 0;
             setIsSending(false);
             pendingSendSessionCountsReference.current.clear();
+            stoppingRunGroupsReference.current.clear();
             setStoppingSessionKeys(new Set());
 
             updateActiveStreams(() => ({}));
@@ -1298,6 +1300,7 @@ export function Chat() {
                                 isSameSessionKey(key, requestSessionKey)
                             );
                             if (!matchingKey) return wasStopping;
+                            stoppingRunGroupsReference.current.delete(matchingKey);
                             const next = new Set(wasStopping);
                             next.delete(matchingKey);
                             return next;
@@ -1420,11 +1423,17 @@ export function Chat() {
         setSendError,
         setIsAtBottom,
         setHistoryLoadVersion,
-        stoppingSessionKeyFor: (sessionKey) =>
-            [...stoppingSessionKeys].find((stoppingSessionKey) =>
-                isSameSessionKey(stoppingSessionKey, sessionKey)
-            ),
-        onRunTerminal: (sessionKey) =>
+        stoppingSessionKeyFor: (sessionKey, runId) =>
+            stoppingRunGroupsReference.current
+                .entries()
+                .find(
+                    ([stoppingSessionKey, runGroups]) =>
+                        isSameSessionKey(stoppingSessionKey, sessionKey) &&
+                        runGroups.some(
+                            (runGroup) => runGroup.has(runId || "") || runGroup.has("")
+                        )
+                )?.[0],
+        onRunTerminal: (sessionKey, runId) =>
             setStoppingSessionKeys((wasStopping) => {
                 const matchingKey = [...wasStopping].find((key) =>
                     isSameSessionKey(key, sessionKey)
@@ -1432,9 +1441,23 @@ export function Chat() {
                 if (!matchingKey) {
                     return wasStopping;
                 }
-                const next = new Set(wasStopping);
-                next.delete(matchingKey);
-                return next;
+                const runGroups =
+                    stoppingRunGroupsReference.current.get(matchingKey) || [];
+                const matchingGroupIndex = runGroups.findIndex(
+                    (runGroup) => runGroup.has(runId || "") || runGroup.has("")
+                );
+                if (matchingGroupIndex === -1) return wasStopping;
+                const nextRunGroups = runGroups.filter(
+                    (_, index) => index !== matchingGroupIndex
+                );
+                if (nextRunGroups.length > 0) {
+                    stoppingRunGroupsReference.current.set(matchingKey, nextRunGroups);
+                    return wasStopping;
+                }
+                stoppingRunGroupsReference.current.delete(matchingKey);
+                const nextStopping = new Set(wasStopping);
+                nextStopping.delete(matchingKey);
+                return nextStopping;
             }),
     });
 
@@ -1845,6 +1868,25 @@ export function Chat() {
 
     /** Stops one session while retaining its buffered output until terminal cleanup. */
     const stopCurrentRun = async (sessionKey: string) => {
+        const sessionStreams = Object.values(activeStreamsReference.current).filter(
+            (stream) => isSameSessionKey(stream.sessionKey, sessionKey)
+        );
+        const session = sessionMap.get(sessionKey);
+        if (sessionStreams.length === 0 && !isSessionActive(session)) {
+            throw new Error("No active run to stop");
+        }
+        const stoppingRunIds = new Set(
+            uniqueStrings(
+                sessionStreams.flatMap((stream) => [stream.runId, ...stream.aliases])
+            )
+        );
+        if (stoppingRunIds.size === 0) stoppingRunIds.add("");
+        const existingRunGroups =
+            stoppingRunGroupsReference.current.get(sessionKey) || [];
+        stoppingRunGroupsReference.current.set(sessionKey, [
+            ...existingRunGroups,
+            stoppingRunIds,
+        ]);
         setStoppingSessionKeys((wasStopping) => new Set(wasStopping).add(sessionKey));
         try {
             await request("chat.abort", { sessionKey });
@@ -1855,9 +1897,14 @@ export function Chat() {
                 ]);
             }
         } catch (error_) {
+            if (existingRunGroups.length === 0) {
+                stoppingRunGroupsReference.current.delete(sessionKey);
+            } else {
+                stoppingRunGroupsReference.current.set(sessionKey, existingRunGroups);
+            }
             setStoppingSessionKeys((wasStopping) => {
                 const next = new Set(wasStopping);
-                next.delete(sessionKey);
+                if (existingRunGroups.length === 0) next.delete(sessionKey);
                 return next;
             });
             throw error_;
