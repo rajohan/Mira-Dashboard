@@ -8744,6 +8744,44 @@ describe("shared component helpers", () => {
             "dashboard-chat-first",
             "dashboard-chat-second",
         ]);
+        const firstRepeatedPromptInHistory = mergeWithRecentOptimisticMessages(
+            concurrentRepeatedPrompts.map((message, index) => ({
+                ...message,
+                timestamp: new Date(Date.now() - (2 - index) * 1000).toISOString(),
+            })),
+            [
+                {
+                    content: "Repeat this",
+                    role: "user",
+                    text: "Repeat this",
+                    timestamp: new Date(Date.now() - 2000).toISOString(),
+                },
+            ]
+        );
+        expect(firstRepeatedPromptInHistory).toHaveLength(2);
+        expect(
+            firstRepeatedPromptInHistory.filter(
+                (message) => message.text === "Repeat this"
+            )
+        ).toHaveLength(2);
+        const bothRepeatedPromptsInHistory = mergeWithRecentOptimisticMessages(
+            concurrentRepeatedPrompts,
+            [
+                {
+                    content: "Repeat this",
+                    role: "user",
+                    text: "Repeat this",
+                    timestamp: "2026-07-15T03:00:00.000Z",
+                },
+                {
+                    content: "Repeat this",
+                    role: "user",
+                    text: "Repeat this",
+                    timestamp: "2026-07-15T03:00:01.000Z",
+                },
+            ]
+        );
+        expect(bothRepeatedPromptsInHistory).toHaveLength(2);
 
         const previousMessage = {
             content: "Retry this",

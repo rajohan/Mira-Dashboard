@@ -352,9 +352,10 @@ export function messageIdentity(message: ChatHistoryMessage): string {
     const mediaIdentity = messageMediaIdentity(message);
     const normalizedTextIdentity =
         role === "user" ? userMessageTextIdentity(message.text) : message.text.trim();
+    const userTurnIdentity = message.runId || message.timestamp;
     const textIdentity =
-        role === "user" && normalizedTextIdentity && message.runId
-            ? `${normalizedTextIdentity}::${message.runId}`
+        role === "user" && normalizedTextIdentity && userTurnIdentity
+            ? `${normalizedTextIdentity}::${userTurnIdentity}`
             : normalizedTextIdentity;
     const userMediaTurnIdentity =
         role === "user" && !textIdentity && mediaIdentity
@@ -599,6 +600,7 @@ export function mergeWithRecentOptimisticMessages(
         enrichedNextMessages.map((message) => messageIdentity(message))
     );
     const nextIdentityCounts = new Map<string, number>();
+    const nextUserTextCounts = new Map<string, number>();
     const unmatchedNextMediaCounts = new Map<string, number>();
     for (const message of enrichedNextMessages) {
         const identity = messageIdentity(message);
@@ -606,6 +608,14 @@ export function mergeWithRecentOptimisticMessages(
 
         const mediaIdentity = messageMediaIdentity(message);
         const role = message.role.toLowerCase();
+        const userTextIdentity =
+            role === "user" ? userMessageTextIdentity(message.text) : "";
+        if (userTextIdentity) {
+            nextUserTextCounts.set(
+                userTextIdentity,
+                (nextUserTextCounts.get(userTextIdentity) || 0) + 1
+            );
+        }
         if ((role === "user" || role === "assistant") && mediaIdentity) {
             const mediaKey = `${role}::${mediaIdentity}`;
             unmatchedNextMediaCounts.set(
@@ -665,7 +675,20 @@ export function mergeWithRecentOptimisticMessages(
             return false;
         }
 
+        const userTextIdentity =
+            role === "user" ? userMessageTextIdentity(message.text) : "";
+        const unmatchedUserTextCount = userTextIdentity
+            ? nextUserTextCounts.get(userTextIdentity) || 0
+            : 0;
         if (nextIdentities.has(messageIdentity(message))) {
+            if (userTextIdentity && unmatchedUserTextCount > 0) {
+                nextUserTextCounts.set(userTextIdentity, unmatchedUserTextCount - 1);
+            }
+            return false;
+        }
+
+        if (message.runId && userTextIdentity && unmatchedUserTextCount > 0) {
+            nextUserTextCounts.set(userTextIdentity, unmatchedUserTextCount - 1);
             return false;
         }
 
