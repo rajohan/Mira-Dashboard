@@ -453,6 +453,10 @@ export function ChatComposer({
                             }
 
                             const shouldUseEnterForAction = shouldSendFromEnter(event);
+                            if (event.key === "Enter" && !shouldUseEnterForAction) {
+                                event.stopPropagation();
+                                return;
+                            }
                             const currentDraft = event.currentTarget.value.trim();
                             const isExactSlashSuggestion = slashCommandSuggestions.some(
                                 (suggestion) =>

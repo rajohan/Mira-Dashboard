@@ -1078,7 +1078,11 @@ describe("shared component helpers", () => {
         expect(onSend).not.toHaveBeenCalled();
 
         fireEvent.change(textarea, { target: { value: "/he-shift" } });
+        const bubbledEnter = jest.fn();
+        document.addEventListener("keydown", bubbledEnter);
         expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
+        expect(bubbledEnter).not.toHaveBeenCalled();
+        document.removeEventListener("keydown", bubbledEnter);
         expect(onApplySlashSuggestion).toHaveBeenCalledTimes(2);
         expect(onSend).not.toHaveBeenCalled();
         fireEvent.pointerDown(document.body);
@@ -1101,7 +1105,10 @@ describe("shared component helpers", () => {
             value: jest.fn(() => ({ matches: true })),
         });
         fireEvent.change(textarea, { target: { value: "/he-mobile" } });
+        document.addEventListener("keydown", bubbledEnter);
         expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(true);
+        expect(bubbledEnter).not.toHaveBeenCalled();
+        document.removeEventListener("keydown", bubbledEnter);
         expect(onApplySlashSuggestion).toHaveBeenCalledTimes(2);
         expect(onSend).toHaveBeenCalledTimes(1);
         if (originalMatchMedia) {
