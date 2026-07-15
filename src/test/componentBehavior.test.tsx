@@ -1005,6 +1005,46 @@ describe("shared component helpers", () => {
         expect(onSend).toHaveBeenCalledTimes(1);
     });
 
+    it("completes an exact required-argument command before sending", () => {
+        const onApplySlashSuggestion = jest.fn();
+        const onSend = jest.fn();
+
+        render(
+            <ChatComposer
+                attachments={[]}
+                canSend={true}
+                draft="/bash"
+                fileInputReference={{ current: undefined }}
+                isConnected={true}
+                isRecording={false}
+                isSending={false}
+                isTranscribing={false}
+                selectedSessionKey="agent:main:main"
+                slashCommandSuggestions={[
+                    {
+                        description: "Run a host shell command",
+                        requiresArgument: true,
+                        title: "/bash <command>",
+                        value: "/bash ",
+                    },
+                ]}
+                onApplySlashSuggestion={onApplySlashSuggestion}
+                onAttachFiles={jest.fn()}
+                onChangeDraft={jest.fn()}
+                onPreview={jest.fn()}
+                onRemoveAttachment={jest.fn()}
+                onSend={onSend}
+                onToggleRecording={jest.fn()}
+            />
+        );
+
+        expect(fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" })).toBe(
+            false
+        );
+        expect(onApplySlashSuggestion).toHaveBeenCalledWith("/bash ");
+        expect(onSend).not.toHaveBeenCalled();
+    });
+
     it("handles chat slash commands without rendering the page", async () => {
         const requestCalls: Array<[string, Record<string, unknown> | undefined]> = [];
         const request = async <T = unknown,>(
