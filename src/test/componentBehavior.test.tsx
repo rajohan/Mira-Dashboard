@@ -5785,7 +5785,7 @@ describe("shared component helpers", () => {
             listener?.({
                 event: "agent",
                 payload: {
-                    data: { delta: "public answer" },
+                    data: { delta: "public answer", phase: "end" },
                     runId: "non-retained-thinking",
                     sessionKey: "agent:main:main",
                     stream: "assistant",

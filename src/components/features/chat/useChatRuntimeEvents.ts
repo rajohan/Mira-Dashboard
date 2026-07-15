@@ -2039,15 +2039,13 @@ export function useChatRuntimeEvents({
                         : []),
                     ...diagnosticMessages,
                 ];
-                if (messagesToAppend.length > 0) {
-                    setMessages((wasPrevious) =>
-                        messagesWithFinalThinkingPersistence(
-                            dedupeMessages([...wasPrevious, ...messagesToAppend]),
-                            createChatVisibility(showThinkingOutput, showToolOutput),
-                            keepThinkingAfterFinalReference.current && showThinkingOutput
-                        )
-                    );
-                }
+                setMessages((wasPrevious) =>
+                    messagesWithFinalThinkingPersistence(
+                        dedupeMessages([...wasPrevious, ...messagesToAppend]),
+                        createChatVisibility(showThinkingOutput, showToolOutput),
+                        keepThinkingAfterFinalReference.current && showThinkingOutput
+                    )
+                );
                 clearActiveStreamsForRun(
                     selectedSessionKey,
                     resolvedEventRunId,
@@ -2751,11 +2749,7 @@ export function useChatRuntimeEvents({
                     };
                 }
 
-                const messagesToAppend = [
-                    ...remainingDiagnosticMessages,
-                    ...(finalMessageToAppend ? [finalMessageToAppend] : []),
-                ];
-                if (messagesToAppend.length > 0 && eventMatchesSelected) {
+                if (eventMatchesSelected) {
                     setMessages((wasPrevious) => {
                         let didMergeFinalMessage = false;
                         const finalAssistantMessage =
