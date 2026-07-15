@@ -1375,6 +1375,7 @@ describe("shared component helpers", () => {
                 typeof updater === "function" ? updater(historyLoadVersion) : updater;
         });
         const onRunTerminal = jest.fn();
+        const onRunAlias = jest.fn();
         const pendingTerminalMessagesReference = {
             current: new Map<string, ChatHistoryMessage[]>(),
         };
@@ -1395,6 +1396,7 @@ describe("shared component helpers", () => {
                 },
                 liveHistoryRefreshTimerReference,
                 onRunTerminal,
+                onRunAlias,
                 pendingTerminalMessagesReference,
                 request,
                 selectedSessionKey: "agent:main:main",
@@ -3596,6 +3598,11 @@ describe("shared component helpers", () => {
             )
         ).toBe(true);
         expect(activeStreamsReference.current["agent:main:main"]).toBeUndefined();
+        expect(onRunAlias).toHaveBeenCalledWith(
+            "agent:main:main",
+            "dashboard-chat-optimistic",
+            "real-chat-terminal"
+        );
         expect(
             activeStreamsReference.current[
                 "agent:main:main::dashboard-chat-optimistic::assistant"

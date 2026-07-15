@@ -1027,6 +1027,7 @@ interface UseChatRuntimeEventsParameters {
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setHistoryLoadVersion: Dispatch<SetStateAction<number>>;
     stoppingSessionKeyFor?: (sessionKey: string, runId?: string) => string | undefined;
+    onRunAlias?: (sessionKey: string, optimisticRunId: string, runId: string) => void;
     onRunTerminal?: (sessionKey: string, runId?: string) => void;
 }
 
@@ -1050,6 +1051,7 @@ export function useChatRuntimeEvents({
     setIsAtBottom,
     setHistoryLoadVersion,
     stoppingSessionKeyFor,
+    onRunAlias,
     onRunTerminal,
 }: UseChatRuntimeEventsParameters) {
     const pendingDeltaUpdatesReference = useRef<Record<string, PendingDeltaUpdate>>({});
@@ -1071,12 +1073,14 @@ export function useChatRuntimeEvents({
     const terminalMessagesReference =
         pendingTerminalMessagesReference || fallbackPendingTerminalMessagesReference;
     const onRunTerminalReference = useRef(onRunTerminal);
+    const onRunAliasReference = useRef(onRunAlias);
     const stoppingSessionKeyForReference = useRef(stoppingSessionKeyFor);
 
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
     keepThinkingAfterFinalReference.current = keepThinkingAfterFinal;
     onRunTerminalReference.current = onRunTerminal;
+    onRunAliasReference.current = onRunAlias;
     stoppingSessionKeyForReference.current = stoppingSessionKeyFor;
 
     useEffect(() => {
@@ -1419,6 +1423,7 @@ export function useChatRuntimeEvents({
             optimisticRunId: string,
             runId: string
         ) => {
+            onRunAliasReference.current?.(sessionKey, optimisticRunId, runId);
             updateActiveStreamsReference.current((wasPrevious) => {
                 let hasChanged = false;
                 const next = { ...wasPrevious };

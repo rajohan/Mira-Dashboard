@@ -1423,6 +1423,16 @@ export function Chat() {
         setSendError,
         setIsAtBottom,
         setHistoryLoadVersion,
+        onRunAlias: (sessionKey, optimisticRunId, runId) => {
+            const matchingKey = stoppingRunGroupsReference.current
+                .keys()
+                .find((key) => isSameSessionKey(key, sessionKey));
+            if (!matchingKey) return;
+            const runGroups = stoppingRunGroupsReference.current.get(matchingKey) || [];
+            for (const runGroup of runGroups) {
+                if (runGroup.has(optimisticRunId)) runGroup.add(runId);
+            }
+        },
         stoppingSessionKeyFor: (sessionKey, runId) =>
             stoppingRunGroupsReference.current
                 .entries()
