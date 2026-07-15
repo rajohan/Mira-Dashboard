@@ -1386,6 +1386,7 @@ describe("shared component helpers", () => {
             historyLoadVersion =
                 typeof updater === "function" ? updater(historyLoadVersion) : updater;
         });
+        const onRunTerminal = jest.fn();
 
         const { unmount } = renderHook(() =>
             useChatRuntimeEvents({
@@ -1394,6 +1395,7 @@ describe("shared component helpers", () => {
                 isConnected: true,
                 keepThinkingAfterFinal: true,
                 liveHistoryRefreshTimerReference,
+                onRunTerminal,
                 request,
                 selectedSessionKey: "agent:main:main",
                 setHistoryLoadVersion,
@@ -3153,6 +3155,29 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
+        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:main");
+
+        activeStreamsReference.current = {
+            "agent:main:other": {
+                aliases: [],
+                runId: "other-run",
+                sessionKey: "agent:main:other",
+                text: "partial output",
+                updatedAt: new Date().toISOString(),
+            },
+        };
+        act(() => {
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "other-run",
+                    sessionKey: "agent:main:other",
+                    state: "aborted",
+                },
+                type: "event",
+            });
+        });
+        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:other");
         expect(
             messages.some(
                 (message) =>
@@ -4955,6 +4980,7 @@ describe("shared component helpers", () => {
         const updateActiveStreams = jest.fn((updater) => {
             activeStreamsReference.current = updater(activeStreamsReference.current);
         });
+        const onRunTerminal = jest.fn();
 
         const { unmount } = renderHook(() =>
             useChatRuntimeEvents({
@@ -4963,6 +4989,7 @@ describe("shared component helpers", () => {
                 isConnected: true,
                 keepThinkingAfterFinal: false,
                 liveHistoryRefreshTimerReference: { current: undefined },
+                onRunTerminal,
                 request: jest.fn(),
                 selectedSessionKey: "agent:main:main",
                 setHistoryLoadVersion: jest.fn(),
@@ -4993,6 +5020,7 @@ describe("shared component helpers", () => {
         });
 
         expect(messages.map((message) => message.text)).toContain("final answer");
+        expect(onRunTerminal).toHaveBeenCalledWith("agent:main:main");
         expect(messages.some((message) => message.thinking?.length)).toBe(false);
 
         act(() => {

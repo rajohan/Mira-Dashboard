@@ -1785,6 +1785,7 @@ export function useChatRuntimeEvents({
                     );
                 }
                 clearActiveStreamsForRun(selectedSessionKey, eventRunId);
+                onRunTerminalReference.current?.(selectedSessionKey);
                 refreshSelectedHistorySoon(150);
                 return;
             }
@@ -2418,9 +2419,7 @@ export function useChatRuntimeEvents({
                 }
 
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
-                if (eventMatchesSelected) {
-                    onRunTerminalReference.current?.(streamSessionKey);
-                }
+                onRunTerminalReference.current?.(streamSessionKey);
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -2457,9 +2456,7 @@ export function useChatRuntimeEvents({
                     );
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
-                if (eventMatchesSelected) {
-                    onRunTerminalReference.current?.(streamSessionKey);
-                }
+                onRunTerminalReference.current?.(streamSessionKey);
                 refreshHistoryAfterTerminalEvent(streamSessionKey);
                 return;
             }
@@ -2518,9 +2515,7 @@ export function useChatRuntimeEvents({
                     setSendError(payload.errorMessage || "Chat request failed");
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
-                if (eventMatchesSelected) {
-                    onRunTerminalReference.current?.(streamSessionKey);
-                }
+                onRunTerminalReference.current?.(streamSessionKey);
             }
         });
 

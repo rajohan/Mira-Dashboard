@@ -756,7 +756,7 @@ export function Chat() {
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [isSending, setIsSending] = useState(false);
-    const [isStopping, setIsStopping] = useState(false);
+    const [stoppingSessionKey, setStoppingSessionKey] = useState<string>();
     const [pendingSessionPatchCounts, setPendingSessionPatchCounts] = useState<
         Record<string, number>
     >({});
@@ -1392,7 +1392,12 @@ export function Chat() {
         setSendError,
         setIsAtBottom,
         setHistoryLoadVersion,
-        onRunTerminal: () => setIsStopping(false),
+        onRunTerminal: (sessionKey) =>
+            setStoppingSessionKey((wasStopping) =>
+                wasStopping && isSameSessionKey(wasStopping, sessionKey)
+                    ? undefined
+                    : wasStopping
+            ),
     });
 
     /** Performs check is at bottom. */
@@ -2048,6 +2053,9 @@ export function Chat() {
             stream.operation === "compact" ||
             stream.statusText?.toLowerCase().includes("compact")
     );
+    const isStopping = Boolean(
+        stoppingSessionKey && isSameSessionKey(stoppingSessionKey, selectedSessionKey)
+    );
     const canStop = Boolean(
         isConnected &&
         selectedSessionKey &&
@@ -2079,16 +2087,25 @@ export function Chat() {
             return;
         }
 
-        setIsStopping(true);
+        const stoppedSessionKey = selectedSessionKey;
+        setStoppingSessionKey(stoppedSessionKey);
         try {
-            await request("chat.abort", { sessionKey: selectedSessionKey });
-            setMessages((wasPrevious) => [
-                ...wasPrevious,
-                createLocalSystemMessage("Stopped current run."),
-            ]);
+            await request("chat.abort", { sessionKey: stoppedSessionKey });
+            if (
+                isSameSessionKey(selectedSessionKeyReference.current, stoppedSessionKey)
+            ) {
+                setMessages((wasPrevious) => [
+                    ...wasPrevious,
+                    createLocalSystemMessage("Stopped current run."),
+                ]);
+            }
         } catch (error_) {
             setSendError(chatErrorMessage(error_, "Failed to stop current run"));
-            setIsStopping(false);
+            setStoppingSessionKey((wasStopping) =>
+                wasStopping && isSameSessionKey(wasStopping, stoppedSessionKey)
+                    ? undefined
+                    : wasStopping
+            );
         }
     };
 
