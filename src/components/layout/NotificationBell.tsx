@@ -106,7 +106,7 @@ export function NotificationBell() {
                                 onClick={() => clearRead.mutate()}
                                 disabled={readCount === 0}
                             >
-                                Clear read
+                                Clear all read
                             </button>
                             <button
                                 type="button"

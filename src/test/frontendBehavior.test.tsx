@@ -3189,12 +3189,15 @@ describe("Mira Dashboard frontend behavior", () => {
             )
         );
 
-        await user.click(getButtonByText("Clear read"));
+        await user.click(getButtonByText("Clear all read"));
         await waitFor(() =>
             expect(fetchMock).toHaveBeenCalledWith(
                 "/api/notifications/clear-read",
-                expect.objectContaining({ method: "POST" })
+                expect.objectContaining({ body: "{}", method: "POST" })
             )
+        );
+        await waitFor(() =>
+            expect(screen.queryByText("Backup complete")).not.toBeInTheDocument()
         );
     });
 
