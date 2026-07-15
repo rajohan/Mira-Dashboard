@@ -3569,6 +3569,14 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(runScopedDeleteKeys).toHaveLength(2);
         expect(runScopedDeleteKeys[0]).toContain("::tool-run::");
         expect(runScopedDeleteKeys[1]).toContain("::no-run::");
+        const acknowledgedDeleteKeys = messageDeleteKeys({
+            ...toolResult,
+            runId: "acknowledged-tool-run",
+        });
+        expect(
+            runScopedDeleteKeys.some((key) => acknowledgedDeleteKeys.includes(key))
+        ).toBe(true);
+        expect(acknowledgedDeleteKeys[1]).toBe(runScopedDeleteKeys[1]);
         expect(messageDeleteKeys(toolResult)).toEqual([messageDeleteKey(toolResult)]);
 
         const duplicateMessages = dedupeMessages([

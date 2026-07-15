@@ -8941,6 +8941,10 @@ describe("shared component helpers", () => {
                 (message) => message.text === "Repeat this"
             )
         ).toHaveLength(2);
+        expect(firstRepeatedPromptInHistory.map((message) => message.runId)).toEqual([
+            undefined,
+            "dashboard-chat-second",
+        ]);
         const bothRepeatedPromptsInHistory = mergeWithRecentOptimisticMessages(
             concurrentRepeatedPrompts,
             [
@@ -8959,6 +8963,10 @@ describe("shared component helpers", () => {
             ]
         );
         expect(bothRepeatedPromptsInHistory).toHaveLength(2);
+        expect(bothRepeatedPromptsInHistory.map((message) => message.runId)).toEqual([
+            undefined,
+            undefined,
+        ]);
 
         const previousMessage = {
             content: "Retry this",
