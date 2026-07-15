@@ -2876,6 +2876,7 @@ describe("Mira Dashboard pages", () => {
             sessionId: "session-main",
             message: "Ship it",
         });
+        expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
         await respondToSocketRequest(socket, "chat.send", { runId: "run-123" });
         await flushQueuedTimers();
 

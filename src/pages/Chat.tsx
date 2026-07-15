@@ -2062,7 +2062,6 @@ export function Chat() {
     const canStop = Boolean(
         isConnected &&
         selectedSessionKey &&
-        !isSending &&
         !isStopping &&
         (selectedStreams.length > 0 || isSessionActive(selectedSession))
     );
