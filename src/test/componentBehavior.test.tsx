@@ -3550,6 +3550,11 @@ describe("shared component helpers", () => {
                     "agent:main:main::real-run-after-provisional::assistant"
                 ]?.text
             ).toBe("Buffered terminal answer continued");
+            expect(
+                activeStreamsReference.current[
+                    "agent:main:main::real-run-after-provisional::assistant"
+                ]?.aliases
+            ).toContain("agent:main:main");
         });
         act(() => {
             listener?.({

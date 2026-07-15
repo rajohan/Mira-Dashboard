@@ -151,6 +151,33 @@ function isAssistantActiveStreamKey(
     );
 }
 
+/** Resolves one active assistant run unless concurrent state is ambiguous. */
+function resolvedAssistantRunIdFromActiveState(
+    sessionKey: string,
+    activeRunIds: string[],
+    hasProvisionalAssistantStream: boolean,
+    fallbackRunId?: string
+): { isAmbiguous: boolean; runId?: string } {
+    const isAmbiguous =
+        activeRunIds.length > 1 ||
+        (activeRunIds.length > 0 &&
+            hasProvisionalAssistantStream &&
+            !(
+                activeRunIds.length === 1 &&
+                activeRunIds.some((activeRunId) => isOptimisticRunId(activeRunId))
+            ));
+    if (isAmbiguous) {
+        return { isAmbiguous: true };
+    }
+
+    return {
+        isAmbiguous: false,
+        runId: hasProvisionalAssistantStream
+            ? sessionKey
+            : activeRunIds[0] || fallbackRunId,
+    };
+}
+
 /** Returns diagnostic message identity used to replace terminal channel buffers. */
 function diagnosticMessageIdentity(message?: ChatHistoryMessage): string {
     if (!message) {
@@ -1130,7 +1157,9 @@ export function useChatRuntimeEvents({
                     sessionKey: streamSessionKey,
                     runId,
                     aliases: uniqueStrings([
-                        ...(isStartsNewRun ? [] : existing?.aliases || []),
+                        ...(isStartsNewRun && !promotesProvisionalRun
+                            ? []
+                            : existing?.aliases || []),
                         ...pending.aliases,
                         runId,
                     ]),
@@ -1332,19 +1361,11 @@ export function useChatRuntimeEvents({
                     isAssistantActiveStreamKey(sessionKey, activeStreamKey) &&
                     isProvisionalRunId(sessionKey, streamEntry.runId)
             );
-            if (
-                activeRunIds.length > 1 ||
-                (activeRunIds.length > 0 &&
-                    hasProvisionalAssistantStream &&
-                    !(
-                        activeRunIds.length === 1 &&
-                        activeRunIds.some((activeRunId) => isOptimisticRunId(activeRunId))
-                    ))
-            ) {
-                return undefined;
-            }
-
-            return hasProvisionalAssistantStream ? sessionKey : activeRunIds[0];
+            return resolvedAssistantRunIdFromActiveState(
+                sessionKey,
+                activeRunIds,
+                hasProvisionalAssistantStream
+            ).runId;
         };
 
         /** Records a terminal run that can only be matched after chat.send ACKs. */
@@ -2484,7 +2505,9 @@ export function useChatRuntimeEvents({
                                 sessionKey: streamSessionKey,
                                 runId,
                                 aliases: uniqueStrings([
-                                    ...(isStartsNewRun ? [] : existing?.aliases || []),
+                                    ...(isStartsNewRun && !promotesCompactRun
+                                        ? []
+                                        : existing?.aliases || []),
                                     payload.runId,
                                     runId,
                                 ]),
@@ -2509,25 +2532,15 @@ export function useChatRuntimeEvents({
                 return;
             }
 
+            const activeRunResolution = resolvedAssistantRunIdFromActiveState(
+                selectedSessionKey,
+                selectedActiveRunIds,
+                hasSelectedProvisionalAssistantStream,
+                selectedStream?.runId
+            );
             const isAmbiguousUnscopedTerminal =
-                !payload.runId &&
-                TERMINAL_CHAT_STATES.has(payload.state || "") &&
-                (selectedActiveRunIds.length > 1 ||
-                    (selectedActiveRunIds.length > 0 &&
-                        hasSelectedProvisionalAssistantStream &&
-                        !(
-                            selectedActiveRunIds.length === 1 &&
-                            selectedActiveRunIds.some((activeRunId) =>
-                                isOptimisticRunId(activeRunId)
-                            )
-                        )));
-            const resolvedTerminalRunId =
-                payload.runId ||
-                (isAmbiguousUnscopedTerminal
-                    ? undefined
-                    : hasSelectedProvisionalAssistantStream
-                      ? selectedSessionKey
-                      : selectedActiveRunIds[0] || selectedStream?.runId);
+                !payload.runId && activeRunResolution.isAmbiguous;
+            const resolvedTerminalRunId = payload.runId || activeRunResolution.runId;
             const shouldClearProvisionalForScopedTerminal =
                 canClearProvisionalAssistantForTerminal(
                     streamSessionKey,
