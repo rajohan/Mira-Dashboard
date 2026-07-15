@@ -232,7 +232,8 @@ export const notificationRoutes = {
 
     "/api/notifications/clear-read": {
         POST: async (request: Request) => {
-            const querySource = new URL(request.url).searchParams.get("source");
+            const querySource =
+                new URL(request.url).searchParams.get("source") ?? undefined;
             let body: { source?: unknown };
             let rawBody: Buffer;
             try {
