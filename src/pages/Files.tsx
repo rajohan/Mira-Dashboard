@@ -61,6 +61,7 @@ export function Files() {
                         size="sm"
                         className="ml-auto"
                         onClick={() => setError(undefined)}
+                        aria-label="Dismiss file error"
                     >
                         <X size={16} />
                     </Button>
