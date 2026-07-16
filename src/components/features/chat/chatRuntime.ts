@@ -349,51 +349,79 @@ export function presentedChatMessages(
     shouldKeepThinkingAfterFinal = true
 ): ChatHistoryMessage[] {
     const visibleMessages: ChatHistoryMessage[] = [];
-    let pendingHiddenToolMedia: NonNullable<ChatHistoryMessage["attachments"]> = [];
+    let pendingHiddenToolMedia:
+        | {
+              attachments: NonNullable<ChatHistoryMessage["attachments"]>;
+              runId?: string;
+          }
+        | undefined;
+
+    /** Emits hidden tool media without attaching it across a run or user boundary. */
+    const flushPendingHiddenToolMedia = () => {
+        if (!pendingHiddenToolMedia) {
+            return;
+        }
+        visibleMessages.push({
+            role: "assistant",
+            content: "",
+            text: "",
+            attachments: pendingHiddenToolMedia.attachments,
+            hasOnlyHiddenToolAttachments: true,
+            runId: pendingHiddenToolMedia.runId,
+        });
+        pendingHiddenToolMedia = undefined;
+    };
 
     for (const message of messages) {
-        const isToolMessage = TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase());
+        const normalizedRole = message.role.toLowerCase();
+        const isToolMessage = TOOL_ROLE_VARIANTS.includes(normalizedRole);
         if (
             isToolMessage &&
             !visibility.shouldShowTools &&
             (message.attachments?.length || 0) > 0
         ) {
-            pendingHiddenToolMedia = mergeChatAttachments(
-                pendingHiddenToolMedia,
-                message.attachments
-            );
+            if (
+                pendingHiddenToolMedia &&
+                pendingHiddenToolMedia.runId !== message.runId
+            ) {
+                flushPendingHiddenToolMedia();
+            }
+            pendingHiddenToolMedia = {
+                attachments: mergeChatAttachments(
+                    pendingHiddenToolMedia?.attachments,
+                    message.attachments
+                ),
+                runId: message.runId,
+            };
             continue;
+        }
+        if (
+            normalizedRole === "user" ||
+            (pendingHiddenToolMedia &&
+                normalizedRole === "assistant" &&
+                pendingHiddenToolMedia.runId !== message.runId)
+        ) {
+            flushPendingHiddenToolMedia();
         }
         if (!isRenderableChatHistoryMessage(message, visibility)) {
             continue;
         }
-        if (
-            pendingHiddenToolMedia.length > 0 &&
-            message.role.toLowerCase() === "assistant"
-        ) {
+        if (pendingHiddenToolMedia && normalizedRole === "assistant") {
             visibleMessages.push({
                 ...message,
                 attachments: mergeChatAttachments(
                     message.attachments,
-                    pendingHiddenToolMedia
+                    pendingHiddenToolMedia.attachments
                 ),
                 hasOnlyHiddenToolAttachments: !message.attachments?.length,
             });
-            pendingHiddenToolMedia = [];
+            pendingHiddenToolMedia = undefined;
             continue;
         }
         visibleMessages.push(message);
     }
 
-    if (pendingHiddenToolMedia.length > 0) {
-        visibleMessages.push({
-            role: "assistant",
-            content: "",
-            text: "",
-            attachments: pendingHiddenToolMedia,
-            hasOnlyHiddenToolAttachments: true,
-        });
-    }
+    flushPendingHiddenToolMedia();
 
     return messagesWithFinalThinkingPersistence(
         visibleMessages,

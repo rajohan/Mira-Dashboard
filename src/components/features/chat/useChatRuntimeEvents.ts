@@ -2026,6 +2026,8 @@ export function useChatRuntimeEvents({
             refreshSelectedHistorySoon(500);
         };
 
+        let isReplayingCompletedSnapshot = false;
+
         /** Applies one live or replayed runtime envelope through the same reducer. */
         const handleRuntimeEnvelope = (raw: unknown) => {
             const data = raw as {
@@ -2245,6 +2247,7 @@ export function useChatRuntimeEvents({
             };
 
             if (payload.state === "final") {
+                const isCompletedSnapshotReplay = isReplayingCompletedSnapshot;
                 flushPendingDeltaUpdates();
                 const finalMessage = finalMessageFromPayload(payload);
                 const bufferedText = activeAssistantTextForRun(
@@ -2390,16 +2393,29 @@ export function useChatRuntimeEvents({
                                           message.text,
                                           finalAssistantMessage.text
                                       );
+                                  const isRecoveredSnapshotFinal =
+                                      isCompletedSnapshotReplay &&
+                                      message.local !== true &&
+                                      messageIndex === lastAssistantMessageIndex &&
+                                      isRecoveredAssistantText(
+                                          message.text,
+                                          finalAssistantMessage.text
+                                      );
                                   if (
                                       !(isSameRun && hasPrimaryText) &&
                                       !isRecoveredLocalText &&
-                                      !isRecoveredRecentFinalEcho
+                                      !isRecoveredRecentFinalEcho &&
+                                      !isRecoveredSnapshotFinal
                                   ) {
                                       return message;
                                   }
 
                                   didMergeFinalMessage = true;
-                                  if (isRecoveredRecentFinalEcho && !isSameRun) {
+                                  if (
+                                      (isRecoveredRecentFinalEcho ||
+                                          isRecoveredSnapshotFinal) &&
+                                      !isSameRun
+                                  ) {
                                       return message;
                                   }
 
@@ -2527,7 +2543,7 @@ export function useChatRuntimeEvents({
             }
         };
 
-        let isSnapshotReady = !isConnected;
+        let isSnapshotReady = !isConnected || !selectedSessionKey;
         const queuedRuntimeEnvelopes: unknown[] = [];
         const unsubscribe = subscribe((raw) => {
             const runtimeSequence = (raw as { runtimeSequence?: unknown })
@@ -2540,25 +2556,50 @@ export function useChatRuntimeEvents({
         });
 
         if (isConnected && selectedSessionKey) {
+            const sessionStreamsBeforeSnapshot = new Map(
+                Object.entries(activeStreamsReference.current).filter(([, stream]) =>
+                    isSameSessionKey(stream.sessionKey, selectedSessionKey)
+                )
+            );
             void (async () => {
                 const replayedSequences = new Set<number>();
+                let throughSequence: number | undefined;
                 try {
                     const snapshot = await requestReference.current<{
+                        completed?: boolean;
                         events?: unknown[];
+                        throughSequence?: unknown;
                     }>("chat.runtimeSnapshot", {
                         sessionKey: selectedSessionKey,
                     });
                     if (isCancelled) {
                         return;
                     }
+                    throughSequence =
+                        typeof snapshot.throughSequence === "number"
+                            ? snapshot.throughSequence
+                            : undefined;
+                    const streamsBeforeReplay = Object.fromEntries(
+                        Object.entries(activeStreamsReference.current).filter(
+                            ([key, stream]) =>
+                                sessionStreamsBeforeSnapshot.get(key) !== stream
+                        )
+                    );
+                    activeStreamsReference.current = streamsBeforeReplay;
+                    updateActiveStreamsReference.current(() => streamsBeforeReplay);
                     const snapshotEvents = snapshot.events || [];
-                    for (const event of snapshotEvents) {
-                        const sequence = (event as { runtimeSequence?: unknown })
-                            ?.runtimeSequence;
-                        if (typeof sequence === "number") {
-                            replayedSequences.add(sequence);
+                    isReplayingCompletedSnapshot = snapshot.completed === true;
+                    try {
+                        for (const event of snapshotEvents) {
+                            const sequence = (event as { runtimeSequence?: unknown })
+                                ?.runtimeSequence;
+                            if (typeof sequence === "number") {
+                                replayedSequences.add(sequence);
+                            }
+                            handleRuntimeEnvelope(event);
                         }
-                        handleRuntimeEnvelope(event);
+                    } finally {
+                        isReplayingCompletedSnapshot = false;
                     }
                 } catch {
                     // Older backends can continue with live events only.
@@ -2570,7 +2611,9 @@ export function useChatRuntimeEvents({
                                 ?.runtimeSequence;
                             if (
                                 typeof sequence !== "number" ||
-                                !replayedSequences.has(sequence)
+                                ((throughSequence === undefined ||
+                                    sequence > throughSequence) &&
+                                    !replayedSequences.has(sequence))
                             ) {
                                 handleRuntimeEnvelope(event);
                             }

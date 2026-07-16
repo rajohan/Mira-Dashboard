@@ -1260,6 +1260,8 @@ export function Chat() {
         request,
         selectedSessionKey,
         selectedSessionUpdatedAt,
+        showThinkingOutput,
+        keepThinkingAfterFinal,
     ]);
 
     useEffect(() => {

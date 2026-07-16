@@ -2871,10 +2871,12 @@ describe("Mira Dashboard pages", () => {
         expect(keepThinkingToggle).toBeDisabled();
         await user.click(thinkingToggle);
         expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "true");
-        expect(
-            socket.sent.filter((entry) => entry.includes('"method":"chat.history"'))
-                .length
-        ).toBe(historyRequestsBeforeToggles);
+        await waitFor(() => {
+            expect(
+                socket.sent.filter((entry) => entry.includes('"method":"chat.history"'))
+                    .length
+            ).toBeGreaterThan(historyRequestsBeforeToggles);
+        });
         await respondToSocketRequest(socket, "chat.history", {
             messages: [
                 {

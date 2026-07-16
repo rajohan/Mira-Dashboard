@@ -196,8 +196,10 @@ interface RuntimeEventEnvelope {
 
 interface RuntimeRunSnapshot {
     completed: boolean;
+    eventBytes: number[];
     events: RuntimeEventEnvelope[];
     runId: string;
+    totalBytes: number;
     updatedAt: number;
 }
 
@@ -216,7 +218,7 @@ const RUNTIME_SNAPSHOT_EVENTS = new Set([
     "session.tool",
 ]);
 const runtimeSnapshots = new Map<string, Map<string, RuntimeRunSnapshot>>();
-const runtimeSessionKeysByRun = new Map<string, string>();
+const runtimeSessionKeysByRun = new Map<string, string | undefined>();
 const runtimeJournal = { sequence: 0 };
 
 /** Clears all ephemeral runtime replay state. */
@@ -451,18 +453,26 @@ function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
         return payload;
     }
 
+    const hasRememberedRun = runtimeSessionKeysByRun.has(runId);
+    const rememberedSessionKey = runtimeSessionKeysByRun.get(runId);
     const matchingSessionKey =
-        runtimeSessionKeysByRun.get(runId) ||
-        gatewayState.sessions.find((session) => hasSessionRunIdentifier(session, runId))
-            ?.key;
+        hasRememberedRun && !rememberedSessionKey
+            ? undefined
+            : rememberedSessionKey ||
+              gatewayState.sessions.find((session) =>
+                  hasSessionRunIdentifier(session, runId)
+              )?.key;
 
     return matchingSessionKey ? { ...record, sessionKey: matchingSessionKey } : payload;
 }
 
 /** Remembers a bounded run-to-session association for early runtime enrichment. */
 function rememberRuntimeSessionKey(runId: string, sessionKey: string): void {
+    const previousSessionKey = runtimeSessionKeysByRun.get(runId);
+    const isAmbiguous =
+        runtimeSessionKeysByRun.has(runId) && previousSessionKey !== sessionKey;
     runtimeSessionKeysByRun.delete(runId);
-    runtimeSessionKeysByRun.set(runId, sessionKey);
+    runtimeSessionKeysByRun.set(runId, isAmbiguous ? undefined : sessionKey);
     if (runtimeSessionKeysByRun.size > 200) {
         const oldestRunId = runtimeSessionKeysByRun.keys().next().value;
         if (oldestRunId) {
@@ -471,8 +481,18 @@ function rememberRuntimeSessionKey(runId: string, sessionKey: string): void {
     }
 }
 
+/** Clears replay data and run associations for one reset session. */
+function clearRuntimeSnapshotsForSession(sessionKey: string): void {
+    runtimeSnapshots.delete(sessionKey);
+    for (const [runId, mappedSessionKey] of runtimeSessionKeysByRun) {
+        if (mappedSessionKey === sessionKey) {
+            runtimeSessionKeysByRun.delete(runId);
+        }
+    }
+}
+
 /** Extracts a run association from an acknowledged chat send. */
-function rememberAcknowledgedChatRun(
+function handleAcknowledgedChatSend(
     method: string,
     parameters: Record<string, unknown>,
     payload: unknown
@@ -480,9 +500,14 @@ function rememberAcknowledgedChatRun(
     if (method !== "chat.send") {
         return;
     }
+    const sessionKey = stringField(parameters, "sessionKey");
+    const message = stringField(parameters, "message");
+    if (sessionKey && message && /^\/(?:new|reset)(?:\s|$)/i.test(message)) {
+        clearRuntimeSnapshotsForSession(sessionKey);
+        return;
+    }
     const response = asRecord(payload);
     const runId = response ? stringField(response, "runId") : undefined;
-    const sessionKey = stringField(parameters, "sessionKey");
     if (runId && sessionKey) {
         rememberRuntimeSessionKey(runId, sessionKey);
     }
@@ -542,8 +567,9 @@ function rememberRuntimeEvent(envelope: RuntimeEventEnvelope): void {
     }
     const isTerminal = isTerminalRuntimeRunEvent(envelope.event, envelope.payload);
     const explicitRunId = payload ? stringField(payload, "runId") : undefined;
+    const serializedEnvelopeBytes = Buffer.byteLength(JSON.stringify(envelope));
     const retainedEnvelope =
-        JSON.stringify(envelope).length <= RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN
+        serializedEnvelopeBytes <= RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN
             ? envelope
             : isTerminal
               ? {
@@ -558,6 +584,10 @@ function rememberRuntimeEvent(envelope: RuntimeEventEnvelope): void {
     if (!retainedEnvelope) {
         return;
     }
+    const retainedEnvelopeBytes =
+        retainedEnvelope === envelope
+            ? serializedEnvelopeBytes
+            : Buffer.byteLength(JSON.stringify(retainedEnvelope));
 
     pruneRuntimeSnapshots();
     const runs = runtimeSnapshots.get(sessionKey) || new Map();
@@ -590,22 +620,26 @@ function rememberRuntimeEvent(envelope: RuntimeEventEnvelope): void {
     if (!snapshot) {
         snapshot = {
             completed: false,
+            eventBytes: [],
             events: [],
             runId,
+            totalBytes: 2,
             updatedAt: Date.now(),
         };
         runs.set(runId, snapshot);
     }
 
     snapshot.events.push(retainedEnvelope);
-    let snapshotBytes = JSON.stringify(snapshot.events).length;
+    snapshot.eventBytes.push(retainedEnvelopeBytes);
+    snapshot.totalBytes += retainedEnvelopeBytes + (snapshot.events.length > 1 ? 1 : 0);
     while (
         snapshot.events.length > 1 &&
         (snapshot.events.length > RUNTIME_SNAPSHOT_MAX_EVENTS_PER_RUN ||
-            snapshotBytes > RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN)
+            snapshot.totalBytes > RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN)
     ) {
         snapshot.events.shift();
-        snapshotBytes = JSON.stringify(snapshot.events).length;
+        snapshot.totalBytes -=
+            (snapshot.eventBytes.shift() || 0) + (snapshot.events.length > 0 ? 1 : 0);
     }
     snapshot.completed ||= isTerminal;
     snapshot.updatedAt = Date.now();
@@ -641,7 +675,10 @@ function rememberRuntimeEvent(envelope: RuntimeEventEnvelope): void {
 }
 
 /** Returns active runtime events, or the most recently completed run during grace. */
-function runtimeSnapshotForSession(sessionKey: string): RuntimeEventEnvelope[] {
+function runtimeSnapshotForSession(sessionKey: string): {
+    completed: boolean;
+    events: RuntimeEventEnvelope[];
+} {
     pruneRuntimeSnapshots();
     const snapshots = [...(runtimeSnapshots.get(sessionKey)?.values() || [])];
     const active = snapshots.filter((snapshot) => !snapshot.completed);
@@ -652,9 +689,12 @@ function runtimeSnapshotForSession(sessionKey: string): RuntimeEventEnvelope[] {
                   .filter((snapshot) => snapshot.completed)
                   .toSorted((left, right) => right.updatedAt - left.updatedAt)
                   .slice(0, 1);
-    return selected
-        .flatMap((snapshot) => snapshot.events)
-        .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence);
+    return {
+        completed: active.length === 0 && selected.length > 0,
+        events: selected
+            .flatMap((snapshot) => snapshot.events)
+            .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence),
+    };
 }
 
 /** Performs image block has omitted data. */
@@ -1261,7 +1301,7 @@ async function forwardRequest(
         try {
             let payload = await activeGateway.request(method, parameters);
             if (method === "chat.send") {
-                rememberAcknowledgedChatRun(method, parameters, payload);
+                handleAcknowledgedChatSend(method, parameters, payload);
             } else if (method === "chat.history") {
                 payload = hydrateOmittedChatHistoryImages(
                     payload,
@@ -1419,9 +1459,9 @@ function handleDashboardClient(ws: DashboardSocket): void {
                                     id: message.id,
                                     isOk: true,
                                     payload: {
-                                        events: sessionKey
+                                        ...(sessionKey
                                             ? runtimeSnapshotForSession(sessionKey)
-                                            : [],
+                                            : { completed: false, events: [] }),
                                         throughSequence: runtimeJournal.sequence,
                                     },
                                 })
@@ -1493,7 +1533,7 @@ async function sendRequestAsync(
     }
 
     const payload = await gatewayState.client.request(method, parameters);
-    rememberAcknowledgedChatRun(method, parameters, payload);
+    handleAcknowledgedChatSend(method, parameters, payload);
     return payload;
 }
 

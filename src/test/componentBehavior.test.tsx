@@ -1376,12 +1376,14 @@ describe("shared component helpers", () => {
                     ],
                     content: "",
                     role: "tool",
+                    runId: "media-run",
                     text: "",
                 },
                 {
                     attachments: [],
                     content: "done",
                     role: "assistant",
+                    runId: "media-run",
                     text: "done",
                 },
             ],
@@ -1392,6 +1394,81 @@ describe("shared component helpers", () => {
         expect(hiddenToolMediaProjection[0]?.attachments?.[0]?.id).toBe(
             "generated-media"
         );
+        expect(hiddenToolMediaProjection[0]?.runId).toBe("media-run");
+
+        const separatedHiddenToolMedia = presentedChatMessages(
+            [
+                {
+                    attachments: [
+                        {
+                            fileName: "first.png",
+                            id: "first-run-media",
+                            kind: "image",
+                        },
+                    ],
+                    content: "",
+                    role: "tool",
+                    runId: "first-run",
+                    text: "",
+                },
+                {
+                    content: "next answer",
+                    role: "assistant",
+                    runId: "second-run",
+                    text: "next answer",
+                },
+                {
+                    attachments: [
+                        {
+                            fileName: "third.png",
+                            id: "third-run-media",
+                            kind: "image",
+                        },
+                    ],
+                    content: "",
+                    role: "tool",
+                    runId: "third-run",
+                    text: "",
+                },
+                {
+                    content: "next question",
+                    role: "user",
+                    text: "next question",
+                },
+                {
+                    content: "fourth answer",
+                    role: "assistant",
+                    runId: "fourth-run",
+                    text: "fourth answer",
+                },
+            ],
+            createChatVisibility(true, false),
+            true
+        );
+        expect(separatedHiddenToolMedia).toHaveLength(5);
+        expect(separatedHiddenToolMedia[0]).toMatchObject({
+            attachments: [{ id: "first-run-media" }],
+            hasOnlyHiddenToolAttachments: true,
+            role: "assistant",
+            runId: "first-run",
+        });
+        expect(separatedHiddenToolMedia[1]).toMatchObject({
+            role: "assistant",
+            runId: "second-run",
+        });
+        expect(separatedHiddenToolMedia[1]?.attachments).toBeUndefined();
+        expect(separatedHiddenToolMedia[2]).toMatchObject({
+            attachments: [{ id: "third-run-media" }],
+            hasOnlyHiddenToolAttachments: true,
+            role: "assistant",
+            runId: "third-run",
+        });
+        expect(separatedHiddenToolMedia[3]?.role).toBe("user");
+        expect(separatedHiddenToolMedia[4]).toMatchObject({
+            role: "assistant",
+            runId: "fourth-run",
+        });
+        expect(separatedHiddenToolMedia[4]?.attachments).toBeUndefined();
     });
 
     it("drives chat runtime event subscription, stream buffering, and refreshes", async () => {
@@ -1412,6 +1489,7 @@ describe("shared component helpers", () => {
             if (method === "chat.runtimeSnapshot") {
                 await runtimeSnapshotGate;
                 return {
+                    completed: false,
                     events: [
                         {
                             event: "agent",
@@ -1441,7 +1519,22 @@ describe("shared component helpers", () => {
             }
             return {} as T;
         };
-        let activeStreams: ActiveChatStreams = {};
+        let activeStreams: ActiveChatStreams = {
+            "agent:main:main::snapshot-run::thinking": {
+                aliases: [],
+                message: {
+                    content: "",
+                    role: "assistant",
+                    runId: "snapshot-run",
+                    text: "",
+                    thinking: [{ text: "restored reasoning" }],
+                },
+                runId: "snapshot-run",
+                sessionKey: "agent:main:main",
+                text: "",
+                updatedAt: "2026-06-24T10:00:00.000Z",
+            },
+        };
         const activeStreamsReference = { current: activeStreams };
         const liveHistoryRefreshTimerReference = { current: undefined };
         const stickToBottomReference = { current: true };
@@ -1490,7 +1583,36 @@ describe("shared component helpers", () => {
         await waitFor(() => {
             expect(subscribe).toHaveBeenCalledTimes(1);
         });
+        activeStreams = {
+            ...activeStreams,
+            "agent:main:main::new-local-run::thinking": {
+                aliases: [],
+                message: {
+                    content: "",
+                    role: "assistant",
+                    runId: "new-local-run",
+                    text: "",
+                    thinking: [{ text: "new local reasoning" }],
+                },
+                runId: "new-local-run",
+                sessionKey: "agent:main:main",
+                text: "",
+                updatedAt: "2026-06-24T10:00:01.000Z",
+            },
+        };
+        activeStreamsReference.current = activeStreams;
         act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "stale queued reasoning" },
+                    runId: "stale-cutoff-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                runtimeSequence: 0,
+                type: "event",
+            });
             listener?.({
                 event: "agent",
                 payload: {
@@ -1510,6 +1632,16 @@ describe("shared component helpers", () => {
                     ?.message?.thinking?.[0]?.text
             ).toBe("restored reasoning");
         });
+        expect(
+            activeStreamsReference.current["agent:main:main::stale-cutoff-run::thinking"]
+        ).toBeUndefined();
+        expect(
+            activeStreamsReference.current["agent:main:main::new-local-run::thinking"]
+                ?.message?.thinking?.[0]?.text
+        ).toBe("new local reasoning");
+        activeStreams = { ...activeStreams };
+        delete activeStreams["agent:main:main::new-local-run::thinking"];
+        activeStreamsReference.current = activeStreams;
         act(() => {
             listener?.({
                 event: "model.completed",
@@ -5132,6 +5264,86 @@ describe("shared component helpers", () => {
 
         unmount();
         expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it("preserves canonical history when a completed snapshot replays its final", async () => {
+        const canonicalTimestamp = "2026-06-24T10:00:00.000Z";
+        let messages: ChatHistoryMessage[] = [
+            {
+                content: "final answer",
+                role: "assistant",
+                text: "final answer",
+                timestamp: canonicalTimestamp,
+            },
+        ];
+        const activeStreamsReference: { current: ActiveChatStreams } = {
+            current: {},
+        };
+        const requestMock = jest.fn();
+        const request = async <T,>(
+            method: string,
+            parameters?: Record<string, unknown>
+        ): Promise<T> => {
+            requestMock(method, parameters);
+            return {
+                completed: true,
+                events: [
+                    {
+                        event: "chat",
+                        payload: {
+                            message: {
+                                role: "assistant",
+                                text: "final answer",
+                            },
+                            runId: "completed-run",
+                            sessionKey: "agent:main:main",
+                            state: "final",
+                        },
+                        runtimeSequence: 1,
+                        type: "event",
+                    },
+                ],
+                throughSequence: 1,
+            } as T;
+        };
+        const setMessages = jest.fn((updater) => {
+            messages = typeof updater === "function" ? updater(messages) : updater;
+        });
+
+        const { unmount } = renderHook(() =>
+            useChatRuntimeEvents({
+                activeStreamsReference,
+                connectionId: 1,
+                isConnected: true,
+                liveHistoryRefreshTimerReference: { current: undefined },
+                request,
+                selectedSessionKey: "agent:main:main",
+                setHistoryLoadVersion: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages,
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                showThinkingOutput: true,
+                showToolOutput: true,
+                subscribe: () => jest.fn(),
+                updateActiveStreams: (updater) => {
+                    activeStreamsReference.current = updater(
+                        activeStreamsReference.current
+                    );
+                },
+            })
+        );
+
+        await waitFor(() => expect(requestMock).toHaveBeenCalled());
+        await waitFor(() => expect(setMessages).toHaveBeenCalled());
+        expect(messages).toHaveLength(1);
+        expect(messages[0]).toMatchObject({
+            text: "final answer",
+            timestamp: canonicalTimestamp,
+        });
+        expect(messages[0]?.local).toBeUndefined();
+        expect(messages[0]?.runId).toBeUndefined();
+        unmount();
     });
 
     it("re-stamps provisional diagnostics before final-thinking retention", async () => {
