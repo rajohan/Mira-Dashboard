@@ -32,6 +32,7 @@ import {
     type ActiveChatStreams,
     createChatVisibility,
     mergeStreamMessage,
+    presentedChatMessages,
     stripThinkingFromMessage,
     visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
@@ -1363,6 +1364,34 @@ describe("shared component helpers", () => {
                 "run-1"
             ).thinking?.map((block) => block.text)
         ).toEqual(["first update", "second"]);
+        const hiddenToolMediaProjection = presentedChatMessages(
+            [
+                {
+                    attachments: [
+                        {
+                            fileName: "generated.png",
+                            id: "generated-media",
+                            kind: "image",
+                        },
+                    ],
+                    content: "",
+                    role: "tool",
+                    text: "",
+                },
+                {
+                    attachments: [],
+                    content: "done",
+                    role: "assistant",
+                    text: "done",
+                },
+            ],
+            createChatVisibility(true, false),
+            true
+        );
+        expect(hiddenToolMediaProjection).toHaveLength(1);
+        expect(hiddenToolMediaProjection[0]?.attachments?.[0]?.id).toBe(
+            "generated-media"
+        );
     });
 
     it("drives chat runtime event subscription, stream buffering, and refreshes", async () => {
@@ -1373,11 +1402,32 @@ describe("shared component helpers", () => {
             return unsubscribe;
         });
         const requestCalls: Array<[string, Record<string, unknown> | undefined]> = [];
+        const { promise: runtimeSnapshotGate, resolve: resolveRuntimeSnapshot } =
+            Promise.withResolvers<void>();
         const request = async <T,>(
             method: string,
             parameters?: Record<string, unknown>
         ): Promise<T> => {
             requestCalls.push([method, parameters]);
+            if (method === "chat.runtimeSnapshot") {
+                await runtimeSnapshotGate;
+                return {
+                    events: [
+                        {
+                            event: "agent",
+                            payload: {
+                                data: { delta: "restored reasoning" },
+                                runId: "snapshot-run",
+                                sessionKey: "agent:main:main",
+                                stream: "thinking",
+                            },
+                            runtimeSequence: 1,
+                            type: "event",
+                        },
+                    ],
+                    throughSequence: 1,
+                } as T;
+            }
             if (method === "chat.history") {
                 return {
                     messages: [
@@ -1422,7 +1472,6 @@ describe("shared component helpers", () => {
                 activeStreamsReference,
                 connectionId: 1,
                 isConnected: true,
-                keepThinkingAfterFinal: true,
                 liveHistoryRefreshTimerReference,
                 request,
                 selectedSessionKey: "agent:main:main",
@@ -1440,6 +1489,42 @@ describe("shared component helpers", () => {
 
         await waitFor(() => {
             expect(subscribe).toHaveBeenCalledTimes(1);
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { delta: "restored reasoning" },
+                    runId: "snapshot-run",
+                    sessionKey: "agent:main:main",
+                    stream: "thinking",
+                },
+                runtimeSequence: 1,
+                type: "event",
+            });
+            resolveRuntimeSnapshot();
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::snapshot-run::thinking"]
+                    ?.message?.thinking?.[0]?.text
+            ).toBe("restored reasoning");
+        });
+        act(() => {
+            listener?.({
+                event: "model.completed",
+                payload: {
+                    runId: "snapshot-run",
+                    sessionKey: "agent:main:main",
+                },
+                runtimeSequence: 2,
+                type: "event",
+            });
+        });
+        await waitFor(() => {
+            expect(
+                activeStreamsReference.current["agent:main:main::snapshot-run::thinking"]
+            ).toBeUndefined();
         });
 
         act(() => {
@@ -5095,7 +5180,6 @@ describe("shared component helpers", () => {
                 activeStreamsReference,
                 connectionId: 1,
                 isConnected: true,
-                keepThinkingAfterFinal: false,
                 liveHistoryRefreshTimerReference: { current: undefined },
                 request: jest.fn(),
                 selectedSessionKey: "agent:main:main",
@@ -5127,7 +5211,12 @@ describe("shared component helpers", () => {
         });
 
         expect(messages.map((message) => message.text)).toContain("final answer");
-        expect(messages.some((message) => message.thinking?.length)).toBe(false);
+        expect(messages.some((message) => message.thinking?.length)).toBe(true);
+        expect(
+            presentedChatMessages(messages, createChatVisibility(true, true), false).some(
+                (message) => message.thinking?.length
+            )
+        ).toBe(false);
 
         act(() => {
             listener?.({
@@ -5153,7 +5242,12 @@ describe("shared component helpers", () => {
                 type: "event",
             });
         });
-        expect(messages.some((message) => message.thinking?.length)).toBe(false);
+        expect(messages.some((message) => message.thinking?.length)).toBe(true);
+        expect(
+            presentedChatMessages(messages, createChatVisibility(true, true), false).some(
+                (message) => message.thinking?.length
+            )
+        ).toBe(false);
         unmount();
     });
 

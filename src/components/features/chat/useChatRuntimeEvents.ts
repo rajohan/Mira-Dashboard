@@ -12,10 +12,9 @@ import {
     isSameSessionKey,
     mergeStreamMessage,
     mergeStreamText,
-    messagesWithFinalThinkingPersistence,
     normalizeAssistantPayload,
+    rawHistoryMessages,
     uniqueStrings,
-    visibleHistoryMessages,
 } from "./chatRuntime";
 import {
     type ChatHistoryMessage,
@@ -1010,7 +1009,6 @@ interface UseChatRuntimeEventsParameters {
     ) => Promise<T>;
     subscribe: (listener: (data: unknown) => void) => () => void;
     selectedSessionKey: string;
-    keepThinkingAfterFinal?: boolean;
     showThinkingOutput: boolean;
     showToolOutput: boolean;
     activeStreamsReference: MutableReference<ActiveChatStreams>;
@@ -1032,7 +1030,6 @@ export function useChatRuntimeEvents({
     request,
     subscribe,
     selectedSessionKey,
-    keepThinkingAfterFinal = false,
     showThinkingOutput,
     showToolOutput,
     activeStreamsReference,
@@ -1055,11 +1052,16 @@ export function useChatRuntimeEvents({
     const updateActiveStreamsReference = useRef(updateActiveStreams);
     const requestReference = useRef(request);
     const toolErrorRunKeysReference = useRef(new Set<string>());
-    const keepThinkingAfterFinalReference = useRef(keepThinkingAfterFinal);
+    const diagnosticVisibilityReference = useRef(
+        createChatVisibility(showThinkingOutput, showToolOutput)
+    );
 
     updateActiveStreamsReference.current = updateActiveStreams;
     requestReference.current = request;
-    keepThinkingAfterFinalReference.current = keepThinkingAfterFinal;
+    diagnosticVisibilityReference.current = createChatVisibility(
+        showThinkingOutput,
+        showToolOutput
+    );
 
     useEffect(() => {
         selectedSessionKeyReference.current = selectedSessionKey;
@@ -1204,24 +1206,11 @@ export function useChatRuntimeEvents({
                         );
 
                     if (shouldApplyResult) {
-                        const historyVisibility = createChatVisibility(
-                            showThinkingOutput,
-                            showToolOutput
-                        );
-                        const visibleMessages = visibleHistoryMessages(
-                            result.messages,
-                            historyVisibility,
-                            keepThinkingAfterFinalReference.current
-                        );
+                        const historyMessages = rawHistoryMessages(result.messages);
                         setMessages((wasPrevious) =>
-                            messagesWithFinalThinkingPersistence(
-                                mergeWithRecentOptimisticMessages(
-                                    wasPrevious,
-                                    visibleMessages
-                                ),
-                                historyVisibility,
-                                keepThinkingAfterFinalReference.current &&
-                                    showThinkingOutput
+                            mergeWithRecentOptimisticMessages(
+                                wasPrevious,
+                                historyMessages
                             )
                         );
 
@@ -1456,7 +1445,7 @@ export function useChatRuntimeEvents({
             sessionKey: string,
             runId?: string
         ): ChatHistoryMessage[] => {
-            const visibility = createChatVisibility(showThinkingOutput, showToolOutput);
+            const visibility = createChatVisibility(true, true);
             const resolvedRunId = resolvedActiveAssistantRunId(sessionKey, runId);
             return Object.values(activeStreamsReference.current)
                 .filter((streamEntry) => {
@@ -1567,7 +1556,7 @@ export function useChatRuntimeEvents({
             const isRuntimeMessageRenderable = runtimeMessageToApply
                 ? isRenderableChatHistoryMessage(
                       runtimeMessageToApply,
-                      createChatVisibility(showThinkingOutput, showToolOutput)
+                      diagnosticVisibilityReference.current
                   )
                 : false;
 
@@ -1617,7 +1606,7 @@ export function useChatRuntimeEvents({
                     if (
                         isRenderableChatHistoryMessage(
                             terminalDiagnosticMessage,
-                            createChatVisibility(showThinkingOutput, showToolOutput)
+                            createChatVisibility(true, true)
                         )
                     ) {
                         const staleDiagnosticIdentity = diagnosticMessageIdentity(
@@ -1654,11 +1643,7 @@ export function useChatRuntimeEvents({
                 ];
                 if (messagesToAppend.length > 0) {
                     setMessages((wasPrevious) =>
-                        messagesWithFinalThinkingPersistence(
-                            dedupeMessages([...wasPrevious, ...messagesToAppend]),
-                            createChatVisibility(showThinkingOutput, showToolOutput),
-                            keepThinkingAfterFinalReference.current && showThinkingOutput
-                        )
+                        dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
                 updateActiveStreamsReference.current((wasPrevious) => {
@@ -1736,7 +1721,7 @@ export function useChatRuntimeEvents({
                     if (
                         isRenderableChatHistoryMessage(
                             terminalDiagnosticMessage,
-                            createChatVisibility(showThinkingOutput, showToolOutput)
+                            createChatVisibility(true, true)
                         )
                     ) {
                         const staleDiagnosticIdentity = diagnosticMessageIdentity(
@@ -1773,11 +1758,7 @@ export function useChatRuntimeEvents({
                 ];
                 if (messagesToAppend.length > 0) {
                     setMessages((wasPrevious) =>
-                        messagesWithFinalThinkingPersistence(
-                            dedupeMessages([...wasPrevious, ...messagesToAppend]),
-                            createChatVisibility(showThinkingOutput, showToolOutput),
-                            keepThinkingAfterFinalReference.current && showThinkingOutput
-                        )
+                        dedupeMessages([...wasPrevious, ...messagesToAppend])
                     );
                 }
                 clearActiveStreamsForRun(selectedSessionKey, eventRunId);
@@ -1785,7 +1766,7 @@ export function useChatRuntimeEvents({
                 return;
             }
 
-            if ((eventName === "session.tool" || stream === "tool") && showToolOutput) {
+            if (eventName === "session.tool" || stream === "tool") {
                 const toolMessages = runtimeToolMessages(data, eventRunId);
                 if (toolMessages.length > 0) {
                     if (
@@ -1802,7 +1783,7 @@ export function useChatRuntimeEvents({
                 }
             }
 
-            if (stream === "item" && showToolOutput) {
+            if (stream === "item") {
                 const toolMessages = runtimeItemToolMessages(data, eventRunId);
                 if (toolMessages.length > 0) {
                     if (
@@ -2042,20 +2023,16 @@ export function useChatRuntimeEvents({
                 });
             }
 
-            if (
-                showThinkingOutput ||
-                (eventName !== "session.tool" && showToolOutput) ||
-                stream === "item"
-            ) {
-                refreshSelectedHistorySoon(500);
-            }
+            refreshSelectedHistorySoon(500);
         };
 
-        const unsubscribe = subscribe((raw) => {
+        /** Applies one live or replayed runtime envelope through the same reducer. */
+        const handleRuntimeEnvelope = (raw: unknown) => {
             const data = raw as {
                 type?: string;
                 event?: string;
                 payload?: unknown;
+                runtimeSequence?: number;
             };
 
             if (data.type !== "event") {
@@ -2251,24 +2228,11 @@ export function useChatRuntimeEvents({
                             );
 
                         if (shouldApplyResult) {
-                            const historyVisibility = createChatVisibility(
-                                showThinkingOutput,
-                                showToolOutput
-                            );
-                            const visibleMessages = visibleHistoryMessages(
-                                result.messages,
-                                historyVisibility,
-                                keepThinkingAfterFinalReference.current
-                            );
+                            const historyMessages = rawHistoryMessages(result.messages);
                             setMessages((wasPrevious) =>
-                                messagesWithFinalThinkingPersistence(
-                                    mergeWithRecentOptimisticMessages(
-                                        wasPrevious,
-                                        visibleMessages
-                                    ),
-                                    historyVisibility,
-                                    keepThinkingAfterFinalReference.current &&
-                                        showThinkingOutput
+                                mergeWithRecentOptimisticMessages(
+                                    wasPrevious,
+                                    historyMessages
                                 )
                             );
                             setIsAtBottom(shouldStickToBottomReference.current);
@@ -2295,7 +2259,7 @@ export function useChatRuntimeEvents({
                     ? createLocalSystemMessage(finalMessage.text)
                     : isRenderableChatHistoryMessage(
                             finalMessage,
-                            createChatVisibility(showThinkingOutput, showToolOutput)
+                            createChatVisibility(true, true)
                         )
                       ? finalMessage
                       : bufferedText.trim()
@@ -2455,17 +2419,13 @@ export function useChatRuntimeEvents({
                               })
                             : wasPrevious;
 
-                        return messagesWithFinalThinkingPersistence(
-                            dedupeMessages([
-                                ...nextPrevious,
-                                ...remainingDiagnosticMessages,
-                                ...(finalMessageToAppend && !didMergeFinalMessage
-                                    ? [finalMessageToAppend]
-                                    : []),
-                            ]),
-                            createChatVisibility(showThinkingOutput, showToolOutput),
-                            keepThinkingAfterFinalReference.current && showThinkingOutput
-                        );
+                        return dedupeMessages([
+                            ...nextPrevious,
+                            ...remainingDiagnosticMessages,
+                            ...(finalMessageToAppend && !didMergeFinalMessage
+                                ? [finalMessageToAppend]
+                                : []),
+                        ]);
                     });
                 }
 
@@ -2565,7 +2525,61 @@ export function useChatRuntimeEvents({
                 }
                 clearActiveStreamsForRun(streamSessionKey, payload.runId);
             }
+        };
+
+        let isSnapshotReady = !isConnected;
+        const queuedRuntimeEnvelopes: unknown[] = [];
+        const unsubscribe = subscribe((raw) => {
+            const runtimeSequence = (raw as { runtimeSequence?: unknown })
+                ?.runtimeSequence;
+            if (!isSnapshotReady && typeof runtimeSequence === "number") {
+                queuedRuntimeEnvelopes.push(raw);
+                return;
+            }
+            handleRuntimeEnvelope(raw);
         });
+
+        if (isConnected && selectedSessionKey) {
+            void (async () => {
+                const replayedSequences = new Set<number>();
+                try {
+                    const snapshot = await requestReference.current<{
+                        events?: unknown[];
+                    }>("chat.runtimeSnapshot", {
+                        sessionKey: selectedSessionKey,
+                    });
+                    if (isCancelled) {
+                        return;
+                    }
+                    const snapshotEvents = snapshot.events || [];
+                    for (const event of snapshotEvents) {
+                        const sequence = (event as { runtimeSequence?: unknown })
+                            ?.runtimeSequence;
+                        if (typeof sequence === "number") {
+                            replayedSequences.add(sequence);
+                        }
+                        handleRuntimeEnvelope(event);
+                    }
+                } catch {
+                    // Older backends can continue with live events only.
+                } finally {
+                    if (!isCancelled) {
+                        isSnapshotReady = true;
+                        for (const event of queuedRuntimeEnvelopes) {
+                            const sequence = (event as { runtimeSequence?: unknown })
+                                ?.runtimeSequence;
+                            if (
+                                typeof sequence !== "number" ||
+                                !replayedSequences.has(sequence)
+                            ) {
+                                handleRuntimeEnvelope(event);
+                            }
+                        }
+                        queuedRuntimeEnvelopes.length = 0;
+                    }
+                }
+            })();
+        }
 
         return () => {
             isCancelled = true;
@@ -2582,6 +2596,8 @@ export function useChatRuntimeEvents({
         };
     }, [
         activeStreamsReference,
+        connectionId,
+        isConnected,
         liveHistoryRefreshTimerReference,
         selectedSessionKey,
         setHistoryLoadVersion,
@@ -2589,8 +2605,6 @@ export function useChatRuntimeEvents({
         setMessages,
         setSendError,
         shouldStickToBottomReference,
-        showThinkingOutput,
-        showToolOutput,
         subscribe,
     ]);
 

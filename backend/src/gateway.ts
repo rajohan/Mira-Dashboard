@@ -187,6 +187,44 @@ const gatewayState: {
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
+interface RuntimeEventEnvelope {
+    type: "event";
+    event: unknown;
+    payload: unknown;
+    runtimeSequence: number;
+}
+
+interface RuntimeRunSnapshot {
+    completed: boolean;
+    events: RuntimeEventEnvelope[];
+    runId: string;
+    updatedAt: number;
+}
+
+const RUNTIME_SNAPSHOT_TTL_MS = 15 * 60_000;
+const ACTIVE_RUNTIME_SNAPSHOT_TTL_MS = 6 * 60 * 60_000;
+const RUNTIME_SNAPSHOT_MAX_EVENTS_PER_RUN = 500;
+const RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN = 1_000_000;
+const RUNTIME_SNAPSHOT_MAX_RUNS_PER_SESSION = 4;
+const RUNTIME_SNAPSHOT_MAX_SESSIONS = 50;
+const RUNTIME_SNAPSHOT_EVENTS = new Set([
+    "agent",
+    "chat",
+    "model.completed",
+    "session.ended",
+    "session.message",
+    "session.tool",
+]);
+const runtimeSnapshots = new Map<string, Map<string, RuntimeRunSnapshot>>();
+const runtimeSessionKeysByRun = new Map<string, string>();
+const runtimeJournal = { sequence: 0 };
+
+/** Clears all ephemeral runtime replay state. */
+function clearRuntimeSnapshots(): void {
+    runtimeSnapshots.clear();
+    runtimeSessionKeysByRun.clear();
+    runtimeJournal.sequence = 0;
+}
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
 ) => OpenClawGatewayClientInstance;
@@ -392,7 +430,14 @@ function hasSessionRunIdentifier(session: Session, runId: string): boolean {
 
 /** Performs enrich runtime event payload. */
 function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
-    if (event !== "agent" && event !== "session.tool" && event !== "session.message") {
+    if (
+        event !== "agent" &&
+        event !== "chat" &&
+        event !== "model.completed" &&
+        event !== "session.ended" &&
+        event !== "session.tool" &&
+        event !== "session.message"
+    ) {
         return payload;
     }
 
@@ -406,13 +451,210 @@ function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
         return payload;
     }
 
-    const matchingSession = gatewayState.sessions.find((session) =>
-        hasSessionRunIdentifier(session, runId)
-    );
+    const matchingSessionKey =
+        runtimeSessionKeysByRun.get(runId) ||
+        gatewayState.sessions.find((session) => hasSessionRunIdentifier(session, runId))
+            ?.key;
 
-    return matchingSession?.key
-        ? { ...record, sessionKey: matchingSession.key }
-        : payload;
+    return matchingSessionKey ? { ...record, sessionKey: matchingSessionKey } : payload;
+}
+
+/** Remembers a bounded run-to-session association for early runtime enrichment. */
+function rememberRuntimeSessionKey(runId: string, sessionKey: string): void {
+    runtimeSessionKeysByRun.delete(runId);
+    runtimeSessionKeysByRun.set(runId, sessionKey);
+    if (runtimeSessionKeysByRun.size > 200) {
+        const oldestRunId = runtimeSessionKeysByRun.keys().next().value;
+        if (oldestRunId) {
+            runtimeSessionKeysByRun.delete(oldestRunId);
+        }
+    }
+}
+
+/** Extracts a run association from an acknowledged chat send. */
+function rememberAcknowledgedChatRun(
+    method: string,
+    parameters: Record<string, unknown>,
+    payload: unknown
+): void {
+    if (method !== "chat.send") {
+        return;
+    }
+    const response = asRecord(payload);
+    const runId = response ? stringField(response, "runId") : undefined;
+    const sessionKey = stringField(parameters, "sessionKey");
+    if (runId && sessionKey) {
+        rememberRuntimeSessionKey(runId, sessionKey);
+    }
+}
+
+/** Returns whether an event completes a whole chat run. */
+function isTerminalRuntimeRunEvent(event: unknown, payload: unknown): boolean {
+    if (event === "model.completed" || event === "session.ended") {
+        return true;
+    }
+    const record = asRecord(payload);
+    return (
+        event === "chat" &&
+        typeof record?.state === "string" &&
+        ["aborted", "error", "final"].includes(record.state)
+    );
+}
+
+/** Removes expired runtime replay data. */
+function pruneRuntimeSnapshots(now = Date.now()): void {
+    for (const [sessionKey, runs] of runtimeSnapshots) {
+        for (const [runId, snapshot] of runs) {
+            const timeToLive = snapshot.completed
+                ? RUNTIME_SNAPSHOT_TTL_MS
+                : ACTIVE_RUNTIME_SNAPSHOT_TTL_MS;
+            if (now - snapshot.updatedAt > timeToLive) {
+                runs.delete(runId);
+            }
+        }
+        if (runs.size === 0) {
+            runtimeSnapshots.delete(sessionKey);
+        }
+    }
+}
+
+/** Returns whether a run key is provisional and safe to reconcile to one concrete run. */
+function isProvisionalRuntimeRunId(runId: string): boolean {
+    return (
+        runId === "runless" ||
+        runId.startsWith("dashboard-chat-") ||
+        runId.startsWith("dashboard-compact-")
+    );
+}
+
+/** Retains a bounded replay buffer for active or just-completed chat runtime work. */
+function rememberRuntimeEvent(envelope: RuntimeEventEnvelope): void {
+    if (
+        typeof envelope.event !== "string" ||
+        !RUNTIME_SNAPSHOT_EVENTS.has(envelope.event)
+    ) {
+        return;
+    }
+    const payload = asRecord(envelope.payload);
+    const sessionKey = payload ? stringField(payload, "sessionKey") : undefined;
+    if (!sessionKey) {
+        return;
+    }
+    const isTerminal = isTerminalRuntimeRunEvent(envelope.event, envelope.payload);
+    const explicitRunId = payload ? stringField(payload, "runId") : undefined;
+    const retainedEnvelope =
+        JSON.stringify(envelope).length <= RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN
+            ? envelope
+            : isTerminal
+              ? {
+                    ...envelope,
+                    payload: {
+                        runId: explicitRunId,
+                        sessionKey,
+                        state: payload?.state,
+                    },
+                }
+              : undefined;
+    if (!retainedEnvelope) {
+        return;
+    }
+
+    pruneRuntimeSnapshots();
+    const runs = runtimeSnapshots.get(sessionKey) || new Map();
+    const activeRuns = runs
+        .values()
+        .filter((snapshot) => !snapshot.completed)
+        .toArray();
+    const runId =
+        explicitRunId ||
+        (activeRuns.length === 1 ? activeRuns[0]?.runId : undefined) ||
+        "runless";
+    let snapshot = runs.get(runId);
+
+    if (!snapshot && explicitRunId) {
+        const provisionalCandidates = activeRuns.filter((entry) =>
+            isProvisionalRuntimeRunId(entry.runId)
+        );
+        const provisionalSnapshot =
+            activeRuns.length === 1 && provisionalCandidates.length === 1
+                ? provisionalCandidates[0]
+                : undefined;
+        if (provisionalSnapshot) {
+            runs.delete(provisionalSnapshot.runId);
+            provisionalSnapshot.runId = explicitRunId;
+            runs.set(explicitRunId, provisionalSnapshot);
+            snapshot = provisionalSnapshot;
+        }
+    }
+
+    if (!snapshot) {
+        snapshot = {
+            completed: false,
+            events: [],
+            runId,
+            updatedAt: Date.now(),
+        };
+        runs.set(runId, snapshot);
+    }
+
+    snapshot.events.push(retainedEnvelope);
+    let snapshotBytes = JSON.stringify(snapshot.events).length;
+    while (
+        snapshot.events.length > 1 &&
+        (snapshot.events.length > RUNTIME_SNAPSHOT_MAX_EVENTS_PER_RUN ||
+            snapshotBytes > RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN)
+    ) {
+        snapshot.events.shift();
+        snapshotBytes = JSON.stringify(snapshot.events).length;
+    }
+    snapshot.completed ||= isTerminal;
+    snapshot.updatedAt = Date.now();
+    while (runs.size > RUNTIME_SNAPSHOT_MAX_RUNS_PER_SESSION) {
+        const oldestRunId = runs
+            .values()
+            .toArray()
+            .toSorted((left, right) => left.updatedAt - right.updatedAt)[0]?.runId;
+        if (!oldestRunId) {
+            break;
+        }
+        runs.delete(oldestRunId);
+    }
+    runtimeSnapshots.set(sessionKey, runs);
+    if (runtimeSnapshots.size > RUNTIME_SNAPSHOT_MAX_SESSIONS) {
+        const oldestSessionKey = runtimeSnapshots
+            .keys()
+            .map((key) => ({
+                key,
+                updatedAt: Math.max(
+                    ...runtimeSnapshots
+                        .get(key)!
+                        .values()
+                        .map((entry) => entry.updatedAt)
+                ),
+            }))
+            .toArray()
+            .toSorted((left, right) => left.updatedAt - right.updatedAt)[0]?.key;
+        if (oldestSessionKey) {
+            runtimeSnapshots.delete(oldestSessionKey);
+        }
+    }
+}
+
+/** Returns active runtime events, or the most recently completed run during grace. */
+function runtimeSnapshotForSession(sessionKey: string): RuntimeEventEnvelope[] {
+    pruneRuntimeSnapshots();
+    const snapshots = [...(runtimeSnapshots.get(sessionKey)?.values() || [])];
+    const active = snapshots.filter((snapshot) => !snapshot.completed);
+    const selected =
+        active.length > 0
+            ? active
+            : snapshots
+                  .filter((snapshot) => snapshot.completed)
+                  .toSorted((left, right) => right.updatedAt - left.updatedAt)
+                  .slice(0, 1);
+    return selected
+        .flatMap((snapshot) => snapshot.events)
+        .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence);
 }
 
 /** Performs image block has omitted data. */
@@ -822,6 +1064,9 @@ function init(token: string): void {
         return;
     }
     const previousGatewayClient = gatewayState.client;
+    if (gatewayState.currentToken && gatewayState.currentToken !== token) {
+        clearRuntimeSnapshots();
+    }
     try {
         previousGatewayClient?.stop();
     } catch (error) {
@@ -886,11 +1131,14 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        broadcast({
+        const envelope: RuntimeEventEnvelope = {
             type: "event",
             event: event.event,
             payload: enrichRuntimeEventPayload(event.event, event.payload),
-        });
+            runtimeSequence: ++runtimeJournal.sequence,
+        };
+        rememberRuntimeEvent(envelope);
+        broadcast(envelope);
         if (typeof event.event === "string" && event.event.startsWith("sessions.")) {
             void refreshGatewaySessions(activeClient);
         }
@@ -1012,7 +1260,9 @@ async function forwardRequest(
 
         try {
             let payload = await activeGateway.request(method, parameters);
-            if (method === "chat.history") {
+            if (method === "chat.send") {
+                rememberAcknowledgedChatRun(method, parameters, payload);
+            } else if (method === "chat.history") {
                 payload = hydrateOmittedChatHistoryImages(
                     payload,
                     typeof parameters.sessionKey === "string"
@@ -1157,6 +1407,28 @@ function handleDashboardClient(ws: DashboardSocket): void {
                     (message.type === "request" || message.type === "req") &&
                     message.method
                 ) {
+                    if (message.method === "chat.runtimeSnapshot") {
+                        if (message.id && ws.isOpen()) {
+                            const sessionKey =
+                                typeof message.params?.sessionKey === "string"
+                                    ? message.params.sessionKey
+                                    : "";
+                            ws.send(
+                                JSON.stringify({
+                                    type: "response",
+                                    id: message.id,
+                                    isOk: true,
+                                    payload: {
+                                        events: sessionKey
+                                            ? runtimeSnapshotForSession(sessionKey)
+                                            : [],
+                                        throughSequence: runtimeJournal.sequence,
+                                    },
+                                })
+                            );
+                        }
+                        return;
+                    }
                     const isOk = await forwardRequest(
                         message.method,
                         message.params || {},
@@ -1220,7 +1492,9 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
-    return gatewayState.client.request(method, parameters);
+    const payload = await gatewayState.client.request(method, parameters);
+    rememberAcknowledgedChatRun(method, parameters, payload);
+    return payload;
 }
 
 /** Performs send session message. */
@@ -1284,6 +1558,7 @@ function shutdown(): void {
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
     gatewayState.currentToken = undefined;
+    clearRuntimeSnapshots();
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
 }

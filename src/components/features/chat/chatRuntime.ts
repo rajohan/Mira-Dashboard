@@ -10,6 +10,7 @@ import {
     normalizeChatHistoryMessage,
     normalizeVisibleChatHistoryMessages,
     type RawChatHistoryMessage,
+    TOOL_ROLE_VARIANTS,
 } from "./chatTypes";
 
 /** Represents active chat stream. */
@@ -341,6 +342,66 @@ export function messagesWithFinalThinkingPersistence(
         .filter((message) => isRenderableChatHistoryMessage(message, visibility));
 }
 
+/** Applies diagnostic visibility to normalized raw messages without deleting state. */
+export function presentedChatMessages(
+    messages: ChatHistoryMessage[],
+    visibility: ChatVisibilitySettings,
+    shouldKeepThinkingAfterFinal = true
+): ChatHistoryMessage[] {
+    const visibleMessages: ChatHistoryMessage[] = [];
+    let pendingHiddenToolMedia: NonNullable<ChatHistoryMessage["attachments"]> = [];
+
+    for (const message of messages) {
+        const isToolMessage = TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase());
+        if (
+            isToolMessage &&
+            !visibility.shouldShowTools &&
+            (message.attachments?.length || 0) > 0
+        ) {
+            pendingHiddenToolMedia = mergeChatAttachments(
+                pendingHiddenToolMedia,
+                message.attachments
+            );
+            continue;
+        }
+        if (!isRenderableChatHistoryMessage(message, visibility)) {
+            continue;
+        }
+        if (
+            pendingHiddenToolMedia.length > 0 &&
+            message.role.toLowerCase() === "assistant"
+        ) {
+            visibleMessages.push({
+                ...message,
+                attachments: mergeChatAttachments(
+                    message.attachments,
+                    pendingHiddenToolMedia
+                ),
+                hasOnlyHiddenToolAttachments: !message.attachments?.length,
+            });
+            pendingHiddenToolMedia = [];
+            continue;
+        }
+        visibleMessages.push(message);
+    }
+
+    if (pendingHiddenToolMedia.length > 0) {
+        visibleMessages.push({
+            role: "assistant",
+            content: "",
+            text: "",
+            attachments: pendingHiddenToolMedia,
+            hasOnlyHiddenToolAttachments: true,
+        });
+    }
+
+    return messagesWithFinalThinkingPersistence(
+        visibleMessages,
+        visibility,
+        shouldKeepThinkingAfterFinal
+    );
+}
+
 /** Performs merge stream message. */
 export function mergeStreamMessage(
     wasPrevious: ChatHistoryMessage | undefined,
@@ -427,6 +488,15 @@ export function visibleHistoryMessages(
         visibility,
         shouldKeepThinkingAfterFinal
     );
+}
+
+const RAW_CHAT_VISIBILITY = createChatVisibility(true, true);
+
+/** Normalizes history without applying diagnostic presentation preferences. */
+export function rawHistoryMessages(
+    messages: RawChatHistoryMessage[] | undefined
+): ChatHistoryMessage[] {
+    return visibleHistoryMessages(messages, RAW_CHAT_VISIBILITY, true);
 }
 
 /** Creates chat visibility. */

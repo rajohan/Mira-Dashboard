@@ -13,6 +13,7 @@ export interface SocketEnvelope {
     lineId?: string;
     history?: boolean;
     gatewayConnected?: boolean;
+    runtimeSequence?: number;
 }
 
 /** Checks whether a value is a socket envelope with a string type. */

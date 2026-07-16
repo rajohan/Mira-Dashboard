@@ -2867,15 +2867,14 @@ describe("Mira Dashboard pages", () => {
         expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "true");
         await user.click(thinkingToggle);
         expect(thinkingToggle).toHaveAttribute("aria-pressed", "false");
-        expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "false");
+        expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "true");
         expect(keepThinkingToggle).toBeDisabled();
         await user.click(thinkingToggle);
-        await waitFor(() => {
-            expect(
-                socket.sent.filter((entry) => entry.includes('"method":"chat.history"'))
-                    .length
-            ).toBeGreaterThan(historyRequestsBeforeToggles);
-        });
+        expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "true");
+        expect(
+            socket.sent.filter((entry) => entry.includes('"method":"chat.history"'))
+                .length
+        ).toBe(historyRequestsBeforeToggles);
         await respondToSocketRequest(socket, "chat.history", {
             messages: [
                 {
@@ -3837,7 +3836,7 @@ describe("Mira Dashboard pages", () => {
         ]);
     });
 
-    it("normalizes stored final-thinking retention when thinking is hidden", () => {
+    it("preserves stored final-thinking retention while thinking is hidden", () => {
         localStorage.setItem(
             "mira-dashboard-chat-diagnostic-visibility",
             JSON.stringify({
@@ -3848,7 +3847,7 @@ describe("Mira Dashboard pages", () => {
         );
 
         expect(readStoredChatDiagnosticVisibility()).toEqual({
-            keepThinkingAfterFinal: false,
+            keepThinkingAfterFinal: true,
             thinking: false,
             tools: true,
         });

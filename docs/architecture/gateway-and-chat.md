@@ -86,6 +86,14 @@ The chat UI combines several event sources into one visible conversation:
 - tool result diagnostics;
 - terminal chat state events.
 
+The Dashboard backend keeps a bounded, in-memory replay snapshot for active
+runs and the most recently completed run during a short grace period. A browser
+requests the selected session's snapshot after connecting and then continues
+with sequenced live events. This restores current thinking, tool diagnostics,
+and status after refresh or device changes without permanently storing
+reasoning. Snapshot payloads are session-scoped, size-limited, and cleared on
+Gateway credential changes or backend restart.
+
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
 - model selection patches the selected session;
@@ -97,7 +105,9 @@ Session controls are Gateway-backed rather than Dashboard-only preferences:
 
 Thinking/reasoning and tool diagnostics have separate visibility toggles stored
 in browser local storage. The composer owns these controls so the setting and
-the message it affects stay in one interaction surface.
+the message it affects stay in one interaction surface. These settings are
+presentation-only: raw diagnostics remain in client state while toggles filter
+rendering, so hiding and showing them does not delete current-run data.
 
 Keeping thinking after the final answer is a separate persisted preference. It
 is available only while thinking is visible, defaults off, and preserves an
@@ -118,6 +128,9 @@ When changing chat event handling, test these cases:
 - failed tool results stay visible when tool output is enabled;
 - hiding tool output does not also hide a real terminal chat error;
 - run IDs are scoped by session, not treated as globally unique.
+- snapshot replay and live delivery interleaving does not duplicate deltas;
+- refresh/reconnect restores only the selected active or latest completed run;
+- hiding diagnostics does not remove them from cached client state.
 - socket reconnects, compaction replacement runs, and selected-session changes
   cannot leak control or stream state between sessions.
 

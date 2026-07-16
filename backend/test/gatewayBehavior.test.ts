@@ -158,6 +158,9 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
         if (method === "sessions.subscribe") {
             return { isOk: true };
         }
+        if (method === "chat.send") {
+            return { runId: "acknowledged-run" };
+        }
         if (method === "chat.history") {
             return {
                 messages: [
@@ -491,6 +494,85 @@ describe("gateway behavior", () => {
         });
 
         socket.emitMessage({
+            id: "runtime-snapshot-1",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-1"'))
+        );
+        const runtimeSnapshot = socket.sent
+            .map(
+                (raw) =>
+                    JSON.parse(raw) as {
+                        id?: string;
+                        payload?: {
+                            events?: Array<Record<string, unknown>>;
+                            throughSequence?: number;
+                        };
+                    }
+            )
+            .find((message) => message.id === "runtime-snapshot-1");
+        expect(runtimeSnapshot?.payload).toMatchObject({
+            events: [
+                {
+                    event: "session.tool",
+                    payload: {
+                        name: "tool",
+                        runId: "run-1",
+                        sessionKey: "agent:main:main",
+                    },
+                    runtimeSequence: expect.any(Number),
+                    type: "event",
+                },
+            ],
+            throughSequence: expect.any(Number),
+        });
+        expect(
+            client?.requests.some(({ method }) => method === "chat.runtimeSnapshot")
+        ).toBe(false);
+
+        client?.options.onEvent?.({
+            event: "chat",
+            payload: {
+                message: { role: "assistant", text: "done" },
+                runId: "run-1",
+                sessionKey: "agent:main:main",
+                state: "final",
+            },
+        });
+        client?.options.onEvent?.({
+            event: "chat",
+            payload: {
+                deltaText: "next",
+                runId: "run-2",
+                sessionKey: "agent:main:main",
+                state: "delta",
+            },
+        });
+        socket.emitMessage({
+            id: "runtime-snapshot-2",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-2"'))
+        );
+        const nextRuntimeEvents = socket.sent
+            .map(
+                (raw) =>
+                    JSON.parse(raw) as {
+                        id?: string;
+                        payload?: { events?: Array<{ payload?: { runId?: string } }> };
+                    }
+            )
+            .find((message) => message.id === "runtime-snapshot-2")?.payload?.events;
+        expect(nextRuntimeEvents).toHaveLength(1);
+        expect(nextRuntimeEvents?.[0]?.payload?.runId).toBe("run-2");
+
+        socket.emitMessage({
             id: "history-1",
             method: "chat.history",
             params: { sessionKey: "agent:main:main" },
@@ -585,6 +667,36 @@ describe("gateway behavior", () => {
         expect(client?.requests.map((request) => request.method)).toEqual(
             expect.arrayContaining(["chat.abort", "chat.send", "sessions.delete"])
         );
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "early reasoning" },
+                runId: "acknowledged-run",
+                stream: "thinking",
+            },
+        });
+        await waitFor(() =>
+            socket.sent.some(
+                (raw) =>
+                    raw.includes('"event":"agent"') &&
+                    raw.includes('"runId":"acknowledged-run"')
+            )
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            event?: string;
+                            payload?: { runId?: string; sessionKey?: string };
+                        }
+                )
+                .findLast(
+                    (message) =>
+                        message.event === "agent" &&
+                        message.payload?.runId === "acknowledged-run"
+                )?.payload?.sessionKey
+        ).toBe("agent:main:main");
 
         socket.emitMessage({ channel: "logs", type: "subscribe" });
         socket.emitMessage({ channel: "logs", type: "unsubscribe" });
