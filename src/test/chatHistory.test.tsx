@@ -85,4 +85,39 @@ describe("chat history controller", () => {
         });
         expect(result.current.messages[0]?.text).toBe("newer");
     });
+
+    it("refreshes settled history without changing scroll stickiness", async () => {
+        const history = jest
+            .fn<ChatTransport["history"]>()
+            .mockResolvedValueOnce([message("initial")])
+            .mockResolvedValueOnce([message("settled")]);
+        const setIsAtBottom = jest.fn();
+        const selectedSessionKeyReference = {
+            current: SESSION,
+        } as MutableRefObject<string>;
+        const stickToBottomReference = {
+            current: false,
+        } as MutableRefObject<boolean>;
+        const { result } = renderHook(() =>
+            useChatHistory({
+                isConnected: true,
+                onError: jest.fn(),
+                selectedSessionKey: SESSION,
+                selectedSessionKeyReference,
+                setIsAtBottom,
+                shouldStickToBottomReference: stickToBottomReference,
+                transport: transportWithHistory(history),
+            })
+        );
+
+        await waitFor(() => expect(result.current.messages[0]?.text).toBe("initial"));
+        await waitFor(() => expect(setIsAtBottom).toHaveBeenCalled());
+        stickToBottomReference.current = false;
+        setIsAtBottom.mockClear();
+        act(() => result.current.refreshSoon(SESSION, 0));
+        await waitFor(() => expect(result.current.messages[0]?.text).toBe("settled"));
+
+        expect(history).toHaveBeenCalledTimes(2);
+        expect(setIsAtBottom).not.toHaveBeenCalled();
+    });
 });

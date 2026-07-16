@@ -79,10 +79,7 @@ export function useChatHistory({
         }
         liveRefreshTimerReference.current = setTimeout(async () => {
             liveRefreshTimerReference.current = undefined;
-            if (
-                selectedSessionKeyReference.current !== sessionKey ||
-                !shouldStickToBottomReference.current
-            ) {
+            if (selectedSessionKeyReference.current !== sessionKey) {
                 return;
             }
             const requestSequence = beginHistoryRequest();
@@ -97,7 +94,9 @@ export function useChatHistory({
                 setMessages((previous) =>
                     mergeWithRecentOptimisticMessages(previous, history)
                 );
-                setIsAtBottom(true);
+                if (shouldStickToBottomReference.current) {
+                    setIsAtBottom(true);
+                }
             } catch {
                 // Runtime state remains authoritative until the next successful poll.
             }

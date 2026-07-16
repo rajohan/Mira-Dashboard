@@ -219,6 +219,38 @@ describe("OpenClaw chat bridge", () => {
         ).toMatchObject({ sessionKey: MAIN });
     });
 
+    it("retains a matching completed provisional run without a provider id", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "fast answer",
+                runId: "dashboard-chat-without-provider",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-without-provider",
+                message: "fast question",
+                sessionKey: MAIN,
+            },
+            {}
+        );
+
+        expect(payloads(bridge)).toEqual([
+            expect.objectContaining({
+                message: "fast answer",
+                runId: "dashboard-chat-without-provider",
+                state: "final",
+            }),
+        ]);
+    });
+
     it("rewrites runless and active provisional replay payloads on promotion", () => {
         const runlessBridge = new OpenClawChatBridge();
         runlessBridge.recordEvent(
@@ -342,6 +374,73 @@ describe("OpenClaw chat bridge", () => {
             bridge.recordEvent("agent", { runId: "provider-new", stream: "thinking" }, [])
                 .payload
         ).toMatchObject({ runId: "provider-new", sessionKey: MAIN });
+    });
+
+    it("prefers newer runless work over an older concrete final", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "old answer",
+                runId: "old-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "new reasoning" },
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { error: "new failure", phase: "error" },
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.events.map((event) => event.event)).toEqual(["agent", "agent"]);
+        expect(payloads(bridge).at(-1)).toMatchObject({
+            data: { error: "new failure", phase: "error" },
+            stream: "lifecycle",
+        });
+    });
+
+    it("does not classify a runless terminal failure as metadata", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "old answer",
+                runId: "old-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.ended",
+            { data: { phase: "error" }, sessionKey: MAIN },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN).events).toEqual([
+            expect.objectContaining({
+                event: "session.ended",
+                payload: expect.objectContaining({
+                    data: { phase: "error" },
+                }),
+            }),
+        ]);
     });
 
     it("treats lifecycle end events as completed replay runs", () => {

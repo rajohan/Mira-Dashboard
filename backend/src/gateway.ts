@@ -814,6 +814,7 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
+        openClawChatBridge.clear();
         gatewayState.isConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         /** Subscribes to Gateway session index events for live session updates. */
@@ -874,6 +875,7 @@ function init(token: string): void {
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
+        openClawChatBridge.clear();
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }

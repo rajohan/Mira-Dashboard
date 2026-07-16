@@ -251,11 +251,11 @@ export function useChatRuntime({
                         event.sequence > snapshot.throughSequence ||
                         !replayedSequences.has(event.sequence)
                 );
-                const snapshotReduction = reduceRuntimeEvents(
+                const replayReduction = reduceRuntimeEvents(
                     clearChatSessionRuntime(stateReference.current, selectedSessionKey),
-                    snapshot.events
+                    [...snapshot.events, ...queuedAfterSnapshot]
                 );
-                let next = snapshotReduction.state;
+                let next = replayReduction.state;
                 const provisionalRuns =
                     gate.optimisticRuns.size === 1
                         ? Object.entries(
@@ -318,12 +318,8 @@ export function useChatRuntime({
                         pendingRun.providerRunId
                     );
                 }
-                const queuedReduction = reduceRuntimeEvents(next, queuedAfterSnapshot);
-                updateState(() => queuedReduction.state);
-                for (const finish of [
-                    ...snapshotReduction.finishes,
-                    ...queuedReduction.finishes,
-                ]) {
+                updateState(() => next);
+                for (const finish of replayReduction.finishes) {
                     handleFinishSideEffects(finish.event, finish.state);
                 }
             })

@@ -1169,6 +1169,29 @@ describe("gateway behavior", () => {
             await waitFor(() =>
                 socket.sent.some((raw) => raw.includes('"type":"disconnected"'))
             );
+            socket.emitMessage({
+                id: "runtime-snapshot-after-close",
+                method: "chat.runtimeSnapshot",
+                params: { sessionKey: "agent:oversized:main" },
+                type: "request",
+            });
+            await waitFor(() =>
+                socket.sent.some((raw) =>
+                    raw.includes('"id":"runtime-snapshot-after-close"')
+                )
+            );
+            expect(
+                socket.sent
+                    .map(
+                        (raw) =>
+                            JSON.parse(raw) as {
+                                id?: string;
+                                payload?: { events?: unknown[] };
+                            }
+                    )
+                    .find((message) => message.id === "runtime-snapshot-after-close")
+                    ?.payload?.events
+            ).toEqual([]);
         } finally {
             errorSpy.mockRestore();
             warnSpy.mockRestore();

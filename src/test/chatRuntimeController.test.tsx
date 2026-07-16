@@ -149,6 +149,29 @@ describe("chat runtime controller", () => {
         ).toBe("stale");
     });
 
+    it("replays an earlier live-only event before a later snapshot finish", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        act(() => fake.emit(assistant(SELECTED, 16, "live-only")));
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [finish(SELECTED, 32)],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]).toMatchObject({
+            assistant: { text: "live-only" },
+            phase: "completed",
+        });
+    });
+
     it("replaces stale selected-session runtime with an authoritative snapshot", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);

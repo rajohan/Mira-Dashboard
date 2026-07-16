@@ -38,6 +38,7 @@ const MAX_BYTES_PER_RUN = 1_000_000;
 const MAX_RUNS_PER_SESSION = 4;
 const MAX_SESSIONS = 50;
 const MAX_RUN_ASSOCIATIONS = 200;
+const TERMINAL_FAILURE_STATES = new Set(["aborted", "error", "failed"]);
 const RETAINED_EVENTS = new Set([
     "agent",
     "chat",
@@ -125,10 +126,33 @@ function isProvisionalRunId(runId: string): boolean {
     );
 }
 
-function hasChatFinal(run: RetainedRun): boolean {
-    return run.events.some((envelope) => {
+function isMetadataOnlyRunlessCompletion(run: RetainedRun): boolean {
+    if (run.runId !== "runless" || run.events.length === 0) {
+        return false;
+    }
+    return run.events.every((envelope) => {
+        if (envelope.event !== "session.ended" && envelope.event !== "model.completed") {
+            return false;
+        }
         const payload = asRecord(envelope.payload);
-        return envelope.event === "chat" && payload?.state === "final";
+        const data = asRecord(payload?.data);
+        const terminalStates = [
+            stringField(payload, "state"),
+            stringField(payload, "status"),
+            stringField(data, "phase"),
+            stringField(data, "status"),
+        ].map((value) => value?.toLowerCase());
+        return (
+            payload?.aborted !== true &&
+            data?.aborted !== true &&
+            !stringField(payload, "error") &&
+            !stringField(payload, "errorMessage") &&
+            !stringField(payload, "promptError") &&
+            !stringField(data, "error") &&
+            !stringField(data, "errorMessage") &&
+            !stringField(data, "promptError") &&
+            terminalStates.every((value) => !TERMINAL_FAILURE_STATES.has(value || ""))
+        );
     });
 }
 
@@ -551,7 +575,7 @@ export class OpenClawChatBridge {
             if (runId) {
                 this.#promoteProvisionalRun(sessionKey, runId, provisionalRunId);
             }
-            this.#clearCompletedRuns(sessionKey, runId);
+            this.#clearCompletedRuns(sessionKey, runId || provisionalRunId);
             if (runId) {
                 this.#rememberRunSession(runId, sessionKey);
             }
@@ -587,13 +611,13 @@ export class OpenClawChatBridge {
             .filter((snapshot) => snapshot.completed)
             .toSorted((left, right) => lastSequence(right) - lastSequence(left));
         const newestCompleted = completed[0];
-        const concreteCompleted =
-            newestCompleted?.runId === "runless" && !hasChatFinal(newestCompleted)
+        const completedToReplay =
+            newestCompleted && isMetadataOnlyRunlessCompletion(newestCompleted)
                 ? completed.find((snapshot) => snapshot.runId !== "runless") ||
                   newestCompleted
                 : newestCompleted;
         const selected =
-            active.length > 0 ? active : concreteCompleted ? [concreteCompleted] : [];
+            active.length > 0 ? active : completedToReplay ? [completedToReplay] : [];
 
         return {
             completed: active.length === 0 && selected.length > 0,

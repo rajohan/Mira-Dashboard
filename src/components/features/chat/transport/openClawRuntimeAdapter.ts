@@ -72,7 +72,10 @@ function chatEventDrafts(
             ? undefined
             : normalizeAssistant(rawMessage, common.runId);
     const isCommand = asRecord(payload.message)?.command === true;
-    const error = stringValue(payload.errorMessage);
+    const error =
+        stringValue(payload.errorMessage) ||
+        stringValue(payload.error) ||
+        (state === "error" ? "Chat run failed" : undefined);
     return [
         {
             ...common,

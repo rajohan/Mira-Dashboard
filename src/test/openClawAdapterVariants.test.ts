@@ -252,13 +252,27 @@ describe("OpenClaw adapter variants", () => {
                 53
             )
         );
+        const payloadError = adapter.event(
+            envelope("chat", { error: "provider failed", state: "error" }, 54)
+        );
+        const genericError = adapter.event(envelope("chat", { state: "error" }, 55));
 
         expect(replacement[0]).toMatchObject({ kind: "assistant", mode: "replace" });
         expect(command[0]).toMatchObject({
             kind: "finish",
             message: expect.objectContaining({ local: true, role: "system" }),
         });
-        expect(adapter.event(envelope("chat", { state: "working" }, 54))).toEqual([]);
+        expect(payloadError[0]).toMatchObject({
+            error: "provider failed",
+            kind: "finish",
+            outcome: "error",
+        });
+        expect(genericError[0]).toMatchObject({
+            error: "Chat run failed",
+            kind: "finish",
+            outcome: "error",
+        });
+        expect(adapter.event(envelope("chat", { state: "working" }, 56))).toEqual([]);
     });
 
     it("keeps provider value helpers deterministic for unusual payloads", () => {
