@@ -1872,36 +1872,46 @@ describe("Mira Dashboard pages", () => {
 
     it("labels and dismisses file save errors", async () => {
         const user = userEvent.setup();
-        Object.defineProperty(globalThis, "fetch", {
-            configurable: true,
-            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-                const url = String(input);
-                const method = init?.method ?? "GET";
+        const originalFetch = fetch;
+        let view: ReturnType<typeof renderPage> | undefined;
 
-                if (method === "PUT" && url === "/api/files/README.md") {
-                    return Response.json({ error: "Save failed" }, { status: 500 });
-                }
+        try {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                    const url = String(input);
+                    const method = init?.method ?? "GET";
 
-                return apiResponse(url, method, init);
-            }),
-            writable: true,
-        });
+                    if (method === "PUT" && url === "/api/files/README.md") {
+                        return Response.json({ error: "Save failed" }, { status: 500 });
+                    }
 
-        const view = renderPage(createElement(Files));
+                    return apiResponse(url, method, init);
+                }),
+                writable: true,
+            });
 
-        await user.click(await screen.findByRole("button", { name: "README.md" }));
-        await user.click(await screen.findByRole("button", { name: "Raw" }));
-        const editor = await screen.findByRole("textbox");
-        await user.clear(editor);
-        await user.type(editor, "# Updated Dashboard");
-        await user.click(screen.getByRole("button", { name: "Save" }));
+            view = renderPage(createElement(Files));
 
-        expect(await screen.findByText("Save failed")).toBeInTheDocument();
-        await user.click(screen.getByRole("button", { name: "Dismiss file error" }));
-        expect(screen.queryByText("Save failed")).not.toBeInTheDocument();
+            await user.click(await screen.findByRole("button", { name: "README.md" }));
+            await user.click(await screen.findByRole("button", { name: "Raw" }));
+            const editor = await screen.findByRole("textbox");
+            await user.clear(editor);
+            await user.type(editor, "# Updated Dashboard");
+            await user.click(screen.getByRole("button", { name: "Save" }));
 
-        view.unmount();
-        view.queryClient.clear();
+            expect(await screen.findByText("Save failed")).toBeInTheDocument();
+            await user.click(screen.getByRole("button", { name: "Dismiss file error" }));
+            expect(screen.queryByText("Save failed")).not.toBeInTheDocument();
+        } finally {
+            view?.unmount();
+            view?.queryClient.clear();
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
     });
 
     it("keeps loaded database metrics visible when a refresh fails", async () => {
