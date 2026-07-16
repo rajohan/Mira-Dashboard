@@ -1571,6 +1571,40 @@ describe("shared component helpers", () => {
                     message.toolResult.content.includes("ok")
             )
         ).toBe(false);
+        expect(activeStreamsReference.current).not.toHaveProperty(
+            "agent:main:main::run-1::tool"
+        );
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "start" },
+                    runId: "compaction-run",
+                    sessionKey: "agent:main:main",
+                    stream: "compaction",
+                },
+                type: "event",
+            });
+        });
+        expect(activeStreamsReference.current).toHaveProperty(
+            "agent:main:main::compaction-run::compaction"
+        );
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "end" },
+                    runId: "compaction-run",
+                    sessionKey: "agent:main:main",
+                    stream: "compaction",
+                },
+                type: "event",
+            });
+        });
+        expect(activeStreamsReference.current).not.toHaveProperty(
+            "agent:main:main::compaction-run::compaction"
+        );
 
         act(() => {
             listener?.({

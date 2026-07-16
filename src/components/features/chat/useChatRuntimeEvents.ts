@@ -1820,7 +1820,37 @@ export function useChatRuntimeEvents({
             }
 
             const statusText = runtimeProgressText(eventName, stream, phase, data);
+            const isTerminalActivityStream =
+                TERMINAL_LIFECYCLE_PHASES.has(phase) &&
+                stream !== "assistant" &&
+                !isRuntimeThinkingStream(stream) &&
+                !(stream === "item" && isRuntimeThinkingItem(data));
+            if (isTerminalActivityStream) {
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const streamKey = runtimeWorkStreamKey(
+                        selectedSessionKey,
+                        stream,
+                        eventName,
+                        eventRunId
+                    );
+                    const fallbackStreamKey = eventRunId
+                        ? runtimeWorkStreamKey(selectedSessionKey, stream, eventName)
+                        : streamKey;
+                    if (
+                        !Object.hasOwn(wasPrevious, streamKey) &&
+                        !Object.hasOwn(wasPrevious, fallbackStreamKey)
+                    ) {
+                        return wasPrevious;
+                    }
+
+                    const next = { ...wasPrevious };
+                    delete next[streamKey];
+                    delete next[fallbackStreamKey];
+                    return next;
+                });
+            }
             const shouldTrackActivity =
+                !isTerminalActivityStream &&
                 !shouldIgnoreRuntimeAssistantText &&
                 isRuntimeWorkEvent(eventName, stream, phase, statusText);
             if (
