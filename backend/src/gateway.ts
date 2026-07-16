@@ -696,6 +696,11 @@ function hasRuntimeSnapshotChatFinal(snapshot: RuntimeRunSnapshot): boolean {
     });
 }
 
+/** Returns the newest retained runtime sequence for snapshot ordering. */
+function runtimeSnapshotLastSequence(snapshot: RuntimeRunSnapshot): number {
+    return snapshot.events.at(-1)?.runtimeSequence ?? -1;
+}
+
 /** Returns active runtime events, or the most recently completed run during grace. */
 function runtimeSnapshotForSession(sessionKey: string): {
     completed: boolean;
@@ -706,7 +711,10 @@ function runtimeSnapshotForSession(sessionKey: string): {
     const active = snapshots.filter((snapshot) => !snapshot.completed);
     const completed = snapshots
         .filter((snapshot) => snapshot.completed)
-        .toSorted((left, right) => right.updatedAt - left.updatedAt);
+        .toSorted(
+            (left, right) =>
+                runtimeSnapshotLastSequence(right) - runtimeSnapshotLastSequence(left)
+        );
     const latestCompleted = completed[0];
     const completedWithoutRunlessTerminal =
         latestCompleted?.runId === "runless" &&
