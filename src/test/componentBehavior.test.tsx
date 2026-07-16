@@ -1528,11 +1528,11 @@ describe("shared component helpers", () => {
                                 sessionKey: "agent:main:main",
                                 stream: "thinking",
                             },
-                            runtimeSequence: 1,
+                            runtimeSequence: 2,
                             type: "event",
                         },
                     ],
-                    throughSequence: 1,
+                    throughSequence: 3,
                 } as T;
             }
             if (method === "chat.history") {
@@ -1560,6 +1560,20 @@ describe("shared component helpers", () => {
                 },
                 runId: "snapshot-run",
                 sessionKey: "agent:main:main",
+                text: "",
+                updatedAt: "2026-06-24T10:00:00.000Z",
+            },
+            "agent:other:main::other-run::thinking": {
+                aliases: [],
+                message: {
+                    content: "",
+                    role: "assistant",
+                    runId: "other-run",
+                    text: "",
+                    thinking: [{ text: "other reasoning" }],
+                },
+                runId: "other-run",
+                sessionKey: "agent:other:main",
                 text: "",
                 updatedAt: "2026-06-24T10:00:00.000Z",
             },
@@ -1639,7 +1653,7 @@ describe("shared component helpers", () => {
                     sessionKey: "agent:main:main",
                     stream: "thinking",
                 },
-                runtimeSequence: 0,
+                runtimeSequence: 1,
                 type: "event",
             });
             listener?.({
@@ -1650,7 +1664,17 @@ describe("shared component helpers", () => {
                     sessionKey: "agent:main:main",
                     stream: "thinking",
                 },
-                runtimeSequence: 1,
+                runtimeSequence: 2,
+                type: "event",
+            });
+            listener?.({
+                event: "chat",
+                payload: {
+                    runId: "other-run",
+                    sessionKey: "agent:other:main",
+                    state: "aborted",
+                },
+                runtimeSequence: 3,
                 type: "event",
             });
             resolveRuntimeSnapshot();
@@ -1668,6 +1692,9 @@ describe("shared component helpers", () => {
             activeStreamsReference.current["agent:main:main::new-local-run::thinking"]
                 ?.message?.thinking?.[0]?.text
         ).toBe("new local reasoning");
+        expect(
+            activeStreamsReference.current["agent:other:main::other-run::thinking"]
+        ).toBeUndefined();
         activeStreams = { ...activeStreams };
         delete activeStreams["agent:main:main::new-local-run::thinking"];
         activeStreamsReference.current = activeStreams;
@@ -1678,7 +1705,7 @@ describe("shared component helpers", () => {
                     runId: "snapshot-run",
                     sessionKey: "agent:main:main",
                 },
-                runtimeSequence: 2,
+                runtimeSequence: 4,
                 type: "event",
             });
         });
@@ -5305,6 +5332,21 @@ describe("shared component helpers", () => {
                 timestamp: "2026-06-24T09:59:59.000Z",
             },
             {
+                content: "",
+                role: "assistant",
+                text: "",
+                toolCalls: [
+                    {
+                        arguments: { command: "pwd" },
+                        name: "functions.exec_command",
+                        toolResult: {
+                            content: "workspace",
+                            name: "functions.exec_command",
+                        },
+                    },
+                ],
+            },
+            {
                 content: "final answer",
                 role: "assistant",
                 text: "final answer",
@@ -5324,6 +5366,47 @@ describe("shared component helpers", () => {
                 completed: true,
                 events: [
                     {
+                        event: "session.tool",
+                        payload: {
+                            data: {
+                                args: { command: "pwd" },
+                                name: "functions.exec_command",
+                                phase: "start",
+                            },
+                            runId: "completed-run",
+                            sessionKey: "agent:main:main",
+                            stream: "tool",
+                        },
+                        runtimeSequence: 1,
+                        type: "event",
+                    },
+                    {
+                        event: "session.tool",
+                        payload: {
+                            data: {
+                                name: "functions.exec_command",
+                                phase: "result",
+                                result: "workspace",
+                            },
+                            runId: "completed-run",
+                            sessionKey: "agent:main:main",
+                            stream: "tool",
+                        },
+                        runtimeSequence: 2,
+                        type: "event",
+                    },
+                    {
+                        event: "agent",
+                        payload: {
+                            data: { delta: "snapshot reasoning" },
+                            runId: "completed-run",
+                            sessionKey: "agent:main:main",
+                            stream: "thinking",
+                        },
+                        runtimeSequence: 3,
+                        type: "event",
+                    },
+                    {
                         event: "chat",
                         payload: {
                             message: {
@@ -5334,11 +5417,11 @@ describe("shared component helpers", () => {
                             sessionKey: "agent:main:main",
                             state: "final",
                         },
-                        runtimeSequence: 1,
+                        runtimeSequence: 4,
                         type: "event",
                     },
                 ],
-                throughSequence: 1,
+                throughSequence: 4,
             } as T;
         };
         const setMessages = jest.fn((updater) => {
@@ -5374,14 +5457,52 @@ describe("shared component helpers", () => {
 
         await waitFor(() => expect(requestMock).toHaveBeenCalled());
         await waitFor(() => expect(setMessages).toHaveBeenCalled());
-        expect(messages).toHaveLength(2);
-        expect(messages[1]).toMatchObject({
+        expect(messages).toHaveLength(4);
+        expect(messages[2]).toMatchObject({
+            role: "assistant",
+            thinking: [{ text: "snapshot reasoning" }],
+        });
+        expect(messages[3]).toMatchObject({
             text: "final answer",
             timestamp: canonicalTimestamp,
         });
-        expect(messages[1]?.local).toBeUndefined();
-        expect(messages[1]?.runId).toBeUndefined();
+        expect(messages[3]?.local).toBeUndefined();
+        expect(messages[3]?.runId).toBeUndefined();
+        expect(messages.filter((message) => message.toolCalls?.length)).toHaveLength(1);
         canonicalReplay.unmount();
+
+        messages = [
+            {
+                content: "current question",
+                role: "user",
+                text: "current question",
+            },
+            {
+                content: "final answer",
+                role: "assistant",
+                text: "final answer",
+            },
+        ];
+        activeStreamsReference.current = {};
+        requestMock.mockClear();
+        setMessages.mockClear();
+        const missingDiagnosticsReplay = renderCompletedSnapshot();
+
+        await waitFor(() => expect(requestMock).toHaveBeenCalled());
+        await waitFor(() => expect(setMessages).toHaveBeenCalled());
+        expect(messages).toHaveLength(4);
+        expect(messages[1]?.toolCalls?.[0]).toMatchObject({
+            name: "functions.exec_command",
+            toolResult: { content: "workspace" },
+        });
+        expect(messages[2]).toMatchObject({
+            thinking: [{ text: "snapshot reasoning" }],
+        });
+        expect(messages[3]).toMatchObject({
+            role: "assistant",
+            text: "final answer",
+        });
+        missingDiagnosticsReplay.unmount();
 
         messages = [
             {
@@ -5407,12 +5528,12 @@ describe("shared component helpers", () => {
 
         await waitFor(() => expect(requestMock).toHaveBeenCalled());
         await waitFor(() => expect(setMessages).toHaveBeenCalled());
-        expect(messages).toHaveLength(4);
         expect(messages.at(-1)).toMatchObject({
             role: "assistant",
             runId: "completed-run",
             text: "final answer",
         });
+        expect(messages.filter((message) => message.toolCalls?.length)).toHaveLength(1);
         repeatedFinalReplay.unmount();
     });
 

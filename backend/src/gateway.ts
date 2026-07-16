@@ -688,6 +688,14 @@ function rememberRuntimeEvent(envelope: RuntimeEventEnvelope): void {
     }
 }
 
+/** Returns whether a runtime snapshot carries a final assistant chat event. */
+function hasRuntimeSnapshotChatFinal(snapshot: RuntimeRunSnapshot): boolean {
+    return snapshot.events.some((envelope) => {
+        const payload = asRecord(envelope.payload);
+        return envelope.event === "chat" && payload?.state === "final";
+    });
+}
+
 /** Returns active runtime events, or the most recently completed run during grace. */
 function runtimeSnapshotForSession(sessionKey: string): {
     completed: boolean;
@@ -696,13 +704,22 @@ function runtimeSnapshotForSession(sessionKey: string): {
     pruneRuntimeSnapshots();
     const snapshots = [...(runtimeSnapshots.get(sessionKey)?.values() || [])];
     const active = snapshots.filter((snapshot) => !snapshot.completed);
+    const completed = snapshots
+        .filter((snapshot) => snapshot.completed)
+        .toSorted((left, right) => right.updatedAt - left.updatedAt);
+    const latestCompleted = completed[0];
+    const completedWithoutRunlessTerminal =
+        latestCompleted?.runId === "runless" &&
+        !hasRuntimeSnapshotChatFinal(latestCompleted)
+            ? completed.find((snapshot) => snapshot.runId !== "runless") ||
+              latestCompleted
+            : latestCompleted;
     const selected =
         active.length > 0
             ? active
-            : snapshots
-                  .filter((snapshot) => snapshot.completed)
-                  .toSorted((left, right) => right.updatedAt - left.updatedAt)
-                  .slice(0, 1);
+            : completedWithoutRunlessTerminal
+              ? [completedWithoutRunlessTerminal]
+              : [];
     return {
         completed: active.length === 0 && selected.length > 0,
         events: selected

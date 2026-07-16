@@ -478,11 +478,28 @@ function runtimeToolMessages(
     return messages;
 }
 
+/** Returns whether a replayed tool result is already present in history. */
+function isSameRuntimeToolResult(
+    existing: NonNullable<ChatHistoryMessage["toolResult"]>,
+    incoming: NonNullable<ChatHistoryMessage["toolResult"]>
+): boolean {
+    if (existing.id && incoming.id) {
+        return existing.id === incoming.id;
+    }
+    return (
+        existing.name === incoming.name &&
+        existing.content.trim() === incoming.content.trim() &&
+        Boolean(existing.isError) === Boolean(incoming.isError) &&
+        JSON.stringify(existing.images || []) === JSON.stringify(incoming.images || [])
+    );
+}
+
 /** Returns the best tool call index for a result. */
 function matchingToolCallIndex(
     toolCalls: ChatHistoryMessage["toolCalls"],
     result: NonNullable<ChatHistoryMessage["toolResult"]>,
-    incomingToolCall?: NonNullable<ChatHistoryMessage["toolCalls"]>[number]
+    incomingToolCall?: NonNullable<ChatHistoryMessage["toolCalls"]>[number],
+    canMatchRecoveredResult = false
 ): number {
     if (!toolCalls?.length) {
         return -1;
@@ -503,7 +520,9 @@ function matchingToolCallIndex(
             return toolCalls.findIndex(
                 (toolCall) =>
                     !toolCall.id &&
-                    !toolCall.toolResult &&
+                    (!toolCall.toolResult ||
+                        (canMatchRecoveredResult &&
+                            isSameRuntimeToolResult(toolCall.toolResult, result))) &&
                     toolCall.name === incomingToolCall.name &&
                     JSON.stringify(toolCall.arguments ?? undefined) === incomingArguments
             );
@@ -522,14 +541,20 @@ function matchingToolCallIndex(
             (toolCall) =>
                 !toolCall.id &&
                 toolCall.name === result.name &&
-                !toolCall.toolResult &&
+                (!toolCall.toolResult ||
+                    (canMatchRecoveredResult &&
+                        isSameRuntimeToolResult(toolCall.toolResult, result))) &&
                 JSON.stringify(toolCall.arguments ?? undefined) === incomingArguments
         );
     }
 
     return toolCalls.findIndex(
         (toolCall) =>
-            !toolCall.id && toolCall.name === result.name && !toolCall.toolResult
+            !toolCall.id &&
+            toolCall.name === result.name &&
+            (!toolCall.toolResult ||
+                (canMatchRecoveredResult &&
+                    isSameRuntimeToolResult(toolCall.toolResult, result)))
     );
 }
 
@@ -538,9 +563,11 @@ function matchingToolMessageIndex(
     messages: ChatHistoryMessage[],
     result: NonNullable<ChatHistoryMessage["toolResult"]>,
     incomingToolCall?: NonNullable<ChatHistoryMessage["toolCalls"]>[number],
-    incomingRunId?: string
+    incomingRunId?: string,
+    minimumMessageIndex = 0,
+    canMatchRecoveredResult = false
 ): { messageIndex: number; toolCallIndex: number } | undefined {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
+    for (let index = messages.length - 1; index >= minimumMessageIndex; index -= 1) {
         const existing = messages[index]!;
         if (existing.role.toLowerCase() === "assistant") {
             if (incomingRunId && existing.runId && existing.runId !== incomingRunId) {
@@ -550,7 +577,8 @@ function matchingToolMessageIndex(
             const toolCallIndex = matchingToolCallIndex(
                 existing.toolCalls,
                 result,
-                incomingToolCall
+                incomingToolCall,
+                canMatchRecoveredResult
             );
             if (toolCallIndex !== -1) {
                 return { messageIndex: index, toolCallIndex };
@@ -565,9 +593,15 @@ function matchingToolMessageIndex(
 function matchingToolCallUpdateIndex(
     messages: ChatHistoryMessage[],
     incomingToolCall: NonNullable<ChatHistoryMessage["toolCalls"]>[number],
-    incomingRunId?: string
+    incomingRunId?: string,
+    minimumMessageIndex = 0,
+    canMatchCompletedCall = false
 ): { messageIndex: number; toolCallIndex: number } | undefined {
-    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    for (
+        let messageIndex = messages.length - 1;
+        messageIndex >= minimumMessageIndex;
+        messageIndex -= 1
+    ) {
         const existing = messages[messageIndex];
         if (existing?.role.toLowerCase() !== "assistant") {
             continue;
@@ -584,7 +618,7 @@ function matchingToolCallUpdateIndex(
 
                 return (
                     !toolCall.id &&
-                    !toolCall.toolResult &&
+                    (!toolCall.toolResult || canMatchCompletedCall) &&
                     toolCall.name === incomingToolCall.name &&
                     JSON.stringify(toolCall.arguments ?? undefined) ===
                         JSON.stringify(incomingToolCall.arguments ?? undefined)
@@ -593,7 +627,7 @@ function matchingToolCallUpdateIndex(
 
             return (
                 !toolCall.id &&
-                !toolCall.toolResult &&
+                (!toolCall.toolResult || canMatchCompletedCall) &&
                 toolCall.name === incomingToolCall.name &&
                 JSON.stringify(toolCall.arguments ?? undefined) ===
                     JSON.stringify(incomingToolCall.arguments ?? undefined)
@@ -611,8 +645,22 @@ function matchingToolCallUpdateIndex(
 /** Merges tool result rows into their matching tool call row when possible. */
 function mergeRuntimeToolMessages(
     previousMessages: ChatHistoryMessage[],
-    incoming: ChatHistoryMessage[]
+    incoming: ChatHistoryMessage[],
+    completedSnapshotFinalText = ""
 ): ChatHistoryMessage[] {
+    const recoveredFinalIndex = completedSnapshotFinalText
+        ? recoveredCompletedSnapshotFinalIndex(
+              previousMessages,
+              completedSnapshotFinalText
+          )
+        : -1;
+    const minimumMessageIndex =
+        recoveredFinalIndex === -1
+            ? 0
+            : previousMessages.findLastIndex(
+                  (message) => message.role.toLowerCase() === "user"
+              ) + 1;
+
     const next = [...previousMessages];
     const unmerged: ChatHistoryMessage[] = [];
 
@@ -620,12 +668,21 @@ function mergeRuntimeToolMessages(
         if (!message.toolResult) {
             const incomingToolCall = message.toolCalls?.[0];
             const match = incomingToolCall
-                ? matchingToolCallUpdateIndex(next, incomingToolCall, message.runId)
+                ? matchingToolCallUpdateIndex(
+                      next,
+                      incomingToolCall,
+                      message.runId,
+                      minimumMessageIndex,
+                      recoveredFinalIndex !== -1
+                  )
                 : undefined;
             if (incomingToolCall && match) {
                 const existing = next[match.messageIndex]!;
                 const nextToolCalls = [...(existing.toolCalls || [])];
                 const matchingToolCall = nextToolCalls[match.toolCallIndex]!;
+                if (recoveredFinalIndex !== -1 && matchingToolCall.toolResult) {
+                    continue;
+                }
                 nextToolCalls[match.toolCallIndex] = {
                     ...matchingToolCall,
                     ...incomingToolCall,
@@ -651,13 +708,18 @@ function mergeRuntimeToolMessages(
             next,
             result,
             incomingToolCall,
-            message.runId
+            message.runId,
+            minimumMessageIndex,
+            recoveredFinalIndex !== -1
         );
 
         if (match) {
             const existing = next[match.messageIndex]!;
             const nextToolCalls = [...(existing.toolCalls || [])];
             const matchingToolCall = nextToolCalls[match.toolCallIndex]!;
+            if (recoveredFinalIndex !== -1 && matchingToolCall.toolResult) {
+                continue;
+            }
             const hasIncomingOutput = Boolean(
                 result.content.length > 0 || result.images?.length
             );
@@ -699,7 +761,15 @@ function mergeRuntimeToolMessages(
         }
     }
 
-    return dedupeMessages([...next, ...unmerged]);
+    const messagesWithUnmerged =
+        recoveredFinalIndex === -1
+            ? [...next, ...unmerged]
+            : [
+                  ...next.slice(0, recoveredFinalIndex),
+                  ...unmerged,
+                  ...next.slice(recoveredFinalIndex),
+              ];
+    return dedupeMessages(messagesWithUnmerged);
 }
 
 /** Returns whether a message timestamp is recent enough to be an event echo. */
@@ -710,6 +780,45 @@ function isRecentChatRuntimeMessage(message: ChatHistoryMessage): boolean {
 
     const timestampMs = Date.parse(message.timestamp);
     return Number.isFinite(timestampMs) && Math.abs(Date.now() - timestampMs) < 30_000;
+}
+
+/** Returns the final assistant text carried by a completed runtime snapshot. */
+function runtimeSnapshotFinalText(events: unknown[]): string {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const envelope = events[index];
+        if (!isRecord(envelope) || envelope.event !== "chat") {
+            continue;
+        }
+        const payload = envelope.payload;
+        if (!isRecord(payload) || payload.state !== "final") {
+            continue;
+        }
+        const message = finalMessageFromPayload(
+            payload as unknown as ChatStreamEventMessage
+        );
+        if (message.role.toLowerCase() === "assistant" && message.text.trim()) {
+            return message.text.trim();
+        }
+    }
+
+    return "";
+}
+
+/** Returns the canonical message index for this completed response. */
+function recoveredCompletedSnapshotFinalIndex(
+    messages: ChatHistoryMessage[],
+    finalText: string
+): number {
+    const lastUserMessageIndex = messages.findLastIndex(
+        (message) => message.role.toLowerCase() === "user"
+    );
+    return messages.findLastIndex(
+        (message, index) =>
+            index > lastUserMessageIndex &&
+            message.local !== true &&
+            message.role.toLowerCase() === "assistant" &&
+            isRecoveredAssistantText(message.text, finalText)
+    );
 }
 
 /** Returns a record nested in common runtime event fields. */
@@ -1487,6 +1596,9 @@ export function useChatRuntimeEvents({
                 typeof payload.sessionKey === "string" ? payload.sessionKey : undefined;
             const eventRunId =
                 typeof payload.runId === "string" ? payload.runId : undefined;
+            const completedSnapshotFinalText = isReplayingCompletedSnapshot
+                ? replayingCompletedSnapshotFinalText
+                : "";
             const streamForRun = eventRunId
                 ? Object.values(activeStreamsReference.current).find(
                       (stream) =>
@@ -1778,7 +1890,11 @@ export function useChatRuntimeEvents({
                         );
                     }
                     setMessages((wasPrevious) =>
-                        mergeRuntimeToolMessages(wasPrevious, toolMessages)
+                        mergeRuntimeToolMessages(
+                            wasPrevious,
+                            toolMessages,
+                            completedSnapshotFinalText
+                        )
                     );
                 }
             }
@@ -1795,7 +1911,11 @@ export function useChatRuntimeEvents({
                         );
                     }
                     setMessages((wasPrevious) =>
-                        mergeRuntimeToolMessages(wasPrevious, toolMessages)
+                        mergeRuntimeToolMessages(
+                            wasPrevious,
+                            toolMessages,
+                            completedSnapshotFinalText
+                        )
                     );
                 }
             }
@@ -2027,6 +2147,7 @@ export function useChatRuntimeEvents({
         };
 
         let isReplayingCompletedSnapshot = false;
+        let replayingCompletedSnapshotFinalText = "";
 
         /** Applies one live or replayed runtime envelope through the same reducer. */
         const handleRuntimeEnvelope = (raw: unknown) => {
@@ -2352,6 +2473,7 @@ export function useChatRuntimeEvents({
                 if (messagesToAppend.length > 0 && eventMatchesSelected) {
                     setMessages((wasPrevious) => {
                         let didMergeFinalMessage = false;
+                        let matchedCanonicalFinalMessageIndex = -1;
                         const finalAssistantMessage =
                             finalMessageToAppend?.role.toLowerCase() === "assistant" &&
                             finalMessageToAppend.text.trim()
@@ -2420,6 +2542,10 @@ export function useChatRuntimeEvents({
                                           isRecoveredSnapshotFinal) &&
                                       !isSameRun
                                   ) {
+                                      if (isRecoveredSnapshotFinal) {
+                                          matchedCanonicalFinalMessageIndex =
+                                              messageIndex;
+                                      }
                                       return message;
                                   }
 
@@ -2439,9 +2565,21 @@ export function useChatRuntimeEvents({
                               })
                             : wasPrevious;
 
+                        const previousWithDiagnostics =
+                            matchedCanonicalFinalMessageIndex === -1
+                                ? [...nextPrevious, ...remainingDiagnosticMessages]
+                                : [
+                                      ...nextPrevious.slice(
+                                          0,
+                                          matchedCanonicalFinalMessageIndex
+                                      ),
+                                      ...remainingDiagnosticMessages,
+                                      ...nextPrevious.slice(
+                                          matchedCanonicalFinalMessageIndex
+                                      ),
+                                  ];
                         return dedupeMessages([
-                            ...nextPrevious,
-                            ...remainingDiagnosticMessages,
+                            ...previousWithDiagnostics,
                             ...(finalMessageToAppend && !didMergeFinalMessage
                                 ? [finalMessageToAppend]
                                 : []),
@@ -2593,6 +2731,9 @@ export function useChatRuntimeEvents({
                     updateActiveStreamsReference.current(() => streamsBeforeReplay);
                     const snapshotEvents = snapshot.events || [];
                     isReplayingCompletedSnapshot = snapshot.completed === true;
+                    replayingCompletedSnapshotFinalText = isReplayingCompletedSnapshot
+                        ? runtimeSnapshotFinalText(snapshotEvents)
+                        : "";
                     try {
                         for (const event of snapshotEvents) {
                             const sequence = (event as { runtimeSequence?: unknown })
@@ -2604,6 +2745,7 @@ export function useChatRuntimeEvents({
                         }
                     } finally {
                         isReplayingCompletedSnapshot = false;
+                        replayingCompletedSnapshotFinalText = "";
                     }
                 } catch {
                     // Older backends can continue with live events only.
@@ -2613,11 +2755,19 @@ export function useChatRuntimeEvents({
                         for (const event of queuedRuntimeEnvelopes) {
                             const sequence = (event as { runtimeSequence?: unknown })
                                 ?.runtimeSequence;
+                            const eventSessionKey =
+                                isRecord(event) && isRecord(event.payload)
+                                    ? event.payload.sessionKey
+                                    : undefined;
+                            const isSelectedSessionEvent =
+                                typeof eventSessionKey === "string" &&
+                                isSameSessionKey(eventSessionKey, selectedSessionKey);
                             if (
                                 typeof sequence !== "number" ||
-                                ((throughSequence === undefined ||
-                                    sequence > throughSequence) &&
-                                    !replayedSequences.has(sequence))
+                                (!replayedSequences.has(sequence) &&
+                                    (!isSelectedSessionEvent ||
+                                        throughSequence === undefined ||
+                                        sequence > throughSequence))
                             ) {
                                 handleRuntimeEnvelope(event);
                             }
