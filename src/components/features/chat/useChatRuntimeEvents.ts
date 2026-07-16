@@ -1833,19 +1833,45 @@ export function useChatRuntimeEvents({
                         eventName,
                         eventRunId
                     );
-                    const fallbackStreamKey = eventRunId
-                        ? runtimeWorkStreamKey(selectedSessionKey, stream, eventName)
-                        : streamKey;
-                    if (
-                        !Object.hasOwn(wasPrevious, streamKey) &&
-                        !Object.hasOwn(wasPrevious, fallbackStreamKey)
-                    ) {
+                    const channelKeySuffix = `::${stream || eventName || "work"}`;
+                    const channelStreams = Object.entries(wasPrevious).filter(
+                        ([key, streamEntry]) =>
+                            isSameSessionKey(
+                                streamEntry.sessionKey,
+                                selectedSessionKey
+                            ) && key.endsWith(channelKeySuffix)
+                    );
+                    const matchingStreams = eventRunId
+                        ? channelStreams.filter(
+                              ([key, streamEntry]) =>
+                                  key === streamKey ||
+                                  streamEntry.runId === eventRunId ||
+                                  streamEntry.aliases.includes(eventRunId)
+                          )
+                        : [];
+                    const canResolveSingleStream =
+                        channelStreams.length === 1 &&
+                        (!eventRunId ||
+                            channelStreams[0]?.[0] ===
+                                runtimeWorkStreamKey(
+                                    selectedSessionKey,
+                                    stream,
+                                    eventName
+                                ));
+                    const streamsToClear =
+                        matchingStreams.length > 0
+                            ? matchingStreams
+                            : canResolveSingleStream
+                              ? channelStreams
+                              : [];
+                    if (streamsToClear.length === 0) {
                         return wasPrevious;
                     }
 
                     const next = { ...wasPrevious };
-                    delete next[streamKey];
-                    delete next[fallbackStreamKey];
+                    for (const [key] of streamsToClear) {
+                        delete next[key];
+                    }
                     return next;
                 });
             }
