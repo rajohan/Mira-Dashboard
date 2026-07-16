@@ -420,6 +420,9 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
 
         const identity = messageIdentity(message);
         const role = message.role.toLowerCase();
+        if (role === "user") {
+            seen.clear();
+        }
         const isUnscopedTextlessConversationalMedia = Boolean(
             (role === "user" || role === "assistant") &&
             !message.text.trim() &&

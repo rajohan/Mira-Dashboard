@@ -689,22 +689,68 @@ describe("gateway behavior", () => {
                 .find((message) => message.id === "runtime-snapshot-after-reset")?.payload
         ).toMatchObject({ completed: false, events: [] });
 
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "partial before stop" },
+                runId: "stopped-run",
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+            },
+        });
         const stop = await sessionRoutes["/api/sessions/:id/action"].POST(
             sessionActionRequest("stop")
         );
         expect(stop.status).toBe(200);
+        socket.emitMessage({
+            id: "runtime-snapshot-after-stop",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-after-stop"'))
+        );
+        expect(
+            socket.sent.find((raw) => raw.includes('"id":"runtime-snapshot-after-stop"'))
+        ).toContain('"events":[]');
 
         const unsupported = await sessionRoutes["/api/sessions/:id/action"].POST(
             sessionActionRequest("archive")
         );
         expect(unsupported.status).toBe(400);
 
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "partial before delete" },
+                runId: "deleted-run",
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+            },
+        });
         const deleted =
             await sessionRoutes["/api/sessions/:id"].DELETE(sessionDeleteRequest());
         await expect(deleted.json()).resolves.toMatchObject({
             isSuccess: true,
             result: { echoed: { method: "sessions.delete" } },
         });
+        socket.emitMessage({
+            id: "runtime-snapshot-after-delete",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-delete"')
+            )
+        );
+        expect(
+            socket.sent.find((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-delete"')
+            )
+        ).toContain('"events":[]');
         expect(client?.requests.map((request) => request.method)).toEqual(
             expect.arrayContaining(["chat.abort", "chat.send", "sessions.delete"])
         );

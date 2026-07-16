@@ -2364,6 +2364,9 @@ export function useChatRuntimeEvents({
                                       message.text.trim()
                               )
                             : -1;
+                        const lastUserMessageIndex = wasPrevious.findLastIndex(
+                            (message) => message.role.toLowerCase() === "user"
+                        );
                         const nextPrevious = finalAssistantMessage
                             ? wasPrevious.map((message, messageIndex) => {
                                   if (
@@ -2397,6 +2400,7 @@ export function useChatRuntimeEvents({
                                       isCompletedSnapshotReplay &&
                                       message.local !== true &&
                                       messageIndex === lastAssistantMessageIndex &&
+                                      messageIndex > lastUserMessageIndex &&
                                       isRecoveredAssistantText(
                                           message.text,
                                           finalAssistantMessage.text

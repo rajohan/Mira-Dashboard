@@ -611,7 +611,8 @@ export function isRenderableChatHistoryMessage(
         return Boolean(
             visibility.shouldShowTools &&
             ((message.toolResult?.content.trim() || "").length > 0 ||
-                (message.toolResult?.images?.length || 0) > 0)
+                (message.toolResult?.images?.length || 0) > 0 ||
+                (message.attachments?.length || 0) > 0)
         );
     }
 

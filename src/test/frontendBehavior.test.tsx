@@ -3622,6 +3622,17 @@ describe("Mira Dashboard frontend behavior", () => {
             "different",
         ]);
 
+        const repeatedResponseMessages = dedupeMessages([
+            chatMessage({ role: "assistant", text: "same" }),
+            chatMessage({ role: "user", text: "repeat" }),
+            chatMessage({ role: "assistant", text: "same" }),
+        ]);
+        expect(repeatedResponseMessages.map((message) => message.text)).toEqual([
+            "same",
+            "repeat",
+            "same",
+        ]);
+
         expect(
             isRecoveredAssistantText(
                 "This is a sufficiently long assistant response",

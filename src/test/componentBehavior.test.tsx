@@ -33,6 +33,7 @@ import {
     createChatVisibility,
     mergeStreamMessage,
     presentedChatMessages,
+    rawHistoryMessages,
     stripThinkingFromMessage,
     visibleHistoryMessages,
 } from "../components/features/chat/chatRuntime";
@@ -1469,6 +1470,34 @@ describe("shared component helpers", () => {
             runId: "fourth-run",
         });
         expect(separatedHiddenToolMedia[4]?.attachments).toBeUndefined();
+
+        const rawToolMediaHistory = rawHistoryMessages([
+            {
+                MediaPath: "/tmp/generated-report.pdf",
+                content: "",
+                role: "tool",
+            },
+            {
+                content: "report ready",
+                role: "assistant",
+                text: "report ready",
+            },
+        ]);
+        expect(rawToolMediaHistory[0]).toMatchObject({
+            attachments: [{ fileName: "generated-report.pdf" }],
+            role: "tool",
+        });
+        expect(
+            presentedChatMessages(
+                rawToolMediaHistory,
+                createChatVisibility(true, false),
+                true
+            )[0]
+        ).toMatchObject({
+            attachments: [{ fileName: "generated-report.pdf" }],
+            role: "assistant",
+            text: "report ready",
+        });
     });
 
     it("drives chat runtime event subscription, stream buffering, and refreshes", async () => {
@@ -5270,6 +5299,12 @@ describe("shared component helpers", () => {
         const canonicalTimestamp = "2026-06-24T10:00:00.000Z";
         let messages: ChatHistoryMessage[] = [
             {
+                content: "current question",
+                role: "user",
+                text: "current question",
+                timestamp: "2026-06-24T09:59:59.000Z",
+            },
+            {
                 content: "final answer",
                 role: "assistant",
                 text: "final answer",
@@ -5310,40 +5345,75 @@ describe("shared component helpers", () => {
             messages = typeof updater === "function" ? updater(messages) : updater;
         });
 
-        const { unmount } = renderHook(() =>
-            useChatRuntimeEvents({
-                activeStreamsReference,
-                connectionId: 1,
-                isConnected: true,
-                liveHistoryRefreshTimerReference: { current: undefined },
-                request,
-                selectedSessionKey: "agent:main:main",
-                setHistoryLoadVersion: jest.fn(),
-                setIsAtBottom: jest.fn(),
-                setMessages,
-                setSendError: jest.fn(),
-                shouldStickToBottomReference: { current: true },
-                showThinkingOutput: true,
-                showToolOutput: true,
-                subscribe: () => jest.fn(),
-                updateActiveStreams: (updater) => {
-                    activeStreamsReference.current = updater(
-                        activeStreamsReference.current
-                    );
-                },
-            })
-        );
+        const renderCompletedSnapshot = () =>
+            renderHook(() =>
+                useChatRuntimeEvents({
+                    activeStreamsReference,
+                    connectionId: 1,
+                    isConnected: true,
+                    liveHistoryRefreshTimerReference: { current: undefined },
+                    request,
+                    selectedSessionKey: "agent:main:main",
+                    setHistoryLoadVersion: jest.fn(),
+                    setIsAtBottom: jest.fn(),
+                    setMessages,
+                    setSendError: jest.fn(),
+                    shouldStickToBottomReference: { current: true },
+                    showThinkingOutput: true,
+                    showToolOutput: true,
+                    subscribe: () => jest.fn(),
+                    updateActiveStreams: (updater) => {
+                        activeStreamsReference.current = updater(
+                            activeStreamsReference.current
+                        );
+                    },
+                })
+            );
+
+        const canonicalReplay = renderCompletedSnapshot();
 
         await waitFor(() => expect(requestMock).toHaveBeenCalled());
         await waitFor(() => expect(setMessages).toHaveBeenCalled());
-        expect(messages).toHaveLength(1);
-        expect(messages[0]).toMatchObject({
+        expect(messages).toHaveLength(2);
+        expect(messages[1]).toMatchObject({
             text: "final answer",
             timestamp: canonicalTimestamp,
         });
-        expect(messages[0]?.local).toBeUndefined();
-        expect(messages[0]?.runId).toBeUndefined();
-        unmount();
+        expect(messages[1]?.local).toBeUndefined();
+        expect(messages[1]?.runId).toBeUndefined();
+        canonicalReplay.unmount();
+
+        messages = [
+            {
+                content: "first question",
+                role: "user",
+                text: "first question",
+            },
+            {
+                content: "final answer",
+                role: "assistant",
+                text: "final answer",
+            },
+            {
+                content: "repeat the answer",
+                role: "user",
+                text: "repeat the answer",
+            },
+        ];
+        activeStreamsReference.current = {};
+        requestMock.mockClear();
+        setMessages.mockClear();
+        const repeatedFinalReplay = renderCompletedSnapshot();
+
+        await waitFor(() => expect(requestMock).toHaveBeenCalled());
+        await waitFor(() => expect(setMessages).toHaveBeenCalled());
+        expect(messages).toHaveLength(4);
+        expect(messages.at(-1)).toMatchObject({
+            role: "assistant",
+            runId: "completed-run",
+            text: "final answer",
+        });
+        repeatedFinalReplay.unmount();
     });
 
     it("re-stamps provisional diagnostics before final-thinking retention", async () => {

@@ -491,12 +491,26 @@ function clearRuntimeSnapshotsForSession(sessionKey: string): void {
     }
 }
 
-/** Extracts a run association from an acknowledged chat send. */
-function handleAcknowledgedChatSend(
+/** Updates ephemeral replay state after a successful Gateway request. */
+function handleSuccessfulGatewayRequest(
     method: string,
     parameters: Record<string, unknown>,
     payload: unknown
 ): void {
+    if (method === "chat.abort") {
+        const sessionKey = stringField(parameters, "sessionKey");
+        if (sessionKey) {
+            clearRuntimeSnapshotsForSession(sessionKey);
+        }
+        return;
+    }
+    if (method === "sessions.delete") {
+        const sessionKey = stringField(parameters, "key");
+        if (sessionKey) {
+            clearRuntimeSnapshotsForSession(sessionKey);
+        }
+        return;
+    }
     if (method !== "chat.send") {
         return;
     }
@@ -1300,9 +1314,8 @@ async function forwardRequest(
 
         try {
             let payload = await activeGateway.request(method, parameters);
-            if (method === "chat.send") {
-                handleAcknowledgedChatSend(method, parameters, payload);
-            } else if (method === "chat.history") {
+            handleSuccessfulGatewayRequest(method, parameters, payload);
+            if (method === "chat.history") {
                 payload = hydrateOmittedChatHistoryImages(
                     payload,
                     typeof parameters.sessionKey === "string"
@@ -1533,7 +1546,7 @@ async function sendRequestAsync(
     }
 
     const payload = await gatewayState.client.request(method, parameters);
-    handleAcknowledgedChatSend(method, parameters, payload);
+    handleSuccessfulGatewayRequest(method, parameters, payload);
     return payload;
 }
 
