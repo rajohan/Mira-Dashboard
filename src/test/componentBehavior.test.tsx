@@ -1571,6 +1571,110 @@ describe("shared component helpers", () => {
                     message.toolResult.content.includes("ok")
             )
         ).toBe(false);
+        expect(activeStreamsReference.current).not.toHaveProperty(
+            "agent:main:main::run-1::tool"
+        );
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "start" },
+                    runId: "dashboard-compact-review",
+                    sessionKey: "agent:main:main",
+                    stream: "compaction",
+                },
+                type: "event",
+            });
+        });
+        expect(activeStreamsReference.current).toHaveProperty(
+            "agent:main:main::dashboard-compact-review::compaction"
+        );
+        act(() => {
+            updateActiveStreams((wasPrevious: ActiveChatStreams) => {
+                const optimisticKey =
+                    "agent:main:main::dashboard-compact-review::compaction";
+                const optimisticStream = wasPrevious[optimisticKey]!;
+                return {
+                    ...wasPrevious,
+                    [optimisticKey]: {
+                        ...optimisticStream,
+                        aliases: [optimisticStream.runId, "acknowledged-compaction-run"],
+                        runId: "acknowledged-compaction-run",
+                    },
+                };
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "start" },
+                    sessionKey: "agent:main:main",
+                    stream: "compaction",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "end" },
+                    runId: "acknowledged-compaction-run",
+                    sessionKey: "agent:main:main",
+                    stream: "compaction",
+                },
+                type: "event",
+            });
+        });
+        expect(activeStreamsReference.current).not.toHaveProperty(
+            "agent:main:main::dashboard-compact-review::compaction"
+        );
+        expect(activeStreamsReference.current).toHaveProperty(
+            "agent:main:main::compaction"
+        );
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "end" },
+                    sessionKey: "agent:main:main",
+                    stream: "compaction",
+                },
+                type: "event",
+            });
+        });
+        expect(activeStreamsReference.current).not.toHaveProperty(
+            "agent:main:main::compaction"
+        );
+
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "start" },
+                    runId: "scoped-compaction-run",
+                    sessionKey: "agent:main:main",
+                    stream: "compaction",
+                },
+                type: "event",
+            });
+        });
+        act(() => {
+            listener?.({
+                event: "agent",
+                payload: {
+                    data: { phase: "end" },
+                    sessionKey: "agent:main:main",
+                    stream: "compaction",
+                },
+                type: "event",
+            });
+        });
+        expect(activeStreamsReference.current).not.toHaveProperty(
+            "agent:main:main::scoped-compaction-run::compaction"
+        );
 
         act(() => {
             listener?.({

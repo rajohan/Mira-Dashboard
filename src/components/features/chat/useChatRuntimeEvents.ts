@@ -1820,7 +1820,63 @@ export function useChatRuntimeEvents({
             }
 
             const statusText = runtimeProgressText(eventName, stream, phase, data);
+            const isTerminalActivityStream =
+                TERMINAL_LIFECYCLE_PHASES.has(phase) &&
+                stream !== "assistant" &&
+                !isRuntimeThinkingStream(stream) &&
+                !(stream === "item" && isRuntimeThinkingItem(data));
+            if (isTerminalActivityStream) {
+                updateActiveStreamsReference.current((wasPrevious) => {
+                    const streamKey = runtimeWorkStreamKey(
+                        selectedSessionKey,
+                        stream,
+                        eventName,
+                        eventRunId
+                    );
+                    const channelKeySuffix = `::${stream || eventName || "work"}`;
+                    const channelStreams = Object.entries(wasPrevious).filter(
+                        ([key, streamEntry]) =>
+                            isSameSessionKey(
+                                streamEntry.sessionKey,
+                                selectedSessionKey
+                            ) && key.endsWith(channelKeySuffix)
+                    );
+                    const matchingStreams = eventRunId
+                        ? channelStreams.filter(
+                              ([key, streamEntry]) =>
+                                  key === streamKey ||
+                                  streamEntry.runId === eventRunId ||
+                                  streamEntry.aliases.includes(eventRunId)
+                          )
+                        : [];
+                    const canResolveSingleStream =
+                        channelStreams.length === 1 &&
+                        (!eventRunId ||
+                            channelStreams[0]?.[0] ===
+                                runtimeWorkStreamKey(
+                                    selectedSessionKey,
+                                    stream,
+                                    eventName
+                                ));
+                    const streamsToClear =
+                        matchingStreams.length > 0
+                            ? matchingStreams
+                            : canResolveSingleStream
+                              ? channelStreams
+                              : [];
+                    if (streamsToClear.length === 0) {
+                        return wasPrevious;
+                    }
+
+                    const next = { ...wasPrevious };
+                    for (const [key] of streamsToClear) {
+                        delete next[key];
+                    }
+                    return next;
+                });
+            }
             const shouldTrackActivity =
+                !isTerminalActivityStream &&
                 !shouldIgnoreRuntimeAssistantText &&
                 isRuntimeWorkEvent(eventName, stream, phase, statusText);
             if (
