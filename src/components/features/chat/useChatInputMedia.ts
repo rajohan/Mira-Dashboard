@@ -1,44 +1,103 @@
-import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
+import {
+    type Dispatch,
+    type SetStateAction,
+    useEffect,
+    useLayoutEffect,
+    useRef,
+    useState,
+} from "react";
 
 import { formatSize } from "../../../utils/format";
 import { supportedAudioRecordingMimeType } from "./chatPageUtilities";
 import { attachmentKind, type ChatSendAttachment } from "./chatTypes";
 import {
+    chatErrorMessage,
     dataUrlToBase64,
     displayMimeType,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     readFileAsDataUrl,
 } from "./chatUtilities";
-import { chatErrorMessage } from "./chatUtilities";
 
 interface ChatInputMediaOptions {
     onError(error?: string): void;
+    sessionKey: string;
     setDraft: Dispatch<SetStateAction<string>>;
 }
 
 /** Owns attachments, voice recording and transcription for the composer. */
-export function useChatInputMedia({ onError, setDraft }: ChatInputMediaOptions) {
+export function useChatInputMedia({
+    onError,
+    sessionKey,
+    setDraft,
+}: ChatInputMediaOptions) {
     const fileInputReference = useRef<HTMLInputElement | undefined>(undefined);
     const voiceFileInputReference = useRef<HTMLInputElement | undefined>(undefined);
     const mediaRecorderReference = useRef<MediaRecorder | undefined>(undefined);
     const recordingChunksReference = useRef<Blob[]>([]);
     const attachmentsReference = useRef<ChatSendAttachment[]>([]);
+    const mediaEpochReference = useRef(0);
+    const pendingAttachmentSlotsReference = useRef(0);
+    const recordingStartEpochReference = useRef<number | undefined>(undefined);
+    const sessionKeyReference = useRef(sessionKey);
+    const transcriptionCountReference = useRef(0);
     const [attachments, setAttachments] = useState<ChatSendAttachment[]>([]);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
 
     attachmentsReference.current = attachments;
 
-    const clearAttachments = () => setAttachments([]);
+    const invalidateMedia = (shouldUpdateState = true) => {
+        mediaEpochReference.current += 1;
+        pendingAttachmentSlotsReference.current = 0;
+        recordingStartEpochReference.current = undefined;
+        transcriptionCountReference.current = 0;
+        recordingChunksReference.current = [];
+        attachmentsReference.current = [];
+        if (fileInputReference.current) {
+            fileInputReference.current.value = "";
+        }
+        if (voiceFileInputReference.current) {
+            voiceFileInputReference.current.value = "";
+        }
+
+        const recorder = mediaRecorderReference.current;
+        mediaRecorderReference.current = undefined;
+        if (recorder) {
+            try {
+                if (recorder.state !== "inactive") {
+                    recorder.stop();
+                }
+            } catch {
+                // Tracks are released below even if the recorder is already stopped.
+            }
+            for (const track of recorder.stream.getTracks()) {
+                track.stop();
+            }
+        }
+        if (shouldUpdateState) {
+            setAttachments([]);
+            setIsRecording(false);
+            setIsTranscribing(false);
+        }
+    };
+
+    const clearAttachments = () => invalidateMedia();
 
     const handleFilesSelected = async (files: FileList | undefined) => {
         if (!files || files.length === 0) {
             return;
         }
         onError(undefined);
-        const remainingSlots = MAX_ATTACHMENTS - attachmentsReference.current.length;
+        const operationEpoch = mediaEpochReference.current;
+        const remainingSlots = Math.max(
+            0,
+            MAX_ATTACHMENTS -
+                attachmentsReference.current.length -
+                pendingAttachmentSlotsReference.current
+        );
         const selectedFiles = [...files].slice(0, remainingSlots);
+        pendingAttachmentSlotsReference.current += selectedFiles.length;
         if (files.length > remainingSlots) {
             onError(`Only ${MAX_ATTACHMENTS} attachments can be sent at once.`);
         }
@@ -65,27 +124,54 @@ export function useChatInputMedia({ onError, setDraft }: ChatInputMediaOptions) 
                     } satisfies ChatSendAttachment;
                 })
             );
-            setAttachments((previous) => [...previous, ...nextAttachments]);
+            if (mediaEpochReference.current !== operationEpoch) {
+                return;
+            }
+            setAttachments((previous) => {
+                const next = [...previous, ...nextAttachments].slice(0, MAX_ATTACHMENTS);
+                attachmentsReference.current = next;
+                return next;
+            });
         } catch (error) {
-            onError(chatErrorMessage(error, "Failed to read attachment"));
+            if (mediaEpochReference.current === operationEpoch) {
+                onError(chatErrorMessage(error, "Failed to read attachment"));
+            }
         } finally {
-            if (fileInputReference.current) {
+            if (mediaEpochReference.current === operationEpoch) {
+                pendingAttachmentSlotsReference.current = Math.max(
+                    0,
+                    pendingAttachmentSlotsReference.current - selectedFiles.length
+                );
+            }
+            if (
+                mediaEpochReference.current === operationEpoch &&
+                fileInputReference.current
+            ) {
                 fileInputReference.current.value = "";
             }
         }
     };
 
     const removeAttachment = (attachmentId: string) => {
-        setAttachments((previous) =>
-            previous.filter((attachment) => attachment.id !== attachmentId)
-        );
+        setAttachments((previous) => {
+            const next = previous.filter((attachment) => attachment.id !== attachmentId);
+            attachmentsReference.current = next;
+            return next;
+        });
     };
 
-    const transcribeRecording = async (audioBlob: Blob) => {
+    const transcribeRecording = async (
+        audioBlob: Blob,
+        operationEpoch = mediaEpochReference.current
+    ) => {
+        if (mediaEpochReference.current !== operationEpoch) {
+            return;
+        }
         if (audioBlob.size === 0) {
             onError("No audio was recorded.");
             return;
         }
+        transcriptionCountReference.current += 1;
         setIsTranscribing(true);
         onError(undefined);
 
@@ -96,6 +182,9 @@ export function useChatInputMedia({ onError, setDraft }: ChatInputMediaOptions) 
                 headers: { "Content-Type": audioBlob.type || "audio/webm" },
                 body: audioBlob,
             });
+            if (mediaEpochReference.current !== operationEpoch) {
+                return;
+            }
             if (!response.ok) {
                 let error: { error?: string };
                 try {
@@ -107,6 +196,9 @@ export function useChatInputMedia({ onError, setDraft }: ChatInputMediaOptions) 
             }
 
             const result = (await response.json()) as { text?: string };
+            if (mediaEpochReference.current !== operationEpoch) {
+                return;
+            }
             const text = result.text?.trim();
             if (!text) {
                 onError("Whisper did not detect any speech.");
@@ -117,9 +209,17 @@ export function useChatInputMedia({ onError, setDraft }: ChatInputMediaOptions) 
                 return trimmed ? `${trimmed}\n${text}` : text;
             });
         } catch (error) {
-            onError(chatErrorMessage(error, "Failed to transcribe audio"));
+            if (mediaEpochReference.current === operationEpoch) {
+                onError(chatErrorMessage(error, "Failed to transcribe audio"));
+            }
         } finally {
-            setIsTranscribing(false);
+            if (mediaEpochReference.current === operationEpoch) {
+                transcriptionCountReference.current = Math.max(
+                    0,
+                    transcriptionCountReference.current - 1
+                );
+                setIsTranscribing(transcriptionCountReference.current > 0);
+            }
         }
     };
 
@@ -128,25 +228,48 @@ export function useChatInputMedia({ onError, setDraft }: ChatInputMediaOptions) 
         if (!file) {
             return;
         }
+        const operationEpoch = mediaEpochReference.current;
         try {
             if (file.size > MAX_ATTACHMENT_BYTES) {
                 throw new Error(
                     `${file.name} is too large (${formatSize(file.size)}). Max is ${formatSize(MAX_ATTACHMENT_BYTES)}.`
                 );
             }
-            await transcribeRecording(file);
+            await transcribeRecording(file, operationEpoch);
         } catch (error) {
-            onError(chatErrorMessage(error, "Failed to read audio file"));
+            if (mediaEpochReference.current === operationEpoch) {
+                onError(chatErrorMessage(error, "Failed to read audio file"));
+            }
         } finally {
-            if (voiceFileInputReference.current) {
+            if (
+                mediaEpochReference.current === operationEpoch &&
+                voiceFileInputReference.current
+            ) {
                 voiceFileInputReference.current.value = "";
             }
         }
     };
 
     const handleToggleRecording = async () => {
-        if (isRecording) {
-            mediaRecorderReference.current?.stop();
+        const activeRecorder = mediaRecorderReference.current;
+        if (activeRecorder) {
+            try {
+                if (activeRecorder.state === "inactive") {
+                    return;
+                }
+                activeRecorder.stop();
+            } catch (error) {
+                mediaRecorderReference.current = undefined;
+                recordingChunksReference.current = [];
+                for (const track of activeRecorder.stream.getTracks()) {
+                    track.stop();
+                }
+                setIsRecording(false);
+                onError(chatErrorMessage(error, "Failed to stop recording"));
+            }
+            return;
+        }
+        if (recordingStartEpochReference.current !== undefined) {
             return;
         }
         const mediaDevices = navigator.mediaDevices as MediaDevices | undefined;
@@ -165,9 +288,17 @@ export function useChatInputMedia({ onError, setDraft }: ChatInputMediaOptions) 
         }
 
         let stream: MediaStream | undefined;
+        const operationEpoch = mediaEpochReference.current;
+        recordingStartEpochReference.current = operationEpoch;
         try {
             onError(undefined);
             stream = await mediaDevices!.getUserMedia({ audio: true });
+            if (mediaEpochReference.current !== operationEpoch) {
+                for (const track of stream.getTracks()) {
+                    track.stop();
+                }
+                return;
+            }
             const recordingStream = stream;
             const mimeType = supportedAudioRecordingMimeType();
             const recorder = mimeType
@@ -176,39 +307,61 @@ export function useChatInputMedia({ onError, setDraft }: ChatInputMediaOptions) 
             recordingChunksReference.current = [];
             mediaRecorderReference.current = recorder;
             recorder.addEventListener("dataavailable", (event) => {
-                if (event.data.size > 0) {
+                if (
+                    mediaEpochReference.current === operationEpoch &&
+                    mediaRecorderReference.current === recorder &&
+                    event.data.size > 0
+                ) {
                     recordingChunksReference.current.push(event.data);
                 }
             });
             recorder.addEventListener("stop", () => {
+                if (mediaEpochReference.current !== operationEpoch) {
+                    return;
+                }
                 for (const track of recordingStream.getTracks()) {
                     track.stop();
                 }
-                setIsRecording(false);
-                mediaRecorderReference.current = undefined;
+                if (mediaRecorderReference.current === recorder) {
+                    mediaRecorderReference.current = undefined;
+                }
                 const blob = new Blob(recordingChunksReference.current, {
                     type: recorder.mimeType || "audio/webm",
                 });
                 recordingChunksReference.current = [];
-                void transcribeRecording(blob);
+                setIsRecording(false);
+                void transcribeRecording(blob, operationEpoch);
             });
             recorder.start();
             setIsRecording(true);
         } catch (error) {
+            mediaRecorderReference.current = undefined;
+            recordingChunksReference.current = [];
             const tracks = stream?.getTracks() || [];
             for (const track of tracks) {
                 track.stop();
             }
-            onError(chatErrorMessage(error, "Failed to start recording"));
+            if (mediaEpochReference.current === operationEpoch) {
+                onError(chatErrorMessage(error, "Failed to start recording"));
+            }
+        } finally {
+            if (recordingStartEpochReference.current === operationEpoch) {
+                recordingStartEpochReference.current = undefined;
+            }
         }
     };
 
+    useLayoutEffect(() => {
+        if (sessionKeyReference.current === sessionKey) {
+            return;
+        }
+        sessionKeyReference.current = sessionKey;
+        invalidateMedia();
+    }, [sessionKey]);
+
     useEffect(
         () => () => {
-            const tracks = mediaRecorderReference.current?.stream.getTracks() || [];
-            for (const track of tracks) {
-                track.stop();
-            }
+            invalidateMedia(false);
         },
         []
     );

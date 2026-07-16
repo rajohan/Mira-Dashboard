@@ -172,6 +172,10 @@ function messageMediaIdentity(message: ChatHistoryMessage): string | undefined {
 
 /** Returns a diagnostic identity for tool/thinking rows without primary text. */
 function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefined {
+    if (message.runtimeKey) {
+        return `runtime:${message.runtimeKey}`;
+    }
+
     const toolCalls = message.toolCalls || [];
     if (toolCalls.length > 0) {
         const fallbackScope = message.timestamp || message.runId || "unknown";
@@ -328,16 +332,29 @@ function mergeDiagnosticDetails(
     previousMessages: ChatHistoryMessage[],
     nextMessages: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {
-    const unmatchedPrevious = previousMessages.filter(
-        (candidate) =>
-            candidate.local === true &&
-            candidate.role.toLowerCase() === "assistant" &&
-            candidate.text.trim() &&
-            hasChatMessageDetails(candidate)
-    );
+    const previousResponseStart =
+        previousMessages.findLastIndex(
+            (message) => message.role.toLowerCase() === "user"
+        ) + 1;
+    const nextResponseStart =
+        nextMessages.findLastIndex((message) => message.role.toLowerCase() === "user") +
+        1;
+    const unmatchedPrevious = previousMessages
+        .slice(previousResponseStart)
+        .filter(
+            (candidate) =>
+                candidate.local === true &&
+                candidate.role.toLowerCase() === "assistant" &&
+                candidate.text.trim() &&
+                hasChatMessageDetails(candidate)
+        );
 
-    return nextMessages.map((message) => {
-        if (message.role.toLowerCase() !== "assistant" || !message.text.trim()) {
+    return nextMessages.map((message, messageIndex) => {
+        if (
+            messageIndex < nextResponseStart ||
+            message.role.toLowerCase() !== "assistant" ||
+            !message.text.trim()
+        ) {
             return message;
         }
 
@@ -402,6 +419,7 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
         message.role.toLowerCase(),
         message.timestamp || "no-time",
         message.runId || "no-run",
+        message.runtimeKey || "no-runtime-key",
         contentIdentity,
     ].join("::");
 }
@@ -428,8 +446,13 @@ export function isRecoveredAssistantText(left: string, right: string): boolean {
 
 /** Performs dedupe messages. */
 export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
-    const seen = new Map<string, Array<string | undefined>>();
+    const seen = new Map<
+        string,
+        Array<{ isLocal: boolean; runId: string | undefined }>
+    >();
     const deduped: ChatHistoryMessage[] = [];
+    let hasCrossedResponseMessages = false;
+    let nextUserIdentity: string | undefined;
 
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
@@ -440,12 +463,21 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         const identity = messageIdentity(message);
         const role = message.role.toLowerCase();
         if (role === "user") {
-            seen.clear();
+            if (
+                hasCrossedResponseMessages ||
+                (nextUserIdentity !== undefined && nextUserIdentity !== identity)
+            ) {
+                seen.clear();
+            }
+            hasCrossedResponseMessages = false;
+            nextUserIdentity = identity;
+        } else {
+            hasCrossedResponseMessages = true;
+            nextUserIdentity = undefined;
         }
-        const seenRunIds = seen.get(identity) || [];
-        const hasCompatibleDuplicate = seenRunIds.some(
-            (runId) => !runId || !message.runId || runId === message.runId
-        );
+        const seenMessages = seen.get(identity) || [];
+        const isCompatibleRun = (runId: string | undefined) =>
+            !runId || !message.runId || runId === message.runId;
         const isUnscopedTextlessConversationalMedia = Boolean(
             (role === "user" || role === "assistant") &&
             !message.text.trim() &&
@@ -453,15 +485,33 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
             !message.runId &&
             !message.timestamp
         );
-        if (
+        const canDeduplicate = Boolean(
             (message.text.trim() || diagnosticMessageIdentity(message)) &&
-            hasCompatibleDuplicate &&
             !isUnscopedTextlessConversationalMedia
+        );
+        const isMessageLocal = message.local === true;
+        if (canDeduplicate && role === "user") {
+            const oppositeLocalityIndex = seenMessages.findIndex(
+                (candidate) =>
+                    isCompatibleRun(candidate.runId) &&
+                    candidate.isLocal === !isMessageLocal
+            );
+            if (oppositeLocalityIndex !== -1) {
+                seenMessages.splice(oppositeLocalityIndex, 1);
+                seen.set(identity, seenMessages);
+                continue;
+            }
+        } else if (
+            canDeduplicate &&
+            seenMessages.some((candidate) => isCompatibleRun(candidate.runId))
         ) {
             continue;
         }
 
-        seen.set(identity, [...seenRunIds, message.runId]);
+        seen.set(identity, [
+            ...seenMessages,
+            { isLocal: isMessageLocal, runId: message.runId },
+        ]);
         deduped.unshift(message);
     }
 
@@ -508,7 +558,7 @@ function insertMessagesByTimestamp(
 
         const insertionIndex = merged.findIndex((candidate) => {
             const candidateTimestamp = messageTimestampMs(candidate);
-            return candidateTimestamp === undefined || candidateTimestamp > timestamp;
+            return candidateTimestamp !== undefined && candidateTimestamp > timestamp;
         });
 
         if (insertionIndex === -1) {
@@ -596,11 +646,9 @@ export function mergeWithRecentOptimisticMessages(
         previousMessages,
         mergeToolCallResults(previousMessages, nextMessages)
     );
-    const nextIdentities = new Set(
-        enrichedNextMessages.map((message) => messageIdentity(message))
-    );
     const nextIdentityCounts = new Map<string, number>();
     const unmatchedNextMediaCounts = new Map<string, number>();
+    const recoveredPreviousMessages = new Set<ChatHistoryMessage>();
     for (const message of enrichedNextMessages) {
         const identity = messageIdentity(message);
         nextIdentityCounts.set(identity, (nextIdentityCounts.get(identity) || 0) + 1);
@@ -622,10 +670,13 @@ export function mergeWithRecentOptimisticMessages(
 
         const identity = messageIdentity(message);
         const identityCount = nextIdentityCounts.get(identity) || 0;
+        if (identityCount > 0) {
+            nextIdentityCounts.set(identity, identityCount - 1);
+            recoveredPreviousMessages.add(message);
+        }
         const mediaIdentity = messageMediaIdentity(message);
         const role = message.role.toLowerCase();
         if (
-            identityCount === 0 ||
             (role !== "user" && role !== "assistant") ||
             message.text.trim() ||
             !mediaIdentity
@@ -633,7 +684,6 @@ export function mergeWithRecentOptimisticMessages(
             continue;
         }
 
-        nextIdentityCounts.set(identity, identityCount - 1);
         const mediaKey = `${role}::${mediaIdentity}`;
         const mediaCount = unmatchedNextMediaCounts.get(mediaKey) || 0;
         unmatchedNextMediaCounts.set(mediaKey, Math.max(0, mediaCount - 1));
@@ -645,7 +695,11 @@ export function mergeWithRecentOptimisticMessages(
             nextToolCallRowsByIdentity.set(identity, message);
         }
     }
+    const nextResponseStart =
+        nextMessages.findLastIndex((message) => message.role.toLowerCase() === "user") +
+        1;
     const nextAssistantTexts = nextMessages
+        .slice(nextResponseStart)
         .filter((message) => message.role.toLowerCase() === "assistant")
         .map((message) => message.text);
     const now = Date.now();
@@ -666,7 +720,14 @@ export function mergeWithRecentOptimisticMessages(
             return false;
         }
 
-        if (nextIdentities.has(messageIdentity(message))) {
+        if (recoveredPreviousMessages.has(message)) {
+            return false;
+        }
+
+        const identity = messageIdentity(message);
+        const matchingNextCount = nextIdentityCounts.get(identity) || 0;
+        if (matchingNextCount > 0) {
+            nextIdentityCounts.set(identity, matchingNextCount - 1);
             return false;
         }
 

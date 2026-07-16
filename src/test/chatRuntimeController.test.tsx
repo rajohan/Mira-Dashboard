@@ -29,6 +29,23 @@ function assistant(
     };
 }
 
+function finish(
+    sessionKey: string,
+    sequence: number,
+    error?: string,
+    timestamp = new Date().toISOString()
+): ChatRuntimeEvent {
+    return {
+        error,
+        kind: "finish",
+        outcome: error ? "error" : "completed",
+        runId: "run-1",
+        sequence,
+        sessionKey,
+        timestamp,
+    };
+}
+
 function deferred<T>() {
     return Promise.withResolvers<T>();
 }
@@ -130,6 +147,134 @@ describe("chat runtime controller", () => {
         expect(result.current.state.sessions[SELECTED]).toBeUndefined();
     });
 
+    it("replaces stale selected-session runtime with an authoritative snapshot", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result, rerender } = renderHook(
+            ({ selectedSessionKey }) =>
+                useChatRuntime({ selectedSessionKey, transport: fake.transport }),
+            { initialProps: { selectedSessionKey: "" } }
+        );
+
+        act(() => fake.emit(assistant(SELECTED, 16, "stale")));
+        expect(result.current.state.sessions[SELECTED]).toBeDefined();
+        rerender({ selectedSessionKey: SELECTED });
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 16 });
+            await snapshot.promise;
+        });
+
+        expect(result.current.state.sessions[SELECTED]).toBeUndefined();
+    });
+
+    it("preserves a local run started while snapshot recovery is in flight", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        act(() => result.current.beginRun(SELECTED, "dashboard-chat-new"));
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 0 });
+            await snapshot.promise;
+        });
+
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["dashboard-chat-new"]?.phase
+        ).toBe("active");
+    });
+
+    it("reconciles a snapshot run whose send acknowledgement arrives later", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        act(() => result.current.beginRun(SELECTED, "dashboard-chat-new"));
+        await act(async () => {
+            snapshot.resolve({
+                completed: false,
+                events: [
+                    {
+                        ...assistant(SELECTED, 16, "working"),
+                        runId: "provider-new",
+                    },
+                ],
+                throughSequence: 16,
+            });
+            await snapshot.promise;
+        });
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "provider-new",
+            "dashboard-chat-new",
+        ]);
+
+        act(() =>
+            result.current.acknowledgeRun(SELECTED, "dashboard-chat-new", "provider-new")
+        );
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "provider-new",
+        ]);
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["provider-new"]?.assistant?.text
+        ).toBe("working");
+    });
+
+    it("runs finish side effects for replayed and queued terminal events", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const onError = jest.fn();
+        const onSettled = jest.fn();
+        renderHook(() =>
+            useChatRuntime({
+                onError,
+                onSettled,
+                selectedSessionKey: SELECTED,
+                transport: fake.transport,
+            })
+        );
+
+        act(() => fake.emit(finish(SELECTED, 32, "queued failure")));
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [finish(SELECTED, 16, "snapshot failure")],
+                throughSequence: 16,
+            });
+            await snapshot.promise;
+        });
+
+        expect(onError).toHaveBeenNthCalledWith(1, "snapshot failure");
+        expect(onError).toHaveBeenNthCalledWith(2, "queued failure");
+        expect(onSettled).toHaveBeenCalledTimes(2);
+    });
+
+    it("expires an old completed snapshot from its original finish time", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+        const oldTimestamp = new Date(Date.now() - 16 * 60_000).toISOString();
+
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [finish(SELECTED, 16, undefined, oldTimestamp)],
+                throughSequence: 16,
+            });
+            await snapshot.promise;
+        });
+
+        await waitFor(() =>
+            expect(
+                Object.keys(result.current.state.sessions[SELECTED]?.runs || {})
+            ).toHaveLength(0)
+        );
+    });
+
     it("processes live events immediately when no session is selected", () => {
         const fake = fakeTransport(
             Promise.resolve({
@@ -153,11 +298,19 @@ describe("chat runtime controller", () => {
     it("flushes queued events if snapshot recovery fails", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
+        const onSettled = jest.fn();
         const { result } = renderHook(() =>
-            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+            useChatRuntime({
+                onSettled,
+                selectedSessionKey: SELECTED,
+                transport: fake.transport,
+            })
         );
 
-        act(() => fake.emit(assistant(SELECTED, 16, "fallback")));
+        act(() => {
+            fake.emit(assistant(SELECTED, 16, "fallback"));
+            fake.emit(finish(SELECTED, 32));
+        });
         await act(async () => {
             snapshot.reject(new Error("offline"));
             try {
@@ -172,5 +325,29 @@ describe("chat runtime controller", () => {
                 result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
             ).toBe("fallback")
         );
+        expect(onSettled).toHaveBeenCalledWith(SELECTED);
+    });
+
+    it("does not restore a snapshot captured before the session was cleared", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        act(() => {
+            fake.emit(assistant(SELECTED, 32, "queued"));
+            result.current.clearSession(SELECTED);
+        });
+        await act(async () => {
+            snapshot.resolve({
+                completed: false,
+                events: [assistant(SELECTED, 16, "stale")],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        expect(result.current.state.sessions[SELECTED]).toBeUndefined();
     });
 });

@@ -14,13 +14,14 @@ import { createElement, type ReactNode } from "react";
 
 import { logsCollection } from "../collections/logs";
 import {
+    didScheduleBottomFollow,
     isSessionActive,
-    nextHistoryBottomState,
     nextHistoryLoadSendError,
+    nextRefreshedChatMessages,
     readDeletedMessageKeys,
     readStoredChatDiagnosticVisibility,
-    scheduleBottomFollowWhenNeeded,
     sessionTimestampMs,
+    shouldStayAtHistoryBottom,
     writeDeletedMessageKeys,
 } from "../components/features/chat/chatPageUtilities";
 import { OpenClawSocketProvider } from "../hooks/useOpenClawSocket";
@@ -3356,10 +3357,31 @@ describe("Mira Dashboard pages", () => {
         expect(sessionTimestampMs("2026-06-24T08:00:00.000Z")).toBeGreaterThan(0);
         expect(sessionTimestampMs(NaN)).toBeUndefined();
 
-        expect(nextHistoryBottomState(false, true, false)).toBe(true);
-        expect(nextHistoryBottomState(false, false, false)).toBe(false);
+        expect(shouldStayAtHistoryBottom(false, true, false)).toBe(true);
+        expect(shouldStayAtHistoryBottom(false, false, false)).toBe(false);
         expect(nextHistoryLoadSendError("old", true, "new")).toBe("old");
         expect(nextHistoryLoadSendError(undefined, false, "new")).toBe("new");
+        const unchangedTimestamp = "2026-06-24T08:00:00.000Z";
+        expect(
+            nextRefreshedChatMessages(
+                [
+                    {
+                        content: "old",
+                        role: "assistant",
+                        text: "old",
+                        timestamp: unchangedTimestamp,
+                    },
+                ],
+                [
+                    {
+                        content: "new",
+                        role: "assistant",
+                        text: "new",
+                        timestamp: unchangedTimestamp,
+                    },
+                ]
+            )[0]?.text
+        ).toBe("new");
         expect(isSessionActive(undefined)).toBe(false);
         expect(
             isSessionActive({ status: "running" } as Parameters<
@@ -3391,10 +3413,10 @@ describe("Mira Dashboard pages", () => {
         ).toBe(false);
 
         const scheduled: string[] = [];
-        scheduleBottomFollowWhenNeeded(true, () => {
+        didScheduleBottomFollow(true, () => {
             scheduled.push("bottom");
         });
-        scheduleBottomFollowWhenNeeded(false, () => {
+        didScheduleBottomFollow(false, () => {
             scheduled.push("skipped");
         });
         expect(scheduled).toEqual(["bottom"]);

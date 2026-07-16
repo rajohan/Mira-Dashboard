@@ -73,10 +73,12 @@ export type ChatRuntimeEvent =
           text?: string;
       })
     | (RuntimeEventBase & {
+          authoritative?: boolean;
           kind: "finish";
           error?: string;
           message?: ChatHistoryMessage;
           outcome: Exclude<ChatRunPhase, "active">;
+          suppressIfToolFailure?: boolean;
       });
 
 export function createChatRuntimeState(generation = 0): ChatRuntimeState {
@@ -124,7 +126,8 @@ function isProvisionalRun(sessionKey: string, runId: string): boolean {
     return (
         isSameChatSession(sessionKey, runId) ||
         runId.startsWith("dashboard-chat-") ||
-        runId.startsWith("dashboard-compact-")
+        runId.startsWith("dashboard-compact-") ||
+        runId.startsWith("runtime-runless-")
     );
 }
 
@@ -159,7 +162,13 @@ function matchingRunKey(
     const activeRuns = Object.entries(session.runs).filter(
         ([, run]) => run.phase === "active"
     );
-    return activeRuns.length === 1 ? activeRuns[0]?.[0] : undefined;
+    if (activeRuns.length === 1) {
+        return activeRuns[0]?.[0];
+    }
+    const runlessRuns = activeRuns.filter(([, run]) =>
+        run.runId.startsWith("runtime-runless-")
+    );
+    return runlessRuns.length === 1 ? runlessRuns[0]?.[0] : undefined;
 }
 
 function resolveRun(
@@ -168,6 +177,15 @@ function resolveRun(
 ): { run: ChatRunState; runKey: string } | undefined {
     let runKey = matchingRunKey(session, event.runId);
     let run = runKey ? session.runs[runKey] : undefined;
+
+    if (!run && !event.runId && event.kind === "finish") {
+        const completedEntry = Object.entries(session.runs)
+            .filter(([, candidate]) => candidate.phase !== "active")
+            .toSorted(([, left], [, right]) => right.lastSequence - left.lastSequence)[0];
+        if (completedEntry) {
+            [runKey, run] = completedEntry;
+        }
+    }
 
     if (!run && event.runId) {
         const provisionalRuns = Object.entries(session.runs).filter(
@@ -205,6 +223,17 @@ function resolveRun(
         }
         runKey = event.runId;
         run = emptyRun(event.sessionKey, event.runId, event.sequence, event.timestamp);
+        session.runs[runKey] = run;
+    }
+
+    if (!run && !event.runId) {
+        session.runs = Object.fromEntries(
+            Object.entries(session.runs).filter(
+                ([, candidate]) => candidate.phase === "active"
+            )
+        );
+        runKey = `runtime-runless-${event.sequence}`;
+        run = emptyRun(event.sessionKey, runKey, event.sequence, event.timestamp);
         session.runs[runKey] = run;
     }
 
@@ -308,6 +337,17 @@ function isToolCallMatching(
     return Boolean(result.name && toolCall.name === result.name);
 }
 
+function isSameToolCall(left: ChatToolCallDisplay, right: ChatToolCallDisplay): boolean {
+    if (left.id || right.id) {
+        return Boolean(left.id && right.id && left.id === right.id);
+    }
+    return (
+        left.name === right.name &&
+        JSON.stringify(left.arguments ?? undefined) ===
+            JSON.stringify(right.arguments ?? undefined)
+    );
+}
+
 function mergeToolDiagnostic(
     previous: ChatHistoryMessage | undefined,
     incoming: ChatHistoryMessage
@@ -379,14 +419,24 @@ function applyDiagnosticEvent(
             ? event.toolKey
             : `thinking:${event.message.thinking?.[0]?.id || "primary"}`;
     const diagnostics = [...run.diagnostics];
-    let index = diagnostics.findIndex((entry) => entry.key === key);
-    if (event.kind === "tool" && index === -1) {
+    let index = diagnostics.findLastIndex((entry) => entry.key === key);
+    if (event.kind === "tool") {
+        const incomingCall = event.message.toolCalls?.[0];
         const result =
             event.message.toolResult ||
             event.message.toolCalls?.find((call) => call.toolResult)?.toolResult;
-        if (result) {
+        const hasStableId = Boolean(incomingCall?.id || result?.id);
+        if (result && !hasStableId) {
             index = diagnostics.findLastIndex((entry) =>
-                entry.message.toolCalls?.some((call) => isToolCallMatching(call, result))
+                entry.message.toolCalls?.some(
+                    (call) => !call.toolResult && isToolCallMatching(call, result)
+                )
+            );
+        } else if (incomingCall && !hasStableId) {
+            index = diagnostics.findLastIndex((entry) =>
+                entry.message.toolCalls?.some(
+                    (call) => !call.toolResult && isSameToolCall(call, incomingCall)
+                )
             );
         }
     }
@@ -395,7 +445,11 @@ function applyDiagnosticEvent(
         event.kind === "tool"
             ? mergeToolDiagnostic(previous, event.message)
             : mergeMessageDetails(previous, event.message, event.message.text);
-    const entry = { key, message };
+    const uniqueKey =
+        index === -1 && diagnostics.some((entry) => entry.key === key)
+            ? `${key}:${event.sequence}`
+            : key;
+    const entry = { key: diagnostics[index]?.key || uniqueKey, message };
     if (index === -1) {
         diagnostics.push(entry);
     } else {
@@ -408,6 +462,24 @@ function applyFinishEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "finish" }>
 ): ChatRunState {
+    const isMetadataCompletion =
+        run.phase !== "active" &&
+        event.outcome === "completed" &&
+        !event.authoritative &&
+        !event.error &&
+        !event.message;
+    if (isMetadataCompletion) {
+        return { ...run, statusText: undefined };
+    }
+
+    const hasFailedTool = run.diagnostics.some((entry) =>
+        [
+            entry.message.toolResult,
+            ...(entry.message.toolCalls || []).map((call) => call.toolResult),
+        ].some((result) => result?.isError === true)
+    );
+    const error = event.suppressIfToolFailure && hasFailedTool ? undefined : event.error;
+
     const withMessage = event.message
         ? applyAssistantEvent(
               { ...run, phase: event.outcome },
@@ -422,7 +494,7 @@ function applyFinishEvent(
         : run;
     return {
         ...withMessage,
-        error: event.error,
+        error,
         phase: event.outcome,
         statusText: undefined,
     };

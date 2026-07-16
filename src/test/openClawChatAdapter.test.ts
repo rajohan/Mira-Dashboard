@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
 
+import {
+    createChatRuntimeState,
+    reduceChatRuntime,
+} from "../components/features/chat/domain/chatState";
 import { OpenClawChatAdapter } from "../components/features/chat/transport/openClawChatAdapter";
 
 const SESSION = "agent:main:main";
@@ -119,6 +123,57 @@ describe("OpenClaw chat adapter", () => {
         expect(events.map((event) => event.sequence)).toEqual([16, 32]);
     });
 
+    it("preserves provider ordering when a snapshot follows a newer live event", () => {
+        const adapter = new OpenClawChatAdapter();
+        adapter.event(envelope("chat", { deltaText: "live", state: "delta" }, 3));
+
+        const replay = adapter.snapshot({
+            completed: false,
+            events: [
+                envelope("chat", { deltaText: "B", state: "delta" }, 2),
+                envelope("chat", { deltaText: "A", state: "delta" }, 1),
+            ],
+            throughSequence: 2,
+        });
+        const queued = adapter.event(
+            envelope("chat", { deltaText: "queued", state: "delta" }, 4)
+        );
+
+        expect(replay.map((event) => event.sequence)).toEqual([16, 32]);
+        expect(queued[0]?.sequence).toBe(64);
+    });
+
+    it("keeps fallback sequences ahead of previously observed provider sequences", () => {
+        const adapter = new OpenClawChatAdapter();
+        const sequenced = adapter.event(
+            envelope("chat", { deltaText: "first", state: "delta" }, 100)
+        );
+        const unsequenced = envelope(
+            "chat",
+            { deltaText: "second", state: "delta" },
+            0
+        ) as Record<string, unknown>;
+        delete unsequenced.runtimeSequence;
+
+        const fallback = adapter.event(unsequenced);
+
+        expect(fallback[0]?.sequence).toBeGreaterThan(sequenced[0]?.sequence || 0);
+    });
+
+    it("uses the backend recording time when a provider event has no timestamp", () => {
+        const adapter = new OpenClawChatAdapter();
+        const raw = envelope("chat", { deltaText: "hello", state: "delta" }, 1);
+        const payload: Record<string, unknown> = {
+            ...raw.payload,
+            ts: Number.MAX_VALUE,
+        };
+        const recordedAt = Date.parse("2026-07-16T12:34:56.000Z");
+
+        const events = adapter.event({ ...raw, payload, runtimeRecordedAt: recordedAt });
+
+        expect(events[0]?.timestamp).toBe("2026-07-16T12:34:56.000Z");
+    });
+
     it("retains attachment-only tool history while folding matching results", () => {
         const adapter = new OpenClawChatAdapter();
         const messages = adapter.history([
@@ -154,6 +209,32 @@ describe("OpenClaw chat adapter", () => {
         expect(messages[1]?.attachments?.[0]?.fileName).toBe("orphan.txt");
     });
 
+    it("retains attachment-only runtime tool results", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        MediaPath: "/tmp/generated.png",
+                        MediaType: "image/png",
+                        name: "generate",
+                        phase: "result",
+                        result: "",
+                    },
+                    stream: "tool",
+                },
+                7
+            )
+        );
+        const tool = events.find((event) => event.kind === "tool");
+
+        expect(tool?.kind === "tool" && tool.message.attachments?.[0]).toMatchObject({
+            fileName: "generated.png",
+            kind: "image",
+        });
+    });
+
     it("does not fold a no-id tool result across a user-turn boundary", () => {
         const adapter = new OpenClawChatAdapter();
         const messages = adapter.history([
@@ -170,6 +251,29 @@ describe("OpenClaw chat adapter", () => {
         expect(messages).toHaveLength(3);
         expect(messages[0]?.toolCalls?.[0]?.toolResult).toBeUndefined();
         expect(messages[2]?.role).toBe("tool");
+    });
+
+    it("folds a run-scoped tool result across a newer user boundary", () => {
+        const adapter = new OpenClawChatAdapter();
+        const messages = adapter.history([
+            {
+                content: [{ id: "call-1", name: "read", type: "toolCall" }],
+                role: "assistant",
+                runId: "run-1",
+            },
+            { content: "next", role: "user" },
+            {
+                content: "late result",
+                role: "tool",
+                runId: "run-1",
+                toolCallId: "call-1",
+                toolName: "read",
+            },
+        ]);
+
+        expect(messages).toHaveLength(2);
+        expect(messages[0]?.toolCalls?.[0]?.toolResult?.content).toBe("late result");
+        expect(messages[1]?.role).toBe("user");
     });
 
     it("matches sequential no-id results to one pending call at a time", () => {
@@ -223,9 +327,9 @@ describe("OpenClaw chat adapter", () => {
         expect(messages[1]?.toolResult?.content).toBe("delayed duplicate");
     });
 
-    it("does not promote surfaced tool failures to a global chat error", () => {
+    it("suppresses only terminal errors proven to repeat a surfaced tool failure", () => {
         const adapter = new OpenClawChatAdapter();
-        adapter.event(
+        const failedTool = adapter.event(
             envelope(
                 "session.tool",
                 {
@@ -240,8 +344,44 @@ describe("OpenClaw chat adapter", () => {
                 9
             )
         );
+        const repeatedToolError = adapter.event(
+            envelope(
+                "chat",
+                {
+                    errorMessage: "tool execution failed: database is locked",
+                    state: "error",
+                },
+                10
+            )
+        );
+        const repeatedState = reduceChatRuntime(createChatRuntimeState(), [
+            ...failedTool,
+            ...repeatedToolError,
+        ]);
+
+        const nonMatchingAdapter = new OpenClawChatAdapter();
+        const nonMatchingState = reduceChatRuntime(createChatRuntimeState(), [
+            ...nonMatchingAdapter.event(
+                envelope(
+                    "session.tool",
+                    {
+                        data: {
+                            error: "database is locked",
+                            isError: true,
+                            name: "functions.exec_command",
+                            phase: "error",
+                        },
+                        stream: "tool",
+                    },
+                    11
+                )
+            ),
+            ...nonMatchingAdapter.event(
+                envelope("chat", { errorMessage: "request failed", state: "error" }, 12)
+            ),
+        ]);
         const otherSession = adapter.event({
-            ...envelope("chat", { errorMessage: "model failed", state: "error" }, 10),
+            ...envelope("chat", { errorMessage: "model failed", state: "error" }, 13),
             payload: {
                 errorMessage: "model failed",
                 runId: "run-1",
@@ -249,9 +389,6 @@ describe("OpenClaw chat adapter", () => {
                 state: "error",
             },
         });
-        const sameRun = adapter.event(
-            envelope("chat", { errorMessage: "request failed", state: "error" }, 11)
-        );
         const runlessToolError = adapter.event({
             event: "chat",
             payload: {
@@ -259,16 +396,49 @@ describe("OpenClaw chat adapter", () => {
                 sessionKey: SESSION,
                 state: "error",
             },
-            runtimeSequence: 12,
+            runtimeSequence: 14,
             type: "event",
         });
 
-        expect(sameRun[0]?.kind === "finish" && sameRun[0].error).toBeUndefined();
+        expect(repeatedState.sessions[SESSION]?.runs["run-1"]?.error).toBeUndefined();
+        expect(nonMatchingState.sessions[SESSION]?.runs["run-1"]?.error).toBe(
+            "request failed"
+        );
         expect(otherSession[0]?.kind === "finish" && otherSession[0].error).toBe(
             "model failed"
         );
+        expect(runlessToolError[0]?.kind === "finish" && runlessToolError[0].error).toBe(
+            "⚠️ 🛠️ `run lint` failed"
+        );
         expect(
-            runlessToolError[0]?.kind === "finish" && runlessToolError[0].error
-        ).toBeUndefined();
+            repeatedToolError[0]?.kind === "finish" &&
+                repeatedToolError[0].suppressIfToolFailure
+        ).toBe(true);
+    });
+
+    it("normalizes malformed raw history metadata without throwing", () => {
+        const adapter = new OpenClawChatAdapter();
+        const messages = adapter.history([
+            {
+                MediaPaths: [42, undefined, { path: "report.txt" }],
+                MediaTypes: ["text/plain", 17],
+                content: "",
+                role: { unexpected: true },
+                runId: 99,
+                timestamp: Number.MAX_VALUE,
+            },
+        ]);
+
+        expect(messages[0]).toMatchObject({
+            role: "unknown",
+            runId: undefined,
+            timestamp: undefined,
+        });
+        expect(
+            messages[0]?.attachments?.map((attachment) => attachment.fileName)
+        ).toEqual(["42", "undefined", "[object Object]"]);
+        expect(adapter.history({ messages: [] })).toEqual([]);
+        expect(adapter.history([undefined, "invalid"])).toEqual([]);
+        expect(adapter.snapshot({ events: { invalid: true } })).toEqual([]);
     });
 });

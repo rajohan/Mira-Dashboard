@@ -7,7 +7,7 @@ import {
     useRef,
 } from "react";
 
-import { scheduleBottomFollowWhenNeeded } from "./chatPageUtilities";
+import { didScheduleBottomFollow } from "./chatPageUtilities";
 import type { ChatRow } from "./chatTypes";
 
 const BOTTOM_THRESHOLD_PX = 32;
@@ -62,7 +62,9 @@ export function useChatScroll(
         }
         bottomFollowFrameReference.current = requestAnimationFrame(() => {
             bottomFollowFrameReference.current = undefined;
-            scrollToBottom();
+            if (shouldStickToBottomReference.current) {
+                scrollToBottom();
+            }
         });
     };
 
@@ -81,7 +83,7 @@ export function useChatScroll(
     });
 
     const handleDynamicContentLoad = () => {
-        scheduleBottomFollowWhenNeeded(
+        didScheduleBottomFollow(
             shouldStickToBottomReference.current,
             scheduleBottomFollow
         );
@@ -114,9 +116,24 @@ export function useChatScroll(
         }
 
         scrollToBottom();
-        const frame = requestAnimationFrame(scrollToBottom);
+        const frame = requestAnimationFrame(() => {
+            if (shouldStickToBottomReference.current) {
+                scrollToBottom();
+            }
+        });
         return () => cancelAnimationFrame(frame);
     }, [activityFingerprint, rows.length, selectedSessionKey]);
+
+    useLayoutEffect(
+        () => () => {
+            if (bottomFollowFrameReference.current === undefined) {
+                return;
+            }
+            cancelAnimationFrame(bottomFollowFrameReference.current);
+            bottomFollowFrameReference.current = undefined;
+        },
+        []
+    );
 
     return {
         handleDynamicContentLoad,

@@ -1015,7 +1015,8 @@ async function forwardRequest(
     }
 
     try {
-        await activeGateway.request(method, parameters);
+        const payload = await activeGateway.request(method, parameters);
+        openClawChatBridge.handleSuccessfulRequest(method, parameters, payload);
         if (method.startsWith("sessions.")) {
             await refreshSessionsAfterRequest(activeGateway);
         }

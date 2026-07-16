@@ -8,6 +8,7 @@ import {
     isNonWorkTool,
     itemTexts,
     itemType,
+    openClawThroughSequence,
     rawString,
     runtimeText,
     stringValue,
@@ -92,19 +93,18 @@ describe("OpenClaw adapter variants", () => {
                 thinking[1].message.thinking?.[0]?.snapshot
         ).toBe(true);
         expect(emptyThinking.map((event) => event.kind)).toEqual(["status"]);
-        expect(itemThinking).toEqual([
-            expect.objectContaining({
-                kind: "thinking",
-                message: expect.objectContaining({
-                    thinking: [
-                        expect.objectContaining({
-                            id: "thought-1",
-                            text: "item thought",
-                        }),
-                    ],
-                }),
+        const expectedItemThinking = expect.objectContaining({
+            kind: "thinking",
+            message: expect.objectContaining({
+                thinking: [
+                    expect.objectContaining({
+                        id: "thought-1",
+                        text: "item thought",
+                    }),
+                ],
             }),
-        ]);
+        });
+        expect(itemThinking).toEqual([expectedItemThinking]);
     });
 
     it("normalizes item tool calls, results and progress-only items", () => {
@@ -203,6 +203,12 @@ describe("OpenClaw adapter variants", () => {
         const modelAborted = adapter.event(
             envelope("model.completed", { data: { status: "aborted" } }, 49)
         );
+        const sessionAborted = adapter.event(
+            envelope("session.ended", { aborted: true }, 50)
+        );
+        const modelFailed = adapter.event(
+            envelope("model.completed", { status: "failed" }, 51)
+        );
 
         expect(compactionEnd[0]).toMatchObject({
             kind: "status",
@@ -216,6 +222,11 @@ describe("OpenClaw adapter variants", () => {
             outcome: "error",
         });
         expect(modelAborted[0]).toMatchObject({ kind: "finish", outcome: "aborted" });
+        expect(sessionAborted[0]).toMatchObject({
+            kind: "finish",
+            outcome: "aborted",
+        });
+        expect(modelFailed[0]).toMatchObject({ kind: "finish", outcome: "error" });
     });
 
     it("maps command finals, replacement deltas and unsupported chat states", () => {
@@ -224,7 +235,7 @@ describe("OpenClaw adapter variants", () => {
             envelope(
                 "chat",
                 { content: "replacement", replace: true, state: "delta" },
-                50
+                52
             )
         );
         const command = adapter.event(
@@ -238,7 +249,7 @@ describe("OpenClaw adapter variants", () => {
                     },
                     state: "final",
                 },
-                51
+                53
             )
         );
 
@@ -247,7 +258,7 @@ describe("OpenClaw adapter variants", () => {
             kind: "finish",
             message: expect.objectContaining({ local: true, role: "system" }),
         });
-        expect(adapter.event(envelope("chat", { state: "working" }, 52))).toEqual([]);
+        expect(adapter.event(envelope("chat", { state: "working" }, 54))).toEqual([]);
     });
 
     it("keeps provider value helpers deterministic for unusual payloads", () => {
@@ -256,7 +267,7 @@ describe("OpenClaw adapter variants", () => {
 
         expect(asRecord([])).toBeUndefined();
         expect(stringValue("  value  ")).toBe("value");
-        expect(stringValue("   ")).toBeUndefined();
+        expect(stringValue(" ".repeat(3))).toBeUndefined();
         expect(rawString(" ")).toBe(" ");
         expect(runtimeText([{ text: "block", type: "text" }])).toBe("block");
         expect(runtimeText(undefined)).toBe("");
@@ -275,5 +286,8 @@ describe("OpenClaw adapter variants", () => {
             ])
         ).toEqual(["summary"]);
         expect(itemType({ payload: { type: "TOOL_USE" } })).toBe("tool_use");
+        expect(openClawThroughSequence(2)).toBe(47);
+        expect(openClawThroughSequence("2")).toBe(0);
+        expect(openClawThroughSequence(Number.MAX_SAFE_INTEGER)).toBe(0);
     });
 });

@@ -41,6 +41,50 @@ describe("OpenClaw chat bridge", () => {
         expect(ambiguous.payload).not.toHaveProperty("sessionKey");
         expect(bridge.snapshot(MAIN).events).toHaveLength(1);
         expect(bridge.snapshot("agent:other:main").events).toHaveLength(0);
+
+        bridge.clearSession("agent:other:main");
+        expect(
+            bridge.recordEvent("agent", { runId: "shared-run", stream: "thinking" }, [])
+                .payload
+        ).toMatchObject({ runId: "shared-run", sessionKey: MAIN });
+    });
+
+    it("keeps live sequence numbers monotonic when replay state is cleared", () => {
+        const bridge = new OpenClawChatBridge();
+        const first = bridge.recordEvent(
+            "agent",
+            { runId: "first", sessionKey: MAIN, stream: "thinking" },
+            []
+        );
+        bridge.clear();
+        const second = bridge.recordEvent(
+            "agent",
+            { runId: "second", sessionKey: MAIN, stream: "thinking" },
+            []
+        );
+
+        expect(first.runtimeSequence).toBe(1);
+        expect(second.runtimeSequence).toBe(2);
+    });
+
+    it("treats duplicate run ids in the provider session index as ambiguous", () => {
+        const bridge = new OpenClawChatBridge();
+        const event = bridge.recordEvent(
+            "agent",
+            { runId: "shared-run", stream: "thinking" },
+            [
+                { id: "main", key: MAIN, runId: "shared-run" },
+                {
+                    id: "other",
+                    key: "agent:other:main",
+                    runId: "shared-run",
+                },
+            ]
+        );
+
+        expect(event.payload).not.toHaveProperty("sessionKey");
+        expect(bridge.snapshot(MAIN).events).toEqual([]);
+        expect(bridge.snapshot("agent:other:main").events).toEqual([]);
     });
 
     it("promotes provisional runs and prefers a concrete final over runless metadata", () => {
@@ -126,6 +170,105 @@ describe("OpenClaw chat bridge", () => {
             bridge.recordEvent("agent", { runId: "new-run", stream: "thinking" }, [])
                 .payload
         ).toMatchObject({ sessionKey: MAIN });
+        expect(
+            bridge.recordEvent("agent", { runId: "old-run", stream: "thinking" }, [])
+                .payload
+        ).not.toHaveProperty("sessionKey");
+    });
+
+    it("retains a completed provisional run when its acknowledgement arrives later", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "fast answer",
+                runId: "dashboard-chat-fast",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            { message: "fast question", sessionKey: MAIN },
+            { runId: "provider-fast" }
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [
+                expect.objectContaining({
+                    payload: expect.objectContaining({
+                        message: "fast answer",
+                        runId: "dashboard-chat-fast",
+                    }),
+                }),
+            ],
+        });
+        expect(
+            bridge.recordEvent(
+                "agent",
+                { runId: "provider-fast", stream: "thinking" },
+                []
+            ).payload
+        ).toMatchObject({ sessionKey: MAIN });
+    });
+
+    it("treats lifecycle end events as completed replay runs", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "end" },
+                runId: "lifecycle-run",
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [expect.objectContaining({ event: "agent" })],
+        });
+    });
+
+    it("learns a run association from explicitly scoped runtime events", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            { runId: "external-run", sessionKey: MAIN, stream: "thinking" },
+            []
+        );
+
+        expect(
+            bridge.recordEvent("agent", { runId: "external-run", stream: "thinking" }, [])
+                .payload
+        ).toMatchObject({ runId: "external-run", sessionKey: MAIN });
+    });
+
+    it("learns explicit associations even when the scoped payload is too large to retain", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "x".repeat(1_000_001) },
+                runId: "large-external-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN).events).toEqual([]);
+        expect(
+            bridge.recordEvent(
+                "agent",
+                { runId: "large-external-run", stream: "thinking" },
+                []
+            ).payload
+        ).toMatchObject({ runId: "large-external-run", sessionKey: MAIN });
     });
 
     it("bounds event count and drops oversized non-terminal payloads", () => {
@@ -168,7 +311,42 @@ describe("OpenClaw chat bridge", () => {
             []
         );
         expect(payloads(bridge)).toEqual([
-            { runId: "large-run", sessionKey: MAIN, state: "final" },
+            expect.objectContaining({
+                runId: "large-run",
+                sessionKey: MAIN,
+                state: "final",
+            }),
         ]);
+
+        bridge.clear();
+        bridge.recordEvent(
+            "session.ended",
+            {
+                data: { detail: "x".repeat(1_000_001), status: "aborted" },
+                runId: "large-aborted-run",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        expect(payloads(bridge)).toEqual([
+            expect.objectContaining({
+                data: expect.objectContaining({ status: "aborted" }),
+                runId: "large-aborted-run",
+                sessionKey: MAIN,
+            }),
+        ]);
+
+        const oversizedSessionKey = "s".repeat(1_000_001);
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                runId: "terminal-run",
+                sessionKey: oversizedSessionKey,
+                state: "final",
+            },
+            []
+        );
+        expect(bridge.snapshot(oversizedSessionKey).events).toEqual([]);
     });
 });

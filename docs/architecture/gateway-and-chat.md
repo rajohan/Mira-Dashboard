@@ -157,7 +157,7 @@ When changing chat event handling, test these cases:
 - snapshot replay and live delivery interleaving does not duplicate deltas;
 - snapshot gating never drops queued events for other sessions;
 - refresh/reconnect restores only the selected active or latest completed run;
-- hiding diagnostics does not remove them from cached client state.
+- hiding diagnostics does not remove them from cached client state;
 - repeated short final answers in different user turns remain distinct;
 - hidden tool attachments never cross a user or run boundary;
 - socket reconnects, compaction replacement runs, and selected-session changes

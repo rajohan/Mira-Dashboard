@@ -12,6 +12,7 @@ export interface OpenClawRuntimeEnvelope {
     type: "event";
     event: unknown;
     payload: unknown;
+    runtimeRecordedAt: number;
     runtimeSequence: number;
 }
 
@@ -57,7 +58,7 @@ function stringField(
     key: string
 ): string | undefined {
     const value = record?.[key];
-    return typeof value === "string" && value.trim() ? value : undefined;
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function hasRunIdentifier(session: OpenClawChatSessionIdentity, runId: string): boolean {
@@ -76,11 +77,44 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
     }
 
     const record = asRecord(payload);
+    const data = asRecord(record?.data);
     return (
-        event === "chat" &&
-        typeof record?.state === "string" &&
-        ["aborted", "error", "final"].includes(record.state)
+        (event === "chat" &&
+            typeof record?.state === "string" &&
+            ["aborted", "error", "final"].includes(record.state)) ||
+        (stringField(record, "stream") === "lifecycle" &&
+            ["end", "error"].includes(stringField(data, "phase") || ""))
     );
+}
+
+function compactTerminalPayload(
+    payload: Record<string, unknown> | undefined,
+    runId: string | undefined,
+    sessionKey: string
+): Record<string, unknown> {
+    const data = asRecord(payload?.data);
+    const compactData = {
+        aborted: data?.aborted === true ? true : undefined,
+        error: stringField(data, "error"),
+        errorMessage: stringField(data, "errorMessage"),
+        phase: stringField(data, "phase"),
+        promptError: stringField(data, "promptError"),
+        status: stringField(data, "status"),
+    };
+    const hasCompactData = Object.values(compactData).some(
+        (value) => value !== undefined
+    );
+    return {
+        aborted: payload?.aborted === true ? true : undefined,
+        data: hasCompactData ? compactData : undefined,
+        error: stringField(payload, "error"),
+        errorMessage: stringField(payload, "errorMessage"),
+        runId,
+        sessionKey,
+        state: stringField(payload, "state"),
+        status: stringField(payload, "status"),
+        stream: stringField(payload, "stream"),
+    };
 }
 
 function isProvisionalRunId(runId: string): boolean {
@@ -109,7 +143,7 @@ function lastSequence(run: RetainedRun): number {
  */
 export class OpenClawChatBridge {
     readonly #runsBySession = new Map<string, Map<string, RetainedRun>>();
-    readonly #sessionByRun = new Map<string, string | undefined>();
+    readonly #sessionsByRun = new Map<string, Set<string>>();
     #sequence = 0;
 
     #clearCompletedRuns(sessionKey: string, preservedRunId?: string): void {
@@ -118,9 +152,11 @@ export class OpenClawChatBridge {
             return;
         }
         for (const [runId, run] of runs) {
-            if (run.completed && runId !== preservedRunId) {
-                runs.delete(runId);
+            if (!run.completed || runId === preservedRunId) {
+                continue;
             }
+            runs.delete(runId);
+            this.#forgetRunSession(runId, sessionKey);
         }
         if (runs.size === 0) {
             this.#runsBySession.delete(sessionKey);
@@ -146,31 +182,63 @@ export class OpenClawChatBridge {
             return payload;
         }
 
-        const hasRememberedRun = this.#sessionByRun.has(runId);
-        const rememberedSessionKey = this.#sessionByRun.get(runId);
+        const candidateSessionKeys = new Set(this.#sessionsByRun.get(runId));
+        for (const session of sessions) {
+            if (hasRunIdentifier(session, runId)) {
+                candidateSessionKeys.add(session.key);
+            }
+        }
         const sessionKey =
-            hasRememberedRun && !rememberedSessionKey
-                ? undefined
-                : rememberedSessionKey ||
-                  sessions.find((session) => hasRunIdentifier(session, runId))?.key;
+            candidateSessionKeys.size === 1
+                ? candidateSessionKeys.values().next().value
+                : undefined;
 
         return sessionKey ? { ...record, sessionKey } : payload;
     }
 
     #rememberRunSession(runId: string, sessionKey: string): void {
-        const previousSessionKey = this.#sessionByRun.get(runId);
-        const isAmbiguous =
-            this.#sessionByRun.has(runId) && previousSessionKey !== sessionKey;
-        this.#sessionByRun.delete(runId);
-        this.#sessionByRun.set(runId, isAmbiguous ? undefined : sessionKey);
+        const sessionKeys = new Set(this.#sessionsByRun.get(runId));
+        sessionKeys.add(sessionKey);
+        this.#sessionsByRun.delete(runId);
+        this.#sessionsByRun.set(runId, sessionKeys);
 
-        while (this.#sessionByRun.size > MAX_RUN_ASSOCIATIONS) {
-            const oldestRunId = this.#sessionByRun.keys().next().value;
+        while (this.#sessionsByRun.size > MAX_RUN_ASSOCIATIONS) {
+            const oldestRunId = this.#sessionsByRun.keys().next().value;
             if (!oldestRunId) {
                 break;
             }
-            this.#sessionByRun.delete(oldestRunId);
+            this.#sessionsByRun.delete(oldestRunId);
         }
+    }
+
+    #forgetRunSession(runId: string, sessionKey: string): void {
+        const sessionKeys = this.#sessionsByRun.get(runId);
+        if (!sessionKeys) {
+            return;
+        }
+        sessionKeys.delete(sessionKey);
+        if (sessionKeys.size === 0) {
+            this.#sessionsByRun.delete(runId);
+        }
+    }
+
+    #promoteProvisionalRun(sessionKey: string, providerRunId: string): void {
+        const runs = this.#runsBySession.get(sessionKey);
+        if (!runs || runs.has(providerRunId)) {
+            return;
+        }
+        const provisionalEntries = [...runs].filter(([, run]) =>
+            isProvisionalRunId(run.runId)
+        );
+        if (provisionalEntries.length !== 1) {
+            return;
+        }
+
+        const [provisionalRunId, provisionalRun] = provisionalEntries[0]!;
+        runs.delete(provisionalRunId);
+        this.#forgetRunSession(provisionalRunId, sessionKey);
+        provisionalRun.runId = providerRunId;
+        runs.set(providerRunId, provisionalRun);
     }
 
     #prune(now = Date.now()): void {
@@ -179,6 +247,7 @@ export class OpenClawChatBridge {
                 const ttl = snapshot.completed ? COMPLETED_RUN_TTL_MS : ACTIVE_RUN_TTL_MS;
                 if (now - snapshot.updatedAt > ttl) {
                     runs.delete(runId);
+                    this.#forgetRunSession(runId, sessionKey);
                 }
             }
             if (runs.size === 0) {
@@ -198,8 +267,15 @@ export class OpenClawChatBridge {
             return;
         }
 
-        const isTerminal = isTerminalEvent(envelope.event, envelope.payload);
         const explicitRunId = stringField(payload, "runId");
+        const isTerminal = isTerminalEvent(envelope.event, envelope.payload);
+        this.#prune();
+        const associationBytes = explicitRunId
+            ? Buffer.byteLength(JSON.stringify({ runId: explicitRunId, sessionKey }))
+            : 0;
+        if (explicitRunId && associationBytes <= MAX_BYTES_PER_RUN) {
+            this.#rememberRunSession(explicitRunId, sessionKey);
+        }
         const serializedBytes = Buffer.byteLength(JSON.stringify(envelope));
         const retainedEnvelope =
             serializedBytes <= MAX_BYTES_PER_RUN
@@ -207,11 +283,11 @@ export class OpenClawChatBridge {
                 : isTerminal
                   ? {
                         ...envelope,
-                        payload: {
-                            runId: explicitRunId,
-                            sessionKey,
-                            state: payload?.state,
-                        },
+                        payload: compactTerminalPayload(
+                            payload,
+                            explicitRunId,
+                            sessionKey
+                        ),
                     }
                   : undefined;
         if (!retainedEnvelope) {
@@ -222,8 +298,10 @@ export class OpenClawChatBridge {
             retainedEnvelope === envelope
                 ? serializedBytes
                 : Buffer.byteLength(JSON.stringify(retainedEnvelope));
+        if (retainedBytes > MAX_BYTES_PER_RUN) {
+            return;
+        }
 
-        this.#prune();
         const runs = this.#runsBySession.get(sessionKey) || new Map();
         const activeRuns = runs
             .values()
@@ -239,6 +317,7 @@ export class OpenClawChatBridge {
             const provisional = activeRuns[0];
             if (provisional && isProvisionalRunId(provisional.runId)) {
                 runs.delete(provisional.runId);
+                this.#forgetRunSession(provisional.runId, sessionKey);
                 provisional.runId = explicitRunId;
                 runs.set(explicitRunId, provisional);
                 snapshot = provisional;
@@ -280,6 +359,7 @@ export class OpenClawChatBridge {
                 break;
             }
             runs.delete(oldestRunId);
+            this.#forgetRunSession(oldestRunId, sessionKey);
         }
 
         this.#runsBySession.set(sessionKey, runs);
@@ -300,24 +380,21 @@ export class OpenClawChatBridge {
             if (!oldestSessionKey) {
                 break;
             }
-            this.#runsBySession.delete(oldestSessionKey);
+            this.clearSession(oldestSessionKey);
         }
     }
 
     /** Clears all ephemeral replay state, for example after credentials change. */
     clear(): void {
         this.#runsBySession.clear();
-        this.#sessionByRun.clear();
-        this.#sequence = 0;
+        this.#sessionsByRun.clear();
     }
 
     /** Clears replay state associated with one reset, aborted, or deleted session. */
     clearSession(sessionKey: string): void {
         this.#runsBySession.delete(sessionKey);
-        for (const [runId, mappedSessionKey] of this.#sessionByRun) {
-            if (mappedSessionKey === sessionKey) {
-                this.#sessionByRun.delete(runId);
-            }
+        for (const runId of this.#sessionsByRun.keys()) {
+            this.#forgetRunSession(runId, sessionKey);
         }
     }
 
@@ -353,6 +430,9 @@ export class OpenClawChatBridge {
         }
         const runId = stringField(asRecord(payload), "runId");
         if (sessionKey) {
+            if (runId) {
+                this.#promoteProvisionalRun(sessionKey, runId);
+            }
             this.#clearCompletedRuns(sessionKey, runId);
             if (runId) {
                 this.#rememberRunSession(runId, sessionKey);
@@ -373,6 +453,7 @@ export class OpenClawChatBridge {
             type: "event",
             event,
             payload: this.#enrichPayload(event, payload, sessions),
+            runtimeRecordedAt: Date.now(),
             runtimeSequence: ++this.#sequence,
         };
         this.#retain(envelope);

@@ -12,21 +12,21 @@ import {
 } from "../chatTypes";
 
 export interface RawOpenClawHistoryMessage {
-    role?: string;
+    role?: unknown;
     content?: unknown;
-    text?: string;
-    timestamp?: string | number;
-    command?: boolean;
-    toolCallId?: string;
-    tool_call_id?: string;
-    toolName?: string;
-    tool_name?: string;
-    isError?: boolean;
-    MediaPath?: string;
-    MediaPaths?: string[];
-    MediaType?: string;
-    MediaTypes?: string[];
-    runId?: string;
+    text?: unknown;
+    timestamp?: unknown;
+    command?: unknown;
+    toolCallId?: unknown;
+    tool_call_id?: unknown;
+    toolName?: unknown;
+    tool_name?: unknown;
+    isError?: unknown;
+    MediaPath?: unknown;
+    MediaPaths?: unknown;
+    MediaType?: unknown;
+    MediaTypes?: unknown;
+    runId?: unknown;
 }
 
 function fileNameFromPath(path: string): string {
@@ -55,6 +55,18 @@ function mimeTypeFromPath(path: string): string {
 
 function mediaUrlFromPath(path: string): string {
     return `/api/media?path=${encodeURIComponent(path)}`;
+}
+
+function normalizedTimestamp(value: unknown): string | undefined {
+    const timestamp =
+        typeof value === "number"
+            ? value
+            : typeof value === "string"
+              ? Date.parse(value)
+              : NaN;
+    return Number.isFinite(timestamp) && !Number.isNaN(new Date(timestamp).getTime())
+        ? isoStringFromDate(timestamp)
+        : undefined;
 }
 
 function mediaDirectiveAttachments(text: string): ChatAttachmentDisplay[] {
@@ -112,14 +124,14 @@ function mediaReferenceAttachments(
     message: RawOpenClawHistoryMessage
 ): ChatAttachmentDisplay[] {
     const paths = Array.isArray(message.MediaPaths)
-        ? message.MediaPaths
-        : message.MediaPath
-          ? [message.MediaPath]
+        ? message.MediaPaths.map(String)
+        : message.MediaPath !== undefined && message.MediaPath !== null
+          ? [String(message.MediaPath)]
           : [];
     const types = Array.isArray(message.MediaTypes)
-        ? message.MediaTypes
-        : message.MediaType
-          ? [message.MediaType]
+        ? message.MediaTypes.map(String)
+        : message.MediaType !== undefined && message.MediaType !== null
+          ? [String(message.MediaType)]
           : [];
     return paths.map((path, index) => {
         const mimeType = types[index] || mimeTypeFromPath(path);
@@ -160,7 +172,7 @@ function toolResult(
     message: RawOpenClawHistoryMessage,
     content: unknown
 ): ChatToolResultDisplay | undefined {
-    const role = message.role?.toLowerCase() || "";
+    const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
     if (!role.startsWith("tool")) {
         return undefined;
     }
@@ -178,7 +190,7 @@ function toolResult(
                   ? message.tool_name
                   : undefined,
         content: normalizeText(content),
-        isError: message.isError,
+        isError: typeof message.isError === "boolean" ? message.isError : undefined,
         images: extractImages(content),
     };
 }
@@ -216,7 +228,7 @@ export function normalizeOpenClawHistoryMessage(
         attachments
     );
     return {
-        role: message.role || "unknown",
+        role: typeof message.role === "string" ? message.role : "unknown",
         content,
         text,
         images,
@@ -224,10 +236,7 @@ export function normalizeOpenClawHistoryMessage(
         thinking: extractThinkingBlocks(content),
         toolCalls: extractToolCalls(content),
         toolResult: toolResult(message, content),
-        runId: message.runId,
-        timestamp:
-            typeof message.timestamp === "number"
-                ? isoStringFromDate(message.timestamp)
-                : message.timestamp,
+        runId: typeof message.runId === "string" ? message.runId : undefined,
+        timestamp: normalizedTimestamp(message.timestamp),
     };
 }

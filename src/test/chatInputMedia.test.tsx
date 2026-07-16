@@ -21,11 +21,19 @@ function fakeLargeFile(name: string): File {
     } as File;
 }
 
+function defineFetch(value: typeof fetch): void {
+    Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        value,
+        writable: true,
+    });
+}
+
 describe("chat input media", () => {
     it("loads, limits, removes and rejects oversized attachments", async () => {
         const onError = jest.fn();
         const { result } = renderHook(() =>
-            useChatInputMedia({ onError, setDraft: jest.fn() })
+            useChatInputMedia({ onError, sessionKey: "session-a", setDraft: jest.fn() })
         );
         const input = document.createElement("input");
         result.current.fileInputReference.current = input;
@@ -67,21 +75,56 @@ describe("chat input media", () => {
         expect(onError.mock.calls.at(-1)?.[0]).toContain("large.bin is too large");
     });
 
+    it("reserves attachment capacity across concurrent selections", async () => {
+        const { result } = renderHook(() =>
+            useChatInputMedia({
+                onError: jest.fn(),
+                sessionKey: "session-a",
+                setDraft: jest.fn(),
+            })
+        );
+        const firstFiles = Array.from(
+            { length: 6 },
+            (_, index) => new File(["a"], `first-${index}.txt`)
+        );
+        const secondFiles = Array.from(
+            { length: 6 },
+            (_, index) => new File(["b"], `second-${index}.txt`)
+        );
+
+        await act(async () => {
+            const first = result.current.handleFilesSelected(fileList(firstFiles));
+            const second = result.current.handleFilesSelected(fileList(secondFiles));
+            await Promise.all([first, second]);
+        });
+
+        expect(result.current.attachments).toHaveLength(MAX_ATTACHMENTS);
+        expect(
+            result.current.attachments.filter((attachment) =>
+                attachment.fileName.startsWith("second-")
+            )
+        ).toHaveLength(4);
+    });
+
     it("transcribes voice files and reports provider and input failures", async () => {
-        const originalFetch = globalThis.fetch;
+        const originalFetch = fetch;
         const onError = jest.fn();
         let draft = "Existing ";
         const setDraft = jest.fn((update: SetStateAction<string>) => {
             draft = typeof update === "function" ? update(draft) : update;
         });
-        const { result } = renderHook(() => useChatInputMedia({ onError, setDraft }));
+        const { result } = renderHook(() =>
+            useChatInputMedia({ onError, sessionKey: "session-a", setDraft })
+        );
         const input = document.createElement("input");
         result.current.voiceFileInputReference.current = input;
 
         try {
-            globalThis.fetch = jest.fn(async () =>
-                Response.json({ text: " transcript " })
-            ) as unknown as typeof fetch;
+            defineFetch(
+                jest.fn(async () =>
+                    Response.json({ text: " transcript " })
+                ) as unknown as typeof fetch
+            );
             await act(async () => {
                 await result.current.handleVoiceFileSelected(
                     fileList([new File(["voice"], "voice.webm", { type: "audio/webm" })])
@@ -91,9 +134,11 @@ describe("chat input media", () => {
             expect(result.current.isTranscribing).toBe(false);
             expect(input.value).toBe("");
 
-            globalThis.fetch = jest.fn(
-                async () => new Response("not json", { status: 500 })
-            ) as unknown as typeof fetch;
+            defineFetch(
+                jest.fn(
+                    async () => new Response("not json", { status: 500 })
+                ) as unknown as typeof fetch
+            );
             await act(async () => {
                 await result.current.handleVoiceFileSelected(
                     fileList([new File(["voice"], "failed.webm")])
@@ -101,9 +146,11 @@ describe("chat input media", () => {
             });
             expect(onError.mock.calls.at(-1)?.[0]).toBe("Failed to transcribe audio");
 
-            globalThis.fetch = jest.fn(async () =>
-                Response.json({ text: "  " })
-            ) as unknown as typeof fetch;
+            defineFetch(
+                jest.fn(async () =>
+                    Response.json({ text: "  " })
+                ) as unknown as typeof fetch
+            );
             await act(async () => {
                 await result.current.handleVoiceFileSelected(
                     fileList([new File(["voice"], "silent.webm")])
@@ -127,7 +174,52 @@ describe("chat input media", () => {
             });
             expect(onError.mock.calls.at(-1)?.[0]).toContain("large.webm is too large");
         } finally {
-            globalThis.fetch = originalFetch;
+            defineFetch(originalFetch);
+        }
+    });
+
+    it("ignores a transcription that completes after the session changes", async () => {
+        const originalFetch = fetch;
+        const response = Promise.withResolvers<Response>();
+        let draft = "";
+        const setDraft = (update: SetStateAction<string>) => {
+            draft = typeof update === "function" ? update(draft) : update;
+        };
+        const onError = jest.fn();
+        const { result, rerender } = renderHook(
+            ({ sessionKey }) => useChatInputMedia({ onError, sessionKey, setDraft }),
+            { initialProps: { sessionKey: "session-a" } }
+        );
+        const attachmentInput = document.createElement("input");
+        const voiceInput = document.createElement("input");
+        attachmentInput.value = "pending-attachment";
+        voiceInput.value = "pending-voice";
+        result.current.fileInputReference.current = attachmentInput;
+        result.current.voiceFileInputReference.current = voiceInput;
+
+        try {
+            defineFetch(jest.fn(() => response.promise) as unknown as typeof fetch);
+            let transcription: Promise<void> | undefined;
+            act(() => {
+                transcription = result.current.handleVoiceFileSelected(
+                    fileList([new File(["voice"], "voice.webm", { type: "audio/webm" })])
+                );
+            });
+            await waitFor(() => expect(result.current.isTranscribing).toBe(true));
+
+            rerender({ sessionKey: "session-b" });
+            await waitFor(() => expect(result.current.isTranscribing).toBe(false));
+            expect(attachmentInput.value).toBe("");
+            expect(voiceInput.value).toBe("");
+            await act(async () => {
+                response.resolve(Response.json({ text: "stale transcript" }));
+                await transcription;
+            });
+
+            expect(draft).toBe("");
+            expect(onError).not.toHaveBeenCalledWith(expect.stringContaining("stale"));
+        } finally {
+            defineFetch(originalFetch);
         }
     });
 
@@ -142,7 +234,7 @@ describe("chat input media", () => {
         );
         const onError = jest.fn();
         const { result } = renderHook(() =>
-            useChatInputMedia({ onError, setDraft: jest.fn() })
+            useChatInputMedia({ onError, sessionKey: "session-a", setDraft: jest.fn() })
         );
         const click = jest.fn();
         result.current.voiceFileInputReference.current = {
@@ -182,7 +274,7 @@ describe("chat input media", () => {
     });
 
     it("records, stops, transcribes and releases microphone tracks", async () => {
-        const originalFetch = globalThis.fetch;
+        const originalFetch = fetch;
         const mediaRecorderDescriptor = Object.getOwnPropertyDescriptor(
             globalThis,
             "MediaRecorder"
@@ -230,24 +322,30 @@ describe("chat input media", () => {
         const onError = jest.fn();
 
         try {
-            globalThis.fetch = jest.fn(async () =>
-                Response.json({ text: "recorded" })
-            ) as unknown as typeof fetch;
+            defineFetch(
+                jest.fn(async () =>
+                    Response.json({ text: "recorded" })
+                ) as unknown as typeof fetch
+            );
             Object.defineProperty(globalThis, "MediaRecorder", {
                 configurable: true,
                 value: FakeMediaRecorder,
             });
+            const getUserMedia = jest.fn(async () => stream);
             Object.defineProperty(navigator, "mediaDevices", {
                 configurable: true,
-                value: { getUserMedia: jest.fn(async () => stream) },
+                value: { getUserMedia },
             });
             const { result, unmount } = renderHook(() =>
-                useChatInputMedia({ onError, setDraft })
+                useChatInputMedia({ onError, sessionKey: "session-a", setDraft })
             );
 
             await act(async () => {
-                await result.current.handleToggleRecording();
+                const first = result.current.handleToggleRecording();
+                const second = result.current.handleToggleRecording();
+                await Promise.all([first, second]);
             });
+            expect(getUserMedia).toHaveBeenCalledTimes(1);
             expect(result.current.isRecording).toBe(true);
             FakeMediaRecorder.latest?.emitData(
                 new Blob(["voice"], { type: "audio/webm" })
@@ -265,7 +363,7 @@ describe("chat input media", () => {
             unmount();
             expect(trackStop).toHaveBeenCalledTimes(2);
         } finally {
-            globalThis.fetch = originalFetch;
+            defineFetch(originalFetch);
             if (mediaRecorderDescriptor) {
                 Object.defineProperty(
                     globalThis,

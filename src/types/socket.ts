@@ -13,6 +13,7 @@ export interface SocketEnvelope {
     lineId?: string;
     history?: boolean;
     gatewayConnected?: boolean;
+    runtimeRecordedAt?: number;
     runtimeSequence?: number;
 }
 

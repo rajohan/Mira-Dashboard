@@ -112,15 +112,10 @@ export function nextRefreshedChatMessages(
     previousMessages: ChatHistoryMessage[],
     nextMessages: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {
-    const previousLast = previousMessages.at(-1)?.timestamp;
-    const nextLast = nextMessages.at(-1)?.timestamp;
-    if (previousMessages.length === nextMessages.length && previousLast === nextLast) {
-        return previousMessages;
-    }
     return mergeWithRecentOptimisticMessages(previousMessages, nextMessages);
 }
 
-export function nextHistoryBottomState(
+export function shouldStayAtHistoryBottom(
     wasAtBottom: boolean,
     isNewSession: boolean,
     shouldStickToBottom: boolean
@@ -136,7 +131,7 @@ export function nextHistoryLoadSendError(
     return wasCancelled ? previousError : historyLoadError;
 }
 
-export function scheduleBottomFollowWhenNeeded(
+export function didScheduleBottomFollow(
     shouldStickToBottom: boolean,
     scheduleBottomFollow: () => void
 ): boolean {

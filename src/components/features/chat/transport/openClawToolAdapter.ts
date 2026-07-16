@@ -1,4 +1,4 @@
-import { type ChatHistoryMessage, extractImages } from "../chatTypes";
+import { type ChatHistoryMessage, extractImages, mergeChatImages } from "../chatTypes";
 import {
     argumentDetail,
     compactStatus,
@@ -48,15 +48,20 @@ export function openClawToolMessage(
         phase === "error" ||
         result !== undefined;
     const resultMessage = normalizeOpenClawHistoryMessage({
+        MediaPath: data.MediaPath,
+        MediaPaths: data.MediaPaths,
+        MediaType: data.MediaType,
+        MediaTypes: data.MediaTypes,
         role: "tool",
         content: result,
         runId,
         timestamp,
     });
     const resultContent = resultMessage.text || runtimeText(result);
-    const resultImages = resultMessage.images?.length
-        ? resultMessage.images
-        : extractImages(result);
+    const resultImages = mergeChatImages(
+        resultMessage.images?.length ? resultMessage.images : extractImages(result),
+        extractImages(data.images)
+    );
     const shouldCreateResult = Boolean(
         hasResult &&
         (phase !== "end" ||

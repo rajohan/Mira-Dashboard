@@ -105,7 +105,8 @@ function thinkingSignatures(message: ChatHistoryMessage): string[] {
 function isDiagnosticRecovered(
     diagnostic: ChatHistoryMessage,
     messages: ChatHistoryMessage[],
-    responseStart: number
+    responseStart: number,
+    run: ChatRunState
 ): boolean {
     const candidates = messages.slice(responseStart);
     const tool = new Set(toolSignatures(diagnostic));
@@ -113,6 +114,9 @@ function isDiagnosticRecovered(
     const identity = messageIdentity(diagnostic);
 
     return candidates.some((candidate) => {
+        if (candidate.runId && !isRunMatchingMessage(run, candidate)) {
+            return false;
+        }
         if (messageIdentity(candidate) === identity) {
             return true;
         }
@@ -131,12 +135,14 @@ function isDiagnosticRecovered(
 
 function transientMessage(
     message: ChatHistoryMessage,
-    run: ChatRunState
+    run: ChatRunState,
+    runtimeKey: string
 ): ChatHistoryMessage {
     return {
         ...message,
         local: true,
-        runId: message.runId || run.runId,
+        runId: run.runId,
+        runtimeKey,
         timestamp: message.timestamp || run.updatedAt,
     };
 }
@@ -158,9 +164,9 @@ export function reconcileChatMessages(
                 (left, right) =>
                     diagnosticRank(left.message) - diagnosticRank(right.message)
             )
-            .map((entry) => transientMessage(entry.message, run))
+            .map((entry) => transientMessage(entry.message, run, entry.key))
             .filter(
-                (message) => !isDiagnosticRecovered(message, messages, responseStart)
+                (message) => !isDiagnosticRecovered(message, messages, responseStart, run)
             );
         const finalIndex = canonicalFinalIndex(messages, run);
         if (finalIndex !== -1) {
@@ -168,7 +174,7 @@ export function reconcileChatMessages(
             if (run.assistant) {
                 messages[finalIndex] = mergeChatMessageDetails(
                     canonical,
-                    transientMessage(run.assistant, run)
+                    transientMessage(run.assistant, run, "assistant")
                 );
             }
             messages.splice(finalIndex, 0, ...diagnostics);
@@ -177,7 +183,7 @@ export function reconcileChatMessages(
 
         messages.push(...diagnostics);
         if (run.assistant) {
-            messages.push(transientMessage(run.assistant, run));
+            messages.push(transientMessage(run.assistant, run, "assistant"));
         }
     }
     return dedupeMessages(messages);
@@ -235,7 +241,7 @@ export function projectChat(
     const rows: ChatRow[] = presented.map((message) => ({
         key:
             message.local === true && message.runId
-                ? `stream-${messageDeleteKey(message)}`
+                ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
                 : messageDeleteKey(message),
         kind: message.local === true && message.runId ? "stream" : "message",
         message,

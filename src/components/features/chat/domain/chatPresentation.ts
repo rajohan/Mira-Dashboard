@@ -1,8 +1,10 @@
 import {
+    allChatMessageImages,
     type ChatHistoryMessage,
     type ChatVisibilitySettings,
     isRenderableChatHistoryMessage,
     mergeChatAttachments,
+    mergeChatImages,
     TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
 
@@ -139,7 +141,11 @@ export function presentChatMessages(
     let pendingToolMedia:
         | {
               attachments: NonNullable<ChatHistoryMessage["attachments"]>;
+              images: NonNullable<ChatHistoryMessage["images"]>;
+              local?: boolean;
               runId?: string;
+              runtimeKey?: string;
+              timestamp?: string;
           }
         | undefined;
 
@@ -151,9 +157,13 @@ export function presentChatMessages(
             attachments: pendingToolMedia.attachments,
             content: "",
             hasOnlyHiddenToolAttachments: true,
+            images: pendingToolMedia.images,
+            local: pendingToolMedia.local,
             role: "assistant",
             runId: pendingToolMedia.runId,
+            runtimeKey: pendingToolMedia.runtimeKey,
             text: "",
+            timestamp: pendingToolMedia.timestamp,
         });
         pendingToolMedia = undefined;
     };
@@ -163,12 +173,13 @@ export function presentChatMessages(
         const isTool = TOOL_ROLE_VARIANTS.includes(role);
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
         const isToolDiagnostic = Boolean(
-            isTool || (hasToolDetails && !message.text.trim() && !message.images?.length)
+            isTool || (hasToolDetails && !message.text.trim())
         );
+        const toolImages = allChatMessageImages(message);
         if (
             isToolDiagnostic &&
             !visibility.shouldShowTools &&
-            Boolean(message.attachments?.length)
+            ((message.attachments?.length || 0) > 0 || toolImages.length > 0)
         ) {
             if (pendingToolMedia && pendingToolMedia.runId !== message.runId) {
                 flushToolMedia();
@@ -178,7 +189,13 @@ export function presentChatMessages(
                     pendingToolMedia?.attachments,
                     message.attachments
                 ),
+                images: mergeChatImages(pendingToolMedia?.images, toolImages),
+                local: pendingToolMedia
+                    ? pendingToolMedia.local === true && message.local === true
+                    : message.local,
                 runId: message.runId,
+                runtimeKey: pendingToolMedia?.runtimeKey || message.runtimeKey,
+                timestamp: pendingToolMedia?.timestamp || message.timestamp,
             };
             continue;
         }
@@ -201,7 +218,10 @@ export function presentChatMessages(
                     message.attachments,
                     pendingToolMedia.attachments
                 ),
-                hasOnlyHiddenToolAttachments: !message.attachments?.length,
+                hasOnlyHiddenToolAttachments:
+                    pendingToolMedia.attachments.length > 0 &&
+                    (message.attachments?.length || 0) === 0,
+                images: mergeChatImages(message.images, pendingToolMedia.images),
             });
             pendingToolMedia = undefined;
             continue;

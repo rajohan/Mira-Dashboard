@@ -1072,12 +1072,14 @@ describe("shared component helpers", () => {
         const setDraft = jest.fn();
         const setSendError = jest.fn();
         const confirmResetSession = jest.fn(async () => false);
+        const selectedSessionKeyReference = { current: "agent:main:main" };
         const runSlashCommand = useChatSlashCommands({
             attachments: [],
             abort,
             clearRuntime,
             confirmResetSession,
             selectedSessionKey: "agent:main:main",
+            selectedSessionKeyReference,
             setDraft,
             setMessages,
             setSendError,
@@ -1107,6 +1109,7 @@ describe("shared component helpers", () => {
             clearRuntime,
             confirmResetSession,
             selectedSessionKey: "agent:main:main",
+            selectedSessionKeyReference,
             setDraft,
             setMessages,
             setSendError,
@@ -1128,6 +1131,25 @@ describe("shared component helpers", () => {
             ])
         ).resolves.toBe(true);
         expect(setSendError).toHaveBeenCalledWith("/compact cannot include attachments.");
+
+        const abortDeferred = Promise.withResolvers<void>();
+        const switchedMessages = jest.fn();
+        const switchedStop = useChatSlashCommands({
+            attachments: [],
+            abort: jest.fn(() => abortDeferred.promise),
+            clearRuntime,
+            confirmResetSession,
+            selectedSessionKey: "agent:main:main",
+            selectedSessionKeyReference,
+            setDraft,
+            setMessages: switchedMessages,
+            setSendError,
+        });
+        const stopPromise = switchedStop("/stop");
+        selectedSessionKeyReference.current = "agent:other:main";
+        abortDeferred.resolve();
+        await expect(stopPromise).resolves.toBe(true);
+        expect(switchedMessages).not.toHaveBeenCalled();
 
         expect(
             chatThinkingOptions({

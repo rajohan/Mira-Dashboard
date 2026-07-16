@@ -75,8 +75,8 @@ export function chatAttachmentIdentity(attachment: ChatAttachmentDisplay): strin
     ].join("::");
 }
 
-/** Represents chat gateway attachment. */
-export interface ChatGatewayAttachment {
+/** Represents one attachment in the provider-independent transport contract. */
+export interface ChatTransportAttachment {
     type: string;
     mimeType: string;
     fileName: string;
@@ -160,6 +160,18 @@ export interface ChatHistoryMessage {
     timestamp?: string;
     local?: boolean;
     runId?: string;
+    /** Stable identity for one transient runtime row inside a run. */
+    runtimeKey?: string;
+}
+
+/** Returns every image carried directly or by a nested tool result. */
+export function allChatMessageImages(message: ChatHistoryMessage): ChatImageBlock[] {
+    let images = mergeChatImages(message.images, message.toolResult?.images);
+    const toolCalls = message.toolCalls || [];
+    for (const toolCall of toolCalls) {
+        images = mergeChatImages(images, toolCall.toolResult?.images);
+    }
+    return images;
 }
 
 /** Represents one chat row. */
@@ -260,9 +272,9 @@ export function attachmentKind(mimeType: string): ChatAttachmentDisplay["kind"] 
 }
 
 /** Performs gateway attachments. */
-export function gatewayAttachments(
+export function chatTransportAttachments(
     attachments: ChatSendAttachment[]
-): ChatGatewayAttachment[] {
+): ChatTransportAttachment[] {
     return attachments.map((attachment) => ({
         type: attachment.kind,
         mimeType: attachment.mimeType,
@@ -343,7 +355,7 @@ export function isRenderableChatHistoryMessage(
         return Boolean(
             visibility.shouldShowTools &&
             ((message.toolResult?.content.trim() || "").length > 0 ||
-                (message.toolResult?.images?.length || 0) > 0 ||
+                allChatMessageImages(message).length > 0 ||
                 (message.attachments?.length || 0) > 0)
         );
     }

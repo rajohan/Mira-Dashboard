@@ -26,6 +26,34 @@ function event(sequence: number, value: EventDraft): ChatRuntimeEvent {
     } as ChatRuntimeEvent;
 }
 
+function noIdToolCall(sequence: number): ChatRuntimeEvent {
+    return event(sequence, {
+        kind: "tool",
+        message: {
+            content: "",
+            role: "assistant",
+            text: "",
+            toolCalls: [{ arguments: { cmd: "date" }, name: "exec" }],
+        },
+        runId: "run-1",
+        toolKey: 'tool:exec:{"cmd":"date"}',
+    });
+}
+
+function noIdToolResult(sequence: number, content: string): ChatRuntimeEvent {
+    return event(sequence, {
+        kind: "tool",
+        message: {
+            content,
+            role: "tool",
+            text: content,
+            toolResult: { content, name: "exec" },
+        },
+        runId: "run-1",
+        toolKey: "tool:exec:undefined",
+    });
+}
+
 describe("chat runtime state", () => {
     it("keeps duplicate provider run ids scoped to their sessions", () => {
         const first = event(16, {
@@ -193,6 +221,22 @@ describe("chat runtime state", () => {
         expect(diagnostics?.[0]?.message.toolCalls?.[0]?.toolResult?.content).toBe("Thu");
     });
 
+    it("keeps repeated no-id tool invocations distinct", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            noIdToolCall(16),
+            noIdToolResult(32, "first"),
+            noIdToolCall(48),
+            noIdToolResult(64, "second"),
+        ]);
+
+        const diagnostics = state.sessions[SESSION]?.runs["run-1"]?.diagnostics;
+        expect(diagnostics).toHaveLength(2);
+        expect(
+            diagnostics?.map((entry) => entry.message.toolCalls?.[0]?.toolResult?.content)
+        ).toEqual(["first", "second"]);
+        expect(new Set(diagnostics?.map((entry) => entry.key)).size).toBe(2);
+    });
+
     it("drops a completed turn when the next run starts", () => {
         const completed = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -211,5 +255,108 @@ describe("chat runtime state", () => {
 
         expect(next.sessions[SESSION]?.runs["old-run"]).toBeUndefined();
         expect(next.sessions[SESSION]?.runs["new-run"]?.phase).toBe("active");
+    });
+
+    it("creates and reuses a provisional run for runless events", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+            }),
+            event(32, {
+                kind: "finish",
+                message: {
+                    content: "done",
+                    role: "assistant",
+                    text: "done",
+                },
+                outcome: "completed",
+            }),
+        ]);
+
+        const runs = Object.values(state.sessions[SESSION]?.runs || {});
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            assistant: { text: "done" },
+            phase: "completed",
+            runId: "runtime-runless-16",
+        });
+        expect(runs[0]?.diagnostics[0]?.message.thinking?.[0]?.text).toBe("working");
+    });
+
+    it("keeps a concrete final when a runless terminal event follows it", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "finish",
+                message: {
+                    content: "done",
+                    role: "assistant",
+                    text: "done",
+                },
+                outcome: "completed",
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "finish",
+                outcome: "completed",
+            }),
+        ]);
+
+        const runs = Object.values(state.sessions[SESSION]?.runs || {});
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            assistant: { text: "done" },
+            lastSequence: 32,
+            phase: "completed",
+            runId: "run-1",
+        });
+    });
+
+    it("does not let metadata completion overwrite a terminal error", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                error: "model failed",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "finish",
+                outcome: "completed",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["run-1"]).toMatchObject({
+            error: "model failed",
+            lastSequence: 32,
+            phase: "error",
+        });
+    });
+
+    it("lets an authoritative final replace an earlier terminal state", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                error: "transient failure",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-1",
+            }),
+            event(32, {
+                authoritative: true,
+                kind: "finish",
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["run-1"]).toMatchObject({
+            error: undefined,
+            phase: "completed",
+        });
     });
 });

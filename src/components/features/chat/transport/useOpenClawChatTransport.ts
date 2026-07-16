@@ -8,8 +8,8 @@ import type {
     ChatSessionPreferences,
     ChatTransport,
 } from "./chatTransport";
-import { OpenClawChatAdapter, type OpenClawRuntimeSnapshot } from "./openClawChatAdapter";
-import type { RawOpenClawHistoryMessage } from "./openClawHistoryNormalizer";
+import { asRecord, openClawThroughSequence, stringValue } from "./openClawAdapterValues";
+import { OpenClawChatAdapter } from "./openClawChatAdapter";
 
 /** Connects the provider-independent chat contract to OpenClaw's Gateway RPCs. */
 export function useOpenClawChatTransport(): ChatTransport {
@@ -27,22 +27,36 @@ export function useOpenClawChatTransport(): ChatTransport {
     const adapter = adapterReference.current.adapter;
 
     const history = async (sessionKey: string, limit: number) => {
-        const result = await socket.request<{
-            messages?: RawOpenClawHistoryMessage[];
-        }>("chat.history", { limit, sessionKey });
-        return adapter.history(result.messages);
+        const result = asRecord(
+            await socket.request("chat.history", { limit, sessionKey })
+        );
+        return adapter.history(result?.messages);
     };
 
     const models = async () => {
-        const result = await socket.request<{ models?: ChatModelOption[] }>(
-            "models.list",
-            { view: "configured" }
+        const result = asRecord(
+            await socket.request("models.list", { view: "configured" })
         );
-        return result.models || [];
+        return Array.isArray(result?.models)
+            ? result.models.flatMap((model) => {
+                  const record = asRecord(model);
+                  if (!record) {
+                      return [];
+                  }
+                  const option: ChatModelOption = {
+                      id: stringValue(record.id),
+                      label: stringValue(record.label),
+                      name: stringValue(record.name),
+                  };
+                  return option.id || option.label || option.name ? [option] : [];
+              })
+            : [];
     };
 
-    const send = (request: ChatSendRequest) =>
-        socket.request<{ runId?: string }>("chat.send", { ...request });
+    const send = async (request: ChatSendRequest) => {
+        const result = asRecord(await socket.request("chat.send", { ...request }));
+        return { runId: stringValue(result?.runId) };
+    };
 
     const abort = async (sessionKey: string) => {
         await socket.request("chat.abort", { sessionKey });
@@ -59,17 +73,12 @@ export function useOpenClawChatTransport(): ChatTransport {
     };
 
     const snapshot = async (sessionKey: string): Promise<ChatRuntimeSnapshot> => {
-        const result = await socket.request<OpenClawRuntimeSnapshot>(
-            "chat.runtimeSnapshot",
-            { sessionKey }
-        );
+        const rawResult = await socket.request("chat.runtimeSnapshot", { sessionKey });
+        const result = asRecord(rawResult);
         return {
-            completed: result.completed === true,
-            events: adapter.snapshot(result),
-            throughSequence:
-                typeof result.throughSequence === "number"
-                    ? result.throughSequence * 16 + 15
-                    : 0,
+            completed: result?.completed === true,
+            events: adapter.snapshot(rawResult),
+            throughSequence: openClawThroughSequence(result?.throughSequence),
         };
     };
 

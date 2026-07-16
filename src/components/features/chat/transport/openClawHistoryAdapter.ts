@@ -47,7 +47,9 @@ export function adaptOpenClawHistory(
         );
         const assistantIndex = result.findLastIndex(
             (candidate, index) =>
-                index > latestUserIndex &&
+                (message.runId
+                    ? candidate.runId === message.runId
+                    : index > latestUserIndex) &&
                 matchingToolCallIndex(message, candidate) !== -1
         );
         if (assistantIndex === -1) {
@@ -67,8 +69,7 @@ export function adaptOpenClawHistory(
             attachments: mergeChatAttachments(assistant.attachments, message.attachments),
             timestamp: message.timestamp || assistant.timestamp,
             toolCalls,
-            toolResult:
-                toolCalls.length === 1 ? message.toolResult : assistant.toolResult,
+            toolResult: (toolCalls.length === 1 ? message : assistant).toolResult,
         };
     }
     return result;

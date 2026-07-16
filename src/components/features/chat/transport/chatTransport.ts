@@ -1,9 +1,9 @@
-import type { ChatGatewayAttachment, ChatHistoryMessage } from "../chatTypes";
+import type { ChatHistoryMessage, ChatTransportAttachment } from "../chatTypes";
 import type { ChatModelOption } from "../chatUtilities";
 import type { ChatRuntimeEvent } from "../domain/chatState";
 
 export interface ChatSendRequest {
-    attachments?: ChatGatewayAttachment[];
+    attachments?: ChatTransportAttachment[];
     idempotencyKey?: string;
     message: string;
     sessionId?: string;

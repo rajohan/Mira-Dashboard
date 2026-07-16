@@ -37,6 +37,44 @@ function message(role: string, text: string, runId?: string): ChatHistoryMessage
     return { content: text, role, runId, text };
 }
 
+function thinkingMessage(runId: string): ChatHistoryMessage {
+    return {
+        content: [{ text: "same reasoning", type: "thinking" }],
+        role: "assistant",
+        runId,
+        text: "",
+        thinking: [{ text: "same reasoning" }],
+    };
+}
+
+function noIdToolCall(sequence: number): ChatRuntimeEvent {
+    return event(sequence, {
+        kind: "tool",
+        message: {
+            content: "",
+            role: "assistant",
+            text: "",
+            toolCalls: [{ arguments: { cmd: "date" }, name: "exec" }],
+        },
+        runId: "run-1",
+        toolKey: 'tool:exec:{"cmd":"date"}',
+    });
+}
+
+function noIdToolResult(sequence: number, content: string): ChatRuntimeEvent {
+    return event(sequence, {
+        kind: "tool",
+        message: {
+            content,
+            role: "tool",
+            text: content,
+            toolResult: { content, name: "exec" },
+        },
+        runId: "run-1",
+        toolKey: "tool:exec:undefined",
+    });
+}
+
 describe("chat projection", () => {
     it("matches a recovered final only inside the latest user turn", () => {
         const history = [
@@ -99,6 +137,56 @@ describe("chat projection", () => {
             ["same", "run-1"],
             ["same", "run-2"],
         ]);
+    });
+
+    it("keeps identical diagnostics from distinct overlapping runs", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: thinkingMessage("run-1"),
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "thinking",
+                message: thinkingMessage("run-2"),
+                runId: "run-2",
+            }),
+        ]);
+
+        const reconciled = reconcileChatMessages(
+            [message("user", "parallel")],
+            runtime.sessions[SESSION]
+        );
+        expect(
+            reconciled
+                .filter((item) => item.thinking?.[0]?.text === "same reasoning")
+                .map((item) => item.runId)
+        ).toEqual(["run-1", "run-2"]);
+    });
+
+    it("keeps repeated no-id tool invocations distinct within one run", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            noIdToolCall(16),
+            noIdToolResult(32, "first"),
+            noIdToolCall(48),
+            noIdToolResult(64, "second"),
+        ]);
+
+        const projection = projectChat(
+            [message("user", "run twice")],
+            runtime,
+            SESSION,
+            createChatVisibility(false, true),
+            false,
+            new Set()
+        );
+        const toolRows = projection.rows.filter((row) => row.message.toolCalls?.length);
+
+        expect(toolRows).toHaveLength(2);
+        expect(
+            toolRows.map((row) => row.message.toolCalls?.[0]?.toolResult?.content)
+        ).toEqual(["first", "second"]);
+        expect(new Set(toolRows.map((row) => row.key)).size).toBe(2);
     });
 
     it("inserts unrecovered diagnostics immediately before a canonical final", () => {
@@ -286,6 +374,48 @@ describe("chat projection", () => {
 
         expect(visible).toHaveLength(1);
         expect(visible[0]?.attachments?.[0]?.fileName).toBe("generated.txt");
+    });
+
+    it("preserves top-level and nested tool images in both visibility modes", () => {
+        const toolMessage: ChatHistoryMessage = {
+            content: "",
+            images: [{ data: "top-level", type: "image" }],
+            role: "tool",
+            runId: "run-1",
+            text: "",
+            toolResult: {
+                content: "",
+                images: [{ data: "nested", type: "image" }],
+                name: "generate",
+            },
+            toolCalls: [
+                {
+                    name: "generate",
+                    toolResult: {
+                        content: "",
+                        images: [{ data: "nested-call", type: "image" }],
+                    },
+                },
+            ],
+        };
+
+        const hidden = presentChatMessages(
+            [toolMessage, message("assistant", "done", "run-1")],
+            createChatVisibility(true, false)
+        );
+        expect(hidden).toHaveLength(1);
+        expect(hidden[0]?.images?.map((image) => image.data)).toEqual([
+            "top-level",
+            "nested",
+            "nested-call",
+        ]);
+
+        const shown = presentChatMessages(
+            [toolMessage],
+            createChatVisibility(true, true)
+        );
+        expect(shown).toHaveLength(1);
+        expect(shown[0]?.images?.[0]?.data).toBe("top-level");
     });
 
     it("treats thinking visibility as a reversible projection", () => {

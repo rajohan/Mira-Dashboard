@@ -15,6 +15,7 @@ const NON_WORK_TOOLS = new Set([
     "send",
     "typing",
 ]);
+const MAX_OPENCLAW_SEQUENCE = Math.floor((Number.MAX_SAFE_INTEGER - 15) / 16);
 
 export function asRecord(value: unknown): Record<string, unknown> | undefined {
     return value && typeof value === "object" && !Array.isArray(value)
@@ -193,11 +194,25 @@ export function normalizeAssistant(value: unknown, runId?: string): ChatHistoryM
     };
 }
 
-function timestampFor(payload: Record<string, unknown>): string {
-    const timestamp = payload.ts;
-    return typeof timestamp === "number" && Number.isFinite(timestamp)
-        ? isoStringFromDate(timestamp)
-        : currentIsoString();
+function timestampFor(
+    envelope: Record<string, unknown>,
+    payload: Record<string, unknown>
+): string {
+    for (const timestamp of [payload.ts, payload.timestamp, envelope.runtimeRecordedAt]) {
+        const timestampMs =
+            typeof timestamp === "number"
+                ? timestamp
+                : typeof timestamp === "string"
+                  ? Date.parse(timestamp)
+                  : NaN;
+        if (
+            Number.isFinite(timestampMs) &&
+            !Number.isNaN(new Date(timestampMs).getTime())
+        ) {
+            return isoStringFromDate(timestampMs);
+        }
+    }
+    return currentIsoString();
 }
 
 export interface OpenClawEventContext {
@@ -224,13 +239,26 @@ export function openClawEventContext(raw: unknown): OpenClawEventContext | undef
         payload,
         runId: stringValue(payload.runId),
         sessionKey,
-        timestamp: timestampFor(payload),
+        timestamp: timestampFor(envelope, payload),
     };
 }
 
 export function openClawSequence(raw: unknown, fallback: number): number {
     const sequence = asRecord(raw)?.runtimeSequence;
-    return typeof sequence === "number" && Number.isSafeInteger(sequence)
+    return typeof sequence === "number" &&
+        Number.isSafeInteger(sequence) &&
+        sequence >= 0 &&
+        sequence <= MAX_OPENCLAW_SEQUENCE
         ? sequence
         : fallback;
+}
+
+/** Converts a validated backend sequence into the canonical event cutoff. */
+export function openClawThroughSequence(value: unknown): number {
+    return typeof value === "number" &&
+        Number.isSafeInteger(value) &&
+        value >= 0 &&
+        value <= MAX_OPENCLAW_SEQUENCE
+        ? value * 16 + 15
+        : 0;
 }

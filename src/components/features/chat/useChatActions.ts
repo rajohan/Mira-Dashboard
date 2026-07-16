@@ -13,7 +13,7 @@ import { isResetSlashCommand, isSessionActive } from "./chatPageUtilities";
 import {
     type ChatHistoryMessage,
     type ChatSendAttachment,
-    gatewayAttachments,
+    chatTransportAttachments,
     optimisticAttachmentDisplay,
 } from "./chatTypes";
 import {
@@ -101,6 +101,7 @@ export function useChatActions({
         abort: transport.abort,
         clearRuntime: runtime.clearSession,
         selectedSessionKey,
+        selectedSessionKeyReference,
         attachments,
         setMessages,
         setDraft,
@@ -122,8 +123,11 @@ export function useChatActions({
         setIsSending(sendCountReference.current > 0);
     };
 
-    const isBlockedByInFlightSend = (text: string) => {
-        const slashCommand = text.startsWith("/") && attachments.length === 0;
+    const isBlockedByInFlightSend = (
+        text: string,
+        attachmentCount = attachments.length
+    ) => {
+        const slashCommand = text.startsWith("/") && attachmentCount === 0;
         return sendCountReference.current > 0 && !(slashCommand && activeRunCount > 0);
     };
 
@@ -133,7 +137,10 @@ export function useChatActions({
         }
         const pendingSessionKey = selectedSessionKey;
         let text = draft.trim();
-        if (isBlockedByInFlightSend(text) || (!text && attachments.length === 0)) {
+        if (
+            isBlockedByInFlightSend(text, attachments.length) ||
+            (!text && attachments.length === 0)
+        ) {
             return;
         }
 
@@ -149,19 +156,29 @@ export function useChatActions({
 
         text = draftReference.current.trim();
         const currentAttachments = attachmentsReference.current;
-        if (isBlockedByInFlightSend(text) || (!text && currentAttachments.length === 0)) {
+        if (
+            isBlockedByInFlightSend(text, currentAttachments.length) ||
+            (!text && currentAttachments.length === 0)
+        ) {
             return;
         }
 
         const sendEpoch = beginSend();
         if (text.startsWith("/")) {
             try {
-                if (await handleSlashCommand(text, currentAttachments)) {
+                const wasHandled = await handleSlashCommand(text, currentAttachments);
+                if (selectedSessionKeyReference.current !== pendingSessionKey) {
+                    endSend(sendEpoch);
+                    return;
+                }
+                if (wasHandled) {
                     endSend(sendEpoch);
                     return;
                 }
             } catch (error) {
-                setSendError(chatErrorMessage(error, "Failed to run slash command"));
+                if (selectedSessionKeyReference.current === pendingSessionKey) {
+                    setSendError(chatErrorMessage(error, "Failed to run slash command"));
+                }
                 endSend(sendEpoch);
                 return;
             }
@@ -174,7 +191,7 @@ export function useChatActions({
             text,
             images: [],
             attachments: optimisticAttachmentDisplay(currentAttachments),
-            local: text ? undefined : true,
+            local: true,
             timestamp: currentIsoString(),
         };
         const optimisticIdentity = messageIdentity(userMessage);
@@ -203,13 +220,13 @@ export function useChatActions({
             ? undefined
             : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         if (idempotencyKey) {
-            runtime.beginRun(selectedSessionKey, idempotencyKey);
+            runtime.beginRun(pendingSessionKey, idempotencyKey);
         }
 
         try {
             if (!text.startsWith("/") && selectedSession?.verboseLevel !== "full") {
                 try {
-                    await transport.patchSession(selectedSessionKey, {
+                    await transport.patchSession(pendingSessionKey, {
                         verboseLevel: "full",
                     });
                 } catch {
@@ -217,24 +234,31 @@ export function useChatActions({
                 }
             }
             const result = await transport.send({
-                sessionKey: selectedSessionKey,
-                sessionId: providerSessionId(selectedSession, selectedSessionKey),
+                sessionKey: pendingSessionKey,
+                sessionId: providerSessionId(selectedSession, pendingSessionKey),
                 message: text,
-                attachments: gatewayAttachments(currentAttachments),
+                attachments: chatTransportAttachments(currentAttachments),
                 idempotencyKey,
             });
             if (resetCommand) {
-                setMessages([]);
-                runtime.clearSession(selectedSessionKey);
+                runtime.clearSession(pendingSessionKey);
+                if (selectedSessionKeyReference.current === pendingSessionKey) {
+                    setMessages([]);
+                }
             } else if (idempotencyKey) {
-                runtime.acknowledgeRun(selectedSessionKey, idempotencyKey, result.runId);
+                runtime.acknowledgeRun(pendingSessionKey, idempotencyKey, result.runId);
             }
         } catch (error) {
-            setSendError(chatErrorMessage(error, "Failed to send message"));
             if (idempotencyKey) {
-                runtime.clearRun(selectedSessionKey, idempotencyKey);
+                runtime.clearRun(pendingSessionKey, idempotencyKey);
             }
-            if (!resetCommand) {
+            if (selectedSessionKeyReference.current === pendingSessionKey) {
+                setSendError(chatErrorMessage(error, "Failed to send message"));
+            }
+            if (
+                !resetCommand &&
+                selectedSessionKeyReference.current === pendingSessionKey
+            ) {
                 setMessages((previous) =>
                     rollbackFailedOptimisticMessage(
                         previous,
@@ -306,7 +330,11 @@ export function useChatActions({
                 await transport.patchSession(patchSessionKey, patch);
                 return true;
             } catch (error) {
-                setSendError(chatErrorMessage(error, "Failed to update chat settings"));
+                if (selectedSessionKeyReference.current === patchSessionKey) {
+                    setSendError(
+                        chatErrorMessage(error, "Failed to update chat settings")
+                    );
+                }
                 return false;
             } finally {
                 setPendingPatchCounts((previous) => ({
@@ -329,22 +357,23 @@ export function useChatActions({
         if (!selectedSessionKey || isSessionControlsDisabled) {
             return;
         }
+        const compactSessionKey = selectedSessionKey;
         const idempotencyKey = `dashboard-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        runtime.beginRun(selectedSessionKey, idempotencyKey, "compact");
+        runtime.beginRun(compactSessionKey, idempotencyKey, "compact");
         setSendError(undefined);
         try {
             const result = await transport.send({
-                sessionKey: selectedSessionKey,
-                sessionId:
-                    selectedSession?.sessionId ||
-                    providerSessionId(selectedSession, selectedSessionKey),
+                sessionKey: compactSessionKey,
+                sessionId: providerSessionId(selectedSession, compactSessionKey),
                 message: "/compact",
                 idempotencyKey,
             });
-            runtime.acknowledgeRun(selectedSessionKey, idempotencyKey, result.runId);
+            runtime.acknowledgeRun(compactSessionKey, idempotencyKey, result.runId);
         } catch (error) {
-            runtime.clearRun(selectedSessionKey, idempotencyKey);
-            setSendError(chatErrorMessage(error, "Failed to compact context"));
+            runtime.clearRun(compactSessionKey, idempotencyKey);
+            if (selectedSessionKeyReference.current === compactSessionKey) {
+                setSendError(chatErrorMessage(error, "Failed to compact context"));
+            }
         }
     };
 
@@ -366,6 +395,9 @@ function providerSessionId(
     session: Session | undefined,
     sessionKey: string
 ): string | undefined {
+    if (session?.sessionId) {
+        return session.sessionId;
+    }
     return session?.id && session.id !== "unknown" && session.id !== sessionKey
         ? session.id
         : undefined;

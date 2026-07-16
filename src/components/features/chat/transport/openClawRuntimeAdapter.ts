@@ -24,6 +24,7 @@ type ChatRuntimeEventDraft = WithoutSequence<ChatRuntimeEvent>;
 export interface OpenClawRuntimeEnvelope {
     event?: unknown;
     payload?: unknown;
+    runtimeRecordedAt?: unknown;
     runtimeSequence?: unknown;
     type?: unknown;
 }
@@ -71,11 +72,13 @@ function chatEventDrafts(
             ? undefined
             : normalizeAssistant(rawMessage, common.runId);
     const isCommand = asRecord(payload.message)?.command === true;
+    const error = stringValue(payload.errorMessage);
     return [
         {
             ...common,
+            authoritative: true,
             kind: "finish",
-            error: stringValue(payload.errorMessage),
+            error,
             message: message
                 ? {
                       ...message,
@@ -90,6 +93,11 @@ function chatEventDrafts(
                     : state === "aborted"
                       ? "aborted"
                       : "error",
+            suppressIfToolFailure: Boolean(
+                error &&
+                (error.startsWith("⚠️ 🛠️") ||
+                    /^tool (?:call|execution) failed\b/iu.test(error))
+            ),
         },
     ];
 }
@@ -174,17 +182,22 @@ function runtimeStreamDrafts(
         const error =
             stringValue(data.errorMessage) ||
             stringValue(data.promptError) ||
-            stringValue(payload.errorMessage);
-        const isAborted = data.aborted === true || stringValue(data.status) === "aborted";
+            stringValue(data.error) ||
+            stringValue(payload.errorMessage) ||
+            stringValue(payload.error);
+        const status = stringValue(data.status) || stringValue(payload.status);
+        const isAborted =
+            data.aborted === true || payload.aborted === true || status === "aborted";
+        const isError =
+            Boolean(error) ||
+            phase === "error" ||
+            status === "error" ||
+            status === "failed";
         drafts.push({
             ...common,
             kind: "finish",
             error,
-            outcome: isAborted
-                ? "aborted"
-                : error || phase === "error"
-                  ? "error"
-                  : "completed",
+            outcome: isAborted ? "aborted" : isError ? "error" : "completed",
         });
     } else if (!progress.text && OPENCLAW_WORK_STREAMS.has(stream) && phase === "start") {
         drafts.push({ ...common, kind: "status", text: "Thinking" });

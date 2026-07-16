@@ -108,6 +108,7 @@ export function Chat() {
 
     const inputMedia = useChatInputMedia({
         onError: setSendError,
+        sessionKey: selectedSessionKey,
         setDraft,
     });
     const {
@@ -146,7 +147,6 @@ export function Chat() {
     const history = useChatHistory({
         isConnected,
         onError: setSendError,
-        onSessionChanged: clearAttachments,
         selectedSessionKey,
         selectedSessionKeyReference,
         selectedSessionUpdatedAt,
@@ -437,15 +437,13 @@ export function Chat() {
                         onSend={() => void handleSend()}
                         onStop={() => void handleStop()}
                         onToggleRecording={() => void handleToggleRecording()}
-                        onToggleThinking={() => {
-                            setShowThinkingOutput(!showThinkingOutput);
-                        }}
+                        onToggleThinking={() => setShowThinkingOutput((value) => !value)}
                         onToggleTools={() => setShowToolOutput((value) => !value)}
                         onToggleKeepThinkingAfterFinal={() => {
                             if (!showThinkingOutput) {
                                 return;
                             }
-                            setKeepThinkingAfterFinal(!keepThinkingAfterFinal);
+                            setKeepThinkingAfterFinal((value) => !value);
                         }}
                         onSelectThinkingLevel={(thinkingLevel) =>
                             void patchSelectedSession({

@@ -1017,6 +1017,44 @@ describe("gateway behavior", () => {
                 .find((message) => message.id === "runtime-snapshot-provisional")?.payload
         ).toMatchObject({ completed: true, events: [{}, {}, {}] });
 
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "fire and forget reasoning" },
+                runId: "fire-and-forget-run",
+                sessionKey: "agent:fire-and-forget:main",
+                stream: "thinking",
+            },
+        });
+        const requestCountBeforeNotification = client?.requests.length || 0;
+        socket.emitMessage({
+            method: "chat.send",
+            params: {
+                message: "/reset",
+                sessionKey: "agent:fire-and-forget:main",
+            },
+            type: "request",
+        });
+        await waitFor(
+            () => (client?.requests.length || 0) > requestCountBeforeNotification
+        );
+        socket.emitMessage({
+            id: "runtime-snapshot-after-idless-reset",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:fire-and-forget:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-idless-reset"')
+            )
+        );
+        expect(
+            socket.sent.find((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-idless-reset"')
+            )
+        ).toContain('"events":[]');
+
         const multiByteDelta = "é".repeat(210_000);
         for (const marker of ["first", "second", "third"]) {
             client?.options.onEvent?.({

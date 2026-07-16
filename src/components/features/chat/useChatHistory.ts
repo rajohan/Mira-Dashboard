@@ -8,9 +8,9 @@ import {
 } from "react";
 
 import {
-    nextHistoryBottomState,
     nextHistoryLoadSendError,
     nextRefreshedChatMessages,
+    shouldStayAtHistoryBottom,
 } from "./chatPageUtilities";
 import type { ChatHistoryMessage } from "./chatTypes";
 import {
@@ -25,7 +25,6 @@ const LIVE_HISTORY_POLL_MS = 2000;
 interface ChatHistoryOptions {
     isConnected: boolean;
     onError: Dispatch<SetStateAction<string | undefined>>;
-    onSessionChanged(): void;
     selectedSessionKey: string;
     selectedSessionKeyReference: MutableRefObject<string>;
     selectedSessionUpdatedAt?: number;
@@ -38,7 +37,6 @@ interface ChatHistoryOptions {
 export function useChatHistory({
     isConnected,
     onError,
-    onSessionChanged,
     selectedSessionKey,
     selectedSessionKeyReference,
     selectedSessionUpdatedAt,
@@ -53,11 +51,27 @@ export function useChatHistory({
         undefined
     );
     const backgroundAbortReference = useRef<AbortController | undefined>(undefined);
+    const historyRequestSequenceReference = useRef(0);
+    const latestAppliedHistoryRequestReference = useRef(0);
     const transportReference = useRef(transport);
-    const sessionChangedReference = useRef(onSessionChanged);
 
     transportReference.current = transport;
-    sessionChangedReference.current = onSessionChanged;
+
+    const beginHistoryRequest = () => {
+        historyRequestSequenceReference.current += 1;
+        return historyRequestSequenceReference.current;
+    };
+
+    const canApplyHistoryResponse = (sessionKey: string, requestSequence: number) => {
+        if (
+            selectedSessionKeyReference.current !== sessionKey ||
+            requestSequence < latestAppliedHistoryRequestReference.current
+        ) {
+            return false;
+        }
+        latestAppliedHistoryRequestReference.current = requestSequence;
+        return true;
+    };
 
     const refreshSoon = (sessionKey: string, delayMs = 450) => {
         if (liveRefreshTimerReference.current !== undefined) {
@@ -71,12 +85,13 @@ export function useChatHistory({
             ) {
                 return;
             }
+            const requestSequence = beginHistoryRequest();
             try {
                 const history = await transportReference.current.history(
                     sessionKey,
                     CHAT_HISTORY_LIMIT
                 );
-                if (selectedSessionKeyReference.current !== sessionKey) {
+                if (!canApplyHistoryResponse(sessionKey, requestSequence)) {
                     return;
                 }
                 setMessages((previous) =>
@@ -105,7 +120,6 @@ export function useChatHistory({
         if (isNewSession) {
             shouldStickToBottomReference.current = true;
             setIsAtBottom(true);
-            sessionChangedReference.current();
         }
         if (!selectedSessionKey) {
             loadedSessionReference.current = "";
@@ -120,6 +134,7 @@ export function useChatHistory({
 
         let isCancelled = false;
         const loadHistory = async () => {
+            const requestSequence = beginHistoryRequest();
             setIsLoadingHistory(true);
             onError(undefined);
             try {
@@ -129,7 +144,7 @@ export function useChatHistory({
                 );
                 if (
                     isCancelled ||
-                    selectedSessionKeyReference.current !== selectedSessionKey
+                    !canApplyHistoryResponse(selectedSessionKey, requestSequence)
                 ) {
                     return;
                 }
@@ -144,7 +159,7 @@ export function useChatHistory({
                     shouldStickToBottomReference.current = true;
                 }
                 setIsAtBottom((previous) =>
-                    nextHistoryBottomState(
+                    shouldStayAtHistoryBottom(
                         previous,
                         isNewSession,
                         shouldStickToBottomReference.current
@@ -186,6 +201,7 @@ export function useChatHistory({
         let isCancelled = false;
 
         const refreshVisibleHistory = async () => {
+            const requestSequence = beginHistoryRequest();
             try {
                 const nextMessages = await transportReference.current.history(
                     requestSessionKey,
@@ -194,7 +210,7 @@ export function useChatHistory({
                 if (
                     isCancelled ||
                     abortController.signal.aborted ||
-                    selectedSessionKeyReference.current !== requestSessionKey
+                    !canApplyHistoryResponse(requestSessionKey, requestSequence)
                 ) {
                     return;
                 }
@@ -229,6 +245,7 @@ export function useChatHistory({
                 return;
             }
             isRefreshInFlight = true;
+            const requestSequence = beginHistoryRequest();
             try {
                 const nextMessages = await transportReference.current.history(
                     selectedSessionKey,
@@ -236,7 +253,7 @@ export function useChatHistory({
                 );
                 if (
                     isCancelled ||
-                    selectedSessionKeyReference.current !== selectedSessionKey
+                    !canApplyHistoryResponse(selectedSessionKey, requestSequence)
                 ) {
                     return;
                 }

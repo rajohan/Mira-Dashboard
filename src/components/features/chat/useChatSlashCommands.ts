@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
@@ -10,6 +10,7 @@ interface UseChatSlashCommandsParameters {
     abort: ChatTransport["abort"];
     clearRuntime: (sessionKey: string) => void;
     selectedSessionKey: string;
+    selectedSessionKeyReference: MutableRefObject<string>;
     attachments: ChatSendAttachment[];
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setDraft: Dispatch<SetStateAction<string>>;
@@ -22,6 +23,7 @@ export function useChatSlashCommands({
     abort,
     clearRuntime,
     selectedSessionKey,
+    selectedSessionKeyReference,
     attachments,
     setMessages,
     setDraft,
@@ -49,6 +51,9 @@ export function useChatSlashCommands({
         currentAttachments: ChatSendAttachment[] = attachments,
         options: { preserveDraft?: boolean } = {}
     ): Promise<boolean> => {
+        const commandSessionKey = selectedSessionKey;
+        const isCommandSessionSelected = () =>
+            selectedSessionKeyReference.current === commandSessionKey;
         const [rawCommand = ""] = commandText.trim().split(/\s+/);
         const command = slashCommandCanonicalName(rawCommand);
 
@@ -73,6 +78,9 @@ export function useChatSlashCommands({
                 isConfirmed = false;
             }
 
+            if (!isCommandSessionSelected()) {
+                return true;
+            }
             if (!isConfirmed) {
                 setDraft("");
                 setSendError(undefined);
@@ -89,11 +97,15 @@ export function useChatSlashCommands({
         setSendError(undefined);
 
         try {
-            await abort(selectedSessionKey);
-            clearRuntime(selectedSessionKey);
-            addSystemMessage("Stopped current run.");
+            await abort(commandSessionKey);
+            clearRuntime(commandSessionKey);
+            if (isCommandSessionSelected()) {
+                addSystemMessage("Stopped current run.");
+            }
         } catch (error_) {
-            setSendError(chatErrorMessage(error_, `Failed to run ${rawCommand}`));
+            if (isCommandSessionSelected()) {
+                setSendError(chatErrorMessage(error_, `Failed to run ${rawCommand}`));
+            }
         }
 
         return true;
