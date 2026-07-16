@@ -11,6 +11,8 @@ import {
 export type ChatRunPhase = "active" | "completed" | "aborted" | "error";
 export type ChatTextSource = "chat" | "runtime" | "session";
 
+const SESSION_ECHO_WINDOW_MILLISECONDS = 60_000;
+
 export interface ChatDiagnosticEntry {
     key: string;
     message: ChatHistoryMessage;
@@ -187,6 +189,23 @@ function resolveRun(
         }
     }
 
+    if (
+        !run &&
+        !event.runId &&
+        event.kind === "assistant" &&
+        event.source === "session"
+    ) {
+        const completedEntry = Object.entries(session.runs)
+            .filter(([, candidate]) => candidate.phase !== "active")
+            .toSorted(([, left], [, right]) => right.lastSequence - left.lastSequence)[0];
+        if (
+            completedEntry &&
+            isCompatibleSessionEcho(completedEntry[1], event.message, event.timestamp)
+        ) {
+            [runKey, run] = completedEntry;
+        }
+    }
+
     if (!run && event.runId) {
         const provisionalRuns = Object.entries(session.runs).filter(
             ([, candidate]) =>
@@ -295,6 +314,42 @@ function hasNonTextDetails(message: ChatHistoryMessage): boolean {
     );
 }
 
+function isCompatibleSessionEcho(
+    run: ChatRunState,
+    incoming: ChatHistoryMessage,
+    incomingTimestamp: string
+): boolean {
+    const previous = run.assistant;
+    if (!previous) {
+        return false;
+    }
+    const elapsedMilliseconds = Date.parse(incomingTimestamp) - Date.parse(run.updatedAt);
+    if (
+        !Number.isFinite(elapsedMilliseconds) ||
+        elapsedMilliseconds < -5000 ||
+        elapsedMilliseconds > SESSION_ECHO_WINDOW_MILLISECONDS
+    ) {
+        return false;
+    }
+    const previousText = previous.text.trim();
+    const incomingText = incoming.text.trim();
+    if (previousText || incomingText) {
+        return Boolean(previousText && incomingText && previousText === incomingText);
+    }
+    if (!hasNonTextDetails(previous) || !hasNonTextDetails(incoming)) {
+        return false;
+    }
+    const details = (message: ChatHistoryMessage) =>
+        JSON.stringify({
+            attachments: message.attachments || [],
+            images: message.images || [],
+            thinking: message.thinking || [],
+            toolCalls: message.toolCalls || [],
+            toolResult: message.toolResult,
+        });
+    return details(previous) === details(incoming);
+}
+
 function applyAssistantEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "assistant" }>
@@ -312,12 +367,20 @@ function applyAssistantEvent(
     }
 
     const previousText = run.assistant?.text || "";
+    const isCompletedSessionEcho = Boolean(
+        run.phase !== "active" &&
+        event.source === "session" &&
+        previousText.trim() &&
+        previousText.trim() === incoming.text.trim()
+    );
     const text = canUseText
-        ? event.mode === "replace"
-            ? incoming.text
-            : event.mode === "append"
-              ? `${previousText}${incoming.text}`
-              : mergeChatStreamText(previousText, incoming.text)
+        ? isCompletedSessionEcho
+            ? previousText
+            : event.mode === "replace"
+              ? incoming.text
+              : event.mode === "append"
+                ? `${previousText}${incoming.text}`
+                : mergeChatStreamText(previousText, incoming.text)
         : previousText;
     return {
         ...run,
@@ -410,21 +473,18 @@ function mergeToolDiagnostic(
     };
 }
 
-function applyDiagnosticEvent(
-    run: ChatRunState,
-    event: Extract<ChatRuntimeEvent, { kind: "thinking" | "tool" }>
-): ChatRunState {
-    const key =
-        event.kind === "tool"
-            ? event.toolKey
-            : `thinking:${event.message.thinking?.[0]?.id || "primary"}`;
-    const diagnostics = [...run.diagnostics];
+function matchingDiagnosticIndex(
+    diagnostics: ChatDiagnosticEntry[],
+    key: string,
+    kind: "thinking" | "tool",
+    message: ChatHistoryMessage
+): number {
     let index = diagnostics.findLastIndex((entry) => entry.key === key);
-    if (event.kind === "tool") {
-        const incomingCall = event.message.toolCalls?.[0];
+    if (kind === "tool") {
+        const incomingCall = message.toolCalls?.[0];
         const result =
-            event.message.toolResult ||
-            event.message.toolCalls?.find((call) => call.toolResult)?.toolResult;
+            message.toolResult ||
+            message.toolCalls?.find((call) => call.toolResult)?.toolResult;
         const hasStableId = Boolean(incomingCall?.id || result?.id);
         if (result && !hasStableId) {
             index = diagnostics.findLastIndex((entry) =>
@@ -440,22 +500,119 @@ function applyDiagnosticEvent(
             );
         }
     }
-    const previous = index === -1 ? undefined : diagnostics[index]?.message;
+    return index;
+}
+
+function mergeDiagnosticEntry(
+    diagnostics: ChatDiagnosticEntry[],
+    key: string,
+    kind: "thinking" | "tool",
+    incoming: ChatHistoryMessage,
+    uniqueSuffix: number | string
+): ChatDiagnosticEntry[] {
+    const next = [...diagnostics];
+    const index = matchingDiagnosticIndex(next, key, kind, incoming);
+    const previous = index === -1 ? undefined : next[index]?.message;
     const message =
-        event.kind === "tool"
-            ? mergeToolDiagnostic(previous, event.message)
-            : mergeMessageDetails(previous, event.message, event.message.text);
+        kind === "tool"
+            ? mergeToolDiagnostic(previous, incoming)
+            : mergeMessageDetails(previous, incoming, incoming.text);
     const uniqueKey =
-        index === -1 && diagnostics.some((entry) => entry.key === key)
-            ? `${key}:${event.sequence}`
+        index === -1 && next.some((entry) => entry.key === key)
+            ? `${key}:${uniqueSuffix}`
             : key;
-    const entry = { key: diagnostics[index]?.key || uniqueKey, message };
+    const entry = { key: next[index]?.key || uniqueKey, message };
     if (index === -1) {
-        diagnostics.push(entry);
+        next.push(entry);
     } else {
-        diagnostics[index] = entry;
+        next[index] = entry;
     }
-    return { ...run, diagnostics };
+    return next;
+}
+
+function applyDiagnosticEvent(
+    run: ChatRunState,
+    event: Extract<ChatRuntimeEvent, { kind: "thinking" | "tool" }>
+): ChatRunState {
+    const key =
+        event.kind === "tool"
+            ? event.toolKey
+            : `thinking:${event.message.thinking?.[0]?.id || "primary"}`;
+    return {
+        ...run,
+        diagnostics: mergeDiagnosticEntry(
+            run.diagnostics,
+            key,
+            event.kind,
+            event.message,
+            event.sequence
+        ),
+    };
+}
+
+function mergeRunDiagnostics(
+    older: ChatRunState,
+    newer: ChatRunState
+): ChatDiagnosticEntry[] {
+    let diagnostics: ChatDiagnosticEntry[] = [];
+    for (const [runIndex, run] of [older, newer].entries()) {
+        for (const [entryIndex, entry] of run.diagnostics.entries()) {
+            const kind =
+                entry.message.toolCalls?.length || entry.message.toolResult
+                    ? "tool"
+                    : "thinking";
+            diagnostics = mergeDiagnosticEntry(
+                diagnostics,
+                entry.key,
+                kind,
+                entry.message,
+                `merge-${runIndex}-${entryIndex}-${run.lastSequence}`
+            );
+        }
+    }
+    return diagnostics;
+}
+
+function mergeAcknowledgedRuns(
+    existing: ChatRunState,
+    optimistic: ChatRunState,
+    providerRunId: string
+): ChatRunState {
+    const isOptimisticNewer = optimistic.lastSequence > existing.lastSequence;
+    const older = isOptimisticNewer ? existing : optimistic;
+    const newer = isOptimisticNewer ? optimistic : existing;
+    const assistant =
+        older.assistant && newer.assistant
+            ? mergeMessageDetails(
+                  older.assistant,
+                  newer.assistant,
+                  mergeChatStreamText(older.assistant.text, newer.assistant.text)
+              )
+            : newer.assistant || older.assistant;
+    const startedAt = (
+        Date.parse(existing.startedAt) <= Date.parse(optimistic.startedAt)
+            ? existing
+            : optimistic
+    ).startedAt;
+
+    return {
+        ...newer,
+        aliases: uniqueChatRunIds([
+            ...existing.aliases,
+            ...optimistic.aliases,
+            optimistic.runId,
+            providerRunId,
+        ]),
+        assistant,
+        assistantSource: newer.assistantSource || older.assistantSource,
+        diagnostics: mergeRunDiagnostics(older, newer),
+        lastSequence: Math.max(existing.lastSequence, optimistic.lastSequence),
+        operation: newer.operation ?? older.operation,
+        runId: providerRunId,
+        startedAt,
+        statusText:
+            newer.phase === "active" ? newer.statusText || older.statusText : undefined,
+    };
 }
 
 function applyFinishEvent(
@@ -623,16 +780,7 @@ export function acknowledgeChatRun(
     delete runs[optimisticKey];
     const existing = runs[providerRunId];
     runs[providerRunId] = existing
-        ? {
-              ...existing,
-              aliases: uniqueChatRunIds([
-                  ...existing.aliases,
-                  ...optimistic.aliases,
-                  optimisticRunId,
-              ]),
-              operation: existing.operation ?? optimistic.operation,
-              statusText: existing.statusText || optimistic.statusText,
-          }
+        ? mergeAcknowledgedRuns(existing, optimistic, providerRunId)
         : {
               ...optimistic,
               aliases: uniqueChatRunIds([

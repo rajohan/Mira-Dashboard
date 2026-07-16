@@ -209,6 +209,9 @@ describe("OpenClaw adapter variants", () => {
         const modelFailed = adapter.event(
             envelope("model.completed", { status: "failed" }, 51)
         );
+        const lifecycleStatusOnlyError = adapter.event(
+            envelope("agent", { data: { phase: "error" }, stream: "lifecycle" }, 52)
+        );
 
         expect(compactionEnd[0]).toMatchObject({
             kind: "status",
@@ -221,12 +224,26 @@ describe("OpenClaw adapter variants", () => {
             kind: "finish",
             outcome: "error",
         });
-        expect(modelAborted[0]).toMatchObject({ kind: "finish", outcome: "aborted" });
-        expect(sessionAborted[0]).toMatchObject({
+        expect(modelAborted[0]).toMatchObject({
+            error: undefined,
             kind: "finish",
             outcome: "aborted",
         });
-        expect(modelFailed[0]).toMatchObject({ kind: "finish", outcome: "error" });
+        expect(sessionAborted[0]).toMatchObject({
+            error: undefined,
+            kind: "finish",
+            outcome: "aborted",
+        });
+        expect(modelFailed[0]).toMatchObject({
+            error: "Chat run failed",
+            kind: "finish",
+            outcome: "error",
+        });
+        expect(lifecycleStatusOnlyError.at(-1)).toMatchObject({
+            error: "Chat run failed",
+            kind: "finish",
+            outcome: "error",
+        });
     });
 
     it("maps command finals, replacement deltas and unsupported chat states", () => {

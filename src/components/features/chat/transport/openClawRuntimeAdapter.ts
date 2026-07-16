@@ -182,7 +182,7 @@ function runtimeStreamDrafts(
         eventName === "session.ended" ||
         (stream === "lifecycle" && (phase === "end" || phase === "error"));
     if (isTerminal) {
-        const error =
+        const explicitError =
             stringValue(data.errorMessage) ||
             stringValue(data.promptError) ||
             stringValue(data.error) ||
@@ -192,15 +192,16 @@ function runtimeStreamDrafts(
         const isAborted =
             data.aborted === true || payload.aborted === true || status === "aborted";
         const isError =
-            Boolean(error) ||
+            Boolean(explicitError) ||
             phase === "error" ||
             status === "error" ||
             status === "failed";
+        const outcome = isAborted ? "aborted" : isError ? "error" : "completed";
         drafts.push({
             ...common,
             kind: "finish",
-            error,
-            outcome: isAborted ? "aborted" : isError ? "error" : "completed",
+            error: explicitError || (outcome === "error" ? "Chat run failed" : undefined),
+            outcome,
         });
     } else if (!progress.text && OPENCLAW_WORK_STREAMS.has(stream) && phase === "start") {
         drafts.push({ ...common, kind: "status", text: "Thinking" });

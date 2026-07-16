@@ -156,6 +156,176 @@ describe("chat runtime state", () => {
         );
     });
 
+    it("merges optimistic payloads into an existing provider run", () => {
+        const providerFirst = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "assistant",
+                message: { content: "Hel", role: "assistant", text: "Hel" },
+                mode: "append",
+                runId: "provider-1",
+                source: "runtime",
+            }),
+        ]);
+        const withOptimistic = addOptimisticChatRun(
+            providerFirst,
+            SESSION,
+            "dashboard-chat-1"
+        );
+        const accumulated = reduceChatRuntime(withOptimistic, [
+            event(32, {
+                kind: "assistant",
+                message: { content: "lo", role: "assistant", text: "lo" },
+                mode: "append",
+                runId: "dashboard-chat-1",
+                source: "runtime",
+            }),
+            event(48, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "reasoning", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "reasoning" }],
+                },
+                runId: "dashboard-chat-1",
+            }),
+            event(64, {
+                error: "late failure",
+                kind: "finish",
+                outcome: "error",
+                runId: "dashboard-chat-1",
+            }),
+        ]);
+
+        const acknowledged = acknowledgeChatRun(
+            accumulated,
+            SESSION,
+            "dashboard-chat-1",
+            "provider-1"
+        );
+        const run = acknowledged.sessions[SESSION]?.runs["provider-1"];
+
+        expect(Object.keys(acknowledged.sessions[SESSION]?.runs || {})).toEqual([
+            "provider-1",
+        ]);
+        expect(run).toMatchObject({
+            assistant: { text: "Hello" },
+            error: "late failure",
+            lastSequence: 64,
+            phase: "error",
+        });
+        expect(run?.aliases).toEqual(
+            expect.arrayContaining(["dashboard-chat-1", "provider-1"])
+        );
+        expect(run?.diagnostics[0]?.message.thinking?.[0]?.text).toBe("reasoning");
+    });
+
+    it("keeps newer provider terminal metadata while merging optimistic diagnostics", () => {
+        const providerFirst = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "status",
+                runId: "provider-1",
+                text: "Working",
+            }),
+        ]);
+        const withOptimistic = addOptimisticChatRun(
+            providerFirst,
+            SESSION,
+            "dashboard-chat-1"
+        );
+        const accumulated = reduceChatRuntime(withOptimistic, [
+            event(32, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "reasoning", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "reasoning" }],
+                },
+                runId: "dashboard-chat-1",
+            }),
+            event(48, {
+                authoritative: true,
+                kind: "finish",
+                message: {
+                    content: "done",
+                    role: "assistant",
+                    text: "done",
+                },
+                outcome: "completed",
+                runId: "provider-1",
+            }),
+        ]);
+
+        const acknowledged = acknowledgeChatRun(
+            accumulated,
+            SESSION,
+            "dashboard-chat-1",
+            "provider-1"
+        );
+
+        expect(acknowledged.sessions[SESSION]?.runs["provider-1"]).toMatchObject({
+            assistant: { text: "done" },
+            error: undefined,
+            lastSequence: 48,
+            phase: "completed",
+            statusText: undefined,
+        });
+        expect(
+            acknowledged.sessions[SESSION]?.runs["provider-1"]?.diagnostics[0]?.message
+                .thinking?.[0]?.text
+        ).toBe("reasoning");
+    });
+
+    it("reconciles a tool call and result split across acknowledged run aliases", () => {
+        const providerFirst = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ arguments: { cmd: "date" }, name: "exec" }],
+                },
+                runId: "provider-1",
+                toolKey: 'tool:exec:{"cmd":"date"}',
+            }),
+        ]);
+        const withOptimistic = addOptimisticChatRun(
+            providerFirst,
+            SESSION,
+            "dashboard-chat-1"
+        );
+        const accumulated = reduceChatRuntime(withOptimistic, [
+            event(32, {
+                kind: "tool",
+                message: {
+                    content: "Thu",
+                    role: "tool",
+                    text: "Thu",
+                    toolResult: { content: "Thu", name: "exec" },
+                },
+                runId: "dashboard-chat-1",
+                toolKey: "tool:exec:undefined",
+            }),
+        ]);
+
+        const acknowledged = acknowledgeChatRun(
+            accumulated,
+            SESSION,
+            "dashboard-chat-1",
+            "provider-1"
+        );
+        const diagnostics =
+            acknowledged.sessions[SESSION]?.runs["provider-1"]?.diagnostics;
+
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics?.[0]?.message.toolCalls?.[0]).toMatchObject({
+            name: "exec",
+            toolResult: { content: "Thu" },
+        });
+    });
+
     it("deduplicates replayed sequences and accepts the selected text source", () => {
         const runtime = event(16, {
             kind: "assistant",
@@ -343,6 +513,114 @@ describe("chat runtime state", () => {
             lastSequence: 32,
             phase: "completed",
             runId: "run-1",
+        });
+    });
+
+    it("keeps a matching runless session echo on the completed run", () => {
+        const completed = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                authoritative: true,
+                kind: "finish",
+                message: {
+                    content: "OK",
+                    role: "assistant",
+                    text: "OK",
+                },
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const echoed = reduceChatRuntime(completed, [
+            event(32, {
+                kind: "assistant",
+                message: { content: " OK ", role: "assistant", text: " OK " },
+                mode: "merge",
+                source: "session",
+            }),
+        ]);
+
+        expect(echoed.sessions[SESSION]?.runs).toEqual({
+            "run-1": expect.objectContaining({
+                assistant: expect.objectContaining({ text: "OK" }),
+                lastSequence: 32,
+                phase: "completed",
+            }),
+        });
+
+        const delayedEcho = {
+            ...event(48, {
+                kind: "assistant",
+                message: { content: "OK", role: "assistant", text: "OK" },
+                mode: "merge",
+                source: "session",
+            }),
+            timestamp: "2026-07-16T12:02:00.000Z",
+        } as ChatRuntimeEvent;
+        const nextTurn = reduceChatRuntime(echoed, [delayedEcho]);
+        expect(Object.values(nextTurn.sessions[SESSION]?.runs || {})).toEqual([
+            expect.objectContaining({
+                assistant: expect.objectContaining({ text: "OK" }),
+                phase: "active",
+                runId: "runtime-runless-48",
+            }),
+        ]);
+
+        const differentImmediateMessage = reduceChatRuntime(completed, [
+            event(48, {
+                kind: "assistant",
+                message: { content: "Different", role: "assistant", text: "Different" },
+                mode: "merge",
+                source: "session",
+            }),
+        ]);
+        expect(
+            differentImmediateMessage.sessions[SESSION]?.runs["runtime-runless-48"]
+        ).toMatchObject({
+            assistant: { text: "Different" },
+            phase: "active",
+        });
+    });
+
+    it("keeps an attachment-only session echo on its completed run", () => {
+        const attachment = {
+            fileName: "report.pdf",
+            id: "report",
+            kind: "file" as const,
+            mimeType: "application/pdf",
+        };
+        const completed = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                authoritative: true,
+                kind: "finish",
+                message: {
+                    attachments: [attachment],
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                },
+                outcome: "completed",
+                runId: "run-media",
+            }),
+        ]);
+        const echoed = reduceChatRuntime(completed, [
+            event(32, {
+                kind: "assistant",
+                message: {
+                    attachments: [attachment],
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                },
+                mode: "merge",
+                source: "session",
+            }),
+        ]);
+
+        expect(echoed.sessions[SESSION]?.runs).toEqual({
+            "run-media": expect.objectContaining({
+                assistant: expect.objectContaining({ attachments: [attachment] }),
+                phase: "completed",
+            }),
         });
     });
 
