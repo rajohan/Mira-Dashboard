@@ -122,7 +122,7 @@ export function mergeChatStreamText(previous: string, next: string): string {
     return `${previous}${next}`;
 }
 
-function isProvisionalRun(sessionKey: string, runId: string): boolean {
+export function isProvisionalChatRunId(sessionKey: string, runId: string): boolean {
     return (
         isSameChatSession(sessionKey, runId) ||
         runId.startsWith("dashboard-chat-") ||
@@ -191,7 +191,7 @@ function resolveRun(
         const provisionalRuns = Object.entries(session.runs).filter(
             ([, candidate]) =>
                 candidate.phase === "active" &&
-                isProvisionalRun(session.sessionKey, candidate.runId)
+                isProvisionalChatRunId(session.sessionKey, candidate.runId)
         );
         if (provisionalRuns.length === 1) {
             const [provisionalKey, provisionalRun] = provisionalRuns[0]!;
@@ -612,12 +612,15 @@ export function acknowledgeChatRun(
         return state;
     }
     const previousSession = state.sessions[sessionKey];
-    const optimistic = previousSession?.runs[optimisticRunId];
-    if (!previousSession || !optimistic) {
+    const optimisticEntry = Object.entries(previousSession?.runs || {}).find(
+        ([key, run]) => key === optimisticRunId || run.aliases.includes(optimisticRunId)
+    );
+    if (!previousSession || !optimisticEntry) {
         return state;
     }
+    const [optimisticKey, optimistic] = optimisticEntry;
     const runs = { ...previousSession.runs };
-    delete runs[optimisticRunId];
+    delete runs[optimisticKey];
     const existing = runs[providerRunId];
     runs[providerRunId] = existing
         ? {

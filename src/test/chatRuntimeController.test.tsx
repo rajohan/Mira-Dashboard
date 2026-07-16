@@ -34,7 +34,7 @@ function finish(
     sequence: number,
     error?: string,
     timestamp = new Date().toISOString()
-): ChatRuntimeEvent {
+): Extract<ChatRuntimeEvent, { kind: "finish" }> {
     return {
         error,
         kind: "finish",
@@ -131,7 +131,7 @@ describe("chat runtime controller", () => {
         ).toBe("Hello");
     });
 
-    it("drops selected-session events covered by the snapshot cutoff", async () => {
+    it("preserves queued live events absent from the snapshot replay", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
         const { result } = renderHook(() =>
@@ -144,7 +144,9 @@ describe("chat runtime controller", () => {
             await snapshot.promise;
         });
 
-        expect(result.current.state.sessions[SELECTED]).toBeUndefined();
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
+        ).toBe("stale");
     });
 
     it("replaces stale selected-session runtime with an authoritative snapshot", async () => {
@@ -222,6 +224,49 @@ describe("chat runtime controller", () => {
         ).toBe("working");
     });
 
+    it("merges a runless snapshot into the pending acknowledged send", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-chat-new");
+            result.current.acknowledgeRun(SELECTED, "dashboard-chat-new", "provider-new");
+        });
+        await act(async () => {
+            snapshot.resolve({
+                completed: false,
+                events: [
+                    {
+                        ...assistant(SELECTED, 16, "working"),
+                        runId: undefined,
+                    },
+                ],
+                throughSequence: 16,
+            });
+            await snapshot.promise;
+        });
+
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "provider-new",
+        ]);
+        act(() =>
+            fake.emit({
+                ...finish(SELECTED, 32),
+                runId: "provider-new",
+            })
+        );
+
+        const runs = result.current.state.sessions[SELECTED]?.runs || {};
+        expect(Object.keys(runs)).toEqual(["provider-new"]);
+        expect(runs["provider-new"]).toMatchObject({
+            assistant: { text: "working" },
+            phase: "completed",
+        });
+    });
+
     it("runs finish side effects for replayed and queued terminal events", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
@@ -249,6 +294,67 @@ describe("chat runtime controller", () => {
         expect(onError).toHaveBeenNthCalledWith(1, "snapshot failure");
         expect(onError).toHaveBeenNthCalledWith(2, "queued failure");
         expect(onSettled).toHaveBeenCalledTimes(2);
+    });
+
+    it("suppresses a duplicate terminal banner after a represented tool failure", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const onError = jest.fn();
+        const onSettled = jest.fn();
+        const { result } = renderHook(() =>
+            useChatRuntime({
+                onError,
+                onSettled,
+                selectedSessionKey: SELECTED,
+                transport: fake.transport,
+            })
+        );
+
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 0 });
+            await snapshot.promise;
+        });
+
+        act(() => {
+            fake.emit({
+                kind: "tool",
+                message: {
+                    content: "failed",
+                    role: "tool",
+                    text: "failed",
+                    toolResult: {
+                        content: "failed",
+                        id: "tool-1",
+                        isError: true,
+                        name: "exec",
+                    },
+                },
+                runId: "run-1",
+                sequence: 16,
+                sessionKey: SELECTED,
+                timestamp: "2026-07-16T12:00:00.000Z",
+                toolKey: "tool:tool-1",
+            });
+            fake.emit({
+                ...finish(SELECTED, 32, "tool execution failed: exec"),
+                suppressIfToolFailure: true,
+            });
+        });
+
+        expect(onError).not.toHaveBeenCalled();
+        expect(onSettled).toHaveBeenCalledWith(SELECTED);
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]?.error).toBe(
+            undefined
+        );
+
+        act(() => {
+            result.current.clearSession(SELECTED);
+            fake.emit({
+                ...finish(SELECTED, 48, "tool execution failed: missing diagnostic"),
+                suppressIfToolFailure: true,
+            });
+        });
+        expect(onError).toHaveBeenCalledWith("tool execution failed: missing diagnostic");
     });
 
     it("expires an old completed snapshot from its original finish time", async () => {

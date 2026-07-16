@@ -222,23 +222,139 @@ export class OpenClawChatBridge {
         }
     }
 
-    #promoteProvisionalRun(sessionKey: string, providerRunId: string): void {
+    #replaceRunEvents(run: RetainedRun, events: OpenClawRuntimeEnvelope[]): void {
+        const uniqueEvents = new Map<number, OpenClawRuntimeEnvelope>();
+        for (const event of events) {
+            uniqueEvents.set(event.runtimeSequence, event);
+        }
+        run.events = uniqueEvents
+            .values()
+            .toArray()
+            .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence);
+        run.eventBytes = run.events.map((event) =>
+            Buffer.byteLength(JSON.stringify(event))
+        );
+        run.totalBytes = run.eventBytes.reduce((total, bytes) => total + bytes, 0);
+        while (
+            run.events.length > 1 &&
+            (run.events.length > MAX_EVENTS_PER_RUN || run.totalBytes > MAX_BYTES_PER_RUN)
+        ) {
+            run.events.shift();
+            run.totalBytes -= run.eventBytes.shift() || 0;
+        }
+    }
+
+    #rewriteProvisionalPayloads(
+        sessionKey: string,
+        run: RetainedRun,
+        provisionalRunId: string,
+        providerRunId: string
+    ): void {
+        const events = run.events.flatMap((envelope) => {
+            const payload = asRecord(envelope.payload);
+            const payloadRunId = stringField(payload, "runId");
+            if (
+                !payload ||
+                (payloadRunId &&
+                    payloadRunId !== provisionalRunId &&
+                    !isProvisionalRunId(payloadRunId))
+            ) {
+                return [envelope];
+            }
+
+            const rewritten = {
+                ...envelope,
+                payload: { ...payload, runId: providerRunId },
+            };
+            if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_RUN) {
+                return [rewritten];
+            }
+            if (!isTerminalEvent(envelope.event, rewritten.payload)) {
+                return [];
+            }
+            const compact = {
+                ...envelope,
+                payload: compactTerminalPayload(
+                    asRecord(rewritten.payload),
+                    providerRunId,
+                    sessionKey
+                ),
+            };
+            return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_RUN
+                ? [compact]
+                : [];
+        });
+        this.#replaceRunEvents(run, events);
+    }
+
+    #promoteRunEntry(
+        sessionKey: string,
+        runs: Map<string, RetainedRun>,
+        provisionalRunId: string,
+        providerRunId: string
+    ): RetainedRun | undefined {
+        const provisional = runs.get(provisionalRunId);
+        if (!provisional || provisionalRunId === providerRunId) {
+            return provisional;
+        }
+
+        this.#rewriteProvisionalPayloads(
+            sessionKey,
+            provisional,
+            provisionalRunId,
+            providerRunId
+        );
+        runs.delete(provisionalRunId);
+        this.#forgetRunSession(provisionalRunId, sessionKey);
+        const existing = runs.get(providerRunId);
+        if (existing) {
+            this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
+            existing.completed ||= provisional.completed;
+            existing.updatedAt = Math.max(existing.updatedAt, provisional.updatedAt);
+            return existing;
+        }
+
+        provisional.runId = providerRunId;
+        runs.set(providerRunId, provisional);
+        return provisional;
+    }
+
+    #promoteProvisionalRun(
+        sessionKey: string,
+        providerRunId: string,
+        preferredProvisionalRunId?: string
+    ): void {
         const runs = this.#runsBySession.get(sessionKey);
-        if (!runs || runs.has(providerRunId)) {
+        if (!runs) {
             return;
         }
-        const provisionalEntries = [...runs].filter(([, run]) =>
-            isProvisionalRunId(run.runId)
+
+        const preferred = preferredProvisionalRunId
+            ? runs.get(preferredProvisionalRunId)
+            : undefined;
+        if (
+            preferredProvisionalRunId &&
+            preferred &&
+            isProvisionalRunId(preferred.runId)
+        ) {
+            this.#promoteRunEntry(
+                sessionKey,
+                runs,
+                preferredProvisionalRunId,
+                providerRunId
+            );
+            return;
+        }
+
+        const provisionalEntries = [...runs].filter(
+            ([runId, run]) =>
+                runId !== providerRunId && !run.completed && isProvisionalRunId(run.runId)
         );
         if (provisionalEntries.length !== 1) {
             return;
         }
 
-        const [provisionalRunId, provisionalRun] = provisionalEntries[0]!;
-        runs.delete(provisionalRunId);
-        this.#forgetRunSession(provisionalRunId, sessionKey);
-        provisionalRun.runId = providerRunId;
-        runs.set(providerRunId, provisionalRun);
+        this.#promoteRunEntry(sessionKey, runs, provisionalEntries[0]![0], providerRunId);
     }
 
     #prune(now = Date.now()): void {
@@ -316,11 +432,12 @@ export class OpenClawChatBridge {
         if (!snapshot && explicitRunId && activeRuns.length === 1) {
             const provisional = activeRuns[0];
             if (provisional && isProvisionalRunId(provisional.runId)) {
-                runs.delete(provisional.runId);
-                this.#forgetRunSession(provisional.runId, sessionKey);
-                provisional.runId = explicitRunId;
-                runs.set(explicitRunId, provisional);
-                snapshot = provisional;
+                snapshot = this.#promoteRunEntry(
+                    sessionKey,
+                    runs,
+                    provisional.runId,
+                    explicitRunId
+                );
             }
         }
 
@@ -429,9 +546,10 @@ export class OpenClawChatBridge {
             return;
         }
         const runId = stringField(asRecord(payload), "runId");
+        const provisionalRunId = stringField(parameters, "idempotencyKey");
         if (sessionKey) {
             if (runId) {
-                this.#promoteProvisionalRun(sessionKey, runId);
+                this.#promoteProvisionalRun(sessionKey, runId, provisionalRunId);
             }
             this.#clearCompletedRuns(sessionKey, runId);
             if (runId) {

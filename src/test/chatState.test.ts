@@ -101,6 +101,35 @@ describe("chat runtime state", () => {
         ).toEqual({});
     });
 
+    it("acknowledges a recovered run through its optimistic alias", () => {
+        const recovered = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "status",
+                text: "Working",
+            }),
+        ]);
+        const optimistic = addOptimisticChatRun(recovered, SESSION, "dashboard-chat-1");
+        const aliased = acknowledgeChatRun(
+            optimistic,
+            SESSION,
+            "dashboard-chat-1",
+            "runtime-runless-16"
+        );
+        const acknowledged = acknowledgeChatRun(
+            aliased,
+            SESSION,
+            "dashboard-chat-1",
+            "provider-1"
+        );
+
+        expect(Object.keys(acknowledged.sessions[SESSION]?.runs || {})).toEqual([
+            "provider-1",
+        ]);
+        expect(acknowledged.sessions[SESSION]?.runs["provider-1"]?.statusText).toBe(
+            "Working"
+        );
+    });
+
     it("retains compact operation when provider events arrive before acknowledgement", () => {
         const providerFirst = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

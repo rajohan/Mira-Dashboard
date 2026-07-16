@@ -8,6 +8,7 @@ import {
     clearChatRun,
     clearChatSessionRuntime,
     createChatRuntimeState,
+    isProvisionalChatRunId,
     reduceChatRuntime,
 } from "./domain/chatState";
 import type { ChatTransport } from "./transport/chatTransport";
@@ -31,6 +32,35 @@ interface SnapshotGate {
     optimisticRuns: Map<string, { operation?: "compact"; providerRunId?: string }>;
     sessionKey: string;
     token: number;
+}
+
+type FinishEvent = Extract<ChatRuntimeEvent, { kind: "finish" }>;
+
+interface RuntimeReduction {
+    finishes: Array<{ event: FinishEvent; state: ChatRuntimeState }>;
+    state: ChatRuntimeState;
+}
+
+function reduceRuntimeEvents(
+    previous: ChatRuntimeState,
+    events: ChatRuntimeEvent[]
+): RuntimeReduction {
+    let state = previous;
+    const finishes: RuntimeReduction["finishes"] = [];
+    const orderedEvents = events.toSorted(
+        (left, right) => left.sequence - right.sequence
+    );
+    for (const event of orderedEvents) {
+        const next = reduceChatRuntime(state, [event]);
+        if (next === state) {
+            continue;
+        }
+        state = next;
+        if (event.kind === "finish") {
+            finishes.push({ event, state });
+        }
+    }
+    return { finishes, state };
 }
 
 interface UseChatRuntimeOptions {
@@ -62,6 +92,9 @@ export function useChatRuntime({
     const [state, setState] = useState(() =>
         createChatRuntimeState(transport.connectionGeneration)
     );
+    // Gateway adapters may emit several events before React renders. This mirror
+    // keeps every reduction based on the latest committed runtime value.
+    const stateReference = useRef(state);
     const gateReference = useRef<SnapshotGate | undefined>(undefined);
     const gateTokenReference = useRef(0);
     const selectedSessionReference = useRef(selectedSessionKey);
@@ -76,6 +109,15 @@ export function useChatRuntime({
     callbacksReference.current = { onError, onSettled };
     transportReference.current = transport;
 
+    const updateState = (
+        update: (current: ChatRuntimeState) => ChatRuntimeState
+    ): ChatRuntimeState => {
+        const next = update(stateReference.current);
+        stateReference.current = next;
+        setState(next);
+        return next;
+    };
+
     useEffect(() => {
         gateReference.current = undefined;
         handledFinishSequencesReference.current.clear();
@@ -83,7 +125,7 @@ export function useChatRuntime({
             clearTimeout(entry.timer);
         }
         completionTimersReference.current.clear();
-        setState(createChatRuntimeState(transport.connectionGeneration));
+        updateState(() => createChatRuntimeState(transport.connectionGeneration));
     }, [transport.connectionGeneration]);
 
     const clearCompletionTimers = (shouldClear: (key: string) => boolean) => {
@@ -97,11 +139,11 @@ export function useChatRuntime({
         }
     };
 
-    const handleFinishSideEffects = (event: ChatRuntimeEvent) => {
-        if (
-            event.kind !== "finish" ||
-            handledFinishSequencesReference.current.has(event.sequence)
-        ) {
+    const handleFinishSideEffects = (
+        event: FinishEvent,
+        stateAfterEvent: ChatRuntimeState
+    ) => {
+        if (handledFinishSequencesReference.current.has(event.sequence)) {
             return;
         }
         handledFinishSequencesReference.current.add(event.sequence);
@@ -117,7 +159,7 @@ export function useChatRuntime({
         const timer = setTimeout(() => {
             completionTimersReference.current.delete(key);
             handledFinishSequencesReference.current.delete(event.sequence);
-            setState((current) => {
+            updateState((current) => {
                 if (completedRunId) {
                     return clearChatRun(current, event.sessionKey, completedRunId);
                 }
@@ -140,8 +182,12 @@ export function useChatRuntime({
             clearCompletionTimers((candidate) => candidate === oldestKey);
         }
         if (event.sessionKey === selectedSessionReference.current) {
-            if (event.error) {
-                callbacksReference.current.onError?.(event.error);
+            const completedRun = Object.values(
+                stateAfterEvent.sessions[event.sessionKey]?.runs || {}
+            ).find((run) => run.lastSequence === event.sequence);
+            const { error: visibleError } = completedRun || event;
+            if (visibleError) {
+                callbacksReference.current.onError?.(visibleError);
             }
             callbacksReference.current.onSettled?.(event.sessionKey);
         }
@@ -160,8 +206,11 @@ export function useChatRuntime({
                 return;
             }
 
-            setState((previous) => reduceChatRuntime(previous, [event]));
-            handleFinishSideEffects(event);
+            const reduction = reduceRuntimeEvents(stateReference.current, [event]);
+            updateState(() => reduction.state);
+            for (const finish of reduction.finishes) {
+                handleFinishSideEffects(finish.event, finish.state);
+            }
         });
     }, [transport.connectionGeneration, transport.isConnected]);
 
@@ -194,31 +243,48 @@ export function useChatRuntime({
                 gateReference.current = undefined;
                 const sessionPrefix = `${selectedSessionKey}\u{0}`;
                 clearCompletionTimers((key) => key.startsWith(sessionPrefix));
-                const queuedAfterSnapshot = gate.events.filter(
-                    (event) => event.sequence > snapshot.throughSequence
+                const replayedSequences = new Set(
+                    snapshot.events.map((event) => event.sequence)
                 );
-                const events = [...snapshot.events, ...queuedAfterSnapshot];
-                setState((previous) => {
-                    let next = reduceChatRuntime(
-                        clearChatSessionRuntime(previous, selectedSessionKey),
-                        snapshot.events
+                const queuedAfterSnapshot = gate.events.filter(
+                    (event) =>
+                        event.sequence > snapshot.throughSequence ||
+                        !replayedSequences.has(event.sequence)
+                );
+                const snapshotReduction = reduceRuntimeEvents(
+                    clearChatSessionRuntime(stateReference.current, selectedSessionKey),
+                    snapshot.events
+                );
+                let next = snapshotReduction.state;
+                const provisionalRuns =
+                    gate.optimisticRuns.size === 1
+                        ? Object.entries(
+                              next.sessions[selectedSessionKey]?.runs || {}
+                          ).filter(
+                              ([, run]) =>
+                                  run.phase === "active" &&
+                                  isProvisionalChatRunId(selectedSessionKey, run.runId)
+                          )
+                        : [];
+                const recoveredProvisionalRunKey =
+                    provisionalRuns.length === 1 ? provisionalRuns[0]?.[0] : undefined;
+                for (const [optimisticRunId, pendingRun] of gate.optimisticRuns) {
+                    const runIds = new Set(
+                        [optimisticRunId, pendingRun.providerRunId].filter(
+                            (runId): runId is string => Boolean(runId)
+                        )
                     );
-                    for (const [optimisticRunId, pendingRun] of gate.optimisticRuns) {
-                        const runIds = new Set(
-                            [optimisticRunId, pendingRun.providerRunId].filter(
-                                (runId): runId is string => Boolean(runId)
-                            )
-                        );
-                        const isRecovered = Object.entries(
-                            next.sessions[selectedSessionKey]?.runs || {}
-                        ).some(
-                            ([runKey, run]) =>
-                                runIds.has(runKey) ||
-                                run.aliases.some((alias) => runIds.has(alias))
-                        );
-                        if (isRecovered) {
-                            continue;
-                        }
+                    const isRecovered = Object.entries(
+                        next.sessions[selectedSessionKey]?.runs || {}
+                    ).some(
+                        ([runKey, run]) =>
+                            runIds.has(runKey) ||
+                            run.aliases.some((alias) => runIds.has(alias))
+                    );
+                    if (isRecovered) {
+                        continue;
+                    }
+                    if (recoveredProvisionalRunKey) {
                         next = addOptimisticChatRun(
                             next,
                             selectedSessionKey,
@@ -229,13 +295,36 @@ export function useChatRuntime({
                             next,
                             selectedSessionKey,
                             optimisticRunId,
+                            recoveredProvisionalRunKey
+                        );
+                        next = acknowledgeChatRun(
+                            next,
+                            selectedSessionKey,
+                            optimisticRunId,
                             pendingRun.providerRunId
                         );
+                        continue;
                     }
-                    return reduceChatRuntime(next, queuedAfterSnapshot);
-                });
-                for (const event of events) {
-                    handleFinishSideEffects(event);
+                    next = addOptimisticChatRun(
+                        next,
+                        selectedSessionKey,
+                        optimisticRunId,
+                        pendingRun.operation
+                    );
+                    next = acknowledgeChatRun(
+                        next,
+                        selectedSessionKey,
+                        optimisticRunId,
+                        pendingRun.providerRunId
+                    );
+                }
+                const queuedReduction = reduceRuntimeEvents(next, queuedAfterSnapshot);
+                updateState(() => queuedReduction.state);
+                for (const finish of [
+                    ...snapshotReduction.finishes,
+                    ...queuedReduction.finishes,
+                ]) {
+                    handleFinishSideEffects(finish.event, finish.state);
                 }
             })
             .catch(() => {
@@ -244,9 +333,13 @@ export function useChatRuntime({
                 }
                 gateReference.current = undefined;
                 if (gate.events.length > 0) {
-                    setState((previous) => reduceChatRuntime(previous, gate.events));
-                    for (const event of gate.events) {
-                        handleFinishSideEffects(event);
+                    const reduction = reduceRuntimeEvents(
+                        stateReference.current,
+                        gate.events
+                    );
+                    updateState(() => reduction.state);
+                    for (const finish of reduction.finishes) {
+                        handleFinishSideEffects(finish.event, finish.state);
                     }
                 }
             });
@@ -257,9 +350,10 @@ export function useChatRuntime({
                 const queued = gateReference.current.events;
                 gateReference.current = undefined;
                 if (queued.length > 0) {
-                    setState((previous) => reduceChatRuntime(previous, queued));
-                    for (const event of queued) {
-                        handleFinishSideEffects(event);
+                    const reduction = reduceRuntimeEvents(stateReference.current, queued);
+                    updateState(() => reduction.state);
+                    for (const finish of reduction.finishes) {
+                        handleFinishSideEffects(finish.event, finish.state);
                     }
                 }
             }
@@ -281,7 +375,7 @@ export function useChatRuntime({
         if (gateReference.current?.sessionKey === sessionKey) {
             gateReference.current.optimisticRuns.set(runId, { operation });
         }
-        setState((current) =>
+        updateState((current) =>
             addOptimisticChatRun(current, sessionKey, runId, operation)
         );
     };
@@ -297,7 +391,7 @@ export function useChatRuntime({
         if (pendingRun) {
             pendingRun.providerRunId = providerRunId;
         }
-        setState((current) =>
+        updateState((current) =>
             acknowledgeChatRun(current, sessionKey, optimisticRunId, providerRunId)
         );
     };
@@ -312,7 +406,7 @@ export function useChatRuntime({
         }
         const completionKey = `${sessionKey}\u{0}${runId}`;
         clearCompletionTimers((key) => key === completionKey);
-        setState((current) => clearChatRun(current, sessionKey, runId));
+        updateState((current) => clearChatRun(current, sessionKey, runId));
     };
     const clearSession = (sessionKey: string) => {
         if (gateReference.current?.sessionKey === sessionKey) {
@@ -322,7 +416,7 @@ export function useChatRuntime({
         }
         const sessionPrefix = `${sessionKey}\u{0}`;
         clearCompletionTimers((key) => key.startsWith(sessionPrefix));
-        setState((current) => clearChatSessionRuntime(current, sessionKey));
+        updateState((current) => clearChatSessionRuntime(current, sessionKey));
     };
 
     return { acknowledgeRun, beginRun, clearRun, clearSession, state };
