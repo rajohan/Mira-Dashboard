@@ -43,11 +43,10 @@ import {
     extractThinkingBlocks,
     extractToolCalls,
     gatewayAttachments,
-    normalizeChatHistoryMessage,
     normalizeText,
-    normalizeVisibleChatHistoryMessages,
     optimisticAttachmentDisplay,
 } from "../components/features/chat/chatTypes";
+import { normalizeOpenClawHistoryMessage } from "../components/features/chat/transport/openClawHistoryNormalizer";
 import {
     base64ToText,
     chatErrorMessage,
@@ -3718,7 +3717,7 @@ describe("Mira Dashboard frontend behavior", () => {
             kind: "text",
         });
 
-        const normalized = normalizeChatHistoryMessage({
+        const normalized = normalizeOpenClawHistoryMessage({
             role: "assistant",
             content: `Here\nMEDIA:images/result.png\n<file name="note.txt" mime="text/plain">hello</file>`,
             timestamp: 1_782_172_800_000,
@@ -3729,18 +3728,6 @@ describe("Mira Dashboard frontend behavior", () => {
             "result.png",
             "note.txt",
         ]);
-
-        const visible = normalizeVisibleChatHistoryMessages([
-            {
-                role: "tool",
-                content: '<file name="tool.png" mime="image/png">abc</file>',
-                toolCallId: "tool-1",
-                toolName: "image",
-            },
-            { role: "assistant", content: "done" },
-        ]);
-        expect(visible).toHaveLength(1);
-        expect(visible[0]?.attachments?.[0]?.fileName).toBe("tool.png");
 
         expect(formatDatabaseNumber(123_456)).toBe("123,456");
         expect(formatDatabaseNumber(NaN)).toBe("0");

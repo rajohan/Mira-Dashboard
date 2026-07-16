@@ -28,6 +28,25 @@ export function chatErrorMessage(error: unknown, fallback: string): string {
     return fallback;
 }
 
+/** Removes a failed optimistic row and restores same-identity rows it replaced. */
+export function rollbackFailedOptimisticMessage(
+    messages: ChatHistoryMessage[],
+    failedMessage: ChatHistoryMessage,
+    replacedMessages: Array<{ index: number; message: ChatHistoryMessage }>
+): ChatHistoryMessage[] {
+    const restored = messages.filter((message) => message !== failedMessage);
+    for (const replaced of replacedMessages) {
+        if (!restored.includes(replaced.message)) {
+            restored.splice(
+                Math.min(replaced.index, restored.length),
+                0,
+                replaced.message
+            );
+        }
+    }
+    return restored;
+}
+
 /** Represents chat model option. */
 export interface ChatModelOption {
     id?: string;
@@ -409,7 +428,7 @@ export function isRecoveredAssistantText(left: string, right: string): boolean {
 
 /** Performs dedupe messages. */
 export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
-    const seen = new Set<string>();
+    const seen = new Map<string, Array<string | undefined>>();
     const deduped: ChatHistoryMessage[] = [];
 
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -423,6 +442,10 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         if (role === "user") {
             seen.clear();
         }
+        const seenRunIds = seen.get(identity) || [];
+        const hasCompatibleDuplicate = seenRunIds.some(
+            (runId) => !runId || !message.runId || runId === message.runId
+        );
         const isUnscopedTextlessConversationalMedia = Boolean(
             (role === "user" || role === "assistant") &&
             !message.text.trim() &&
@@ -432,13 +455,13 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
         );
         if (
             (message.text.trim() || diagnosticMessageIdentity(message)) &&
-            seen.has(identity) &&
+            hasCompatibleDuplicate &&
             !isUnscopedTextlessConversationalMedia
         ) {
             continue;
         }
 
-        seen.add(identity);
+        seen.set(identity, [...seenRunIds, message.runId]);
         deduped.unshift(message);
     }
 

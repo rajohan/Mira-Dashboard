@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
+import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import { errorMessage } from "./lib/errors.ts";
 import {
@@ -187,46 +188,7 @@ const gatewayState: {
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
-interface RuntimeEventEnvelope {
-    type: "event";
-    event: unknown;
-    payload: unknown;
-    runtimeSequence: number;
-}
-
-interface RuntimeRunSnapshot {
-    completed: boolean;
-    eventBytes: number[];
-    events: RuntimeEventEnvelope[];
-    runId: string;
-    totalBytes: number;
-    updatedAt: number;
-}
-
-const RUNTIME_SNAPSHOT_TTL_MS = 15 * 60_000;
-const ACTIVE_RUNTIME_SNAPSHOT_TTL_MS = 6 * 60 * 60_000;
-const RUNTIME_SNAPSHOT_MAX_EVENTS_PER_RUN = 500;
-const RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN = 1_000_000;
-const RUNTIME_SNAPSHOT_MAX_RUNS_PER_SESSION = 4;
-const RUNTIME_SNAPSHOT_MAX_SESSIONS = 50;
-const RUNTIME_SNAPSHOT_EVENTS = new Set([
-    "agent",
-    "chat",
-    "model.completed",
-    "session.ended",
-    "session.message",
-    "session.tool",
-]);
-const runtimeSnapshots = new Map<string, Map<string, RuntimeRunSnapshot>>();
-const runtimeSessionKeysByRun = new Map<string, string | undefined>();
-const runtimeJournal = { sequence: 0 };
-
-/** Clears all ephemeral runtime replay state. */
-function clearRuntimeSnapshots(): void {
-    runtimeSnapshots.clear();
-    runtimeSessionKeysByRun.clear();
-    runtimeJournal.sequence = 0;
-}
+const openClawChatBridge = new OpenClawChatBridge();
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
 ) => OpenClawGatewayClientInstance;
@@ -411,329 +373,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     return value && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : undefined;
-}
-
-/** Performs string field. */
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-    const value = record[key];
-    return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-/** Performs session has run IDentifier. */
-function hasSessionRunIdentifier(session: Session, runId: string): boolean {
-    return [
-        session.id,
-        session.key,
-        session.runId,
-        session.activeRunId,
-        session.currentRunId,
-    ].includes(runId);
-}
-
-/** Performs enrich runtime event payload. */
-function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
-    if (
-        event !== "agent" &&
-        event !== "chat" &&
-        event !== "model.completed" &&
-        event !== "session.ended" &&
-        event !== "session.tool" &&
-        event !== "session.message"
-    ) {
-        return payload;
-    }
-
-    const record = asRecord(payload);
-    if (!record || stringField(record, "sessionKey")) {
-        return payload;
-    }
-
-    const runId = stringField(record, "runId");
-    if (!runId) {
-        return payload;
-    }
-
-    const hasRememberedRun = runtimeSessionKeysByRun.has(runId);
-    const rememberedSessionKey = runtimeSessionKeysByRun.get(runId);
-    const matchingSessionKey =
-        hasRememberedRun && !rememberedSessionKey
-            ? undefined
-            : rememberedSessionKey ||
-              gatewayState.sessions.find((session) =>
-                  hasSessionRunIdentifier(session, runId)
-              )?.key;
-
-    return matchingSessionKey ? { ...record, sessionKey: matchingSessionKey } : payload;
-}
-
-/** Remembers a bounded run-to-session association for early runtime enrichment. */
-function rememberRuntimeSessionKey(runId: string, sessionKey: string): void {
-    const previousSessionKey = runtimeSessionKeysByRun.get(runId);
-    const isAmbiguous =
-        runtimeSessionKeysByRun.has(runId) && previousSessionKey !== sessionKey;
-    runtimeSessionKeysByRun.delete(runId);
-    runtimeSessionKeysByRun.set(runId, isAmbiguous ? undefined : sessionKey);
-    if (runtimeSessionKeysByRun.size > 200) {
-        const oldestRunId = runtimeSessionKeysByRun.keys().next().value;
-        if (oldestRunId) {
-            runtimeSessionKeysByRun.delete(oldestRunId);
-        }
-    }
-}
-
-/** Clears replay data and run associations for one reset session. */
-function clearRuntimeSnapshotsForSession(sessionKey: string): void {
-    runtimeSnapshots.delete(sessionKey);
-    for (const [runId, mappedSessionKey] of runtimeSessionKeysByRun) {
-        if (mappedSessionKey === sessionKey) {
-            runtimeSessionKeysByRun.delete(runId);
-        }
-    }
-}
-
-/** Updates ephemeral replay state after a successful Gateway request. */
-function handleSuccessfulGatewayRequest(
-    method: string,
-    parameters: Record<string, unknown>,
-    payload: unknown
-): void {
-    if (method === "chat.abort") {
-        const sessionKey = stringField(parameters, "sessionKey");
-        if (sessionKey) {
-            clearRuntimeSnapshotsForSession(sessionKey);
-        }
-        return;
-    }
-    if (method === "sessions.delete") {
-        const sessionKey = stringField(parameters, "key");
-        if (sessionKey) {
-            clearRuntimeSnapshotsForSession(sessionKey);
-        }
-        return;
-    }
-    if (method !== "chat.send") {
-        return;
-    }
-    const sessionKey = stringField(parameters, "sessionKey");
-    const message = stringField(parameters, "message");
-    if (sessionKey && message && /^\/(?:new|reset)(?:\s|$)/i.test(message)) {
-        clearRuntimeSnapshotsForSession(sessionKey);
-        return;
-    }
-    const response = asRecord(payload);
-    const runId = response ? stringField(response, "runId") : undefined;
-    if (runId && sessionKey) {
-        rememberRuntimeSessionKey(runId, sessionKey);
-    }
-}
-
-/** Returns whether an event completes a whole chat run. */
-function isTerminalRuntimeRunEvent(event: unknown, payload: unknown): boolean {
-    if (event === "model.completed" || event === "session.ended") {
-        return true;
-    }
-    const record = asRecord(payload);
-    return (
-        event === "chat" &&
-        typeof record?.state === "string" &&
-        ["aborted", "error", "final"].includes(record.state)
-    );
-}
-
-/** Removes expired runtime replay data. */
-function pruneRuntimeSnapshots(now = Date.now()): void {
-    for (const [sessionKey, runs] of runtimeSnapshots) {
-        for (const [runId, snapshot] of runs) {
-            const timeToLive = snapshot.completed
-                ? RUNTIME_SNAPSHOT_TTL_MS
-                : ACTIVE_RUNTIME_SNAPSHOT_TTL_MS;
-            if (now - snapshot.updatedAt > timeToLive) {
-                runs.delete(runId);
-            }
-        }
-        if (runs.size === 0) {
-            runtimeSnapshots.delete(sessionKey);
-        }
-    }
-}
-
-/** Returns whether a run key is provisional and safe to reconcile to one concrete run. */
-function isProvisionalRuntimeRunId(runId: string): boolean {
-    return (
-        runId === "runless" ||
-        runId.startsWith("dashboard-chat-") ||
-        runId.startsWith("dashboard-compact-")
-    );
-}
-
-/** Retains a bounded replay buffer for active or just-completed chat runtime work. */
-function rememberRuntimeEvent(envelope: RuntimeEventEnvelope): void {
-    if (
-        typeof envelope.event !== "string" ||
-        !RUNTIME_SNAPSHOT_EVENTS.has(envelope.event)
-    ) {
-        return;
-    }
-    const payload = asRecord(envelope.payload);
-    const sessionKey = payload ? stringField(payload, "sessionKey") : undefined;
-    if (!sessionKey) {
-        return;
-    }
-    const isTerminal = isTerminalRuntimeRunEvent(envelope.event, envelope.payload);
-    const explicitRunId = payload ? stringField(payload, "runId") : undefined;
-    const serializedEnvelopeBytes = Buffer.byteLength(JSON.stringify(envelope));
-    const retainedEnvelope =
-        serializedEnvelopeBytes <= RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN
-            ? envelope
-            : isTerminal
-              ? {
-                    ...envelope,
-                    payload: {
-                        runId: explicitRunId,
-                        sessionKey,
-                        state: payload?.state,
-                    },
-                }
-              : undefined;
-    if (!retainedEnvelope) {
-        return;
-    }
-    const retainedEnvelopeBytes =
-        retainedEnvelope === envelope
-            ? serializedEnvelopeBytes
-            : Buffer.byteLength(JSON.stringify(retainedEnvelope));
-
-    pruneRuntimeSnapshots();
-    const runs = runtimeSnapshots.get(sessionKey) || new Map();
-    const activeRuns = runs
-        .values()
-        .filter((snapshot) => !snapshot.completed)
-        .toArray();
-    const runId =
-        explicitRunId ||
-        (activeRuns.length === 1 ? activeRuns[0]?.runId : undefined) ||
-        "runless";
-    let snapshot = runs.get(runId);
-
-    if (!snapshot && explicitRunId) {
-        const provisionalCandidates = activeRuns.filter((entry) =>
-            isProvisionalRuntimeRunId(entry.runId)
-        );
-        const provisionalSnapshot =
-            activeRuns.length === 1 && provisionalCandidates.length === 1
-                ? provisionalCandidates[0]
-                : undefined;
-        if (provisionalSnapshot) {
-            runs.delete(provisionalSnapshot.runId);
-            provisionalSnapshot.runId = explicitRunId;
-            runs.set(explicitRunId, provisionalSnapshot);
-            snapshot = provisionalSnapshot;
-        }
-    }
-
-    if (!snapshot) {
-        snapshot = {
-            completed: false,
-            eventBytes: [],
-            events: [],
-            runId,
-            totalBytes: 2,
-            updatedAt: Date.now(),
-        };
-        runs.set(runId, snapshot);
-    }
-
-    snapshot.events.push(retainedEnvelope);
-    snapshot.eventBytes.push(retainedEnvelopeBytes);
-    snapshot.totalBytes += retainedEnvelopeBytes + (snapshot.events.length > 1 ? 1 : 0);
-    while (
-        snapshot.events.length > 1 &&
-        (snapshot.events.length > RUNTIME_SNAPSHOT_MAX_EVENTS_PER_RUN ||
-            snapshot.totalBytes > RUNTIME_SNAPSHOT_MAX_BYTES_PER_RUN)
-    ) {
-        snapshot.events.shift();
-        snapshot.totalBytes -=
-            (snapshot.eventBytes.shift() || 0) + (snapshot.events.length > 0 ? 1 : 0);
-    }
-    snapshot.completed ||= isTerminal;
-    snapshot.updatedAt = Date.now();
-    while (runs.size > RUNTIME_SNAPSHOT_MAX_RUNS_PER_SESSION) {
-        const oldestRunId = runs
-            .values()
-            .toArray()
-            .toSorted((left, right) => left.updatedAt - right.updatedAt)[0]?.runId;
-        if (!oldestRunId) {
-            break;
-        }
-        runs.delete(oldestRunId);
-    }
-    runtimeSnapshots.set(sessionKey, runs);
-    if (runtimeSnapshots.size > RUNTIME_SNAPSHOT_MAX_SESSIONS) {
-        const oldestSessionKey = runtimeSnapshots
-            .keys()
-            .map((key) => ({
-                key,
-                updatedAt: Math.max(
-                    ...runtimeSnapshots
-                        .get(key)!
-                        .values()
-                        .map((entry) => entry.updatedAt)
-                ),
-            }))
-            .toArray()
-            .toSorted((left, right) => left.updatedAt - right.updatedAt)[0]?.key;
-        if (oldestSessionKey) {
-            runtimeSnapshots.delete(oldestSessionKey);
-        }
-    }
-}
-
-/** Returns whether a runtime snapshot carries a final assistant chat event. */
-function hasRuntimeSnapshotChatFinal(snapshot: RuntimeRunSnapshot): boolean {
-    return snapshot.events.some((envelope) => {
-        const payload = asRecord(envelope.payload);
-        return envelope.event === "chat" && payload?.state === "final";
-    });
-}
-
-/** Returns the newest retained runtime sequence for snapshot ordering. */
-function runtimeSnapshotLastSequence(snapshot: RuntimeRunSnapshot): number {
-    return snapshot.events.at(-1)?.runtimeSequence ?? -1;
-}
-
-/** Returns active runtime events, or the most recently completed run during grace. */
-function runtimeSnapshotForSession(sessionKey: string): {
-    completed: boolean;
-    events: RuntimeEventEnvelope[];
-} {
-    pruneRuntimeSnapshots();
-    const snapshots = [...(runtimeSnapshots.get(sessionKey)?.values() || [])];
-    const active = snapshots.filter((snapshot) => !snapshot.completed);
-    const completed = snapshots
-        .filter((snapshot) => snapshot.completed)
-        .toSorted(
-            (left, right) =>
-                runtimeSnapshotLastSequence(right) - runtimeSnapshotLastSequence(left)
-        );
-    const latestCompleted = completed[0];
-    const completedWithoutRunlessTerminal =
-        latestCompleted?.runId === "runless" &&
-        !hasRuntimeSnapshotChatFinal(latestCompleted)
-            ? completed.find((snapshot) => snapshot.runId !== "runless") ||
-              latestCompleted
-            : latestCompleted;
-    const selected =
-        active.length > 0
-            ? active
-            : completedWithoutRunlessTerminal
-              ? [completedWithoutRunlessTerminal]
-              : [];
-    return {
-        completed: active.length === 0 && selected.length > 0,
-        events: selected
-            .flatMap((snapshot) => snapshot.events)
-            .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence),
-    };
 }
 
 /** Performs image block has omitted data. */
@@ -1144,7 +783,7 @@ function init(token: string): void {
     }
     const previousGatewayClient = gatewayState.client;
     if (gatewayState.currentToken && gatewayState.currentToken !== token) {
-        clearRuntimeSnapshots();
+        openClawChatBridge.clear();
     }
     try {
         previousGatewayClient?.stop();
@@ -1210,13 +849,11 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        const envelope: RuntimeEventEnvelope = {
-            type: "event",
-            event: event.event,
-            payload: enrichRuntimeEventPayload(event.event, event.payload),
-            runtimeSequence: ++runtimeJournal.sequence,
-        };
-        rememberRuntimeEvent(envelope);
+        const envelope = openClawChatBridge.recordEvent(
+            event.event,
+            event.payload,
+            gatewayState.sessions
+        );
         broadcast(envelope);
         if (typeof event.event === "string" && event.event.startsWith("sessions.")) {
             void refreshGatewaySessions(activeClient);
@@ -1339,7 +976,7 @@ async function forwardRequest(
 
         try {
             let payload = await activeGateway.request(method, parameters);
-            handleSuccessfulGatewayRequest(method, parameters, payload);
+            openClawChatBridge.handleSuccessfulRequest(method, parameters, payload);
             if (method === "chat.history") {
                 payload = hydrateOmittedChatHistoryImages(
                     payload,
@@ -1496,12 +1133,7 @@ function handleDashboardClient(ws: DashboardSocket): void {
                                     type: "response",
                                     id: message.id,
                                     isOk: true,
-                                    payload: {
-                                        ...(sessionKey
-                                            ? runtimeSnapshotForSession(sessionKey)
-                                            : { completed: false, events: [] }),
-                                        throughSequence: runtimeJournal.sequence,
-                                    },
+                                    payload: openClawChatBridge.snapshot(sessionKey),
                                 })
                             );
                         }
@@ -1571,7 +1203,7 @@ async function sendRequestAsync(
     }
 
     const payload = await gatewayState.client.request(method, parameters);
-    handleSuccessfulGatewayRequest(method, parameters, payload);
+    openClawChatBridge.handleSuccessfulRequest(method, parameters, payload);
     return payload;
 }
 
@@ -1636,7 +1268,7 @@ function shutdown(): void {
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
     gatewayState.currentToken = undefined;
-    clearRuntimeSnapshots();
+    openClawChatBridge.clear();
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
 }
