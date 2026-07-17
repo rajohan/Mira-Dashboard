@@ -158,6 +158,9 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
         if (method === "sessions.subscribe") {
             return { isOk: true };
         }
+        if (method === "chat.send") {
+            return { runId: "acknowledged-run" };
+        }
         if (method === "chat.history") {
             return {
                 messages: [
@@ -491,6 +494,195 @@ describe("gateway behavior", () => {
         });
 
         socket.emitMessage({
+            id: "runtime-snapshot-1",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-1"'))
+        );
+        const runtimeSnapshot = socket.sent
+            .map(
+                (raw) =>
+                    JSON.parse(raw) as {
+                        id?: string;
+                        payload?: {
+                            events?: Array<Record<string, unknown>>;
+                            throughSequence?: number;
+                        };
+                    }
+            )
+            .find((message) => message.id === "runtime-snapshot-1");
+        expect(runtimeSnapshot?.payload).toMatchObject({
+            events: [
+                {
+                    event: "session.tool",
+                    payload: {
+                        name: "tool",
+                        runId: "run-1",
+                        sessionKey: "agent:main:main",
+                    },
+                    runtimeSequence: expect.any(Number),
+                    type: "event",
+                },
+            ],
+            throughSequence: expect.any(Number),
+        });
+        expect(
+            client?.requests.some(({ method }) => method === "chat.runtimeSnapshot")
+        ).toBe(false);
+
+        client?.options.onEvent?.({
+            event: "chat",
+            payload: {
+                message: { role: "assistant", text: "done" },
+                runId: "run-1",
+                sessionKey: "agent:main:main",
+                state: "final",
+            },
+        });
+        socket.emitMessage({
+            id: "runtime-snapshot-completed",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-completed"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            payload?: { completed?: boolean };
+                        }
+                )
+                .find((message) => message.id === "runtime-snapshot-completed")?.payload
+                ?.completed
+        ).toBe(true);
+        client?.options.onEvent?.({
+            event: "session.ended",
+            payload: {
+                sessionKey: "agent:main:main",
+            },
+        });
+        socket.emitMessage({
+            id: "runtime-snapshot-after-runless-terminal",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-runless-terminal"')
+            )
+        );
+        const eventsAfterRunlessTerminal = socket.sent
+            .map(
+                (raw) =>
+                    JSON.parse(raw) as {
+                        id?: string;
+                        payload?: {
+                            events?: Array<{ event?: string; payload?: unknown }>;
+                        };
+                    }
+            )
+            .find((message) => message.id === "runtime-snapshot-after-runless-terminal")
+            ?.payload?.events;
+        expect(
+            eventsAfterRunlessTerminal?.some(
+                (event) =>
+                    event.event === "chat" &&
+                    (event.payload as { state?: string } | undefined)?.state === "final"
+            )
+        ).toBe(true);
+        expect(
+            eventsAfterRunlessTerminal?.some((event) => event.event === "session.ended")
+        ).toBe(false);
+        client?.options.onEvent?.({
+            event: "chat",
+            payload: {
+                runId: "aborted-after-final",
+                sessionKey: "agent:main:main",
+                state: "aborted",
+            },
+        });
+        client?.options.onEvent?.({
+            event: "session.ended",
+            payload: {
+                sessionKey: "agent:main:main",
+            },
+        });
+        socket.emitMessage({
+            id: "runtime-snapshot-after-aborted-run",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-aborted-run"')
+            )
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            payload?: {
+                                events?: Array<{
+                                    event?: string;
+                                    payload?: { runId?: string; state?: string };
+                                }>;
+                            };
+                        }
+                )
+                .find((message) => message.id === "runtime-snapshot-after-aborted-run")
+                ?.payload?.events
+        ).toEqual([
+            expect.objectContaining({
+                event: "chat",
+                payload: expect.objectContaining({
+                    runId: "aborted-after-final",
+                    state: "aborted",
+                }),
+            }),
+        ]);
+        client?.options.onEvent?.({
+            event: "chat",
+            payload: {
+                deltaText: "next",
+                runId: "run-2",
+                sessionKey: "agent:main:main",
+                state: "delta",
+            },
+        });
+        socket.emitMessage({
+            id: "runtime-snapshot-2",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-2"'))
+        );
+        const nextRuntimeEvents = socket.sent
+            .map(
+                (raw) =>
+                    JSON.parse(raw) as {
+                        id?: string;
+                        payload?: { events?: Array<{ payload?: { runId?: string } }> };
+                    }
+            )
+            .find((message) => message.id === "runtime-snapshot-2")?.payload?.events;
+        expect(nextRuntimeEvents).toHaveLength(1);
+        expect(nextRuntimeEvents?.[0]?.payload?.runId).toBe("run-2");
+
+        socket.emitMessage({
             id: "history-1",
             method: "chat.history",
             params: { sessionKey: "agent:main:main" },
@@ -565,26 +757,176 @@ describe("gateway behavior", () => {
             sessionActionRequest("reset")
         );
         expect(reset.status).toBe(200);
+        socket.emitMessage({
+            id: "runtime-snapshot-after-reset",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-after-reset"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            payload?: { completed?: boolean; events?: unknown[] };
+                        }
+                )
+                .find((message) => message.id === "runtime-snapshot-after-reset")?.payload
+        ).toMatchObject({ completed: false, events: [] });
 
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "partial before stop" },
+                runId: "stopped-run",
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+            },
+        });
         const stop = await sessionRoutes["/api/sessions/:id/action"].POST(
             sessionActionRequest("stop")
         );
         expect(stop.status).toBe(200);
+        socket.emitMessage({
+            id: "runtime-snapshot-after-stop",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-after-stop"'))
+        );
+        expect(
+            socket.sent.find((raw) => raw.includes('"id":"runtime-snapshot-after-stop"'))
+        ).toContain('"events":[]');
 
         const unsupported = await sessionRoutes["/api/sessions/:id/action"].POST(
             sessionActionRequest("archive")
         );
         expect(unsupported.status).toBe(400);
 
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "partial before delete" },
+                runId: "deleted-run",
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+            },
+        });
         const deleted =
             await sessionRoutes["/api/sessions/:id"].DELETE(sessionDeleteRequest());
         await expect(deleted.json()).resolves.toMatchObject({
             isSuccess: true,
             result: { echoed: { method: "sessions.delete" } },
         });
+        socket.emitMessage({
+            id: "runtime-snapshot-after-delete",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-delete"')
+            )
+        );
+        expect(
+            socket.sent.find((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-delete"')
+            )
+        ).toContain('"events":[]');
         expect(client?.requests.map((request) => request.method)).toEqual(
             expect.arrayContaining(["chat.abort", "chat.send", "sessions.delete"])
         );
+        socket.emitMessage({
+            id: "ack-main-run",
+            method: "chat.send",
+            params: {
+                message: "regular message",
+                sessionKey: "agent:main:main",
+            },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"ack-main-run"'))
+        );
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "early reasoning" },
+                runId: "acknowledged-run",
+                stream: "thinking",
+            },
+        });
+        await waitFor(() =>
+            socket.sent.some(
+                (raw) =>
+                    raw.includes('"event":"agent"') &&
+                    raw.includes('"runId":"acknowledged-run"')
+            )
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            event?: string;
+                            payload?: { runId?: string; sessionKey?: string };
+                        }
+                )
+                .findLast(
+                    (message) =>
+                        message.event === "agent" &&
+                        message.payload?.runId === "acknowledged-run"
+                )?.payload?.sessionKey
+        ).toBe("agent:main:main");
+
+        socket.emitMessage({
+            id: "ack-duplicate-run",
+            method: "chat.send",
+            params: {
+                message: "parallel message",
+                sessionKey: "agent:researcher:subagent:abc",
+            },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"ack-duplicate-run"'))
+        );
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "ambiguous reasoning" },
+                runId: "acknowledged-run",
+                stream: "thinking",
+            },
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes("ambiguous reasoning"))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            event?: string;
+                            payload?: {
+                                data?: { delta?: string };
+                                sessionKey?: string;
+                            };
+                        }
+                )
+                .findLast(
+                    (message) =>
+                        message.event === "agent" &&
+                        message.payload?.data?.delta === "ambiguous reasoning"
+                )?.payload
+        ).not.toHaveProperty("sessionKey");
 
         socket.emitMessage({ channel: "logs", type: "subscribe" });
         socket.emitMessage({ channel: "logs", type: "unsubscribe" });
@@ -630,6 +972,201 @@ describe("gateway behavior", () => {
                 .find((message) => message.id === "fail-1")
         ).toMatchObject({ error: "gateway rejected" });
 
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "provisional reasoning" },
+                sessionKey: "agent:provisional:main",
+                stream: "thinking",
+            },
+        });
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: " acknowledged" },
+                runId: "resolved-provisional-run",
+                sessionKey: "agent:provisional:main",
+                stream: "thinking",
+            },
+        });
+        client?.options.onEvent?.({
+            event: "model.completed",
+            payload: {
+                runId: "resolved-provisional-run",
+                sessionKey: "agent:provisional:main",
+            },
+        });
+        socket.emitMessage({
+            id: "runtime-snapshot-provisional",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:provisional:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-provisional"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            payload?: {
+                                completed?: boolean;
+                                events?: Array<{
+                                    payload?: {
+                                        data?: { delta?: string };
+                                        runId?: string;
+                                    };
+                                }>;
+                            };
+                        }
+                )
+                .find((message) => message.id === "runtime-snapshot-provisional")?.payload
+        ).toMatchObject({
+            completed: false,
+            events: [
+                {
+                    payload: {
+                        data: { delta: "provisional reasoning" },
+                    },
+                },
+            ],
+        });
+
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "fire and forget reasoning" },
+                runId: "fire-and-forget-run",
+                sessionKey: "agent:fire-and-forget:main",
+                stream: "thinking",
+            },
+        });
+        const requestCountBeforeNotification = client?.requests.length || 0;
+        socket.emitMessage({
+            method: "chat.send",
+            params: {
+                message: "/reset",
+                sessionKey: "agent:fire-and-forget:main",
+            },
+            type: "request",
+        });
+        await waitFor(
+            () => (client?.requests.length || 0) > requestCountBeforeNotification
+        );
+        socket.emitMessage({
+            id: "runtime-snapshot-after-idless-reset",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:fire-and-forget:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-idless-reset"')
+            )
+        );
+        expect(
+            socket.sent.find((raw) =>
+                raw.includes('"id":"runtime-snapshot-after-idless-reset"')
+            )
+        ).toContain('"events":[]');
+
+        const multiByteDelta = "é".repeat(210_000);
+        for (const marker of ["first", "second", "third"]) {
+            client?.options.onEvent?.({
+                event: "agent",
+                payload: {
+                    data: { delta: multiByteDelta, marker },
+                    runId: "byte-limited-run",
+                    sessionKey: "agent:bytes:main",
+                    stream: "thinking",
+                },
+            });
+        }
+        socket.emitMessage({
+            id: "runtime-snapshot-byte-limit",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:bytes:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"runtime-snapshot-byte-limit"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            payload?: {
+                                events?: Array<{
+                                    payload?: { data?: { marker?: string } };
+                                }>;
+                            };
+                        }
+                )
+                .find((message) => message.id === "runtime-snapshot-byte-limit")
+                ?.payload?.events?.map((event) => event.payload?.data?.marker)
+        ).toEqual(["second", "third"]);
+
+        const oversizedDelta = "é".repeat(510_000);
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: oversizedDelta },
+                runId: "oversized-run",
+                sessionKey: "agent:oversized:main",
+                stream: "thinking",
+            },
+        });
+        client?.options.onEvent?.({
+            event: "chat",
+            payload: {
+                message: { role: "assistant", text: oversizedDelta },
+                runId: "oversized-run",
+                sessionKey: "agent:oversized:main",
+                state: "final",
+            },
+        });
+        socket.emitMessage({
+            id: "runtime-snapshot-oversized-terminal",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:oversized:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) =>
+                raw.includes('"id":"runtime-snapshot-oversized-terminal"')
+            )
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            payload?: {
+                                completed?: boolean;
+                                events?: Array<{ payload?: unknown }>;
+                            };
+                        }
+                )
+                .find((message) => message.id === "runtime-snapshot-oversized-terminal")
+                ?.payload
+        ).toMatchObject({
+            completed: true,
+            events: [
+                {
+                    payload: {
+                        runId: "oversized-run",
+                        sessionKey: "agent:oversized:main",
+                        state: "final",
+                    },
+                },
+            ],
+        });
+
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
         try {
@@ -649,6 +1186,29 @@ describe("gateway behavior", () => {
             await waitFor(() =>
                 socket.sent.some((raw) => raw.includes('"type":"disconnected"'))
             );
+            socket.emitMessage({
+                id: "runtime-snapshot-after-close",
+                method: "chat.runtimeSnapshot",
+                params: { sessionKey: "agent:oversized:main" },
+                type: "request",
+            });
+            await waitFor(() =>
+                socket.sent.some((raw) =>
+                    raw.includes('"id":"runtime-snapshot-after-close"')
+                )
+            );
+            expect(
+                socket.sent
+                    .map(
+                        (raw) =>
+                            JSON.parse(raw) as {
+                                id?: string;
+                                payload?: { events?: unknown[] };
+                            }
+                    )
+                    .find((message) => message.id === "runtime-snapshot-after-close")
+                    ?.payload?.events
+            ).toEqual([]);
         } finally {
             errorSpy.mockRestore();
             warnSpy.mockRestore();

@@ -1,25 +1,17 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import {
-    type ActiveChatStreams,
-    createLocalSystemMessage,
-    isSameSessionKey,
-} from "./chatRuntime";
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
 import { slashCommandCanonicalName } from "./slashCommands";
+import type { ChatTransport } from "./transport/chatTransport";
 
 /** Represents use chat slash commands params. */
 interface UseChatSlashCommandsParameters {
-    request: <T = unknown>(
-        method: string,
-        parameters?: Record<string, unknown>
-    ) => Promise<T>;
+    abort: ChatTransport["abort"];
+    clearRuntime: (sessionKey: string) => void;
     selectedSessionKey: string;
+    selectedSessionKeyReference: MutableRefObject<string>;
     attachments: ChatSendAttachment[];
-    updateActiveStreams: (
-        updater: (wasPrevious: ActiveChatStreams) => ActiveChatStreams
-    ) => void;
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setDraft: Dispatch<SetStateAction<string>>;
     setSendError: Dispatch<SetStateAction<string | undefined>>;
@@ -28,10 +20,11 @@ interface UseChatSlashCommandsParameters {
 
 /** Handles Dashboard control commands that need dedicated Gateway RPCs. */
 export function useChatSlashCommands({
-    request,
+    abort,
+    clearRuntime,
     selectedSessionKey,
+    selectedSessionKeyReference,
     attachments,
-    updateActiveStreams,
     setMessages,
     setDraft,
     setSendError,
@@ -39,7 +32,18 @@ export function useChatSlashCommands({
 }: UseChatSlashCommandsParameters) {
     /** Performs add system message. */
     const addSystemMessage = (text: string) => {
-        setMessages((wasPrevious) => [...wasPrevious, createLocalSystemMessage(text)]);
+        setMessages((previous) => [
+            ...previous,
+            {
+                attachments: [],
+                content: text,
+                images: [],
+                local: true,
+                role: "system",
+                text,
+                timestamp: new Date().toISOString(),
+            },
+        ]);
     };
 
     return async (
@@ -47,6 +51,9 @@ export function useChatSlashCommands({
         currentAttachments: ChatSendAttachment[] = attachments,
         options: { preserveDraft?: boolean } = {}
     ): Promise<boolean> => {
+        const commandSessionKey = selectedSessionKey;
+        const isCommandSessionSelected = () =>
+            selectedSessionKeyReference.current === commandSessionKey;
         const [rawCommand = ""] = commandText.trim().split(/\s+/);
         const command = slashCommandCanonicalName(rawCommand);
 
@@ -71,6 +78,9 @@ export function useChatSlashCommands({
                 isConfirmed = false;
             }
 
+            if (!isCommandSessionSelected()) {
+                return true;
+            }
             if (!isConfirmed) {
                 setDraft("");
                 setSendError(undefined);
@@ -87,18 +97,15 @@ export function useChatSlashCommands({
         setSendError(undefined);
 
         try {
-            await request("chat.abort", { sessionKey: selectedSessionKey });
-            updateActiveStreams((wasPrevious) => {
-                return Object.fromEntries(
-                    Object.entries(wasPrevious).filter(
-                        ([, stream]) =>
-                            !isSameSessionKey(stream.sessionKey, selectedSessionKey)
-                    )
-                );
-            });
-            addSystemMessage("Stopped current run.");
+            await abort(commandSessionKey);
+            clearRuntime(commandSessionKey);
+            if (isCommandSessionSelected()) {
+                addSystemMessage("Stopped current run.");
+            }
         } catch (error_) {
-            setSendError(chatErrorMessage(error_, `Failed to run ${rawCommand}`));
+            if (isCommandSessionSelected()) {
+                setSendError(chatErrorMessage(error_, `Failed to run ${rawCommand}`));
+            }
         }
 
         return true;

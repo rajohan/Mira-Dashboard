@@ -1,0 +1,342 @@
+import type { ChatHistoryMessage, ChatRow, ChatVisibilitySettings } from "../chatTypes";
+import {
+    dedupeMessages,
+    isRecoveredAssistantText,
+    mergeChatMessageDetails,
+    messageDeleteKey,
+    messageIdentity,
+} from "../chatUtilities";
+import { presentChatMessages } from "./chatPresentation";
+import type {
+    ChatRunState,
+    ChatRuntimeState,
+    ChatSessionRuntimeState,
+} from "./chatState";
+import { findChatSessionRuntimeState } from "./chatState";
+
+export interface ChatProjection {
+    activityFingerprint: string;
+    activeRuns: ChatRunState[];
+    isCompacting: boolean;
+    rows: ChatRow[];
+}
+
+function orderedRuns(session?: ChatSessionRuntimeState): ChatRunState[] {
+    return Object.values(session?.runs || {}).toSorted((left, right) => {
+        const leftSequence =
+            left.phase === "active"
+                ? left.lastSequence
+                : (left.terminalSequence ?? left.lastSequence);
+        const rightSequence =
+            right.phase === "active"
+                ? right.lastSequence
+                : (right.terminalSequence ?? right.lastSequence);
+        const sequenceDifference = leftSequence - rightSequence;
+        return sequenceDifference || left.runId.localeCompare(right.runId);
+    });
+}
+
+function currentResponseStart(messages: ChatHistoryMessage[]): number {
+    return messages.findLastIndex((message) => message.role.toLowerCase() === "user") + 1;
+}
+
+interface ResponseSegment {
+    end: number;
+    start: number;
+}
+
+function isUserMessage(message: ChatHistoryMessage): boolean {
+    return message.role.toLowerCase() === "user";
+}
+
+function messageTimestamp(message: ChatHistoryMessage): number | undefined {
+    const timestamp = Date.parse(message.timestamp || "");
+    return Number.isNaN(timestamp) ? undefined : timestamp;
+}
+
+function isRunMatchingMessage(run: ChatRunState, message: ChatHistoryMessage): boolean {
+    return Boolean(
+        message.runId &&
+        (message.runId === run.runId || run.aliases.includes(message.runId))
+    );
+}
+
+function responseSegment(
+    messages: ChatHistoryMessage[],
+    run: ChatRunState
+): ResponseSegment {
+    const matchingIndex = messages.findIndex((message) =>
+        isRunMatchingMessage(run, message)
+    );
+    let userIndex =
+        matchingIndex === -1
+            ? -1
+            : messages.findLastIndex(
+                  (message, index) => index < matchingIndex && isUserMessage(message)
+              );
+    const startedAt = Date.parse(run.startedAt);
+    if (userIndex === -1 && !Number.isNaN(startedAt)) {
+        const nextUserIndex = messages.findIndex((message) => {
+            const timestamp = messageTimestamp(message);
+            return (
+                isUserMessage(message) && timestamp !== undefined && timestamp > startedAt
+            );
+        });
+        const hasNextUser = nextUserIndex !== -1;
+        userIndex = messages.findLastIndex((message, index) => {
+            if (!isUserMessage(message)) {
+                return false;
+            }
+            if (hasNextUser) {
+                return index < nextUserIndex;
+            }
+            const timestamp = messageTimestamp(message);
+            return timestamp !== undefined && timestamp <= startedAt;
+        });
+    }
+    const start = userIndex === -1 ? currentResponseStart(messages) : userIndex + 1;
+    const nextUserOffset = messages
+        .slice(start)
+        .findIndex((message) => isUserMessage(message));
+    return {
+        end: nextUserOffset === -1 ? messages.length : start + nextUserOffset,
+        start,
+    };
+}
+
+function canonicalFinalIndex(
+    messages: ChatHistoryMessage[],
+    run: ChatRunState,
+    segment: ResponseSegment
+): number {
+    const assistantText = run.assistant?.text || "";
+    for (let index = segment.end - 1; index >= segment.start; index -= 1) {
+        const message = messages[index]!;
+        const role = message.role.toLowerCase();
+        if (role !== "assistant" && role !== "system") {
+            continue;
+        }
+        if (isRunMatchingMessage(run, message)) {
+            return index;
+        }
+        if (message.runId) {
+            continue;
+        }
+        if (!assistantText && run.phase !== "active" && message.text.trim()) {
+            return index;
+        }
+        if (assistantText && isRecoveredAssistantText(message.text, assistantText)) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+function toolSignatures(message: ChatHistoryMessage): string[] {
+    const calls = (message.toolCalls || []).map((call) =>
+        JSON.stringify({
+            arguments: call.arguments ?? undefined,
+            id: call.id || "",
+            name: call.name,
+            result: call.toolResult
+                ? {
+                      content: call.toolResult.content,
+                      error: call.toolResult.isError || false,
+                      id: call.toolResult.id || "",
+                      images: call.toolResult.images || [],
+                      name: call.toolResult.name || "",
+                  }
+                : undefined,
+        })
+    );
+    if (message.toolResult) {
+        calls.push(
+            JSON.stringify({
+                result: {
+                    content: message.toolResult.content,
+                    error: message.toolResult.isError || false,
+                    id: message.toolResult.id || "",
+                    images: message.toolResult.images || [],
+                    name: message.toolResult.name || "",
+                },
+            })
+        );
+    }
+    return calls;
+}
+
+function thinkingSignatures(message: ChatHistoryMessage): string[] {
+    return (message.thinking || []).map((block) =>
+        JSON.stringify({ id: block.id || "", text: block.text })
+    );
+}
+
+function isDiagnosticRecovered(
+    diagnostic: ChatHistoryMessage,
+    messages: ChatHistoryMessage[],
+    segment: ResponseSegment,
+    run: ChatRunState
+): boolean {
+    const candidates = messages.slice(segment.start, segment.end);
+    const tool = new Set(toolSignatures(diagnostic));
+    const thinking = new Set(thinkingSignatures(diagnostic));
+    const identity = messageIdentity(diagnostic);
+
+    return candidates.some((candidate) => {
+        if (candidate.runId && !isRunMatchingMessage(run, candidate)) {
+            return false;
+        }
+        if (messageIdentity(candidate) === identity) {
+            return true;
+        }
+        if (
+            tool.size > 0 &&
+            toolSignatures(candidate).some((signature) => tool.has(signature))
+        ) {
+            return true;
+        }
+        return (
+            thinking.size > 0 &&
+            thinkingSignatures(candidate).some((signature) => thinking.has(signature))
+        );
+    });
+}
+
+function transientMessage(
+    message: ChatHistoryMessage,
+    run: ChatRunState,
+    runtimeKey: string
+): ChatHistoryMessage {
+    return {
+        ...message,
+        local: true,
+        runId: run.runId,
+        runtimeKey,
+        timestamp: message.timestamp || run.updatedAt,
+    };
+}
+
+function diagnosticRank(message: ChatHistoryMessage): number {
+    return message.toolCalls?.length || message.toolResult ? 0 : 1;
+}
+
+/** Reconciles history with the current provider-independent runtime turn. */
+export function reconcileChatMessages(
+    history: ChatHistoryMessage[],
+    session?: ChatSessionRuntimeState
+): ChatHistoryMessage[] {
+    const messages = [...history];
+    for (const run of orderedRuns(session)) {
+        const segment = responseSegment(messages, run);
+        const diagnostics = run.diagnostics
+            .toSorted(
+                (left, right) =>
+                    diagnosticRank(left.message) - diagnosticRank(right.message)
+            )
+            .map((entry) => transientMessage(entry.message, run, entry.key))
+            .filter((message) => !isDiagnosticRecovered(message, messages, segment, run));
+        const finalIndex = canonicalFinalIndex(messages, run, segment);
+        if (finalIndex !== -1) {
+            const canonical = messages[finalIndex]!;
+            if (run.assistant) {
+                messages[finalIndex] = mergeChatMessageDetails(
+                    canonical,
+                    transientMessage(run.assistant, run, "assistant")
+                );
+            }
+            messages.splice(finalIndex, 0, ...diagnostics);
+            continue;
+        }
+
+        const additions = [...diagnostics];
+        if (run.assistant) {
+            additions.push(transientMessage(run.assistant, run, "assistant"));
+        }
+        messages.splice(segment.end, 0, ...additions);
+    }
+    return dedupeMessages(messages);
+}
+
+function visibleRunIds(messages: ChatHistoryMessage[]): Set<string> {
+    return new Set(
+        messages
+            .filter((message) => message.local === true)
+            .map((message) => message.runId)
+            .filter((runId): runId is string => Boolean(runId))
+    );
+}
+
+function statusRow(
+    runs: ChatRunState[],
+    visibleRunIdSet: Set<string>
+): ChatRow | undefined {
+    const run = runs
+        .filter((candidate) => candidate.phase === "active")
+        .toSorted((left, right) => right.lastSequence - left.lastSequence)
+        .find(
+            (candidate) =>
+                !visibleRunIdSet.has(candidate.runId) &&
+                candidate.aliases.every((alias) => !visibleRunIdSet.has(alias))
+        );
+    if (!run) {
+        return undefined;
+    }
+    const text = run.statusText || "Thinking";
+    return {
+        key: `typing-${run.sessionKey}-${run.runId}-${text}`,
+        kind: "typing",
+        message: { content: text, role: "assistant", text },
+    };
+}
+
+/** Builds the exact rows consumed by the unchanged chat message UI. */
+export function projectChat(
+    history: ChatHistoryMessage[],
+    runtime: ChatRuntimeState,
+    sessionKey: string,
+    visibility: ChatVisibilitySettings,
+    shouldKeepThinkingAfterFinal: boolean,
+    deletedMessageKeys: ReadonlySet<string>
+): ChatProjection {
+    const session = findChatSessionRuntimeState(runtime, sessionKey);
+    const runs = orderedRuns(session);
+    const reconciled = reconcileChatMessages(history, session);
+    const presented = presentChatMessages(
+        reconciled,
+        visibility,
+        shouldKeepThinkingAfterFinal
+    ).filter((message) => !deletedMessageKeys.has(messageDeleteKey(message)));
+    const rows: ChatRow[] = presented.map((message) => ({
+        key:
+            message.local === true && message.runId
+                ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
+                : messageDeleteKey(message),
+        kind: message.local === true && message.runId ? "stream" : "message",
+        message,
+    }));
+    const typing = statusRow(runs, visibleRunIds(presented));
+    if (typing) {
+        rows.push(typing);
+    }
+
+    const activeRuns = runs.filter((run) => run.phase === "active");
+    return {
+        activityFingerprint: runs
+            .map((run) =>
+                [
+                    run.runId,
+                    run.lastSequence,
+                    run.statusText || "",
+                    run.assistant?.text || "",
+                ].join(":")
+            )
+            .join("|"),
+        activeRuns,
+        isCompacting: activeRuns.some(
+            (run) =>
+                run.operation === "compact" ||
+                run.statusText?.toLowerCase().includes("compact")
+        ),
+        rows,
+    };
+}

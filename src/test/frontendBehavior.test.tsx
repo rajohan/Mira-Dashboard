@@ -36,16 +36,14 @@ import {
     replaceSessionsFromWebSocket,
     sessionsCollection,
 } from "../collections/sessions";
-import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
 import {
     attachmentKind,
+    type ChatHistoryMessage,
+    chatTransportAttachments,
     extractImages,
     extractThinkingBlocks,
     extractToolCalls,
-    gatewayAttachments,
-    normalizeChatHistoryMessage,
     normalizeText,
-    normalizeVisibleChatHistoryMessages,
     optimisticAttachmentDisplay,
 } from "../components/features/chat/chatTypes";
 import {
@@ -64,6 +62,7 @@ import {
     buildSlashCommandSuggestions,
     slashCommandCanonicalName,
 } from "../components/features/chat/slashCommands";
+import { normalizeOpenClawHistoryMessage } from "../components/features/chat/transport/openClawHistoryNormalizer";
 import {
     formatBytes as formatDatabaseBytes,
     formatNumber as formatDatabaseNumber,
@@ -3622,6 +3621,48 @@ describe("Mira Dashboard frontend behavior", () => {
             "different",
         ]);
 
+        const duplicateUserMessages = dedupeMessages([
+            chatMessage({ role: "user", text: "same question" }),
+            chatMessage({ local: true, role: "user", text: "same question" }),
+        ]);
+        expect(duplicateUserMessages).toHaveLength(1);
+        expect(duplicateUserMessages[0]?.text).toBe("same question");
+
+        const intentionalRepeatedUserMessages = dedupeMessages([
+            chatMessage({ role: "user", text: "same question" }),
+            chatMessage({ role: "user", text: "same question" }),
+        ]);
+        expect(intentionalRepeatedUserMessages).toHaveLength(2);
+
+        const oneOptimisticCopyOfRepeatedUserMessages = dedupeMessages([
+            chatMessage({ role: "user", text: "same question" }),
+            chatMessage({ role: "user", text: "same question" }),
+            chatMessage({ local: true, role: "user", text: "same question" }),
+        ]);
+        expect(oneOptimisticCopyOfRepeatedUserMessages).toHaveLength(2);
+
+        const queuedRepeatedUserMessages = dedupeMessages([
+            chatMessage({ role: "user", text: "repeat" }),
+            chatMessage({ role: "user", text: "different" }),
+            chatMessage({ role: "user", text: "repeat" }),
+        ]);
+        expect(queuedRepeatedUserMessages.map((message) => message.text)).toEqual([
+            "repeat",
+            "different",
+            "repeat",
+        ]);
+
+        const repeatedResponseMessages = dedupeMessages([
+            chatMessage({ role: "assistant", text: "same" }),
+            chatMessage({ role: "user", text: "repeat" }),
+            chatMessage({ role: "assistant", text: "same" }),
+        ]);
+        expect(repeatedResponseMessages.map((message) => message.text)).toEqual([
+            "same",
+            "repeat",
+            "same",
+        ]);
+
         expect(
             isRecoveredAssistantText(
                 "This is a sufficiently long assistant response",
@@ -3665,6 +3706,73 @@ describe("Mira Dashboard frontend behavior", () => {
             "no timestamp",
             "local system",
         ]);
+
+        const repeatedTurnMessages = mergeWithRecentOptimisticMessages(
+            [
+                chatMessage({ role: "user", text: "OK" }),
+                chatMessage({ role: "assistant", text: "Earlier answer" }),
+                chatMessage({
+                    local: true,
+                    role: "user",
+                    text: "OK",
+                    timestamp: new Date().toISOString(),
+                }),
+            ],
+            [
+                chatMessage({ role: "user", text: "OK" }),
+                chatMessage({ role: "assistant", text: "Earlier answer" }),
+            ]
+        );
+        expect(
+            repeatedTurnMessages.filter(
+                (message) => message.role === "user" && message.text === "OK"
+            )
+        ).toHaveLength(2);
+
+        const repeatedAnswerWithCurrentDiagnostics = mergeWithRecentOptimisticMessages(
+            [
+                chatMessage({ role: "user", text: "first" }),
+                chatMessage({ role: "assistant", text: "OK" }),
+                chatMessage({ role: "user", text: "second" }),
+                chatMessage({
+                    local: true,
+                    role: "assistant",
+                    text: "OK",
+                    thinking: [{ text: "current turn reasoning" }],
+                    timestamp: new Date().toISOString(),
+                }),
+            ],
+            [
+                chatMessage({ role: "user", text: "first" }),
+                chatMessage({ role: "assistant", text: "OK" }),
+                chatMessage({ role: "user", text: "second" }),
+            ]
+        );
+        expect(repeatedAnswerWithCurrentDiagnostics.at(-1)).toMatchObject({
+            local: true,
+            role: "assistant",
+            text: "OK",
+            thinking: [{ text: "current turn reasoning" }],
+        });
+    });
+
+    it("keeps stored delete keys compatible while scoping runtime rows", () => {
+        const existingHistoryMessage = chatMessage({
+            role: "assistant",
+            runId: "run-1",
+            text: "answer",
+            timestamp: "2026-06-23T08:00:00.000Z",
+        });
+
+        expect(messageDeleteKey(existingHistoryMessage)).toBe(
+            "assistant::2026-06-23T08:00:00.000Z::run-1::answer"
+        );
+        expect(
+            messageDeleteKey({
+                ...existingHistoryMessage,
+                runtimeKey: "runtime-assistant",
+            })
+        ).toBe("assistant::2026-06-23T08:00:00.000Z::run-1::runtime-assistant::answer");
     });
 
     it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {
@@ -3693,7 +3801,7 @@ describe("Mira Dashboard frontend behavior", () => {
             contentBase64: "aGVsbG8=",
             kind: "text" as const,
         };
-        expect(gatewayAttachments([sendAttachment])).toEqual([
+        expect(chatTransportAttachments([sendAttachment])).toEqual([
             {
                 type: "text",
                 mimeType: "text/plain",
@@ -3707,7 +3815,7 @@ describe("Mira Dashboard frontend behavior", () => {
             kind: "text",
         });
 
-        const normalized = normalizeChatHistoryMessage({
+        const normalized = normalizeOpenClawHistoryMessage({
             role: "assistant",
             content: `Here\nMEDIA:images/result.png\n<file name="note.txt" mime="text/plain">hello</file>`,
             timestamp: 1_782_172_800_000,
@@ -3718,18 +3826,6 @@ describe("Mira Dashboard frontend behavior", () => {
             "result.png",
             "note.txt",
         ]);
-
-        const visible = normalizeVisibleChatHistoryMessages([
-            {
-                role: "tool",
-                content: '<file name="tool.png" mime="image/png">abc</file>',
-                toolCallId: "tool-1",
-                toolName: "image",
-            },
-            { role: "assistant", content: "done" },
-        ]);
-        expect(visible).toHaveLength(1);
-        expect(visible[0]?.attachments?.[0]?.fileName).toBe("tool.png");
 
         expect(formatDatabaseNumber(123_456)).toBe("123,456");
         expect(formatDatabaseNumber(NaN)).toBe("0");

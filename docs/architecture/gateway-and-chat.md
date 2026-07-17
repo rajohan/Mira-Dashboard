@@ -77,7 +77,25 @@ as Dashboard session/origin/Gateway health issues before debugging React state.
 
 ## Chat Runtime Model
 
-The chat UI combines several event sources into one visible conversation:
+Chat is split into provider-independent layers. OpenClaw-specific shapes stop at
+the adapter boundary:
+
+```text
+OpenClaw Gateway
+  -> backend OpenClawChatBridge (bounded replay journal)
+  -> frontend OpenClaw transport + adapter (raw shapes -> canonical events)
+  -> chat reducer (session/run state machine)
+  -> reconciliation + visibility projection
+  -> existing Chat UI components
+```
+
+`Chat.tsx` composes the view. History, input media, scrolling, commands, models,
+and runtime replay each have a focused controller. The domain reducer and
+projection functions do not know RPC method names or OpenClaw event variants.
+Supporting another provider should require a new `ChatTransport` adapter, not
+changes throughout the reducer or UI.
+
+The runtime combines several event sources into one visible conversation:
 
 - historical session messages;
 - live assistant deltas;
@@ -85,6 +103,22 @@ The chat UI combines several event sources into one visible conversation:
 - tool call diagnostics;
 - tool result diagnostics;
 - terminal chat state events.
+
+The Dashboard backend keeps a bounded, in-memory replay snapshot for active
+runs and the most recently completed run during a short grace period. A browser
+requests the selected session's snapshot after connecting and then continues
+with sequenced live events. This restores current thinking, tool diagnostics,
+and status after refresh or device changes without permanently storing
+reasoning. Snapshot payloads are session-scoped, size-limited, and cleared on
+Gateway credential changes or backend restart. They are also cleared after a
+successful reset/new send, abort, or session deletion. Completed data expires
+after 15 minutes; active data expires after six hours without an event.
+
+The canonical reducer is ordered and idempotent. Run identifiers and aliases are
+always session-scoped. Snapshot gating applies only to the selected session, so
+off-screen terminal events continue to clean up their own runs while a snapshot
+is in flight. Canonical history wins reconciliation after a terminal refresh;
+transient diagnostics are inserted before the matching final answer.
 
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
@@ -97,7 +131,9 @@ Session controls are Gateway-backed rather than Dashboard-only preferences:
 
 Thinking/reasoning and tool diagnostics have separate visibility toggles stored
 in browser local storage. The composer owns these controls so the setting and
-the message it affects stay in one interaction surface.
+the message it affects stay in one interaction surface. These settings are
+presentation-only: raw diagnostics remain in client state while toggles filter
+rendering, so hiding and showing them does not delete current-run data.
 
 Keeping thinking after the final answer is a separate persisted preference. It
 is available only while thinking is visible, defaults off, and preserves an
@@ -118,6 +154,12 @@ When changing chat event handling, test these cases:
 - failed tool results stay visible when tool output is enabled;
 - hiding tool output does not also hide a real terminal chat error;
 - run IDs are scoped by session, not treated as globally unique.
+- snapshot replay and live delivery interleaving does not duplicate deltas;
+- snapshot gating never drops queued events for other sessions;
+- refresh/reconnect restores only the selected active or latest completed run;
+- hiding diagnostics does not remove them from cached client state;
+- repeated short final answers in different user turns remain distinct;
+- hidden tool attachments never cross a user or run boundary;
 - socket reconnects, compaction replacement runs, and selected-session changes
   cannot leak control or stream state between sessions.
 

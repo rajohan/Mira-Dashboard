@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
+import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import { errorMessage } from "./lib/errors.ts";
 import {
@@ -187,6 +188,7 @@ const gatewayState: {
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
+const openClawChatBridge = new OpenClawChatBridge();
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
 ) => OpenClawGatewayClientInstance;
@@ -371,48 +373,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     return value && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : undefined;
-}
-
-/** Performs string field. */
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-    const value = record[key];
-    return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-/** Performs session has run IDentifier. */
-function hasSessionRunIdentifier(session: Session, runId: string): boolean {
-    return [
-        session.id,
-        session.key,
-        session.runId,
-        session.activeRunId,
-        session.currentRunId,
-    ].includes(runId);
-}
-
-/** Performs enrich runtime event payload. */
-function enrichRuntimeEventPayload(event: unknown, payload: unknown): unknown {
-    if (event !== "agent" && event !== "session.tool" && event !== "session.message") {
-        return payload;
-    }
-
-    const record = asRecord(payload);
-    if (!record || stringField(record, "sessionKey")) {
-        return payload;
-    }
-
-    const runId = stringField(record, "runId");
-    if (!runId) {
-        return payload;
-    }
-
-    const matchingSession = gatewayState.sessions.find((session) =>
-        hasSessionRunIdentifier(session, runId)
-    );
-
-    return matchingSession?.key
-        ? { ...record, sessionKey: matchingSession.key }
-        : payload;
 }
 
 /** Performs image block has omitted data. */
@@ -798,6 +758,7 @@ async function refreshSessions(
                             : undefined,
                 });
             });
+        openClawChatBridge.reconcileSessions(gatewayState.sessions);
         broadcast({ type: "sessions", sessions: gatewayState.sessions });
     }
 }
@@ -822,6 +783,9 @@ function init(token: string): void {
         return;
     }
     const previousGatewayClient = gatewayState.client;
+    if (gatewayState.currentToken && gatewayState.currentToken !== token) {
+        openClawChatBridge.clear();
+    }
     try {
         previousGatewayClient?.stop();
     } catch (error) {
@@ -851,6 +815,7 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
+        openClawChatBridge.clear();
         gatewayState.isConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         /** Subscribes to Gateway session index events for live session updates. */
@@ -886,11 +851,12 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        broadcast({
-            type: "event",
-            event: event.event,
-            payload: enrichRuntimeEventPayload(event.event, event.payload),
-        });
+        const envelope = openClawChatBridge.recordEvent(
+            event.event,
+            event.payload,
+            gatewayState.sessions
+        );
+        broadcast(envelope);
         if (typeof event.event === "string" && event.event.startsWith("sessions.")) {
             void refreshGatewaySessions(activeClient);
         }
@@ -910,6 +876,7 @@ function init(token: string): void {
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
+        openClawChatBridge.clear();
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
@@ -1011,7 +978,14 @@ async function forwardRequest(
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
+            const requestBoundary = openClawChatBridge.captureRequestBoundary();
             let payload = await activeGateway.request(method, parameters);
+            openClawChatBridge.handleSuccessfulRequest(
+                method,
+                parameters,
+                payload,
+                requestBoundary
+            );
             if (method === "chat.history") {
                 payload = hydrateOmittedChatHistoryImages(
                     payload,
@@ -1050,7 +1024,14 @@ async function forwardRequest(
     }
 
     try {
-        await activeGateway.request(method, parameters);
+        const requestBoundary = openClawChatBridge.captureRequestBoundary();
+        const payload = await activeGateway.request(method, parameters);
+        openClawChatBridge.handleSuccessfulRequest(
+            method,
+            parameters,
+            payload,
+            requestBoundary
+        );
         if (method.startsWith("sessions.")) {
             await refreshSessionsAfterRequest(activeGateway);
         }
@@ -1157,6 +1138,23 @@ function handleDashboardClient(ws: DashboardSocket): void {
                     (message.type === "request" || message.type === "req") &&
                     message.method
                 ) {
+                    if (message.method === "chat.runtimeSnapshot") {
+                        if (message.id && ws.isOpen()) {
+                            const sessionKey =
+                                typeof message.params?.sessionKey === "string"
+                                    ? message.params.sessionKey
+                                    : "";
+                            ws.send(
+                                JSON.stringify({
+                                    type: "response",
+                                    id: message.id,
+                                    isOk: true,
+                                    payload: openClawChatBridge.snapshot(sessionKey),
+                                })
+                            );
+                        }
+                        return;
+                    }
                     const isOk = await forwardRequest(
                         message.method,
                         message.params || {},
@@ -1220,7 +1218,15 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
-    return gatewayState.client.request(method, parameters);
+    const requestBoundary = openClawChatBridge.captureRequestBoundary();
+    const payload = await gatewayState.client.request(method, parameters);
+    openClawChatBridge.handleSuccessfulRequest(
+        method,
+        parameters,
+        payload,
+        requestBoundary
+    );
+    return payload;
 }
 
 /** Performs send session message. */
@@ -1284,6 +1290,7 @@ function shutdown(): void {
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
     gatewayState.currentToken = undefined;
+    openClawChatBridge.clear();
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
 }
