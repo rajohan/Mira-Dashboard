@@ -244,29 +244,6 @@ function resolveRun(
     }
 
     if (!run && event.runId) {
-        const provisionalRuns = Object.entries(session.runs).filter(
-            ([, candidate]) =>
-                candidate.phase === "active" &&
-                isProvisionalChatRunId(session.sessionKey, candidate.runId)
-        );
-        if (provisionalRuns.length === 1) {
-            const [provisionalKey, provisionalRun] = provisionalRuns[0]!;
-            delete session.runs[provisionalKey];
-            runKey = event.runId;
-            run = {
-                ...provisionalRun,
-                aliases: uniqueChatRunIds([
-                    ...provisionalRun.aliases,
-                    provisionalRun.runId,
-                    event.runId,
-                ]),
-                runId: event.runId,
-            };
-            session.runs[runKey] = run;
-        }
-    }
-
-    if (!run && event.runId) {
         runKey = event.runId;
         run = emptyRun(event.sessionKey, event.runId, event.sequence, event.timestamp);
         session.runs[runKey] = run;

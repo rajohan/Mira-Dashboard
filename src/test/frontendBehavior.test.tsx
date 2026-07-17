@@ -3756,6 +3756,25 @@ describe("Mira Dashboard frontend behavior", () => {
         });
     });
 
+    it("keeps stored delete keys compatible while scoping runtime rows", () => {
+        const existingHistoryMessage = chatMessage({
+            role: "assistant",
+            runId: "run-1",
+            text: "answer",
+            timestamp: "2026-06-23T08:00:00.000Z",
+        });
+
+        expect(messageDeleteKey(existingHistoryMessage)).toBe(
+            "assistant::2026-06-23T08:00:00.000Z::run-1::answer"
+        );
+        expect(
+            messageDeleteKey({
+                ...existingHistoryMessage,
+                runtimeKey: "runtime-assistant",
+            })
+        ).toBe("assistant::2026-06-23T08:00:00.000Z::run-1::runtime-assistant::answer");
+    });
+
     it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {
         const contentBlocks = [
             { type: "text", text: "hello" },

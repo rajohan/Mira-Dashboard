@@ -1011,11 +1011,28 @@ describe("gateway behavior", () => {
                     (raw) =>
                         JSON.parse(raw) as {
                             id?: string;
-                            payload?: { completed?: boolean; events?: unknown[] };
+                            payload?: {
+                                completed?: boolean;
+                                events?: Array<{
+                                    payload?: {
+                                        data?: { delta?: string };
+                                        runId?: string;
+                                    };
+                                }>;
+                            };
                         }
                 )
                 .find((message) => message.id === "runtime-snapshot-provisional")?.payload
-        ).toMatchObject({ completed: true, events: [{}, {}, {}] });
+        ).toMatchObject({
+            completed: false,
+            events: [
+                {
+                    payload: {
+                        data: { delta: "provisional reasoning" },
+                    },
+                },
+            ],
+        });
 
         client?.options.onEvent?.({
             event: "agent",

@@ -142,7 +142,7 @@ describe("OpenClaw chat bridge", () => {
         expect(bridge.snapshot(MAIN).events).toEqual([event]);
     });
 
-    it("promotes provisional runs and prefers a concrete final over runless metadata", () => {
+    it("promotes acknowledged provisional runs and prefers a concrete final", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(
             "agent",
@@ -164,6 +164,15 @@ describe("OpenClaw chat bridge", () => {
             },
             []
         );
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-local",
+                message: "question",
+                sessionKey: MAIN,
+            },
+            { runId: "real-run" }
+        );
         bridge.recordEvent("session.ended", { sessionKey: MAIN }, []);
 
         const snapshot = bridge.snapshot(MAIN);
@@ -172,6 +181,41 @@ describe("OpenClaw chat bridge", () => {
         expect(payloads(bridge).at(-1)).toMatchObject({
             runId: "real-run",
             state: "final",
+        });
+    });
+
+    it("does not end an unrelated provisional run with unscoped metadata", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                runId: "dashboard-chat-local",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "external answer",
+                runId: "external-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent("session.ended", { sessionKey: MAIN }, []);
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: false,
+            events: [
+                expect.objectContaining({
+                    payload: expect.objectContaining({
+                        runId: "dashboard-chat-local",
+                    }),
+                }),
+            ],
         });
     });
 
@@ -214,6 +258,59 @@ describe("OpenClaw chat bridge", () => {
             expect.objectContaining({
                 event: "chat",
                 payload: expect.objectContaining({ message: "done" }),
+            }),
+        ]);
+    });
+
+    it("selects completed replay by terminal order after delayed older events", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "old answer",
+                runId: "old-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "new answer",
+                runId: "new-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.message",
+            {
+                content: "old answer",
+                role: "assistant",
+                runId: "old-run",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.message",
+            { content: "new answer", role: "assistant", sessionKey: MAIN },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN).events).toEqual([
+            expect.objectContaining({
+                event: "chat",
+                payload: expect.objectContaining({
+                    message: "new answer",
+                    runId: "new-run",
+                }),
+            }),
+            expect.objectContaining({
+                event: "session.message",
+                payload: expect.objectContaining({ content: "new answer" }),
             }),
         ]);
     });
@@ -471,7 +568,7 @@ describe("OpenClaw chat bridge", () => {
         ]);
     });
 
-    it("rewrites an active provisional replay when the provider run arrives", () => {
+    it("keeps an explicit provider replay separate until send acknowledgement", () => {
         const activeBridge = new OpenClawChatBridge();
         activeBridge.recordEvent(
             "agent",
@@ -494,6 +591,20 @@ describe("OpenClaw chat bridge", () => {
             []
         );
         expect(payloads(activeBridge).map((payload) => payload.runId)).toEqual([
+            "dashboard-chat-active",
+            "provider-active",
+        ]);
+
+        activeBridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-active",
+                message: "question",
+                sessionKey: MAIN,
+            },
+            { runId: "provider-active" }
+        );
+        expect(payloads(activeBridge).map((payload) => payload.runId)).toEqual([
             "provider-active",
             "provider-active",
         ]);
@@ -508,6 +619,7 @@ describe("OpenClaw chat bridge", () => {
                 []
             );
         }
+        const requestBoundary = bridge.captureRequestBoundary();
         bridge.recordEvent(
             "agent",
             { data: { delta: "first" }, sessionKey: MAIN, stream: "thinking" },
@@ -524,13 +636,24 @@ describe("OpenClaw chat bridge", () => {
             []
         );
 
-        expect(
-            payloads(bridge)
-                .filter(
-                    (payload) => (payload.data as { delta?: unknown } | undefined)?.delta
-                )
-                .map((payload) => payload.runId)
-        ).toEqual(["provider-run", "provider-run"]);
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-grouped",
+                message: "question",
+                sessionKey: MAIN,
+            },
+            { runId: "provider-run" },
+            requestBoundary
+        );
+
+        expect(payloads(bridge).map((payload) => payload.runId)).toEqual([
+            "parallel-a",
+            "parallel-b",
+            "provider-run",
+            "provider-run",
+            "provider-run",
+        ]);
     });
 
     it("merges a completed provisional replay into an existing provider run", () => {

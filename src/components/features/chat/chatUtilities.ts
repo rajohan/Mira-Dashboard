@@ -415,13 +415,16 @@ export function messageDeleteKey(message: ChatHistoryMessage): string {
     const contentIdentity = textIdentity
         ? [textIdentity, stableTextDiagnosticIdentity].filter(Boolean).join("::")
         : diagnosticIdentity || "no-text";
-    return [
+    const keyParts = [
         message.role.toLowerCase(),
         message.timestamp || "no-time",
         message.runId || "no-run",
-        message.runtimeKey || "no-runtime-key",
-        contentIdentity,
-    ].join("::");
+    ];
+    if (message.runtimeKey) {
+        keyParts.push(message.runtimeKey);
+    }
+    keyParts.push(contentIdentity);
+    return keyParts.join("::");
 }
 
 /** Performs assistant text looks recovered. */

@@ -27,6 +27,7 @@ interface RetainedRun {
     eventBytes: number[];
     events: OpenClawRuntimeEnvelope[];
     runId: string;
+    terminalSequence: number;
     totalBytes: number;
     updatedAt: number;
 }
@@ -502,6 +503,10 @@ export class OpenClawChatBridge {
         if (existing) {
             this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
             existing.completed ||= provisional.completed;
+            existing.terminalSequence = Math.max(
+                existing.terminalSequence,
+                provisional.terminalSequence
+            );
             existing.updatedAt = Math.max(existing.updatedAt, provisional.updatedAt);
             return existing;
         }
@@ -638,16 +643,14 @@ export class OpenClawChatBridge {
                       .values()
                       .filter((run) => run.completed)
                       .toArray()
-                      .toSorted((left, right) => lastSequence(right) - lastSequence(left))
+                      .toSorted(
+                          (left, right) => right.terminalSequence - left.terminalSequence
+                      )
                 : [];
         const latestMeaningfulCompletion = completedRuns.find(
             (run) => !isMetadataOnlyRunlessCompletion(run)
         );
-        if (
-            isMetadataOnlyCompletion &&
-            activeRuns.length === 0 &&
-            latestMeaningfulCompletion
-        ) {
+        if (isMetadataOnlyCompletion && latestMeaningfulCompletion) {
             return;
         }
         const metadataCompletionRun = isMetadataOnlyCompletion
@@ -669,28 +672,13 @@ export class OpenClawChatBridge {
             `runless:${envelope.runtimeSequence}`;
         let snapshot = runs.get(runId);
 
-        if (!snapshot && explicitRunId) {
-            const provisionalRuns = activeRuns.filter((run) =>
-                isProvisionalRunId(run.runId)
-            );
-            const provisional =
-                provisionalRuns.length === 1 ? provisionalRuns[0] : undefined;
-            if (provisional) {
-                snapshot = this.#promoteRunEntry(
-                    sessionKey,
-                    runs,
-                    provisional.runId,
-                    explicitRunId
-                );
-            }
-        }
-
         if (!snapshot) {
             snapshot = {
                 completed: false,
                 eventBytes: [],
                 events: [],
                 runId,
+                terminalSequence: -1,
                 totalBytes: 0,
                 updatedAt: Date.now(),
             };
@@ -707,6 +695,9 @@ export class OpenClawChatBridge {
         ) {
             snapshot.events.shift();
             snapshot.totalBytes -= snapshot.eventBytes.shift() || 0;
+        }
+        if (isTerminal) {
+            snapshot.terminalSequence = envelope.runtimeSequence;
         }
         snapshot.completed ||= isTerminal;
         snapshot.updatedAt = Date.now();
@@ -841,7 +832,7 @@ export class OpenClawChatBridge {
         const active = snapshots.filter((snapshot) => !snapshot.completed);
         const completed = snapshots
             .filter((snapshot) => snapshot.completed)
-            .toSorted((left, right) => lastSequence(right) - lastSequence(left));
+            .toSorted((left, right) => right.terminalSequence - left.terminalSequence);
         const newestCompleted = completed[0];
         const completedToReplay =
             newestCompleted && isMetadataOnlyRunlessCompletion(newestCompleted)
