@@ -53,9 +53,11 @@ describe("OpenClaw chat snapshot store", () => {
             store.save(sessionKey, snapshot);
             expect(store.keys()).toContain(sessionKey);
             expect(store.load(sessionKey)).toEqual(snapshot);
+            expect(store.maximumSequence()).toBe(7);
 
             store.delete(sessionKey);
             expect(store.load(sessionKey)).toBeUndefined();
+            expect(store.maximumSequence()).toBe(0);
         } finally {
             store.delete(sessionKey);
         }

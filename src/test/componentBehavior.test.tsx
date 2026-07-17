@@ -1806,11 +1806,9 @@ describe("shared component helpers", () => {
         const onFollow = jest.fn();
         const onPreview = jest.fn();
         const onScroll = jest.fn();
+        const onUserScrollIntent = jest.fn();
         const onTtsError = jest.fn();
         const onDeleteMessage = jest.fn();
-        const messagesBottomReference = {
-            current: undefined,
-        } as RefObject<HTMLDivElement | undefined>;
         const messagesContainerReference = {
             current: undefined,
         } as RefObject<HTMLDivElement | undefined>;
@@ -1900,7 +1898,6 @@ describe("shared component helpers", () => {
                             },
                         },
                     ]}
-                    messagesBottomReference={messagesBottomReference}
                     messagesContainerReference={messagesContainerReference}
                     messagesVirtualizer={virtualizer as never}
                     onDeleteMessage={onDeleteMessage}
@@ -1908,6 +1905,7 @@ describe("shared component helpers", () => {
                     onFollow={onFollow}
                     onPreview={onPreview}
                     onScroll={onScroll}
+                    onUserScrollIntent={onUserScrollIntent}
                     onTtsError={onTtsError}
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
                 />
@@ -1919,6 +1917,7 @@ describe("shared component helpers", () => {
         ).not.toContainElement(screen.getByText("answer"));
 
         fireEvent.scroll(messagesContainerReference.current!);
+        fireEvent.wheel(messagesContainerReference.current!);
         await user.click(screen.getByRole("button", { name: /follow/i }));
         await user.click(screen.getByRole("button", { name: /delete your message/i }));
         await user.click(
@@ -1926,6 +1925,7 @@ describe("shared component helpers", () => {
         );
         await user.click(screen.getByRole("button", { name: /readme.txt/i }));
         expect(onScroll).toHaveBeenCalledTimes(1);
+        expect(onUserScrollIntent).toHaveBeenCalled();
         expect(onFollow).toHaveBeenCalledTimes(1);
         expect(onDeleteMessage).toHaveBeenCalledWith("user");
         expect(onPreview).toHaveBeenCalledWith(

@@ -28,6 +28,7 @@ export interface OpenClawChatSnapshotStore {
     delete(sessionKey: string): void;
     keys(): string[];
     load(sessionKey: string): OpenClawRuntimeSnapshot | undefined;
+    maximumSequence(): number;
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void;
 }
 
@@ -235,15 +236,51 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
 
     const record = asRecord(payload);
     const data = asRecord(record?.data);
+    const eventStream =
+        stringField(data, "stream") || stringField(record, "stream") || "";
+    const compactionOperation = (
+        stringField(data, "operation") ||
+        stringField(record, "operation") ||
+        ""
+    ).toLowerCase();
+    const eventPhase = (
+        stringField(data, "phase") ||
+        stringField(record, "phase") ||
+        ""
+    ).toLowerCase();
+    const eventStatus = (
+        stringField(data, "status") ||
+        stringField(record, "status") ||
+        ""
+    ).toLowerCase();
+    const isTerminalCompaction =
+        event === "session.compaction" &&
+        compactionOperation === "compact" &&
+        ([
+            "aborted",
+            "complete",
+            "completed",
+            "end",
+            "error",
+            "failed",
+            "failure",
+            "finished",
+        ].includes(eventPhase) ||
+            [
+                "aborted",
+                "complete",
+                "completed",
+                "error",
+                "failed",
+                "failure",
+                "finished",
+            ].includes(eventStatus));
     return (
         (event === "chat" &&
             typeof record?.state === "string" &&
             ["aborted", "error", "final"].includes(record.state)) ||
-        (event === "session.compaction" &&
-            stringField(record, "operation") === "compact" &&
-            stringField(record, "phase") === "end") ||
-        (stringField(record, "stream") === "lifecycle" &&
-            ["end", "error"].includes(stringField(data, "phase") || ""))
+        isTerminalCompaction ||
+        (eventStream === "lifecycle" && ["end", "error"].includes(eventPhase))
     );
 }
 
@@ -395,14 +432,29 @@ function hasChatFinal(run: RetainedRun): boolean {
     );
 }
 
+function sessionMessageRole(payload: unknown): string | undefined {
+    const record = asRecord(payload);
+    return (
+        stringField(record, "role") || stringField(asRecord(record?.message), "role")
+    )?.toLowerCase();
+}
+
+function isRunlessUserLedRun(run: RetainedRun): boolean {
+    const firstEvent = run.events[0];
+    return (
+        !run.completed &&
+        isRunlessRunId(run.runId) &&
+        firstEvent?.event === "session.message" &&
+        sessionMessageRole(firstEvent.payload) === "user"
+    );
+}
+
 function isMatchingSessionEcho(
     run: RetainedRun,
     envelope: OpenClawRuntimeEnvelope
 ): boolean {
-    const payload = asRecord(envelope.payload);
-    const nestedMessage = asRecord(payload?.message);
-    const role = stringField(payload, "role") || stringField(nestedMessage, "role");
-    if (role && role.toLowerCase() !== "assistant") {
+    const role = sessionMessageRole(envelope.payload);
+    if (role && role !== "assistant") {
         return false;
     }
     const elapsedMilliseconds = envelope.runtimeRecordedAt - run.updatedAt;
@@ -442,6 +494,19 @@ export class OpenClawChatBridge {
 
     constructor(store?: OpenClawChatSnapshotStore) {
         this.#store = store;
+        if (!store) {
+            return;
+        }
+        try {
+            const maximumSequence = store.maximumSequence();
+            if (!Number.isSafeInteger(maximumSequence) || maximumSequence < 0) {
+                throw new Error("Runtime snapshot sequence watermark is invalid");
+            }
+            this.#sequence = maximumSequence;
+            this.#storeFailureReported = false;
+        } catch (error) {
+            this.#reportStoreFailure(error);
+        }
     }
 
     #reportStoreFailure(error: unknown): void {
@@ -1279,6 +1344,20 @@ export class OpenClawChatBridge {
         }
         const runs =
             this.#runsBySession.get(sessionKey) || new Map<string, RetainedRun>();
+        if (explicitRunId && !runs.has(explicitRunId)) {
+            const pendingUserRuns = runs
+                .values()
+                .filter((run) => isRunlessUserLedRun(run))
+                .toArray();
+            if (pendingUserRuns.length === 1) {
+                this.#promoteRunEntry(
+                    sessionKey,
+                    runs,
+                    pendingUserRuns[0]!.runId,
+                    explicitRunId
+                );
+            }
+        }
         const activeRuns = runs
             .values()
             .filter((snapshot) => !snapshot.completed)

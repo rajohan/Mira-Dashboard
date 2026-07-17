@@ -135,7 +135,8 @@ function runtimeStreamDrafts(
         stringValue(payload.stream) ||
         (eventName === "session.compaction" ? "compaction" : "");
     const stream = streamRaw === "command_output" ? "command-output" : streamRaw;
-    const data = asRecord(payload.data) || payload;
+    const nestedData = asRecord(payload.data);
+    const data = nestedData ? { ...payload, ...nestedData } : payload;
     const phase = stringValue(data.phase) || stringValue(payload.phase) || "";
     if (
         (stream === "tool" || eventName === "session.tool") &&

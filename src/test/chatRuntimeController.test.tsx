@@ -848,6 +848,42 @@ describe("chat runtime controller", () => {
         });
     });
 
+    it("does not restore displaced replay after a concurrent send is acknowledged", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [
+                    assistant(SELECTED, 16, "previous answer", "replace"),
+                    finish(SELECTED, 32),
+                ],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-chat-first");
+            result.current.beginRun(SELECTED, "dashboard-chat-second");
+            result.current.acknowledgeRun(
+                SELECTED,
+                "dashboard-chat-second",
+                "provider-second"
+            );
+            result.current.failRun(SELECTED, "dashboard-chat-first");
+        });
+
+        const runs = result.current.state.sessions[SELECTED]?.runs || {};
+        expect(runs["run-1"]).toBeUndefined();
+        expect(runs["dashboard-chat-first"]).toBeUndefined();
+        expect(runs["provider-second"]?.phase).toBe("active");
+    });
+
     it("replaces projection-hidden status runs before routing a new unscoped reply", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);

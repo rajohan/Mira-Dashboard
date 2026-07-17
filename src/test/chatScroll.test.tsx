@@ -106,7 +106,6 @@ describe("chat scroll", () => {
             message: { content: "answer", role: "assistant", text: "answer" },
         };
         const stickToBottomReference = { current: true };
-        const scrollIntoView = jest.fn();
         const { result, unmount } = renderHook(() =>
             useChatScroll([row], "agent:main:main", jest.fn(), stickToBottomReference)
         );
@@ -115,19 +114,13 @@ describe("chat scroll", () => {
             clientHeight: { configurable: true, value: 100 },
             scrollHeight: { configurable: true, value: 400 },
         });
-        const bottom = document.createElement("div");
-        Object.defineProperty(bottom, "scrollIntoView", {
-            configurable: true,
-            value: scrollIntoView,
-        });
         result.current.messagesContainerReference.current = container;
-        result.current.messagesBottomReference.current = bottom;
 
         act(() => result.current.scheduleBottomFollow());
         const firstFrameId = animationFrameState.nextFrameId;
         stickToBottomReference.current = false;
         act(() => animationFrameState.frames.get(firstFrameId)?.(0));
-        expect(scrollIntoView).not.toHaveBeenCalled();
+        expect(container.scrollTop).toBe(0);
 
         stickToBottomReference.current = true;
         act(() => result.current.scheduleBottomFollow());
@@ -135,6 +128,40 @@ describe("chat scroll", () => {
         unmount();
         expect(cancelFrame).toHaveBeenCalledWith(pendingFrameId);
         expect(animationFrameState.frames.has(pendingFrameId)).toBe(false);
+    });
+
+    it("cancels a queued bottom follow as soon as the user scrolls up", () => {
+        const stickToBottomReference = { current: true };
+        const { result, unmount } = renderHook(() =>
+            useChatScroll(
+                [chatRow("answer", "assistant")],
+                "agent:main:main",
+                jest.fn(),
+                stickToBottomReference
+            )
+        );
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 400 },
+        });
+        result.current.messagesContainerReference.current = container;
+
+        container.scrollTop = 300;
+        act(() => result.current.handleScroll());
+        act(() => result.current.scheduleBottomFollow());
+        const pendingFrameId = animationFrameState.nextFrameId;
+
+        container.scrollTop = 200;
+        act(() => {
+            result.current.handleUserScrollIntent();
+            result.current.handleScroll();
+        });
+
+        expect(cancelFrame).toHaveBeenCalledWith(pendingFrameId);
+        expect(animationFrameState.frames.has(pendingFrameId)).toBe(false);
+        expect(stickToBottomReference.current).toBe(false);
+        unmount();
     });
 
     it("keeps sticky bottom when a tool is inserted before a stable activity row", () => {
@@ -189,7 +216,6 @@ describe("chat scroll", () => {
             message: { content: "answer", role: "assistant", text: "answer" },
         };
         const stickToBottomReference = { current: true };
-        const scrollIntoView = jest.fn();
         const { result, rerender, unmount } = renderHook(
             ({ rows }: { rows: ChatRow[] }) =>
                 useChatScroll(rows, "agent:main:main", jest.fn(), stickToBottomReference),
@@ -201,13 +227,7 @@ describe("chat scroll", () => {
             clientHeight: { configurable: true, value: 100 },
             scrollHeight: { configurable: true, get: () => scrollHeight },
         });
-        const bottom = document.createElement("div");
-        Object.defineProperty(bottom, "scrollIntoView", {
-            configurable: true,
-            value: scrollIntoView,
-        });
         result.current.messagesContainerReference.current = container;
-        result.current.messagesBottomReference.current = bottom;
 
         rerender({ rows: [row] });
         expect(animationFrameState.frames.size).toBe(1);

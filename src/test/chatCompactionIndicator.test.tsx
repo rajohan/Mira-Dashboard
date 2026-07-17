@@ -41,6 +41,49 @@ describe("chat compaction indicator", () => {
                 message: expect.objectContaining({ text: "Thinking" }),
             }),
         ]);
+        const streamingRows = [
+            {
+                key: "streaming-answer",
+                kind: "stream" as const,
+                message: {
+                    content: "Streaming answer",
+                    role: "assistant",
+                    text: "Streaming answer",
+                },
+            },
+        ];
+        expect(
+            projectChatActivityRows(streamingRows, undefined, true, "agent:main:main")
+        ).toBe(streamingRows);
+    });
+
+    it("preserves normal activity while completed compaction feedback is visible", () => {
+        const normalActivity = {
+            key: "typing-run",
+            kind: "typing" as const,
+            message: { content: "Thinking", role: "assistant", text: "Thinking" },
+        };
+
+        expect(
+            projectChatActivityRows(
+                [normalActivity],
+                {
+                    key: "compact-1",
+                    phase: "complete",
+                    text: "Context compacted",
+                    timestamp: "2026-07-17T18:00:00.000Z",
+                },
+                true,
+                "agent:main:main"
+            )
+        ).toEqual([
+            normalActivity,
+            expect.objectContaining({
+                key: "compaction-compact-1",
+                kind: "status",
+                message: expect.objectContaining({ text: "Context compacted" }),
+            }),
+        ]);
     });
 
     it("expires active feedback five minutes after the provider event", () => {

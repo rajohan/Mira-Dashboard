@@ -53,9 +53,9 @@ interface ChatActionsOptions {
 
 function dashboardChatRunId(): string {
     const uniqueId =
-        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        typeof crypto.randomUUID === "function"
             ? crypto.randomUUID()
-            : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+            : crypto.getRandomValues(new Uint32Array(4)).join("-");
     return `dashboard-chat-${uniqueId}`;
 }
 

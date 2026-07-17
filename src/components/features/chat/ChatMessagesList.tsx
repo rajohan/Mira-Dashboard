@@ -29,7 +29,6 @@ interface ChatMessagesListProperties {
     isLoadingHistory: boolean;
     isAtBottom: boolean;
     chatRows: ChatRow[];
-    messagesBottomReference: RefObject<HTMLDivElement | undefined>;
     messagesContainerReference: RefObject<HTMLDivElement | undefined>;
     messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
     onDynamicContentLoad: () => void;
@@ -37,6 +36,7 @@ interface ChatMessagesListProperties {
     onPreview: (isPreview: ChatPreviewItem) => void;
     visibility: ChatVisibilitySettings;
     onScroll: () => void;
+    onUserScrollIntent: () => void;
     onTtsError: (error: string) => void;
     onDeleteMessage: (messageKey: string) => void;
 }
@@ -267,7 +267,6 @@ export function ChatMessagesList({
     isLoadingHistory,
     isAtBottom,
     chatRows,
-    messagesBottomReference,
     messagesContainerReference,
     messagesVirtualizer,
     onDynamicContentLoad,
@@ -275,6 +274,7 @@ export function ChatMessagesList({
     onPreview,
     visibility,
     onScroll,
+    onUserScrollIntent,
     onTtsError,
     onDeleteMessage,
 }: ChatMessagesListProperties) {
@@ -398,7 +398,10 @@ export function ChatMessagesList({
             ref={(element) => {
                 messagesContainerReference.current = element ?? undefined;
             }}
+            onPointerDownCapture={onUserScrollIntent}
             onScroll={onScroll}
+            onTouchStartCapture={onUserScrollIntent}
+            onWheelCapture={onUserScrollIntent}
             className="mt-3 min-h-0 flex-1 overflow-y-auto pr-0 sm:mt-4 sm:pr-1"
             style={{ overflowAnchor: "none" }}
         >
@@ -649,12 +652,6 @@ export function ChatMessagesList({
                     {paddingBottom > 0 ? (
                         <div style={{ height: paddingBottom }} />
                     ) : undefined}
-                    <div
-                        ref={(element) => {
-                            messagesBottomReference.current = element ?? undefined;
-                        }}
-                        aria-hidden="true"
-                    />
                 </div>
             )}
         </div>

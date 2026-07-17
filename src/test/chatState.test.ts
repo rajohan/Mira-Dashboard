@@ -834,6 +834,90 @@ describe("chat runtime state", () => {
         ).toHaveLength(1);
     });
 
+    it("attaches an explicit provider final to a pending runless user echo", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: {
+                    content: "message from another client",
+                    role: "user",
+                    text: "message from another client",
+                },
+            }),
+            event(32, {
+                kind: "finish",
+                message: {
+                    content: "provider answer",
+                    role: "assistant",
+                    text: "provider answer",
+                },
+                outcome: "completed",
+                runId: "provider-run",
+            }),
+        ]);
+
+        const runs = Object.values(state.sessions[SESSION]?.runs || {});
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            aliases: expect.arrayContaining(["provider-run"]),
+            assistant: { text: "provider answer" },
+            phase: "completed",
+            userMessages: [
+                expect.objectContaining({
+                    message: expect.objectContaining({
+                        text: "message from another client",
+                    }),
+                }),
+            ],
+        });
+    });
+
+    it("keeps runless work with its user echo when the provider id arrives", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: {
+                    content: "message from another client",
+                    role: "user",
+                    text: "message from another client",
+                },
+            }),
+            event(24, {
+                kind: "thinking",
+                message: {
+                    content: "working before provider id",
+                    role: "assistant",
+                    text: "working before provider id",
+                },
+            }),
+            event(32, {
+                kind: "finish",
+                message: {
+                    content: "provider answer",
+                    role: "assistant",
+                    text: "provider answer",
+                },
+                outcome: "completed",
+                runId: "provider-run",
+            }),
+        ]);
+
+        const runs = Object.values(state.sessions[SESSION]?.runs || {});
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            aliases: expect.arrayContaining(["provider-run"]),
+            assistant: { text: "provider answer" },
+            diagnostics: [
+                expect.objectContaining({
+                    message: expect.objectContaining({
+                        text: "working before provider id",
+                    }),
+                }),
+            ],
+            phase: "completed",
+        });
+    });
+
     it("keeps a concrete final when a runless terminal event follows it", () => {
         const state = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -1117,6 +1201,45 @@ describe("chat runtime state", () => {
             error: "model failed",
             lastSequence: 32,
             phase: "error",
+        });
+    });
+
+    it("keeps later terminal errors suppressed after a failed tool is recorded", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "tool",
+                message: {
+                    content: "command failed",
+                    role: "tool",
+                    text: "command failed",
+                    toolResult: {
+                        content: "command failed",
+                        isError: true,
+                        name: "Bash",
+                    },
+                },
+                runId: "run-tool-failure",
+                toolKey: "tool:bash:failed",
+            }),
+            event(32, {
+                error: "Bash failed",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-tool-failure",
+                toolFailure: true,
+            }),
+            event(48, {
+                error: "generic terminal error",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-tool-failure",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["run-tool-failure"]).toMatchObject({
+            error: undefined,
+            phase: "error",
+            toolFailure: true,
         });
     });
 

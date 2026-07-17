@@ -238,6 +238,19 @@ function latestCompletedRunEntry(
         )[0];
 }
 
+function pendingRunlessUserEntry(
+    session: ChatSessionRuntimeState
+): [string, ChatRunState] | undefined {
+    const candidates = Object.entries(session.runs).filter(
+        ([, run]) =>
+            run.phase === "active" &&
+            run.runId.startsWith("runtime-runless-") &&
+            run.userMessages.length > 0 &&
+            run.userMessages[0]?.message.timestamp === run.startedAt
+    );
+    return candidates.length === 1 ? candidates[0] : undefined;
+}
+
 function resolveRun(
     session: ChatSessionRuntimeState,
     event: ChatRuntimeEvent
@@ -271,6 +284,13 @@ function resolveRun(
         const completedEntry = latestCompletedRunEntry(session);
         if (completedEntry) {
             [runKey, run] = completedEntry;
+        }
+    }
+
+    if (!run && event.runId) {
+        const pendingUserEntry = pendingRunlessUserEntry(session);
+        if (pendingUserEntry) {
+            [runKey, run] = pendingUserEntry;
         }
     }
 
@@ -739,7 +759,7 @@ function applyFinishEvent(
         ].some((result) => result?.isError === true)
     );
     const isToolFailure = Boolean(run.toolFailure || event.toolFailure);
-    const error = event.toolFailure && hasFailedTool ? undefined : event.error;
+    const error = isToolFailure && hasFailedTool ? undefined : event.error;
 
     const withMessage = event.message
         ? applyAssistantEvent(

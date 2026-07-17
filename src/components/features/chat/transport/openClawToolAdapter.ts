@@ -232,18 +232,33 @@ export function openClawProgress(
     if (stream === "compaction") {
         if (
             eventName === "session.compaction" &&
-            stringValue(data.operation) !== "compact"
+            (stringValue(data.operation) || "").toLowerCase() !== "compact"
         ) {
             return {};
         }
-        const isEnd = ["complete", "completed", "end", "finished"].includes(phase);
+        const normalizedPhase = phase.toLowerCase();
+        const status = (stringValue(data.status) || "").toLowerCase();
+        const isFailure =
+            data.aborted === true ||
+            ["aborted", "error", "failed", "failure"].includes(normalizedPhase) ||
+            ["aborted", "error", "failed", "failure"].includes(status);
+        const isTerminal =
+            isFailure ||
+            ["complete", "completed", "end", "finished"].includes(normalizedPhase) ||
+            ["complete", "completed", "finished"].includes(status);
         const isSuccessful =
-            data.completed === true ||
-            ["complete", "completed", "finished"].includes(phase);
-        const isRetrying = isEnd && data.willRetry === true && data.completed === true;
+            !isFailure &&
+            (data.completed === true ||
+                ["complete", "completed", "finished"].includes(normalizedPhase) ||
+                ["complete", "completed", "finished"].includes(status));
+        const isRetrying =
+            !isFailure &&
+            isTerminal &&
+            data.willRetry === true &&
+            data.completed === true;
         const operationPhase: ChatOperationPhase = isRetrying
             ? "retrying"
-            : isEnd
+            : isTerminal
               ? isSuccessful
                   ? "complete"
                   : "inactive"

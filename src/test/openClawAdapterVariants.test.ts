@@ -130,6 +130,16 @@ describe("OpenClaw adapter variants", () => {
                 21
             )
         );
+        const runlessUserMessage = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: { content: "provider echo", role: "user" },
+                    runId: undefined,
+                },
+                22
+            )
+        );
         const topLevelAssistant = adapter.event(
             envelope(
                 "session.message",
@@ -187,6 +197,11 @@ describe("OpenClaw adapter variants", () => {
         expect(userMessage[0]).toMatchObject({
             kind: "user",
             message: { role: "user", text: "prompt" },
+        });
+        expect(runlessUserMessage[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "provider echo" },
+            runId: undefined,
         });
         expect(topLevelAssistant[0]).toMatchObject({
             kind: "assistant",
@@ -419,6 +434,28 @@ describe("OpenClaw adapter variants", () => {
                 56
             )
         );
+        const failedAgentCompaction = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: { phase: "error", status: "failed" },
+                    stream: "compaction",
+                },
+                57
+            )
+        );
+        const failedSessionCompaction = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    operation: "compact",
+                    phase: "failed",
+                    runId: undefined,
+                    status: "failed",
+                },
+                58
+            )
+        );
 
         expect(sessionStart[0]).toMatchObject({
             kind: "status",
@@ -442,6 +479,18 @@ describe("OpenClaw adapter variants", () => {
             kind: "status",
             operationPhase: "active",
             runId: `compaction:${SESSION}`,
+        });
+        expect(failedAgentCompaction[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "inactive",
+            text: undefined,
+        });
+        expect(failedSessionCompaction[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "inactive",
+            text: undefined,
         });
     });
 

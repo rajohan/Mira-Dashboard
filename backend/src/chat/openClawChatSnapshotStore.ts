@@ -14,6 +14,10 @@ interface SnapshotKeyRow {
     session_key: string;
 }
 
+interface SnapshotMaximumSequenceRow {
+    maximum_sequence: unknown;
+}
+
 const SAVE_SNAPSHOT_SQL = `
     INSERT INTO chat_runtime_snapshots (
         gateway_scope,
@@ -130,6 +134,29 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             this.delete(sessionKey);
         }
         return snapshot;
+    }
+
+    maximumSequence(): number {
+        const row = database
+            .prepare(
+                `SELECT MAX(
+                    CASE
+                        WHEN json_valid(snapshot_json)
+                        THEN CASE
+                            WHEN json_type(snapshot_json, '$.throughSequence') = 'integer'
+                            THEN json_extract(snapshot_json, '$.throughSequence')
+                        END
+                    END
+                ) AS maximum_sequence
+                FROM chat_runtime_snapshots
+                WHERE gateway_scope = ?`
+            )
+            .get(this.#gatewayScope) as SnapshotMaximumSequenceRow | undefined;
+        return typeof row?.maximum_sequence === "number" &&
+            Number.isSafeInteger(row.maximum_sequence) &&
+            row.maximum_sequence >= 0
+            ? row.maximum_sequence
+            : 0;
     }
 
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {

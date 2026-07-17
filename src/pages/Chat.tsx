@@ -192,7 +192,7 @@ export function Chat() {
     const {
         handleDynamicContentLoad: handleDynamicRowContentLoad,
         handleScroll: handleMessagesScroll,
-        messagesBottomReference,
+        handleUserScrollIntent,
         messagesContainerReference,
         scheduleBottomFollow,
         scrollToBottom: scrollMessagesToBottom,
@@ -334,7 +334,7 @@ export function Chat() {
         clearAttachments,
         confirmResetSession,
         draft,
-        isCompacting: compactionIndicator?.phase === "active",
+        isCompacting: projection.isCompacting,
         isConnected,
         isRecording,
         isTranscribing,
@@ -382,7 +382,6 @@ export function Chat() {
                         isLoadingHistory={isLoadingHistory}
                         isAtBottom={isAtBottom}
                         chatRows={chatRows}
-                        messagesBottomReference={messagesBottomReference}
                         messagesContainerReference={messagesContainerReference}
                         messagesVirtualizer={messagesVirtualizer}
                         onDynamicContentLoad={handleDynamicRowContentLoad}
@@ -393,6 +392,7 @@ export function Chat() {
                             showToolOutput
                         )}
                         onScroll={handleMessagesScroll}
+                        onUserScrollIntent={handleUserScrollIntent}
                         onTtsError={setSendError}
                         onDeleteMessage={handleDeleteMessage}
                     />

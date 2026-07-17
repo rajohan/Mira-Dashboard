@@ -23,7 +23,7 @@ export function useChatCompactionIndicator(
     const hasAlreadyExpired = expiresAt !== undefined && expiresAt <= Date.now();
 
     useEffect(() => {
-        if (!statusKey) {
+        if (!statusKey || hasAlreadyExpired) {
             return;
         }
         const remaining = Math.max(0, (expiresAt ?? Date.now() + duration) - Date.now());
@@ -33,7 +33,7 @@ export function useChatCompactionIndicator(
         }
         const timeout = setTimeout(() => setExpiredKey(statusKey), remaining);
         return () => clearTimeout(timeout);
-    }, [duration, expiresAt, statusKey]);
+    }, [duration, expiresAt, hasAlreadyExpired, statusKey]);
 
     return hasAlreadyExpired || status?.key === expiredKey ? undefined : status;
 }
@@ -58,13 +58,20 @@ export function projectChatActivityRows(
     isActiveSession: boolean,
     sessionKey: string
 ): ChatRow[] {
-    if (compactionStatus) {
+    if (compactionStatus?.phase === "active") {
         return [
             ...rows.filter((row) => row.kind !== "typing"),
             compactionIndicatorRow(compactionStatus),
         ];
     }
-    if (!isActiveSession || !sessionKey || rows.some((row) => row.kind === "typing")) {
+    if (compactionStatus) {
+        return [...rows, compactionIndicatorRow(compactionStatus)];
+    }
+    if (
+        !isActiveSession ||
+        !sessionKey ||
+        rows.some((row) => row.kind === "typing" || row.kind === "stream")
+    ) {
         return rows;
     }
     return [

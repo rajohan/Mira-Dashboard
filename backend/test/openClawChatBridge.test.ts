@@ -9,6 +9,7 @@ import {
 const MAIN = "agent:main:main";
 
 class MemorySnapshotStore implements OpenClawChatSnapshotStore {
+    readonly loadedKeys: string[] = [];
     readonly snapshots = new Map<string, OpenClawRuntimeSnapshot>();
     clearFailures = 0;
     deleteFailures = 0;
@@ -43,8 +44,22 @@ class MemorySnapshotStore implements OpenClawChatSnapshotStore {
     }
 
     load(sessionKey: string): OpenClawRuntimeSnapshot | undefined {
+        this.loadedKeys.push(sessionKey);
         const snapshot = this.snapshots.get(sessionKey);
         return snapshot ? structuredClone(snapshot) : undefined;
+    }
+
+    maximumSequence(): number {
+        let maximumSequence = 0;
+        for (const snapshot of this.snapshots.values()) {
+            if (
+                Number.isSafeInteger(snapshot.throughSequence) &&
+                snapshot.throughSequence >= 0
+            ) {
+                maximumSequence = Math.max(maximumSequence, snapshot.throughSequence);
+            }
+        }
+        return maximumSequence;
     }
 
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {
@@ -67,7 +82,8 @@ function persistedSnapshot(
     sessionKey: string,
     runId: string,
     runtimeRecordedAt = Date.now(),
-    state?: "final"
+    state?: "final",
+    sequence = 1
 ): OpenClawRuntimeSnapshot {
     return {
         completed: state === "final",
@@ -78,11 +94,11 @@ function persistedSnapshot(
                     ? { message: "done", runId, sessionKey, state }
                     : { runId, sessionKey, stream: "thinking" },
                 runtimeRecordedAt,
-                runtimeSequence: 1,
+                runtimeSequence: sequence,
                 type: "event",
             },
         ],
-        throughSequence: 1,
+        throughSequence: sequence,
     };
 }
 
@@ -125,6 +141,32 @@ describe("OpenClaw chat bridge", () => {
             completed: true,
             events: [thinking, expect.objectContaining({ event: "chat" })],
         });
+    });
+
+    it("seeds the global sequence from unhydrated persisted sessions", () => {
+        const store = new MemorySnapshotStore();
+        const otherSession = "agent:other:main";
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, "main-run", Date.now(), undefined, 100)
+        );
+        store.snapshots.set(
+            otherSession,
+            persistedSnapshot(otherSession, "other-run", Date.now(), undefined, 200)
+        );
+
+        const bridge = new OpenClawChatBridge(store);
+        expect(store.loadedKeys).toEqual([]);
+        expect(bridge.captureRequestBoundary(MAIN)).toBe(200);
+        expect(store.loadedKeys).toEqual([MAIN]);
+
+        const nextEvent = bridge.recordEvent(
+            "agent",
+            { runId: "next-run", sessionKey: MAIN, stream: "thinking" },
+            []
+        );
+        expect(nextEvent.runtimeSequence).toBe(201);
+        expect(store.loadedKeys).not.toContain(otherSession);
     });
 
     it("persists manual compaction without displacing the latest completed run", () => {
@@ -197,6 +239,89 @@ describe("OpenClaw chat bridge", () => {
                 operation: "compact",
                 operationId: "compact-operation",
                 phase: "end",
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({ completed: true });
+    });
+
+    it("does not let a nested completed compaction displace a later final", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.compaction",
+            {
+                data: { operation: "compact", phase: "start" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.compaction",
+            {
+                data: { operation: "compact", phase: "end" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "answer after compaction",
+                runId: "final-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [
+                expect.objectContaining({
+                    event: "chat",
+                    payload: expect.objectContaining({
+                        message: "answer after compaction",
+                        state: "final",
+                    }),
+                }),
+            ],
+        });
+    });
+
+    it("marks a nested failed compaction replay terminal", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.compaction",
+            {
+                data: {
+                    operation: "compact",
+                    phase: "error",
+                    status: "failed",
+                },
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(true);
+        expect(snapshot.events[0]).toMatchObject({
+            event: "session.compaction",
+            payload: { data: { status: "failed" } },
+        });
+    });
+
+    it("marks a nested completed compaction status terminal", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.compaction",
+            {
+                data: {
+                    operation: "compact",
+                    status: "completed",
+                },
                 sessionKey: MAIN,
             },
             []
@@ -1941,6 +2066,41 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("promotes a runless user session message when provider work starts", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.message",
+            {
+                content: "message from another client",
+                role: "user",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "provider answer",
+                runId: "provider-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(true);
+        expect(snapshot.events).toHaveLength(2);
+        expect(snapshot.events[0]).toMatchObject({
+            event: "session.message",
+            payload: { runId: "provider-run" },
+        });
+        expect(snapshot.events[1]).toMatchObject({
+            event: "chat",
+            payload: { runId: "provider-run" },
+        });
+    });
+
     it("does not attach a session message to an older matching final", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(
@@ -2114,7 +2274,7 @@ describe("OpenClaw chat bridge", () => {
         bridge.recordEvent(
             "agent",
             {
-                data: { phase: "end" },
+                phase: "end",
                 runId: "lifecycle-run",
                 sessionKey: MAIN,
                 stream: "lifecycle",

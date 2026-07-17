@@ -503,7 +503,11 @@ export function useChatRuntime({
         optimisticRunId: string,
         providerRunId?: string
     ) => {
-        displacedCompletedRunsReference.current.delete(optimisticRunId);
+        for (const [runId, displaced] of displacedCompletedRunsReference.current) {
+            if (isSameChatSession(displaced.sessionKey, sessionKey)) {
+                displacedCompletedRunsReference.current.delete(runId);
+            }
+        }
         const gate = gateReference.current;
         const pendingRun =
             gate && isSameChatSession(gate.sessionKey, sessionKey)
