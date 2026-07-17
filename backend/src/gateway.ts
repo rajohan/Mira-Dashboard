@@ -226,16 +226,19 @@ function chatReplayGatewayScope(endpoint: string, token: string): string {
         .digest("hex");
 }
 
-function selectChatReplayScope(endpoint: string, token: string): void {
+function didSelectChatReplayScope(endpoint: string, token: string): boolean {
     const gatewayScope = chatReplayGatewayScope(endpoint, token);
     if (gatewayScope === chatReplayState.scope) {
-        return;
+        return true;
     }
-    chatReplayState.bridge.flush();
+    if (!chatReplayState.bridge.flush()) {
+        return false;
+    }
     chatReplayState.bridge = new OpenClawChatBridge(
         new SqliteOpenClawChatSnapshotStore(gatewayScope)
     );
     chatReplayState.scope = gatewayScope;
+    return true;
 }
 
 export function setGatewayClientConstructorForTests(
@@ -814,6 +817,11 @@ function init(token: string): void {
         return;
     }
     const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
+    if (!didSelectChatReplayScope(gatewayUrl, token)) {
+        throw new Error(
+            "Gateway credentials were not changed because pending chat replay could not be persisted"
+        );
+    }
     const previousGatewayClient = gatewayState.client;
     try {
         previousGatewayClient?.stop();
@@ -831,7 +839,6 @@ function init(token: string): void {
     gatewayState.connectError = undefined;
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
-    selectChatReplayScope(gatewayUrl, token);
     gatewayState.currentToken = token;
     /** Returns the active Gateway client when this callback belongs to it. */
     function getCurrentInitGatewayClient(): OpenClawGatewayClientInstance | undefined {
@@ -1008,7 +1015,11 @@ async function forwardRequest(
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
-            const requestBoundary = chatReplayState.bridge.captureRequestBoundary();
+            const requestBoundary = chatReplayState.bridge.captureRequestBoundary(
+                typeof parameters.sessionKey === "string"
+                    ? parameters.sessionKey
+                    : undefined
+            );
             let payload = await activeGateway.request(method, parameters);
             chatReplayState.bridge.handleSuccessfulRequest(
                 method,
@@ -1054,7 +1065,9 @@ async function forwardRequest(
     }
 
     try {
-        const requestBoundary = chatReplayState.bridge.captureRequestBoundary();
+        const requestBoundary = chatReplayState.bridge.captureRequestBoundary(
+            typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
+        );
         const payload = await activeGateway.request(method, parameters);
         chatReplayState.bridge.handleSuccessfulRequest(
             method,
@@ -1251,7 +1264,9 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
-    const requestBoundary = chatReplayState.bridge.captureRequestBoundary();
+    const requestBoundary = chatReplayState.bridge.captureRequestBoundary(
+        typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
+    );
     const payload = await gatewayState.client.request(method, parameters);
     chatReplayState.bridge.handleSuccessfulRequest(
         method,

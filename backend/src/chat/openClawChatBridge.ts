@@ -41,7 +41,7 @@ interface RetainedRun {
     updatedAt: number;
 }
 
-const MAX_EVENTS_PER_RUN = 500;
+const MAX_EVENTS_PER_RUN = 2000;
 const MAX_BYTES_PER_RUN = 1_000_000;
 const MAX_RUNS_PER_SESSION = 4;
 export const MAX_CHAT_RUNTIME_SESSIONS = 50;
@@ -55,6 +55,7 @@ const RETAINED_EVENTS = new Set([
     "chat",
     "model.completed",
     "session.ended",
+    "session.compaction",
     "session.message",
     "session.started",
     "session.tool",
@@ -118,6 +119,12 @@ function shouldRetainRuntimeEvent(
         stringField(data, "kind") ||
         ""
     ).toLowerCase();
+    if (kind === "command" && data.suppressChannelProgress === true) {
+        // Native Codex commands are followed by richer session.tool events with
+        // the same item ID. Retaining both lifecycle pairs turns one visible
+        // tool bubble into four replay events and prematurely evicts thinking.
+        return false;
+    }
     return (
         !["start", "end"].includes(phase) ||
         !/\b(?:analysis|reasoning|thinking)\b/u.test(kind) ||
@@ -126,6 +133,16 @@ function shouldRetainRuntimeEvent(
 }
 
 function replayCoalescingKey(envelope: OpenClawRuntimeEnvelope): string | undefined {
+    if (envelope.event === "session.tool") {
+        const payload = asRecord(envelope.payload);
+        const data = asRecord(payload?.data) || payload;
+        const itemId =
+            stringField(data, "toolCallId") ||
+            stringField(data, "callId") ||
+            stringField(data, "itemId") ||
+            stringField(data, "id");
+        return itemId ? `session:tool:${itemId}` : undefined;
+    }
     if (envelope.event !== "agent") {
         return undefined;
     }
@@ -141,6 +158,27 @@ function replayCoalescingKey(envelope: OpenClawRuntimeEnvelope): string | undefi
     }
     const itemId = stringField(data, "itemId") || stringField(item, "itemId");
     return itemId ? `agent:item:${itemId}` : undefined;
+}
+
+function coalesceReplayEnvelope(
+    previous: OpenClawRuntimeEnvelope,
+    next: OpenClawRuntimeEnvelope
+): OpenClawRuntimeEnvelope {
+    if (previous.event !== "session.tool" || next.event !== "session.tool") {
+        return next;
+    }
+    const previousPayload = asRecord(previous.payload) || {};
+    const nextPayload = asRecord(next.payload) || {};
+    const previousData = asRecord(previousPayload.data) || previousPayload;
+    const nextData = asRecord(nextPayload.data) || nextPayload;
+    return {
+        ...next,
+        payload: {
+            ...previousPayload,
+            ...nextPayload,
+            data: { ...previousData, ...nextData },
+        },
+    };
 }
 
 function hasRunIdentifier(session: OpenClawChatSessionIdentity, runId: string): boolean {
@@ -201,6 +239,9 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
         (event === "chat" &&
             typeof record?.state === "string" &&
             ["aborted", "error", "final"].includes(record.state)) ||
+        (event === "session.compaction" &&
+            stringField(record, "operation") === "compact" &&
+            stringField(record, "phase") === "end") ||
         (stringField(record, "stream") === "lifecycle" &&
             ["end", "error"].includes(stringField(data, "phase") || ""))
     );
@@ -703,7 +744,7 @@ export class OpenClawChatBridge {
         }
     }
 
-    #flushSessionPersistence(sessionKey: string): void {
+    #flushSessionPersistence(sessionKey: string): boolean {
         const didPersist = this.#persistSession(sessionKey);
         if (didPersist) {
             this.#pendingPersistence.delete(sessionKey);
@@ -713,14 +754,17 @@ export class OpenClawChatBridge {
         if (this.#pendingPersistence.size === 0) {
             this.#cancelPersistenceTimer();
         }
+        return didPersist;
     }
 
-    #flushPendingPersistence(): void {
+    #flushPendingPersistence(): boolean {
         this.#cancelPersistenceTimer();
         const sessionKeys = this.#pendingPersistence.values().toArray();
+        let didFlushAll = true;
         for (const sessionKey of sessionKeys) {
-            this.#flushSessionPersistence(sessionKey);
+            didFlushAll = this.#flushSessionPersistence(sessionKey) && didFlushAll;
         }
+        return didFlushAll;
     }
 
     #queuePersistence(sessionKey: string): void {
@@ -1248,9 +1292,12 @@ export class OpenClawChatBridge {
                   : undefined;
         const isMetadataOnlyCompletion =
             !explicitRunId && isMetadataOnlyCompletionEnvelope(retainedEnvelope);
+        const isSessionCompaction = envelope.event === "session.compaction";
         const completedRuns =
             !explicitRunId &&
-            (envelope.event === "session.message" || isMetadataOnlyCompletion)
+            (envelope.event === "session.message" ||
+                isMetadataOnlyCompletion ||
+                isSessionCompaction)
                 ? runs
                       .values()
                       .filter((run) => run.completed)
@@ -1290,6 +1337,7 @@ export class OpenClawChatBridge {
             explicitRunId ||
             completedEchoRun?.runId ||
             compatibleActiveRun?.runId ||
+            (isSessionCompaction ? latestMeaningfulCompletion?.runId : undefined) ||
             metadataCompletionRun?.runId ||
             `runless:${envelope.runtimeSequence}`;
         let snapshot = runs.get(runId);
@@ -1318,11 +1366,22 @@ export class OpenClawChatBridge {
             snapshot.eventBytes.push(retainedBytes);
             snapshot.totalBytes += retainedBytes;
         } else {
+            const coalescedEnvelope = coalesceReplayEnvelope(
+                snapshot.events[coalescingIndex]!,
+                retainedEnvelope
+            );
+            const coalescedBytes = Buffer.byteLength(JSON.stringify(coalescedEnvelope));
+            const replayEnvelope =
+                coalescedBytes <= MAX_BYTES_PER_RUN
+                    ? coalescedEnvelope
+                    : retainedEnvelope;
+            const replayBytes =
+                replayEnvelope === coalescedEnvelope ? coalescedBytes : retainedBytes;
             snapshot.events.splice(coalescingIndex, 1);
             snapshot.totalBytes -= snapshot.eventBytes.splice(coalescingIndex, 1)[0] || 0;
-            snapshot.events.push(retainedEnvelope);
-            snapshot.eventBytes.push(retainedBytes);
-            snapshot.totalBytes += retainedBytes;
+            snapshot.events.push(replayEnvelope);
+            snapshot.eventBytes.push(replayBytes);
+            snapshot.totalBytes += replayBytes;
         }
         while (
             snapshot.events.length > 1 &&
@@ -1372,24 +1431,35 @@ export class OpenClawChatBridge {
     }
 
     /** Flushes all coalesced replay writes at lifecycle boundaries. */
-    flush(): void {
+    flush(): boolean {
         this.#cancelPersistenceTimer();
         if (!this.#retryStoreClear()) {
-            return;
+            return false;
         }
+        let didFlushAll = true;
         for (const pendingClear of this.#pendingSessionClears) {
-            this.#retryPendingSessionClear(pendingClear);
+            didFlushAll = this.#retryPendingSessionClear(pendingClear) && didFlushAll;
         }
         for (const pendingKey of this.#pendingDeleteKeys) {
-            this.#retryExactDelete(pendingKey);
+            didFlushAll = this.#retryExactDelete(pendingKey) && didFlushAll;
         }
-        this.#flushPendingPersistence();
+        didFlushAll = this.#flushPendingPersistence() && didFlushAll;
+        return (
+            didFlushAll &&
+            !this.#storeClearPending &&
+            this.#pendingSessionClears.size === 0 &&
+            this.#pendingDeleteKeys.size === 0 &&
+            this.#pendingPersistence.size === 0
+        );
     }
 
     /** Drops only process-local indexes while retaining the persisted replay. */
-    clearMemory(): void {
-        this.flush();
+    clearMemory(): boolean {
+        if (!this.flush()) {
+            return false;
+        }
         this.#dropMemoryState();
+        return true;
     }
 
     /** Clears all replay state, for example after credentials change. */
@@ -1426,8 +1496,11 @@ export class OpenClawChatBridge {
         }
     }
 
-    /** Captures the runtime cutoff immediately before a Gateway request starts. */
-    captureRequestBoundary(): number {
+    /** Hydrates the target before capturing the runtime cutoff for a request. */
+    captureRequestBoundary(sessionKey?: string): number {
+        if (sessionKey) {
+            this.#ensureSessionLoaded(sessionKey);
+        }
         return this.#sequence;
     }
 

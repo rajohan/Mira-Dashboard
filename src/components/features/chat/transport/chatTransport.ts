@@ -27,6 +27,7 @@ export interface ChatRuntimeSnapshot {
 /** Provider-independent operations needed by the Dashboard chat feature. */
 export interface ChatTransport {
     abort(sessionKey: string): Promise<void>;
+    compact(sessionKey: string): Promise<void>;
     connectionGeneration: number;
     error?: string;
     history(sessionKey: string, limit: number): Promise<ChatHistoryMessage[]>;

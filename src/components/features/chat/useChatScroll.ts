@@ -24,14 +24,15 @@ export function useChatScroll(
     const messagesContainerReference = useRef<HTMLDivElement | undefined>(undefined);
     const messagesBottomReference = useRef<HTMLDivElement | undefined>(undefined);
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
-    const previousRowsLengthReference = useRef(0);
+    const previousRowKeysReference = useRef<string[]>([]);
+    const previousScrollTopReference = useRef(0);
     const previousSessionKeyReference = useRef("");
 
     const virtualizer = useVirtualizer({
         anchorTo: "end",
         count: rows.length,
         estimateSize: (index) =>
-            rows[index]?.kind === "typing"
+            rows[index]?.kind === "typing" || rows[index]?.kind === "status"
                 ? ESTIMATED_TYPING_ROW_HEIGHT_PX
                 : ESTIMATED_MESSAGE_ROW_HEIGHT_PX,
         followOnAppend: "auto",
@@ -54,9 +55,20 @@ export function useChatScroll(
     };
 
     const handleScroll = () => {
+        const container = messagesContainerReference.current;
+        const scrollTop = container?.scrollTop ?? 0;
+        const didScrollUp = scrollTop + 1 < previousScrollTopReference.current;
         const atBottom = checkIsAtBottom();
-        shouldStickToBottomReference.current = atBottom;
-        setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
+        const shouldStaySticky = Boolean(
+            atBottom ||
+            (shouldStickToBottomReference.current &&
+                (!didScrollUp || bottomFollowFrameReference.current !== undefined))
+        );
+        previousScrollTopReference.current = scrollTop;
+        shouldStickToBottomReference.current = shouldStaySticky;
+        setIsAtBottom((previous) =>
+            previous === shouldStaySticky ? previous : shouldStaySticky
+        );
     };
 
     const scrollToBottom = () => {
@@ -66,6 +78,7 @@ export function useChatScroll(
         }
         messagesBottomReference.current?.scrollIntoView({ block: "end" });
         container.scrollTop = container.scrollHeight;
+        previousScrollTopReference.current = container.scrollTop;
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
     };
@@ -91,19 +104,33 @@ export function useChatScroll(
     useLayoutEffect(() => {
         const isSessionChanged =
             previousSessionKeyReference.current !== selectedSessionKey;
-        const isInitialHistory =
-            previousRowsLengthReference.current === 0 && rows.length > 0;
+        const previousRowKeys = previousRowKeysReference.current;
+        const rowKeys = rows.map((row) => row.key);
+        const isInitialHistoryLoad = previousRowKeys.length === 0 && rowKeys.length > 0;
+        const didRowKeysChange =
+            previousRowKeys.length !== rowKeys.length ||
+            previousRowKeys.some((key, index) => key !== rowKeys[index]);
+        const isPureTailAppend =
+            rowKeys.length > previousRowKeys.length &&
+            previousRowKeys.every((key, index) => rowKeys[index] === key);
+        const needsStructuralBottomFollow =
+            previousRowKeys.length > 0 && didRowKeysChange && !isPureTailAppend;
         previousSessionKeyReference.current = selectedSessionKey;
-        previousRowsLengthReference.current = rows.length;
+        previousRowKeysReference.current = rowKeys;
 
         if (isSessionChanged) {
+            previousScrollTopReference.current = 0;
             shouldStickToBottomReference.current = true;
             setIsAtBottom(true);
         }
-        if (rows.length > 0 && (isSessionChanged || isInitialHistory)) {
+        if (
+            rows.length > 0 &&
+            shouldStickToBottomReference.current &&
+            (isSessionChanged || isInitialHistoryLoad || needsStructuralBottomFollow)
+        ) {
             scheduleBottomFollow();
         }
-    }, [rows.length, selectedSessionKey]);
+    }, [rows, selectedSessionKey]);
 
     useLayoutEffect(
         () => () => {

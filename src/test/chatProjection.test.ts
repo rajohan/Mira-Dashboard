@@ -366,10 +366,20 @@ describe("chat projection", () => {
             new Set()
         );
         const thinkingKey = "diagnostic-run-1-thinking";
+        const beforeThinkingIndex = before.rows.findIndex(
+            (row) => row.key === thinkingKey
+        );
+        const afterToolIndex = after.rows.findIndex(
+            (row) => row.message.toolCalls?.length
+        );
+        const afterThinkingIndex = after.rows.findIndex((row) => row.key === thinkingKey);
 
-        expect(before.rows.findIndex((row) => row.key === thinkingKey)).toBe(1);
-        expect(after.rows.findIndex((row) => row.message.toolCalls?.length)).toBe(1);
-        expect(after.rows.findIndex((row) => row.key === thinkingKey)).toBe(2);
+        expect(beforeThinkingIndex).toBeGreaterThanOrEqual(0);
+        expect(afterToolIndex).toBeGreaterThanOrEqual(0);
+        expect(afterThinkingIndex).toBeGreaterThan(afterToolIndex);
+        expect(after.rows[afterThinkingIndex]?.key).toBe(
+            before.rows[beforeThinkingIndex]?.key
+        );
     });
 
     it("keeps sibling tool call and result row keys distinct", () => {
@@ -534,6 +544,34 @@ describe("chat projection", () => {
             kind: "typing",
             message: { text: "Thinking" },
         });
+    });
+
+    it("moves thinking below a recovered unscoped steer before more work arrives", () => {
+        const visible = presentChatMessages(
+            [
+                message("user", "question", "run-1"),
+                {
+                    content: [{ thinking: "working", type: "thinking" }],
+                    role: "assistant",
+                    runId: "run-1",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                message("user", "steer without provider run id"),
+                message("assistant", "done", "run-1"),
+            ],
+            createChatVisibility(true, true),
+            true
+        );
+
+        const steerIndex = visible.findIndex(
+            (item) => item.text === "steer without provider run id"
+        );
+        const thinkingIndex = visible.findIndex((item) => item.thinking?.length);
+        const finalIndex = visible.findIndex((item) => item.text === "done");
+
+        expect(thinkingIndex).toBeGreaterThan(steerIndex);
+        expect(thinkingIndex).toBeLessThan(finalIndex);
     });
 
     it("projects an unscoped runtime steer before later run diagnostics", () => {
@@ -1468,6 +1506,100 @@ describe("chat projection", () => {
         ).toBe(false);
     });
 
+    it("extracts mixed unscoped thinking into one bubble before the final answer", () => {
+        const raw: ChatHistoryMessage[] = [
+            message("user", "heartbeat"),
+            message("assistant", "Running scheduled check"),
+            {
+                content: [{ text: "first thought", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ id: "thought-1", text: "first thought" }],
+                toolCalls: [{ id: "call-1", name: "read" }],
+            },
+            {
+                content: "first result",
+                role: "tool",
+                text: "first result",
+                toolResult: { content: "first result", id: "call-1", name: "read" },
+            },
+            {
+                content: [{ text: "second thought", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ id: "thought-2", text: "second thought" }],
+                toolCalls: [{ id: "call-2", name: "exec" }],
+            },
+            {
+                content: "second result",
+                role: "tool",
+                text: "second result",
+                toolResult: { content: "second result", id: "call-2", name: "exec" },
+            },
+            {
+                content: [
+                    { text: "final thought", type: "thinking" },
+                    { text: "All healthy", type: "text" },
+                ],
+                role: "assistant",
+                text: "All healthy",
+                thinking: [{ id: "thought-3", text: "final thought" }],
+            },
+        ];
+
+        const visible = presentChatMessages(raw, createChatVisibility(true, true), true);
+        const thinkingRows = visible.filter((item) => item.thinking?.length);
+        const lastToolIndex = visible.findLastIndex(
+            (item) => item.toolCalls?.length || item.toolResult
+        );
+        const thinkingIndex = visible.findIndex((item) => item.thinking?.length);
+        const finalIndex = visible.findIndex((item) => item.text === "All healthy");
+
+        expect(thinkingRows).toHaveLength(1);
+        expect(thinkingRows[0]?.thinking?.map((block) => block.text)).toEqual([
+            "first thought",
+            "second thought",
+            "final thought",
+        ]);
+        expect(thinkingIndex).toBeGreaterThan(lastToolIndex);
+        expect(thinkingIndex).toBeLessThan(finalIndex);
+        expect(visible[finalIndex]?.thinking).toBeUndefined();
+    });
+
+    it("moves thinking below an optimistic steer before provider acknowledgement", () => {
+        const visible = presentChatMessages(
+            [
+                message("user", "question", "run-1"),
+                {
+                    content: [{ text: "working", type: "thinking" }],
+                    role: "assistant",
+                    runId: "run-1",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "working" }],
+                },
+                message("user", "steer now", "dashboard-chat-steer"),
+                {
+                    content: "",
+                    role: "assistant",
+                    runId: "run-1",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                message("assistant", "done", "run-1"),
+            ],
+            createChatVisibility(true, true),
+            true
+        );
+        const steerIndex = visible.findIndex((item) => item.text === "steer now");
+        const toolIndex = visible.findIndex((item) => item.toolCalls?.length);
+        const thinkingIndex = visible.findIndex((item) => item.thinking?.length);
+        const finalIndex = visible.findIndex((item) => item.text === "done");
+
+        expect(thinkingIndex).toBeGreaterThan(steerIndex);
+        expect(thinkingIndex).toBeGreaterThan(toolIndex);
+        expect(thinkingIndex).toBeLessThan(finalIndex);
+    });
+
     it("projects a single compacting status without mutating messages", () => {
         const runtime = addOptimisticChatRun(
             createChatRuntimeState(),
@@ -1485,12 +1617,86 @@ describe("chat projection", () => {
         );
 
         expect(projection.isCompacting).toBe(true);
-        expect(projection.rows).toEqual([
-            expect.objectContaining({
-                kind: "typing",
-                message: expect.objectContaining({ text: "Compacting context" }),
+        expect(projection.compactionStatus).toMatchObject({
+            phase: "active",
+            text: "Compacting context",
+        });
+        expect(projection.rows).toEqual([]);
+    });
+
+    it("finishes a dedicated compaction run without ending the parent chat run", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "active",
+                runId: "compaction:run-1",
+                text: "Compacting context",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "complete",
+                runId: "compaction:run-1",
+                text: "Context compacted",
+            }),
+            event(48, {
+                kind: "status",
+                runId: "run-1",
+                text: "Thinking",
             }),
         ]);
+        const projection = projectChat(
+            [],
+            runtime,
+            SESSION,
+            createChatVisibility(false, false),
+            false,
+            new Set()
+        );
+
+        expect(projection.activeRuns.map((run) => run.runId)).toEqual(["run-1"]);
+        expect(projection.compactionStatus).toMatchObject({ phase: "complete" });
+        expect(projection.rows.at(-1)?.message.text).toBe("Thinking");
+    });
+
+    it("completes retrying compaction when the lifecycle settles", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "active",
+                runId: "compaction:run-1",
+                text: "Compacting context",
+            }),
+            event(16, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "retrying",
+                runId: "compaction:run-1",
+                text: "Compacting context",
+            }),
+            event(24, {
+                kind: "finish",
+                outcome: "completed",
+                runId: "run-1",
+                settlesCompaction: true,
+            }),
+        ]);
+        const projection = projectChat(
+            [],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projection.compactionStatus).toMatchObject({ phase: "complete" });
+        expect(runtime.sessions[SESSION]?.runs["compaction:run-1"]).toMatchObject({
+            operationPhase: "complete",
+            phase: "completed",
+        });
     });
 
     it("projects an unambiguous short provider session alias", () => {

@@ -5,6 +5,27 @@ import {
     type OpenClawRuntimeSnapshot,
 } from "../src/chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
+import { database } from "../src/database.ts";
+
+function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnapshot {
+    return {
+        completed: false,
+        events: [
+            {
+                event: "agent",
+                payload: {
+                    runId: `run-${sequence}`,
+                    sessionKey,
+                    stream: "thinking",
+                },
+                runtimeRecordedAt: Date.now(),
+                runtimeSequence: sequence,
+                type: "event",
+            },
+        ],
+        throughSequence: sequence,
+    };
+}
 
 describe("OpenClaw chat snapshot store", () => {
     it("round-trips and deletes a bounded runtime snapshot", () => {
@@ -109,6 +130,88 @@ describe("OpenClaw chat snapshot store", () => {
             expect(store.keys()).toHaveLength(MAX_CHAT_RUNTIME_SESSIONS);
             expect(store.load(sessionKeys[0]!)).toBeUndefined();
             expect(store.load(sessionKeys.at(-1)!)).toBeDefined();
+        } finally {
+            store.clear();
+        }
+    });
+
+    it("treats a same-millisecond refresh as the newest persisted session", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(
+            gatewayScope,
+            () => "2026-07-17T20:00:00.000Z"
+        );
+        const sessionKeys = Array.from(
+            { length: MAX_CHAT_RUNTIME_SESSIONS },
+            (_, index) => `agent:test:same-time-${index}`
+        );
+        const overflowKey = "agent:test:same-time-overflow";
+
+        try {
+            for (const [index, sessionKey] of sessionKeys.entries()) {
+                store.save(sessionKey, snapshotFor(sessionKey, index + 1));
+            }
+            store.save(sessionKeys[0]!, snapshotFor(sessionKeys[0]!, 100));
+            store.save(overflowKey, snapshotFor(overflowKey, 101));
+
+            expect(store.keys()).toHaveLength(MAX_CHAT_RUNTIME_SESSIONS);
+            expect(store.load(sessionKeys[0]!)).toBeDefined();
+            expect(store.load(sessionKeys[1]!)).toBeUndefined();
+            expect(store.load(overflowKey)).toBeDefined();
+        } finally {
+            store.clear();
+        }
+    });
+
+    it("deletes snapshots with invalid or inconsistent sequence metadata", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const invalidSnapshots = [
+            { ...snapshotFor("agent:test:negative", 1), throughSequence: -1 },
+            { ...snapshotFor("agent:test:fractional", 1), throughSequence: 1.5 },
+            {
+                ...snapshotFor("agent:test:event-negative", 1),
+                events: [
+                    {
+                        ...snapshotFor("agent:test:event-negative", 1).events[0],
+                        runtimeSequence: -1,
+                    },
+                ],
+            },
+            {
+                ...snapshotFor("agent:test:event-fractional", 1),
+                events: [
+                    {
+                        ...snapshotFor("agent:test:event-fractional", 1).events[0],
+                        runtimeSequence: 0.5,
+                    },
+                ],
+            },
+            { ...snapshotFor("agent:test:behind", 2), throughSequence: 1 },
+        ];
+
+        try {
+            for (const [index, snapshot] of invalidSnapshots.entries()) {
+                const sessionKey = `agent:test:invalid-${index}`;
+                database
+                    .prepare(
+                        `INSERT INTO chat_runtime_snapshots (
+                            gateway_scope,
+                            session_key,
+                            snapshot_json,
+                            updated_at
+                        ) VALUES (?, ?, ?, ?)`
+                    )
+                    .run(
+                        gatewayScope,
+                        sessionKey,
+                        JSON.stringify(snapshot),
+                        "2026-07-17T20:00:00.000Z"
+                    );
+
+                expect(store.load(sessionKey)).toBeUndefined();
+                expect(store.keys()).not.toContain(sessionKey);
+            }
         } finally {
             store.clear();
         }

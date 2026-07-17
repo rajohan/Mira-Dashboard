@@ -25,8 +25,16 @@ const RUNTIME_USER_ECHO_WINDOW_MS = 5000;
 
 export interface ChatProjection {
     activeRuns: ChatRunState[];
+    compactionStatus?: ChatCompactionStatus;
     isCompacting: boolean;
     rows: ChatRow[];
+}
+
+export interface ChatCompactionStatus {
+    key: string;
+    phase: "active" | "complete";
+    text: string;
+    timestamp: string;
 }
 
 function orderedRuns(session?: ChatSessionRuntimeState): ChatRunState[] {
@@ -535,31 +543,10 @@ export function reconcileChatMessages(
     return dedupeMessages(messages);
 }
 
-function visibleAssistantRunIds(messages: ChatHistoryMessage[]): Set<string> {
-    return new Set(
-        messages
-            .filter(
-                (message) =>
-                    message.local === true &&
-                    ["assistant", "system"].includes(message.role.toLowerCase()) &&
-                    Boolean(message.text.trim())
-            )
-            .map((message) => message.runId)
-            .filter((runId): runId is string => Boolean(runId))
-    );
-}
-
-function statusRow(
-    runs: ChatRunState[],
-    visibleRunIdSet: Set<string>
-): ChatRow | undefined {
+function statusRow(runs: ChatRunState[]): ChatRow | undefined {
     const run = runs
         .toSorted((left, right) => right.lastSequence - left.lastSequence)
-        .find(
-            (candidate) =>
-                !visibleRunIdSet.has(candidate.runId) &&
-                candidate.aliases.every((alias) => !visibleRunIdSet.has(alias))
-        );
+        .find((candidate) => candidate.operation !== "compact");
     if (!run) {
         return undefined;
     }
@@ -568,6 +555,37 @@ function statusRow(
         key: `typing-${run.sessionKey}-${run.runId}-${text}`,
         kind: "typing",
         message: { content: text, role: "assistant", text },
+    };
+}
+
+function currentCompactionStatus(runs: ChatRunState[]): ChatCompactionStatus | undefined {
+    const run = runs
+        .filter((candidate) => candidate.operation === "compact")
+        .toSorted((left, right) => {
+            const leftTimestamp = Date.parse(
+                left.operationUpdatedAt || left.terminalAt || left.updatedAt
+            );
+            const rightTimestamp = Date.parse(
+                right.operationUpdatedAt || right.terminalAt || right.updatedAt
+            );
+            return rightTimestamp - leftTimestamp;
+        })[0];
+    if (!run) {
+        return undefined;
+    }
+    if (run.operationPhase === "inactive") {
+        return undefined;
+    }
+    const phase =
+        run.operationPhase === "complete" || run.phase !== "active"
+            ? "complete"
+            : "active";
+    const timestamp = run.operationUpdatedAt || run.terminalAt || run.updatedAt;
+    return {
+        key: `${run.sessionKey}:${run.runId}:${phase}:${timestamp}`,
+        phase,
+        text: phase === "active" ? "Compacting context" : "Context compacted",
+        timestamp,
     };
 }
 
@@ -599,24 +617,23 @@ export function projectChat(
     const activeRuns = runs.filter(
         (run) =>
             run.phase === "active" &&
+            run.operation !== "compact" &&
             canonicalFinalIndex(
                 boundaryMessages,
                 run,
                 responseSegment(boundaryMessages, run, runs)
             ) === -1
     );
-    const typing = statusRow(activeRuns, visibleAssistantRunIds(presented));
+    const typing = statusRow(activeRuns);
     if (typing) {
         rows.push(typing);
     }
 
+    const compactionStatus = currentCompactionStatus(runs);
     return {
         activeRuns,
-        isCompacting: activeRuns.some(
-            (run) =>
-                run.operation === "compact" ||
-                run.statusText?.toLowerCase().includes("compact")
-        ),
+        compactionStatus,
+        isCompacting: compactionStatus?.phase === "active",
         rows,
     };
 }

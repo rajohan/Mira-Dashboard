@@ -177,7 +177,7 @@ export function allChatMessageImages(message: ChatHistoryMessage): ChatImageBloc
 /** Represents one chat row. */
 export interface ChatRow {
     key: string;
-    kind: "message" | "stream" | "typing";
+    kind: "message" | "status" | "stream" | "typing";
     message: ChatHistoryMessage;
 }
 

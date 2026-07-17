@@ -54,6 +54,7 @@ function fakeTransport(snapshotPromise: Promise<ChatRuntimeSnapshot>, generation
     const listeners = new Set<(event: ChatRuntimeEvent) => void>();
     const transport: ChatTransport = {
         abort: jest.fn(async () => {}),
+        compact: jest.fn(async () => {}),
         connectionGeneration: generation,
         history: jest.fn(async () => []),
         isConnected: true,
@@ -383,7 +384,9 @@ describe("chat runtime controller", () => {
         );
 
         act(() => {
-            result.current.beginRun(SELECTED, "dashboard-compact-pre-gate", "compact");
+            result.current.beginRun(SELECTED, "dashboard-compact-pre-gate", {
+                operation: "compact",
+            });
             result.current.acknowledgeRun(
                 SELECTED,
                 "dashboard-compact-pre-gate",
@@ -522,7 +525,9 @@ describe("chat runtime controller", () => {
         );
 
         act(() => {
-            result.current.beginRun(SELECTED, "dashboard-compact-new", "compact");
+            result.current.beginRun(SELECTED, "dashboard-compact-new", {
+                operation: "compact",
+            });
             result.current.acknowledgeRun(
                 SELECTED,
                 "dashboard-compact-new",
@@ -750,6 +755,37 @@ describe("chat runtime controller", () => {
         expect(result.current.state.sessions[SELECTED]?.runs["run-1"]?.error).toBe(
             "tool execution failed: missing diagnostic"
         );
+
+        act(() => fake.emit(finish(SELECTED, 64)));
+        expect(onError).not.toHaveBeenCalled();
+
+        act(() => {
+            result.current.clearSession(SELECTED);
+            fake.emit({
+                kind: "tool",
+                message: {
+                    content: "failed",
+                    role: "tool",
+                    text: "failed",
+                    toolResult: {
+                        content: "failed",
+                        id: "tool-2",
+                        isError: true,
+                        name: "exec",
+                    },
+                },
+                runId: "run-1",
+                sequence: 80,
+                sessionKey: SELECTED,
+                timestamp: "2026-07-16T12:00:01.000Z",
+                toolKey: "tool:tool-2",
+            });
+            fake.emit({
+                ...finish(SELECTED, 96, "model crashed"),
+                outcome: "error",
+            });
+        });
+        expect(onError).toHaveBeenCalledWith("model crashed");
     });
 
     it("retains an old completed snapshot until a new run begins", async () => {
@@ -778,6 +814,84 @@ describe("chat runtime controller", () => {
         expect(
             result.current.state.sessions[SELECTED]?.runs["dashboard-chat-next"]?.phase
         ).toBe("active");
+    });
+
+    it("restores a completed replay when the optimistic send fails", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [
+                    assistant(SELECTED, 16, "previous answer", "replace"),
+                    finish(SELECTED, 32),
+                ],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        act(() => result.current.beginRun(SELECTED, "dashboard-chat-failed"));
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]).toBeUndefined();
+
+        act(() => result.current.failRun(SELECTED, "dashboard-chat-failed"));
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["dashboard-chat-failed"]
+        ).toBeUndefined();
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]).toMatchObject({
+            assistant: { text: "previous answer" },
+            phase: "completed",
+        });
+    });
+
+    it("replaces projection-hidden status runs before routing a new unscoped reply", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        await act(async () => {
+            snapshot.resolve({
+                completed: false,
+                events: [
+                    {
+                        kind: "status",
+                        runId: "stale-status-run",
+                        sequence: 16,
+                        sessionKey: SELECTED,
+                        text: "Thinking",
+                        timestamp: "2026-07-16T12:00:00.000Z",
+                    },
+                ],
+                throughSequence: 16,
+            });
+            await snapshot.promise;
+        });
+
+        act(() =>
+            result.current.beginRun(SELECTED, "dashboard-chat-current", {
+                replaceStatusOnlyRuns: true,
+            })
+        );
+        act(() =>
+            fake.emit({
+                ...assistant(SELECTED, 32, "current answer"),
+                runId: undefined,
+            })
+        );
+
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["stale-status-run"]
+        ).toBeUndefined();
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["dashboard-chat-current"]
+                ?.assistant?.text
+        ).toBe("current answer");
     });
 
     it("retains an unscoped finish after a delayed event advances the run", async () => {

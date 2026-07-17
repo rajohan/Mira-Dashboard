@@ -20,6 +20,7 @@ function fakeRuntime(): ChatRuntimeController {
         beginRun: jest.fn(),
         clearRun: jest.fn(),
         clearSession: jest.fn(),
+        failRun: jest.fn(),
         state: createChatRuntimeState(),
     };
 }
@@ -39,6 +40,7 @@ function fakeTransport(
 ): ChatTransport {
     return {
         abort: jest.fn(async () => {}),
+        compact: jest.fn(async () => {}),
         connectionGeneration: 1,
         history: jest.fn(async () => []),
         isConnected: true,
@@ -115,6 +117,8 @@ describe("chat actions", () => {
 
         rerender({ activeRunCount: 1, draft: "steer", isCompacting: true });
         expect(result.current.canSend).toBe(true);
+        expect(result.current.preferenceControlsDisabled).toBe(false);
+        expect(result.current.compactDisabled).toBe(true);
 
         let secondSend: Promise<void> | undefined;
         act(() => {
@@ -126,11 +130,70 @@ describe("chat actions", () => {
             expect.stringMatching(DASHBOARD_CHAT_RUN_ID),
             expect.stringMatching(DASHBOARD_CHAT_RUN_ID),
         ]);
+        expect(runtime.beginRun).toHaveBeenNthCalledWith(
+            1,
+            SESSION_A,
+            expect.stringMatching(DASHBOARD_CHAT_RUN_ID),
+            { replaceStatusOnlyRuns: true }
+        );
+        expect(runtime.beginRun).toHaveBeenNthCalledWith(
+            2,
+            SESSION_A,
+            expect.stringMatching(DASHBOARD_CHAT_RUN_ID),
+            { replaceStatusOnlyRuns: false }
+        );
 
         await act(async () => {
             sendDeferred.resolve({ runId: "run-1" });
             await Promise.all([firstSend, secondSend]);
         });
+    });
+
+    it("uses the session compaction RPC and clears request state when it finishes", async () => {
+        const compactDeferred = Promise.withResolvers<void>();
+        const transport = fakeTransport();
+        transport.compact = jest.fn(() => compactDeferred.promise);
+        const runtime = fakeRuntime();
+        const { result } = renderHook(() =>
+            useChatActions({
+                activeRunCount: 0,
+                attachments: [],
+                attachmentsReference: { current: [] },
+                clearAttachments: jest.fn(),
+                confirmResetSession: jest.fn(async () => true),
+                draft: "",
+                isCompacting: false,
+                isConnected: true,
+                isRecording: false,
+                isTranscribing: false,
+                runtime,
+                scheduleBottomFollow: jest.fn(),
+                selectedSession: selectedSession(),
+                selectedSessionKey: SESSION_A,
+                selectedSessionKeyReference: { current: SESSION_A },
+                setDraft: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                transport,
+            })
+        );
+
+        let compactPromise: Promise<void> | undefined;
+        act(() => {
+            compactPromise = result.current.compactSelectedSession();
+        });
+        await waitFor(() => expect(transport.compact).toHaveBeenCalledWith(SESSION_A));
+        expect(result.current.isCompactingSession).toBe(true);
+        expect(result.current.compactDisabled).toBe(true);
+        expect(runtime.beginRun).not.toHaveBeenCalled();
+
+        await act(async () => {
+            compactDeferred.resolve();
+            await compactPromise;
+        });
+        expect(result.current.isCompactingSession).toBe(false);
     });
 
     it("clears a steer placeholder when the provider omits its run id", async () => {
@@ -225,13 +288,63 @@ describe("chat actions", () => {
             await sendPromise;
         });
 
-        expect(runtime.clearRun).toHaveBeenCalledWith(
+        expect(runtime.failRun).toHaveBeenCalledWith(
             SESSION_A,
             expect.stringMatching(/^dashboard-chat-/u)
         );
         expect(setMessages).toHaveBeenCalledTimes(1);
         expect(messages).toHaveLength(1);
         expect(setSendError).not.toHaveBeenCalledWith("delivery failed");
+    });
+
+    it("generates a send id when randomUUID is unavailable", async () => {
+        const crypto = globalThis.crypto;
+        const originalRandomUuid = crypto.randomUUID;
+        Object.defineProperty(crypto, "randomUUID", {
+            configurable: true,
+            value: undefined,
+        });
+        try {
+            const transport = fakeTransport();
+            const { result } = renderHook(() =>
+                useChatActions({
+                    activeRunCount: 0,
+                    attachments: [],
+                    attachmentsReference: { current: [] },
+                    clearAttachments: jest.fn(),
+                    confirmResetSession: jest.fn(async () => true),
+                    draft: "fallback id",
+                    isCompacting: false,
+                    isConnected: true,
+                    isRecording: false,
+                    isTranscribing: false,
+                    runtime: fakeRuntime(),
+                    scheduleBottomFollow: jest.fn(),
+                    selectedSession: selectedSession(),
+                    selectedSessionKey: SESSION_A,
+                    selectedSessionKeyReference: { current: SESSION_A },
+                    setDraft: jest.fn(),
+                    setIsAtBottom: jest.fn(),
+                    setMessages: jest.fn(),
+                    setSendError: jest.fn(),
+                    shouldStickToBottomReference: { current: true },
+                    transport,
+                })
+            );
+
+            await act(async () => result.current.handleSend());
+
+            expect(transport.send).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    idempotencyKey: expect.stringMatching(/^dashboard-chat-[\da-z-]+$/u),
+                })
+            );
+        } finally {
+            Object.defineProperty(crypto, "randomUUID", {
+                configurable: true,
+                value: originalRandomUuid,
+            });
+        }
     });
 
     it("does not send a reset after confirmation returns for another session", async () => {

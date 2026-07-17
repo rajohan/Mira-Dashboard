@@ -127,6 +127,84 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("persists manual compaction without displacing the latest completed run", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "latest answer",
+                runId: "latest-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.compaction",
+            {
+                operation: "compact",
+                operationId: "compact-operation",
+                phase: "start",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.compaction",
+            {
+                completed: true,
+                operation: "compact",
+                operationId: "compact-operation",
+                phase: "end",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.flush();
+
+        const restored = new OpenClawChatBridge(store).snapshot(MAIN);
+        expect(restored.completed).toBe(true);
+        expect(restored.events.map((event) => event.payload)).toEqual([
+            expect.objectContaining({ message: "latest answer", state: "final" }),
+            expect.objectContaining({
+                operationId: "compact-operation",
+                phase: "start",
+            }),
+            expect.objectContaining({
+                completed: true,
+                operationId: "compact-operation",
+                phase: "end",
+            }),
+        ]);
+    });
+
+    it("completes a standalone manual compaction replay", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.compaction",
+            {
+                operation: "compact",
+                operationId: "compact-operation",
+                phase: "start",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.compaction",
+            {
+                operation: "compact",
+                operationId: "compact-operation",
+                phase: "end",
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({ completed: true });
+    });
+
     it("removes the previous persisted replay when a new send starts", () => {
         const store = new MemorySnapshotStore();
         const firstBridge = new OpenClawChatBridge(store);
@@ -244,11 +322,37 @@ describe("OpenClaw chat bridge", () => {
         const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
 
         try {
-            bridge.flush();
+            expect(bridge.flush()).toBe(false);
             expect(store.snapshots.has(MAIN)).toBe(false);
 
-            bridge.flush();
+            expect(bridge.flush()).toBe(true);
             expect(store.snapshots.get(MAIN)?.events).toHaveLength(1);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("retains process memory when a final persistence flush fails", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "working" },
+                runId: "run-1",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        store.saveFailures = 1;
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            expect(bridge.clearMemory()).toBe(false);
+            expect(bridge.snapshot(MAIN).events).toHaveLength(1);
+            expect(bridge.clearMemory()).toBe(true);
+            expect(new OpenClawChatBridge(store).snapshot(MAIN).events).toHaveLength(1);
         } finally {
             warning.mockRestore();
         }
@@ -450,6 +554,92 @@ describe("OpenClaw chat bridge", () => {
         ]);
         expect(snapshot.events[1]?.payload).toMatchObject({
             data: { progressText: "Working 599" },
+        });
+    });
+
+    it("stores one replay event per visible native tool bubble", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.started",
+            { runId: "tool-run", sessionKey: MAIN },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    itemId: "call-1",
+                    kind: "command",
+                    phase: "start",
+                    suppressChannelProgress: true,
+                },
+                runId: "tool-run",
+                sessionKey: MAIN,
+                stream: "item",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.tool",
+            {
+                data: {
+                    args: { command: "true" },
+                    itemId: "call-1",
+                    name: "bash",
+                    phase: "start",
+                    toolCallId: "call-1",
+                },
+                runId: "tool-run",
+                sessionKey: MAIN,
+                stream: "tool",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    itemId: "call-1",
+                    kind: "command",
+                    phase: "end",
+                    suppressChannelProgress: true,
+                },
+                runId: "tool-run",
+                sessionKey: MAIN,
+                stream: "item",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.tool",
+            {
+                data: {
+                    isError: false,
+                    itemId: "call-1",
+                    name: "bash",
+                    phase: "result",
+                    result: { exitCode: 0, status: "completed" },
+                    toolCallId: "call-1",
+                },
+                runId: "tool-run",
+                sessionKey: MAIN,
+                stream: "tool",
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.events.map((event) => event.event)).toEqual([
+            "session.started",
+            "session.tool",
+        ]);
+        expect(snapshot.events[1]?.payload).toMatchObject({
+            data: {
+                args: { command: "true" },
+                phase: "result",
+                result: { exitCode: 0, status: "completed" },
+                toolCallId: "call-1",
+            },
         });
     });
 
@@ -1340,6 +1530,57 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("hydrates persisted replay before capturing a new send boundary", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(MAIN, {
+            completed: true,
+            events: [
+                {
+                    event: "chat",
+                    payload: {
+                        message: "persisted old answer",
+                        sessionKey: MAIN,
+                        state: "final",
+                    },
+                    runtimeRecordedAt: Date.now() - 1000,
+                    runtimeSequence: 7,
+                    type: "event",
+                },
+            ],
+            throughSequence: 7,
+        });
+        const bridge = new OpenClawChatBridge(store);
+        const requestBoundary = bridge.captureRequestBoundary(MAIN);
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "new answer",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-new",
+                message: "new question",
+                sessionKey: MAIN,
+            },
+            { runId: "provider-new" },
+            requestBoundary
+        );
+
+        expect(requestBoundary).toBe(7);
+        expect(payloads(bridge)).toEqual([
+            expect.objectContaining({
+                message: "new answer",
+                runId: "provider-new",
+            }),
+        ]);
+    });
+
     it("promotes a completed runless turn without a provider run id", () => {
         const withoutProvider = new OpenClawChatBridge();
         const withoutProviderBoundary = withoutProvider.captureRequestBoundary();
@@ -1926,7 +2167,7 @@ describe("OpenClaw chat bridge", () => {
 
     it("bounds event count and drops oversized non-terminal payloads", () => {
         const bridge = new OpenClawChatBridge();
-        for (let index = 0; index < 510; index += 1) {
+        for (let index = 0; index < 2010; index += 1) {
             bridge.recordEvent(
                 "agent",
                 {
@@ -1938,7 +2179,7 @@ describe("OpenClaw chat bridge", () => {
                 []
             );
         }
-        expect(bridge.snapshot(MAIN).events).toHaveLength(500);
+        expect(bridge.snapshot(MAIN).events).toHaveLength(2000);
 
         bridge.clear();
         bridge.recordEvent(

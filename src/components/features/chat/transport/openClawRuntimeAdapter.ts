@@ -131,10 +131,12 @@ function runtimeStreamDrafts(
         timestamp: string;
     }
 ): ChatRuntimeEventDraft[] {
-    const streamRaw = stringValue(payload.stream) || "";
+    const streamRaw =
+        stringValue(payload.stream) ||
+        (eventName === "session.compaction" ? "compaction" : "");
     const stream = streamRaw === "command_output" ? "command-output" : streamRaw;
-    const data = asRecord(payload.data) || {};
-    const phase = stringValue(data.phase) || "";
+    const data = asRecord(payload.data) || payload;
+    const phase = stringValue(data.phase) || stringValue(payload.phase) || "";
     if (
         (stream === "tool" || eventName === "session.tool") &&
         isNonWorkTool(stringValue(data.name) || stringValue(data.toolName) || "tool")
@@ -144,11 +146,12 @@ function runtimeStreamDrafts(
 
     const drafts: ChatRuntimeEventDraft[] = [];
     const progress = openClawProgress(eventName, stream, phase, data);
-    if (progress.text || progress.operation) {
+    if (progress.text || progress.operation || progress.operationPhase) {
         drafts.push({
             ...common,
             kind: "status",
             operation: progress.operation,
+            operationPhase: progress.operationPhase,
             text: progress.text,
         });
     }
@@ -221,6 +224,8 @@ function runtimeStreamDrafts(
             kind: "finish",
             error: terminalError,
             outcome,
+            settlesCompaction:
+                stream === "lifecycle" && (phase === "end" || phase === "error"),
             toolFailure: isToolFailureError(terminalError) || undefined,
         });
     } else if (!progress.text && OPENCLAW_WORK_STREAMS.has(stream) && phase === "start") {

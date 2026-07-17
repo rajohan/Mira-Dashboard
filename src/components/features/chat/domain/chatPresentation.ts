@@ -94,19 +94,19 @@ function applyFinalThinkingPreference(
             continue;
         }
 
-        const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
+        const hasToolOutput = Boolean(message.toolCalls?.length || message.toolResult);
         const hasPrimaryContent = Boolean(
             withoutThinking.text.trim() ||
             withoutThinking.images?.length ||
             (withoutThinking.attachments?.length &&
-                !hasToolDetails &&
+                !hasToolOutput &&
                 !withoutThinking.hasOnlyHiddenToolAttachments)
         );
-        const isDiagnosticTool = hasToolDetails && !hasPrimaryContent;
+        const isDiagnosticTool = hasToolOutput && !hasPrimaryContent;
         const isPrimaryAnswer = Boolean(
             message.role.toLowerCase() === "assistant" &&
             hasPrimaryContent &&
-            !isDiagnosticTool &&
+            !hasToolOutput &&
             isRenderableChatHistoryMessage(withoutThinking, visibility)
         );
         response.push({
@@ -128,119 +128,179 @@ function applyFinalThinkingPreference(
         .filter((message) => isRenderableChatHistoryMessage(message, visibility));
 }
 
-function isStandaloneThinking(message: ChatHistoryMessage): boolean {
-    return Boolean(
-        message.runId &&
-        message.role.toLowerCase() === "assistant" &&
-        message.thinking?.length &&
-        !message.text.trim() &&
-        !message.images?.length &&
-        !message.attachments?.length &&
-        !message.toolCalls?.length &&
-        !message.toolResult
-    );
+function hasToolDetails(message: ChatHistoryMessage): boolean {
+    return Boolean(message.toolCalls?.length || message.toolResult);
 }
 
-function isStandaloneToolDiagnostic(message: ChatHistoryMessage): boolean {
+interface ThinkingGroup {
+    blocks: NonNullable<ChatHistoryMessage["thinking"]>;
+    firstIndex: number;
+    runId?: string;
+    segment: number;
+    template: ChatHistoryMessage;
+}
+
+function mergeThinkingBlocks(
+    target: NonNullable<ChatHistoryMessage["thinking"]>,
+    incoming: NonNullable<ChatHistoryMessage["thinking"]>
+): void {
+    for (const block of incoming) {
+        let matchingIndex = block.id
+            ? target.findIndex((candidate) => candidate.id === block.id)
+            : -1;
+        if (matchingIndex === -1) {
+            matchingIndex = target.findIndex(
+                (candidate) =>
+                    candidate.text === block.text && (!block.id || !candidate.id)
+            );
+        }
+        if (matchingIndex === -1) {
+            target.push(block);
+        } else {
+            target[matchingIndex] = { ...target[matchingIndex], ...block };
+        }
+    }
+}
+
+function responseSegments(messages: ChatHistoryMessage[]): number[] {
+    let segment = 0;
+    return messages.map((message) => {
+        if (message.role.toLowerCase() === "user") {
+            segment += 1;
+        }
+        return segment;
+    });
+}
+
+function isPrimaryAssistantMessage(message: ChatHistoryMessage): boolean {
+    const withoutThinking = stripThinkingFromMessage(message);
     return Boolean(
-        (message.toolCalls?.length || message.toolResult) &&
-        (!message.text.trim() || TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase()))
+        message.role.toLowerCase() === "assistant" &&
+        !hasToolDetails(withoutThinking) &&
+        (withoutThinking.text.trim() ||
+            withoutThinking.images?.length ||
+            withoutThinking.attachments?.length)
     );
 }
 
 function thinkingAnchorIndex(
     messages: ChatHistoryMessage[],
-    runId: string,
-    firstThinkingIndex: number
+    segments: number[],
+    group: ThinkingGroup
 ): number {
+    const isInGroup = (message: ChatHistoryMessage, index: number) =>
+        group.runId ? message.runId === group.runId : segments[index] === group.segment;
+    const matchingUserBeforeThinking = messages.findLastIndex(
+        (message, index) =>
+            index <= group.firstIndex &&
+            message.role.toLowerCase() === "user" &&
+            (isInGroup(message, index) || !message.runId)
+    );
+    const rangeStart = matchingUserBeforeThinking === -1 ? 0 : matchingUserBeforeThinking;
+    const finalIndex = messages.findIndex(
+        (message, index) =>
+            index >= group.firstIndex &&
+            isInGroup(message, index) &&
+            isPrimaryAssistantMessage(message)
+    );
+    const rangeEnd = finalIndex === -1 ? messages.length : finalIndex;
     let latestPrerequisiteIndex = -1;
+
     for (const [index, message] of messages.entries()) {
-        if (message.runId !== runId) {
+        if (index < rangeStart || index >= rangeEnd) {
             continue;
         }
         const isUser = message.role.toLowerCase() === "user";
-        if (isUser || isStandaloneToolDiagnostic(message)) {
+        const isCompatibleSteer = Boolean(
+            isUser && (!message.runId || message.runId.startsWith("dashboard-chat-"))
+        );
+        if (
+            (isUser && (isInGroup(message, index) || isCompatibleSteer)) ||
+            (isInGroup(message, index) && hasToolDetails(message))
+        ) {
             latestPrerequisiteIndex = index;
         }
     }
-    return latestPrerequisiteIndex === -1
-        ? firstThinkingIndex
-        : latestPrerequisiteIndex + 1;
+
+    const requestedAnchor =
+        latestPrerequisiteIndex === -1 ? group.firstIndex : latestPrerequisiteIndex + 1;
+    return finalIndex === -1 ? requestedAnchor : Math.min(requestedAnchor, finalIndex);
 }
 
-/** Keeps one standalone thinking bubble per run, after that turn's tool rows. */
+function standaloneThinkingMessage(group: ThinkingGroup): ChatHistoryMessage {
+    const template = stripThinkingFromMessage(group.template);
+    return {
+        ...template,
+        attachments: undefined,
+        content: group.blocks.map((block) => ({
+            id: block.id,
+            text: block.text,
+            type: "thinking",
+        })),
+        images: undefined,
+        role: "assistant",
+        runId: group.runId,
+        text: "",
+        thinking: group.blocks,
+        toolCalls: undefined,
+        toolResult: undefined,
+    };
+}
+
+/** Extracts every assistant thinking shape into one bubble per run or response. */
 function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
-    const groups = new Map<
-        string,
-        {
-            blocks: NonNullable<ChatHistoryMessage["thinking"]>;
-            firstIndex: number;
-            template: ChatHistoryMessage;
-        }
-    >();
+    const segments = responseSegments(messages);
+    const groups = new Map<string, ThinkingGroup>();
 
     for (const [index, message] of messages.entries()) {
-        const runId = message.runId;
-        if (!runId || !isStandaloneThinking(message)) {
+        if (message.role.toLowerCase() !== "assistant" || !message.thinking?.length) {
             continue;
         }
-        const group = groups.get(runId) || {
+        const segment = segments[index] ?? 0;
+        const key = message.runId ? `run:${message.runId}` : `segment:${segment}`;
+        const group = groups.get(key) || {
             blocks: [],
             firstIndex: index,
+            runId: message.runId,
+            segment,
             template: message,
         };
-        const blocks = message.thinking || [];
-        for (const block of blocks) {
-            let matchingIndex = block.id
-                ? group.blocks.findIndex((candidate) => candidate.id === block.id)
-                : -1;
-            if (matchingIndex === -1) {
-                matchingIndex = group.blocks.findIndex(
-                    (candidate) =>
-                        candidate.text === block.text && (!block.id || !candidate.id)
-                );
-            }
-            if (matchingIndex === -1) {
-                group.blocks.push(block);
-            } else {
-                group.blocks[matchingIndex] = {
-                    ...group.blocks[matchingIndex],
-                    ...block,
-                };
-            }
-        }
+        mergeThinkingBlocks(group.blocks, message.thinking);
         if (message.local === true || group.template.local !== true) {
             group.template = message;
         }
-        groups.set(runId, group);
+        groups.set(key, group);
     }
 
     const groupsByAnchorIndex = new Map<
         number,
         Array<{ message: ChatHistoryMessage; order: number }>
     >();
-    for (const [runId, group] of groups) {
-        const anchorIndex = thinkingAnchorIndex(messages, runId, group.firstIndex);
+    for (const group of groups.values()) {
+        const anchorIndex = thinkingAnchorIndex(messages, segments, group);
         const anchoredGroups = groupsByAnchorIndex.get(anchorIndex) || [];
         anchoredGroups.push({
-            message: { ...group.template, thinking: group.blocks },
+            message: standaloneThinkingMessage(group),
             order: group.firstIndex,
         });
         groupsByAnchorIndex.set(anchorIndex, anchoredGroups);
     }
 
     const collapsed: ChatHistoryMessage[] = [];
-    for (let index = 0; index <= messages.length; index += 1) {
+    for (const [index, message] of messages.entries()) {
         const anchoredGroups = groupsByAnchorIndex
             .get(index)
             ?.toSorted((left, right) => left.order - right.order);
         if (anchoredGroups) {
             collapsed.push(...anchoredGroups.map((group) => group.message));
         }
-        const message = messages[index];
-        if (message && !isStandaloneThinking(message)) {
-            collapsed.push(message);
-        }
+        collapsed.push(stripThinkingFromMessage(message));
+    }
+    const trailingGroups = groupsByAnchorIndex
+        .get(messages.length)
+        ?.toSorted((left, right) => left.order - right.order);
+    if (trailingGroups) {
+        collapsed.push(...trailingGroups.map((group) => group.message));
     }
     return collapsed;
 }
@@ -285,7 +345,7 @@ export function presentChatMessages(
         pendingToolMedia = undefined;
     };
 
-    for (const message of messages) {
+    for (const message of collapseRunThinking(messages)) {
         const role = message.role.toLowerCase();
         const isTool = TOOL_ROLE_VARIANTS.includes(role);
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
@@ -348,7 +408,7 @@ export function presentChatMessages(
     flushToolMedia();
 
     return applyFinalThinkingPreference(
-        collapseRunThinking(visible),
+        visible,
         visibility,
         shouldKeepThinkingAfterFinal
     );

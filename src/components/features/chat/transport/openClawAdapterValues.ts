@@ -234,10 +234,18 @@ export function openClawEventContext(raw: unknown): OpenClawEventContext | undef
     if (!eventName || !payload || !sessionKey) {
         return undefined;
     }
+    const sourceRunId = stringValue(
+        eventName === "session.compaction" ? payload.operationId : payload.runId
+    );
+    const isCompactionEvent =
+        eventName === "session.compaction" ||
+        stringValue(payload.stream) === "compaction";
     return {
         eventName,
         payload,
-        runId: stringValue(payload.runId),
+        runId: isCompactionEvent
+            ? `compaction:${sourceRunId || sessionKey}`
+            : sourceRunId,
         sessionKey,
         timestamp: timestampFor(envelope, payload),
     };

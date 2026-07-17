@@ -21,9 +21,6 @@ const SAVE_SNAPSHOT_SQL = `
         snapshot_json,
         updated_at
     ) VALUES (?, ?, ?, ?)
-    ON CONFLICT(gateway_scope, session_key) DO UPDATE SET
-        snapshot_json = excluded.snapshot_json,
-        updated_at = excluded.updated_at
 `;
 
 const PRUNE_SNAPSHOTS_SQL = `
@@ -46,21 +43,30 @@ function isRuntimeEnvelope(value: unknown): value is OpenClawRuntimeEnvelope {
     return (
         envelope.type === "event" &&
         Number.isFinite(envelope.runtimeRecordedAt) &&
-        Number.isFinite(envelope.runtimeSequence)
+        Number.isSafeInteger(envelope.runtimeSequence) &&
+        (envelope.runtimeSequence as number) >= 0
     );
 }
 
 function parseSnapshot(serialized: string): OpenClawRuntimeSnapshot | undefined {
     try {
         const value = JSON.parse(serialized) as Record<string, unknown>;
+        const events = Array.isArray(value.events) ? value.events : [];
+        const throughSequence = value.throughSequence;
         if (
             !value ||
             typeof value !== "object" ||
             Array.isArray(value) ||
             typeof value.completed !== "boolean" ||
             !Array.isArray(value.events) ||
-            !value.events.every(isRuntimeEnvelope) ||
-            !Number.isFinite(value.throughSequence)
+            !events.every(isRuntimeEnvelope) ||
+            !Number.isSafeInteger(throughSequence) ||
+            (throughSequence as number) < 0 ||
+            events.some(
+                (event) =>
+                    (event as OpenClawRuntimeEnvelope).runtimeSequence >
+                    (throughSequence as number)
+            )
         ) {
             return undefined;
         }
@@ -73,13 +79,18 @@ function parseSnapshot(serialized: string): OpenClawRuntimeSnapshot | undefined 
 /** Persists the bounded bridge replay without exposing its payload as a new API. */
 export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStore {
     readonly #gatewayScope: string;
+    readonly #now: () => string;
 
-    constructor(gatewayScope: string) {
+    constructor(
+        gatewayScope: string,
+        now: () => string = () => new Date().toISOString()
+    ) {
         const normalizedScope = gatewayScope.trim();
         if (!normalizedScope) {
             throw new Error("Gateway scope is required for chat runtime persistence");
         }
         this.#gatewayScope = normalizedScope;
+        this.#now = now;
     }
 
     clear(): void {
@@ -123,13 +134,16 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
 
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {
         const persist = database.transaction(() => {
+            // Reinsert so a refresh always receives a newer rowid tie-breaker,
+            // even when multiple writes share the same millisecond timestamp.
+            this.delete(sessionKey);
             database
                 .prepare(SAVE_SNAPSHOT_SQL)
                 .run(
                     this.#gatewayScope,
                     sessionKey,
                     JSON.stringify(snapshot),
-                    new Date().toISOString()
+                    this.#now()
                 );
             database
                 .prepare(PRUNE_SNAPSHOTS_SQL)

@@ -1,6 +1,8 @@
 import { type ChatHistoryMessage, extractImages, mergeChatImages } from "../chatTypes";
+import type { ChatOperationPhase } from "../domain/chatState";
 import {
     argumentDetail,
+    asRecord,
     compactStatus,
     formatToolName,
     isNonWorkTool,
@@ -41,8 +43,23 @@ export function openClawToolMessage(
         stringValue(data.callId);
     const arguments_ = data.args ?? data.arguments ?? data.input;
     const result = data.result ?? data.output ?? data.content ?? data.text ?? data.error;
+    const resultRecord = asRecord(result);
     const phase = stringValue(data.phase) || "";
+    const status = (
+        stringValue(data.status) ||
+        stringValue(resultRecord?.status) ||
+        ""
+    ).toLowerCase();
+    const exitCode =
+        typeof data.exitCode === "number"
+            ? data.exitCode
+            : typeof resultRecord?.exitCode === "number"
+              ? resultRecord.exitCode
+              : undefined;
     const hasErrorResult = data.error !== undefined && result === data.error;
+    const isFailedResult =
+        ["error", "failed", "failure"].includes(status) ||
+        (exitCode !== undefined && exitCode !== 0);
     const hasResult =
         phase === "result" ||
         phase === "end" ||
@@ -70,7 +87,8 @@ export function openClawToolMessage(
             resultImages.length > 0 ||
             resultMessage.attachments?.length ||
             data.isError === true ||
-            hasErrorResult)
+            hasErrorResult ||
+            isFailedResult)
     );
     const toolResult = shouldCreateResult
         ? {
@@ -78,7 +96,11 @@ export function openClawToolMessage(
               name,
               content: resultContent,
               images: resultImages,
-              isError: phase === "error" || data.isError === true || hasErrorResult,
+              isError:
+                  phase === "error" ||
+                  data.isError === true ||
+                  hasErrorResult ||
+                  isFailedResult,
           }
         : undefined;
     const toolCall =
@@ -134,7 +156,7 @@ export function openClawProgress(
     stream: string,
     phase: string,
     data: Record<string, unknown>
-): { operation?: "compact"; text?: string } {
+): { operation?: "compact"; operationPhase?: ChatOperationPhase; text?: string } {
     if (eventName === "session.started") {
         return { text: "Thinking" };
     }
@@ -208,9 +230,33 @@ export function openClawProgress(
         };
     }
     if (stream === "compaction") {
+        if (
+            eventName === "session.compaction" &&
+            stringValue(data.operation) !== "compact"
+        ) {
+            return {};
+        }
+        const isEnd = ["complete", "completed", "end", "finished"].includes(phase);
+        const isSuccessful =
+            data.completed === true ||
+            ["complete", "completed", "finished"].includes(phase);
+        const isRetrying = isEnd && data.willRetry === true && data.completed === true;
+        const operationPhase: ChatOperationPhase = isRetrying
+            ? "retrying"
+            : isEnd
+              ? isSuccessful
+                  ? "complete"
+                  : "inactive"
+              : "active";
         return {
             operation: "compact",
-            text: phase === "end" ? undefined : "Compacting context",
+            operationPhase,
+            text:
+                operationPhase === "complete"
+                    ? "Context compacted"
+                    : operationPhase === "active" || operationPhase === "retrying"
+                      ? "Compacting context"
+                      : undefined,
         };
     }
     if (stream === "command-output" && (!phase || phase === "end")) {

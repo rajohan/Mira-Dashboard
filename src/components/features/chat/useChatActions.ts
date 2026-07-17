@@ -51,8 +51,12 @@ interface ChatActionsOptions {
     transport: ChatTransport;
 }
 
-function dashboardRunId(operation: "chat" | "compact"): string {
-    return `dashboard-${operation}-${crypto.randomUUID()}`;
+function dashboardChatRunId(): string {
+    const uniqueId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    return `dashboard-chat-${uniqueId}`;
 }
 
 /** Owns stateful chat commands while the page remains a view composition. */
@@ -83,6 +87,7 @@ export function useChatActions({
     const sendEpochReference = useRef(0);
     const pendingPatchesReference = useRef(new Map<string, Set<Promise<boolean>>>());
     const draftReference = useRef(draft);
+    const [compactingSessionKey, setCompactingSessionKey] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [stoppingSessionKey, setStoppingSessionKey] = useState("");
     const [pendingPatchCounts, setPendingPatchCounts] = useState<Record<string, number>>(
@@ -98,6 +103,7 @@ export function useChatActions({
 
         sendEpochReference.current += 1;
         sendCountReference.current = 0;
+        setCompactingSessionKey("");
         setIsSending(false);
     }, [isConnected]);
 
@@ -178,7 +184,7 @@ export function useChatActions({
         }
 
         const resetCommand = isResetSlashCommand(text);
-        const idempotencyKey = resetCommand ? undefined : dashboardRunId("chat");
+        const idempotencyKey = resetCommand ? undefined : dashboardChatRunId();
         const userMessage: ChatHistoryMessage = {
             role: "user",
             content: text,
@@ -212,7 +218,9 @@ export function useChatActions({
         scheduleBottomFollow();
 
         if (idempotencyKey) {
-            runtime.beginRun(pendingSessionKey, idempotencyKey);
+            runtime.beginRun(pendingSessionKey, idempotencyKey, {
+                replaceStatusOnlyRuns: activeRunCount === 0,
+            });
         }
 
         try {
@@ -251,7 +259,7 @@ export function useChatActions({
             }
         } catch (error) {
             if (idempotencyKey) {
-                runtime.clearRun(pendingSessionKey, idempotencyKey);
+                runtime.failRun(pendingSessionKey, idempotencyKey);
             }
             if (selectedSessionKeyReference.current === pendingSessionKey) {
                 setSendError(chatErrorMessage(error, "Failed to send message"));
@@ -292,9 +300,14 @@ export function useChatActions({
         !isStopping &&
         (activeRunCount > 0 || isSessionActive(selectedSession))
     );
-    const isSessionControlsDisabled = Boolean(
+    const isCompactingSession = Boolean(
+        isCompacting || isSameChatSession(compactingSessionKey, selectedSessionKey)
+    );
+    const arePreferenceControlsDisabled = !isConnected || isPatchingSession;
+    const isCompactDisabled = Boolean(
         !isConnected ||
         isSending ||
+        isCompactingSession ||
         isPatchingSession ||
         activeRunCount > 0 ||
         isSessionActive(selectedSession)
@@ -316,7 +329,7 @@ export function useChatActions({
     };
 
     const patchSelectedSession = async (patch: ChatSessionPreferences) => {
-        if (!selectedSessionKey || isSessionControlsDisabled) {
+        if (!selectedSessionKey || arePreferenceControlsDisabled) {
             return;
         }
         const patchSessionKey = selectedSessionKey;
@@ -354,40 +367,37 @@ export function useChatActions({
     };
 
     const compactSelectedSession = async () => {
-        if (!selectedSessionKey || isSessionControlsDisabled) {
+        if (!selectedSessionKey || isCompactDisabled) {
             return;
         }
         const compactSessionKey = selectedSessionKey;
-        const idempotencyKey = dashboardRunId("compact");
-        runtime.beginRun(compactSessionKey, idempotencyKey, "compact");
+        setCompactingSessionKey(compactSessionKey);
         setSendError(undefined);
         try {
-            const result = await transport.send({
-                sessionKey: compactSessionKey,
-                sessionId: providerSessionId(selectedSession, compactSessionKey),
-                message: "/compact",
-                idempotencyKey,
-            });
-            runtime.acknowledgeRun(compactSessionKey, idempotencyKey, result.runId);
+            await transport.compact(compactSessionKey);
         } catch (error) {
-            runtime.clearRun(compactSessionKey, idempotencyKey);
             if (selectedSessionKeyReference.current === compactSessionKey) {
                 setSendError(chatErrorMessage(error, "Failed to compact context"));
             }
+        } finally {
+            setCompactingSessionKey((current) =>
+                isSameChatSession(current, compactSessionKey) ? "" : current
+            );
         }
     };
 
     return {
         canSend,
         canStop,
+        compactDisabled: isCompactDisabled,
         compactSelectedSession,
         handleSend,
         handleStop,
-        isCompactingSession: isCompacting,
+        isCompactingSession,
         isSending,
         isStopping,
         patchSelectedSession,
-        sessionControlsDisabled: isSessionControlsDisabled,
+        preferenceControlsDisabled: arePreferenceControlsDisabled,
     };
 }
 

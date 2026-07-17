@@ -62,6 +62,15 @@ export function useOpenClawChatTransport(): ChatTransport {
         await socket.request("chat.abort", { sessionKey });
     };
 
+    const compact = async (sessionKey: string) => {
+        const result = asRecord(
+            await socket.request("sessions.compact", { key: sessionKey })
+        );
+        if (result?.ok !== true) {
+            throw new Error(stringValue(result?.reason) || "Context compaction failed");
+        }
+    };
+
     const patchSession = async (
         sessionKey: string,
         preferences: ChatSessionPreferences
@@ -92,6 +101,7 @@ export function useOpenClawChatTransport(): ChatTransport {
 
     return {
         abort,
+        compact,
         connectionGeneration: socket.connectionId,
         error: socket.error,
         history,

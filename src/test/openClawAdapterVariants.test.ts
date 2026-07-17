@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
 import {
+    createChatVisibility,
+    presentChatMessages,
+} from "../components/features/chat/domain/chatPresentation";
+import {
     argumentDetail,
     asRecord,
     compactStatus,
@@ -36,6 +40,80 @@ function envelope(
 }
 
 describe("OpenClaw adapter variants", () => {
+    it("groups heartbeat-style thinking around preamble tool steps", () => {
+        const adapter = new OpenClawChatAdapter();
+        const history = adapter.history([
+            { content: "heartbeat", role: "user" },
+            {
+                content: [
+                    { thinking: "inspect services", type: "thinking" },
+                    { text: "Checking services", type: "text" },
+                    {
+                        arguments: { command: "systemctl --failed" },
+                        id: "functions.exec:0",
+                        name: "exec",
+                        type: "toolCall",
+                    },
+                ],
+                role: "assistant",
+            },
+            {
+                content: [{ text: "all units healthy", type: "text" }],
+                role: "toolResult",
+                toolCallId: "functions.exec:0",
+                toolName: "exec",
+            },
+            {
+                content: [
+                    { thinking: "inspect disk", type: "thinking" },
+                    {
+                        arguments: { command: "df -h" },
+                        id: "functions.exec:1",
+                        name: "exec",
+                        type: "toolCall",
+                    },
+                ],
+                role: "assistant",
+            },
+            {
+                content: [{ text: "disk healthy", type: "text" }],
+                role: "toolResult",
+                toolCallId: "functions.exec:1",
+                toolName: "exec",
+            },
+            {
+                content: [
+                    { thinking: "report result", type: "thinking" },
+                    { text: "HEARTBEAT_OK", type: "text" },
+                ],
+                role: "assistant",
+            },
+        ]);
+        const visible = presentChatMessages(
+            history,
+            createChatVisibility(true, true),
+            true
+        );
+        const thinkingRows = visible.filter((message) => message.thinking?.length);
+        const thinkingIndex = visible.findIndex((message) => message.thinking?.length);
+        const lastToolIndex = visible.findLastIndex(
+            (message) => message.toolCalls?.length || message.toolResult
+        );
+        const finalIndex = visible.findIndex(
+            (message) => message.text === "HEARTBEAT_OK"
+        );
+
+        expect(thinkingRows).toHaveLength(1);
+        expect(thinkingRows[0]?.thinking?.map((block) => block.text)).toEqual([
+            "inspect services",
+            "inspect disk",
+            "report result",
+        ]);
+        expect(thinkingIndex).toBeGreaterThan(lastToolIndex);
+        expect(thinkingIndex).toBeLessThan(finalIndex);
+        expect(visible[finalIndex]?.thinking).toBeUndefined();
+    });
+
     it("normalizes session, assistant, thinking and item streams", () => {
         const adapter = new OpenClawChatAdapter();
         const sessionMessage = adapter.event(
@@ -260,6 +338,7 @@ describe("OpenClaw adapter variants", () => {
         expect(compactionEnd[0]).toMatchObject({
             kind: "status",
             operation: "compact",
+            operationPhase: "inactive",
             text: undefined,
         });
         expect(lifecycleStart[0]).toMatchObject({ kind: "status", text: "Thinking" });
@@ -267,6 +346,7 @@ describe("OpenClaw adapter variants", () => {
             error: "model failed",
             kind: "finish",
             outcome: "error",
+            settlesCompaction: true,
         });
         expect(modelAborted[0]).toMatchObject({
             error: undefined,
@@ -287,6 +367,144 @@ describe("OpenClaw adapter variants", () => {
             error: "Chat run failed",
             kind: "finish",
             outcome: "error",
+        });
+    });
+
+    it("tracks both OpenClaw compaction lifecycle signal shapes", () => {
+        const adapter = new OpenClawChatAdapter();
+        const sessionStart = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    operation: "compact",
+                    operationId: "compact-operation",
+                    phase: "start",
+                    runId: undefined,
+                },
+                53
+            )
+        );
+        const sessionEnd = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    completed: true,
+                    operation: "compact",
+                    operationId: "compact-operation",
+                    phase: "end",
+                    runId: undefined,
+                },
+                54
+            )
+        );
+        const retrying = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: { completed: true, phase: "end", willRetry: true },
+                    stream: "compaction",
+                },
+                55
+            )
+        );
+        const unidentifiedStart = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    operation: "compact",
+                    operationId: undefined,
+                    phase: "start",
+                    runId: undefined,
+                },
+                56
+            )
+        );
+
+        expect(sessionStart[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "active",
+            runId: "compaction:compact-operation",
+        });
+        expect(sessionEnd[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "complete",
+            runId: "compaction:compact-operation",
+        });
+        expect(retrying[0]).toMatchObject({
+            kind: "status",
+            operationPhase: "retrying",
+            runId: "compaction:run-variants",
+            text: "Compacting context",
+        });
+        expect(unidentifiedStart[0]).toMatchObject({
+            kind: "status",
+            operationPhase: "active",
+            runId: `compaction:${SESSION}`,
+        });
+    });
+
+    it("marks failed structured tool results as errors", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        id: "failed-call",
+                        name: "exec",
+                        phase: "result",
+                        result: { exitCode: 1, status: "failed" },
+                    },
+                    stream: "tool",
+                },
+                56
+            )
+        );
+        const toolEvent = events.find((event) => event.kind === "tool");
+
+        expect(toolEvent?.kind === "tool" && toolEvent.message.toolResult?.isError).toBe(
+            true
+        );
+    });
+
+    it("renders a coalesced replay tool with the same input and result", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        args: { command: "printf ready" },
+                        itemId: "coalesced-call",
+                        name: "bash",
+                        phase: "result",
+                        result: { exitCode: 0, status: "completed" },
+                        toolCallId: "coalesced-call",
+                    },
+                    stream: "tool",
+                },
+                57
+            )
+        );
+        const toolEvent = events.find((event) => event.kind === "tool");
+
+        expect(toolEvent).toMatchObject({
+            kind: "tool",
+            message: {
+                toolCalls: [
+                    {
+                        arguments: { command: "printf ready" },
+                        id: "coalesced-call",
+                        name: "bash",
+                        toolResult: {
+                            content: expect.stringContaining('"exitCode": 0'),
+                            isError: false,
+                        },
+                    },
+                ],
+            },
         });
     });
 

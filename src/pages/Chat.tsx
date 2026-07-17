@@ -9,6 +9,7 @@ import { ChatHeader } from "../components/features/chat/ChatHeader";
 import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
     chatFastModePatchValue,
+    isSessionActive,
     readDeletedMessageKeys,
     readStoredChatDiagnosticVisibility,
     writeDeletedMessageKeys,
@@ -21,6 +22,10 @@ import { isSameChatSession } from "../components/features/chat/domain/chatState"
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
 import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
 import { useChatActions } from "../components/features/chat/useChatActions";
+import {
+    projectChatActivityRows,
+    useChatCompactionIndicator,
+} from "../components/features/chat/useChatCompactionIndicator";
 import { useChatHistory } from "../components/features/chat/useChatHistory";
 import { useChatInputMedia } from "../components/features/chat/useChatInputMedia";
 import { useChatModels } from "../components/features/chat/useChatModels";
@@ -171,7 +176,13 @@ export function Chat() {
         keepThinkingAfterFinal,
         deletedMessageKeys
     );
-    const chatRows = projection.rows;
+    const compactionIndicator = useChatCompactionIndicator(projection.compactionStatus);
+    const chatRows = projectChatActivityRows(
+        projection.rows,
+        compactionIndicator,
+        isSessionActive(selectedSession),
+        selectedSessionKey
+    );
     const scroll = useChatScroll(
         chatRows,
         selectedSessionKey,
@@ -323,7 +334,7 @@ export function Chat() {
         clearAttachments,
         confirmResetSession,
         draft,
-        isCompacting: projection.isCompacting,
+        isCompacting: compactionIndicator?.phase === "active",
         isConnected,
         isRecording,
         isTranscribing,
@@ -342,6 +353,7 @@ export function Chat() {
     const {
         canSend,
         canStop,
+        compactDisabled,
         compactSelectedSession,
         handleSend,
         handleStop,
@@ -349,7 +361,7 @@ export function Chat() {
         isSending,
         isStopping,
         patchSelectedSession,
-        sessionControlsDisabled: isSessionControlsDisabled,
+        preferenceControlsDisabled,
     } = actions;
 
     return (
@@ -424,7 +436,8 @@ export function Chat() {
                         shouldShowThinking={showThinkingOutput}
                         shouldShowTools={showToolOutput}
                         shouldKeepThinkingAfterFinal={keepThinkingAfterFinal}
-                        sessionControlsDisabled={isSessionControlsDisabled}
+                        compactDisabled={compactDisabled}
+                        preferenceControlsDisabled={preferenceControlsDisabled}
                         isCompacting={isCompactingSession}
                         slashCommandSuggestions={slashCommandSuggestions}
                         onApplySlashSuggestion={applySlashSuggestion}

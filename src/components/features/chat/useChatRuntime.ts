@@ -8,11 +8,14 @@ import {
     clearChatRun,
     clearChatSessionRuntime,
     clearCompletedChatRuns,
+    clearStatusOnlyChatRuns,
+    completedChatRuns,
     createChatRuntimeState,
     findChatSessionRuntimeState,
     isProvisionalChatRunId,
     isSameChatSession,
     reduceChatRuntime,
+    restoreChatRuns,
 } from "./domain/chatState";
 import type { ChatTransport } from "./transport/chatTransport";
 
@@ -108,9 +111,17 @@ export interface ChatRuntimeController {
         optimisticRunId: string,
         providerRunId?: string
     ): void;
-    beginRun(sessionKey: string, runId: string, operation?: "compact"): void;
+    beginRun(
+        sessionKey: string,
+        runId: string,
+        options?: {
+            operation?: "compact";
+            replaceStatusOnlyRuns?: boolean;
+        }
+    ): void;
     clearRun(sessionKey: string, runId: string): void;
     clearSession(sessionKey: string): void;
+    failRun(sessionKey: string, runId: string): void;
     state: ChatRuntimeState;
 }
 
@@ -135,6 +146,15 @@ export function useChatRuntime({
     const callbacksReference = useRef({ onError, onSettled });
     const transportReference = useRef(transport);
     const handledFinishSequencesReference = useRef(new Set<number>());
+    const displacedCompletedRunsReference = useRef(
+        new Map<
+            string,
+            {
+                runs: ReturnType<typeof completedChatRuns>;
+                sessionKey: string;
+            }
+        >()
+    );
 
     selectedSessionReference.current = selectedSessionKey;
     callbacksReference.current = { onError, onSettled };
@@ -193,7 +213,8 @@ export function useChatRuntime({
                         run.lastSequence === event.sequence)
             );
             const { error: visibleError } = completedRun || event;
-            if (visibleError && !event.toolFailure) {
+            const isToolFailure = Boolean(completedRun?.toolFailure || event.toolFailure);
+            if (visibleError && !isToolFailure) {
                 callbacksReference.current.onError?.(visibleError);
             }
             callbacksReference.current.onSettled?.(selectedSessionReference.current);
@@ -444,30 +465,45 @@ export function useChatRuntime({
 
     useEffect(() => () => handledFinishSequencesReference.current.clear(), []);
 
-    const beginRun = (sessionKey: string, runId: string, operation?: "compact") => {
+    const beginRun: ChatRuntimeController["beginRun"] = (
+        sessionKey,
+        runId,
+        options = {}
+    ) => {
         const gate = gateReference.current;
         if (gate && isSameChatSession(gate.sessionKey, sessionKey)) {
             const pendingRun = gate.optimisticRuns.get(runId);
             gate.optimisticRuns.set(runId, {
                 ...pendingRun,
                 observedAfterSnapshotRequest: true,
-                operation: operation ?? pendingRun?.operation,
+                operation: options.operation ?? pendingRun?.operation,
             });
         }
-        updateState((current) =>
-            addOptimisticChatRun(
-                clearCompletedChatRuns(current, sessionKey),
+        updateState((current) => {
+            const displacedRuns = completedChatRuns(current, sessionKey);
+            if (Object.keys(displacedRuns).length > 0) {
+                displacedCompletedRunsReference.current.set(runId, {
+                    runs: displacedRuns,
+                    sessionKey,
+                });
+            }
+            const withoutStaleStatus = options.replaceStatusOnlyRuns
+                ? clearStatusOnlyChatRuns(current, sessionKey)
+                : current;
+            return addOptimisticChatRun(
+                clearCompletedChatRuns(withoutStaleStatus, sessionKey),
                 sessionKey,
                 runId,
-                operation
-            )
-        );
+                options.operation
+            );
+        });
     };
     const acknowledgeRun = (
         sessionKey: string,
         optimisticRunId: string,
         providerRunId?: string
     ) => {
+        displacedCompletedRunsReference.current.delete(optimisticRunId);
         const gate = gateReference.current;
         const pendingRun =
             gate && isSameChatSession(gate.sessionKey, sessionKey)
@@ -482,6 +518,7 @@ export function useChatRuntime({
         );
     };
     const clearRun = (sessionKey: string, runId: string) => {
+        displacedCompletedRunsReference.current.delete(runId);
         const gate = gateReference.current;
         if (gate && isSameChatSession(gate.sessionKey, sessionKey)) {
             for (const [optimisticRunId, pendingRun] of gate.optimisticRuns) {
@@ -492,14 +529,29 @@ export function useChatRuntime({
         }
         updateState((current) => clearChatRun(current, sessionKey, runId));
     };
+    const failRun = (sessionKey: string, runId: string) => {
+        const displaced = displacedCompletedRunsReference.current.get(runId);
+        displacedCompletedRunsReference.current.delete(runId);
+        updateState((current) => {
+            const withoutFailedRun = clearChatRun(current, sessionKey, runId);
+            return displaced && isSameChatSession(displaced.sessionKey, sessionKey)
+                ? restoreChatRuns(withoutFailedRun, sessionKey, displaced.runs)
+                : withoutFailedRun;
+        });
+    };
     const clearSession = (sessionKey: string) => {
         if (isSameChatSession(gateReference.current?.sessionKey, sessionKey)) {
             // A snapshot response captured before an abort/reset must not restore
             // the runtime state that this explicit clear just removed.
             gateReference.current = undefined;
         }
+        for (const [runId, displaced] of displacedCompletedRunsReference.current) {
+            if (isSameChatSession(displaced.sessionKey, sessionKey)) {
+                displacedCompletedRunsReference.current.delete(runId);
+            }
+        }
         updateState((current) => clearChatSessionRuntime(current, sessionKey));
     };
 
-    return { acknowledgeRun, beginRun, clearRun, clearSession, state };
+    return { acknowledgeRun, beginRun, clearRun, clearSession, failRun, state };
 }

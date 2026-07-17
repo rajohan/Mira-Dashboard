@@ -136,7 +136,8 @@ interface ChatComposerProperties {
     shouldShowThinking?: boolean;
     shouldShowTools?: boolean;
     shouldKeepThinkingAfterFinal?: boolean;
-    sessionControlsDisabled?: boolean;
+    compactDisabled?: boolean;
+    preferenceControlsDisabled?: boolean;
     isCompacting?: boolean;
     slashCommandSuggestions: SlashCommandSuggestion[];
     onApplySlashSuggestion: (value: string) => void;
@@ -174,7 +175,8 @@ export function ChatComposer({
     shouldShowThinking,
     shouldShowTools,
     shouldKeepThinkingAfterFinal = false,
-    sessionControlsDisabled,
+    compactDisabled,
+    preferenceControlsDisabled,
     isCompacting,
     slashCommandSuggestions,
     onApplySlashSuggestion,
@@ -541,7 +543,7 @@ export function ChatComposer({
                                                     value={selectedSession?.model || ""}
                                                     disabled={
                                                         !selectedSessionKey ||
-                                                        sessionControlsDisabled
+                                                        preferenceControlsDisabled
                                                     }
                                                     onChange={(value) =>
                                                         onSelectModel?.(value)
@@ -562,7 +564,7 @@ export function ChatComposer({
                                                     }
                                                     disabled={
                                                         !selectedSessionKey ||
-                                                        sessionControlsDisabled
+                                                        preferenceControlsDisabled
                                                     }
                                                     onChange={(value) =>
                                                         onSelectThinkingLevel?.(value)
@@ -584,7 +586,7 @@ export function ChatComposer({
                                                     )}
                                                     disabled={
                                                         !selectedSessionKey ||
-                                                        sessionControlsDisabled
+                                                        preferenceControlsDisabled
                                                     }
                                                     onChange={(value) =>
                                                         onSelectSpeed?.(value)
@@ -600,7 +602,7 @@ export function ChatComposer({
                                                 className="w-full justify-center"
                                                 disabled={
                                                     !selectedSessionKey ||
-                                                    sessionControlsDisabled ||
+                                                    compactDisabled ||
                                                     isCompacting
                                                 }
                                                 onClick={() => onCompact?.()}

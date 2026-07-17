@@ -1,5 +1,6 @@
 import type { Virtualizer } from "@tanstack/react-virtual";
 import {
+    CircleCheck,
     FileText,
     Image as ImageIcon,
     Loader2,
@@ -208,7 +209,13 @@ function TtsButton({
 }
 
 /** Renders the typing indicator UI. */
-function TypingIndicator({ text = "Thinking" }: { text?: string }) {
+function ActivityIndicator({
+    active = true,
+    text = "Thinking",
+}: {
+    active?: boolean;
+    text?: string;
+}) {
     return (
         <div className="flex justify-start pb-3">
             <div className="rounded-2xl border border-primary-700 bg-primary-800 px-3 py-2 text-sm text-primary-100 shadow-sm">
@@ -217,14 +224,21 @@ function TypingIndicator({ text = "Thinking" }: { text?: string }) {
                 </div>
                 <div className="flex items-center gap-2 text-primary-300">
                     <span className="min-w-0 wrap-break-word">{text || "Thinking"}</span>
-                    <span
-                        className="flex shrink-0 gap-1"
-                        aria-label="Assistant is working"
-                    >
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.24s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.12s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary-300" />
-                    </span>
+                    {active ? (
+                        <span
+                            className="flex shrink-0 gap-1"
+                            aria-label="Assistant is working"
+                        >
+                            <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.24s]" />
+                            <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.12s]" />
+                            <span className="size-1.5 animate-bounce rounded-full bg-primary-300" />
+                        </span>
+                    ) : (
+                        <CircleCheck
+                            className="size-4 shrink-0 text-emerald-400"
+                            aria-label="Operation complete"
+                        />
+                    )}
                 </div>
             </div>
         </div>
@@ -423,7 +437,7 @@ export function ChatMessagesList({
                             );
                         }
 
-                        if (row.kind === "typing") {
+                        if (row.kind === "typing" || row.kind === "status") {
                             return (
                                 <div
                                     key={virtualItem.key}
@@ -432,7 +446,10 @@ export function ChatMessagesList({
                                     ref={messagesVirtualizer.measureElement}
                                     className="w-full pb-3"
                                 >
-                                    <TypingIndicator text={row.message.text} />
+                                    <ActivityIndicator
+                                        active={row.kind === "typing"}
+                                        text={row.message.text}
+                                    />
                                 </div>
                             );
                         }

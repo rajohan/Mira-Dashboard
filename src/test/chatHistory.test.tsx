@@ -22,6 +22,7 @@ function subscribeToNothing(): () => void {
 function transportWithHistory(history: ChatTransport["history"]): ChatTransport {
     return {
         abort: jest.fn(async () => {}),
+        compact: jest.fn(async () => {}),
         connectionGeneration: 1,
         history,
         isConnected: true,

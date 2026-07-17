@@ -10,6 +10,7 @@ import {
 
 export type ChatRunPhase = "active" | "completed" | "aborted" | "error";
 export type ChatTextSource = "chat" | "runtime" | "session";
+export type ChatOperationPhase = "active" | "complete" | "inactive" | "retrying";
 
 const SESSION_ECHO_WINDOW_MILLISECONDS = 60_000;
 
@@ -27,6 +28,8 @@ export interface ChatRunState {
     error?: string;
     lastSequence: number;
     operation?: "compact";
+    operationPhase?: ChatOperationPhase;
+    operationUpdatedAt?: string;
     phase: ChatRunPhase;
     runId: string;
     sessionKey: string;
@@ -34,6 +37,7 @@ export interface ChatRunState {
     statusText?: string;
     terminalAt?: string;
     terminalSequence?: number;
+    toolFailure?: boolean;
     updatedAt: string;
     userMessages: ChatDiagnosticEntry[];
 }
@@ -79,6 +83,7 @@ export type ChatRuntimeEvent =
     | (RuntimeEventBase & {
           kind: "status";
           operation?: "compact";
+          operationPhase?: ChatOperationPhase;
           text?: string;
       })
     | (RuntimeEventBase & {
@@ -87,6 +92,7 @@ export type ChatRuntimeEvent =
           error?: string;
           message?: ChatHistoryMessage;
           outcome: Exclude<ChatRunPhase, "active">;
+          settlesCompaction?: boolean;
           toolFailure?: boolean;
       });
 
@@ -699,12 +705,15 @@ function mergeAcknowledgedRuns(
         error: (terminalRun ?? newer).error,
         lastSequence: Math.max(existing.lastSequence, optimistic.lastSequence),
         operation: newer.operation ?? older.operation,
+        operationPhase: newer.operationPhase ?? older.operationPhase,
+        operationUpdatedAt: newer.operationUpdatedAt ?? older.operationUpdatedAt,
         phase,
         runId: providerRunId,
         startedAt,
         statusText: phase === "active" ? newer.statusText || older.statusText : undefined,
         terminalAt: terminalRun?.terminalAt ?? newer.terminalAt ?? older.terminalAt,
         terminalSequence,
+        toolFailure: newer.toolFailure || older.toolFailure || undefined,
         userMessages: mergeRunUserMessages(older, newer),
     };
 }
@@ -729,6 +738,7 @@ function applyFinishEvent(
             ...(entry.message.toolCalls || []).map((call) => call.toolResult),
         ].some((result) => result?.isError === true)
     );
+    const isToolFailure = Boolean(run.toolFailure || event.toolFailure);
     const error = event.toolFailure && hasFailedTool ? undefined : event.error;
 
     const withMessage = event.message
@@ -743,14 +753,52 @@ function applyFinishEvent(
               }
           )
         : run;
+    const isPendingCompaction =
+        run.operation === "compact" &&
+        (run.operationPhase === "active" || run.operationPhase === "retrying");
     return {
         ...withMessage,
         error,
+        operationPhase: isPendingCompaction
+            ? event.outcome === "completed"
+                ? "complete"
+                : "inactive"
+            : run.operationPhase,
+        operationUpdatedAt: isPendingCompaction
+            ? event.timestamp
+            : run.operationUpdatedAt,
         phase: event.outcome,
         statusText: undefined,
         terminalAt: event.timestamp,
         terminalSequence: event.sequence,
+        toolFailure: isToolFailure || undefined,
     };
+}
+
+function settleRetryingCompactionRuns(
+    session: ChatSessionRuntimeState,
+    event: ChatRuntimeEvent
+): void {
+    if (event.kind !== "finish" || !event.settlesCompaction) {
+        return;
+    }
+    for (const [runKey, run] of Object.entries(session.runs)) {
+        if (run.operation !== "compact" || run.operationPhase !== "retrying") {
+            continue;
+        }
+        session.runs[runKey] = {
+            ...run,
+            error: undefined,
+            lastSequence: event.sequence,
+            operationPhase: "complete",
+            operationUpdatedAt: event.timestamp,
+            phase: "completed",
+            statusText: undefined,
+            terminalAt: event.timestamp,
+            terminalSequence: event.sequence,
+            updatedAt: event.timestamp,
+        };
+    }
 }
 
 /** Applies normalized runtime events deterministically and idempotently. */
@@ -792,6 +840,7 @@ export function reduceChatRuntime(
                   ),
               }
             : { lastSequence: -1, runs: {}, sessionKey };
+        settleRetryingCompactionRuns(session, normalizedEvent);
         const resolved = resolveRun(session, normalizedEvent);
         session.lastSequence = normalizedEvent.sequence;
         const sessions = { ...nextState.sessions };
@@ -835,10 +884,40 @@ function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState
             return applyDiagnosticEvent(run, event);
         }
         case "status": {
+            const operationPhase = event.operation
+                ? (event.operationPhase ?? "active")
+                : run.operationPhase;
+            const isPendingOperation =
+                operationPhase === "active" || operationPhase === "retrying";
+            const operationOutcome = event.operation
+                ? isPendingOperation
+                    ? "active"
+                    : operationPhase === "complete"
+                      ? "completed"
+                      : "aborted"
+                : run.phase;
             return {
                 ...run,
                 operation: event.operation ?? run.operation,
+                error: event.operation && isPendingOperation ? undefined : run.error,
+                operationPhase,
+                operationUpdatedAt: event.operation
+                    ? event.timestamp
+                    : run.operationUpdatedAt,
+                phase: operationOutcome,
                 statusText: event.text,
+                terminalAt:
+                    event.operation && !isPendingOperation
+                        ? event.timestamp
+                        : event.operation
+                          ? undefined
+                          : run.terminalAt,
+                terminalSequence:
+                    event.operation && !isPendingOperation
+                        ? event.sequence
+                        : event.operation
+                          ? undefined
+                          : run.terminalSequence,
             };
         }
         default: {
@@ -881,6 +960,10 @@ export function addOptimisticChatRun(
         session.runs[existingKey] = {
             ...existingRun,
             operation: operation ?? existingRun.operation,
+            operationPhase:
+                operation === "compact" ? "active" : existingRun.operationPhase,
+            operationUpdatedAt:
+                operation === "compact" ? timestamp : existingRun.operationUpdatedAt,
             statusText:
                 existingRun.phase === "active"
                     ? operation === "compact"
@@ -892,6 +975,8 @@ export function addOptimisticChatRun(
         session.runs[runId] = {
             ...emptyRun(canonicalSessionKey, runId, session.lastSequence, timestamp),
             operation,
+            operationPhase: operation === "compact" ? "active" : undefined,
+            operationUpdatedAt: operation === "compact" ? timestamp : undefined,
             statusText: operation === "compact" ? "Compacting context" : "Thinking",
         };
     }
@@ -993,6 +1078,74 @@ export function clearCompletedChatRuns(
     const [previousSessionKey, previousSession] = previousEntry;
     const runs = Object.fromEntries(
         Object.entries(previousSession.runs).filter(([, run]) => run.phase === "active")
+    );
+    if (Object.keys(runs).length === Object.keys(previousSession.runs).length) {
+        return state;
+    }
+    return {
+        ...state,
+        sessions: {
+            ...state.sessions,
+            [previousSessionKey]: { ...previousSession, runs },
+        },
+    };
+}
+
+/** Returns the immutable completed replay displaced by a new optimistic send. */
+export function completedChatRuns(
+    state: ChatRuntimeState,
+    sessionKey: string
+): Record<string, ChatRunState> {
+    const session = matchingSessionEntry(state, sessionKey)?.[1];
+    return Object.fromEntries(
+        Object.entries(session?.runs || {}).filter(([, run]) => run.phase !== "active")
+    );
+}
+
+/** Restores a displaced replay without replacing newer live runtime state. */
+export function restoreChatRuns(
+    state: ChatRuntimeState,
+    sessionKey: string,
+    restoredRuns: Readonly<Record<string, ChatRunState>>
+): ChatRuntimeState {
+    if (Object.keys(restoredRuns).length === 0) {
+        return state;
+    }
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    const previousSessionKey = previousEntry?.[0] ?? sessionKey;
+    const previousSession = previousEntry?.[1] ?? {
+        lastSequence: -1,
+        runs: {},
+        sessionKey,
+    };
+    const runs = { ...restoredRuns, ...previousSession.runs };
+    return {
+        ...state,
+        sessions: {
+            ...state.sessions,
+            [previousSessionKey]: { ...previousSession, runs },
+        },
+    };
+}
+
+/** Removes status-only runs that projection has already classified as stale. */
+export function clearStatusOnlyChatRuns(
+    state: ChatRuntimeState,
+    sessionKey: string
+): ChatRuntimeState {
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    if (!previousEntry) {
+        return state;
+    }
+    const [previousSessionKey, previousSession] = previousEntry;
+    const runs = Object.fromEntries(
+        Object.entries(previousSession.runs).filter(
+            ([, run]) =>
+                run.phase !== "active" ||
+                Boolean(run.assistant) ||
+                run.diagnostics.length > 0 ||
+                run.userMessages.length > 0
+        )
     );
     if (Object.keys(runs).length === Object.keys(previousSession.runs).length) {
         return state;
