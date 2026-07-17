@@ -82,6 +82,7 @@ export type ChatRuntimeEvent =
           error?: string;
           message?: ChatHistoryMessage;
           outcome: Exclude<ChatRunPhase, "active">;
+          toolFailure?: boolean;
       });
 
 export function createChatRuntimeState(generation = 0): ChatRuntimeState {
@@ -658,6 +659,14 @@ function applyFinishEvent(
         return { ...run, statusText: undefined };
     }
 
+    const hasFailedTool = run.diagnostics.some((entry) =>
+        [
+            entry.message.toolResult,
+            ...(entry.message.toolCalls || []).map((call) => call.toolResult),
+        ].some((result) => result?.isError === true)
+    );
+    const error = event.toolFailure && hasFailedTool ? undefined : event.error;
+
     const withMessage = event.message
         ? applyAssistantEvent(
               { ...run, phase: event.outcome },
@@ -672,7 +681,7 @@ function applyFinishEvent(
         : run;
     return {
         ...withMessage,
-        error: event.error,
+        error,
         phase: event.outcome,
         statusText: undefined,
         terminalAt: event.timestamp,

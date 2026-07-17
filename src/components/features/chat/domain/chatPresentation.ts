@@ -128,6 +128,72 @@ function applyFinalThinkingPreference(
         .filter((message) => isRenderableChatHistoryMessage(message, visibility));
 }
 
+function isStandaloneThinking(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        message.runId &&
+        message.role.toLowerCase() === "assistant" &&
+        message.thinking?.length &&
+        !message.text.trim() &&
+        !message.images?.length &&
+        !message.attachments?.length &&
+        !message.toolCalls?.length &&
+        !message.toolResult
+    );
+}
+
+/** Keeps one standalone thinking bubble per run, at its latest position. */
+function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
+    const groups = new Map<
+        string,
+        {
+            blocks: NonNullable<ChatHistoryMessage["thinking"]>;
+            lastIndex: number;
+        }
+    >();
+
+    for (const [index, message] of messages.entries()) {
+        const runId = message.runId;
+        if (!runId || !isStandaloneThinking(message)) {
+            continue;
+        }
+        const group = groups.get(runId) || { blocks: [], lastIndex: index };
+        const blocks = message.thinking || [];
+        for (const block of blocks) {
+            let matchingIndex = block.id
+                ? group.blocks.findIndex((candidate) => candidate.id === block.id)
+                : -1;
+            if (matchingIndex === -1) {
+                matchingIndex = group.blocks.findIndex(
+                    (candidate) =>
+                        candidate.text === block.text && (!block.id || !candidate.id)
+                );
+            }
+            if (matchingIndex === -1) {
+                group.blocks.push(block);
+            } else {
+                group.blocks[matchingIndex] = {
+                    ...group.blocks[matchingIndex],
+                    ...block,
+                };
+            }
+        }
+        group.lastIndex = index;
+        groups.set(runId, group);
+    }
+
+    return messages.flatMap((message, index) => {
+        const runId = message.runId;
+        if (!runId || !isStandaloneThinking(message)) {
+            return [message];
+        }
+        const group = groups.get(runId);
+        if (!group || group.lastIndex !== index) {
+            return [];
+        }
+        return [{ ...message, thinking: group.blocks }];
+    });
+}
+
 /**
  * Applies visibility as a pure projection. Raw messages are never mutated or
  * discarded, so toggling diagnostics can always reveal the same current run.
@@ -231,7 +297,7 @@ export function presentChatMessages(
     flushToolMedia();
 
     return applyFinalThinkingPreference(
-        visible,
+        collapseRunThinking(visible),
         visibility,
         shouldKeepThinkingAfterFinal
     );

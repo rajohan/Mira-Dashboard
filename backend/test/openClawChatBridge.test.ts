@@ -47,6 +47,66 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("retains suppressed item diagnostics for snapshot replay", () => {
+        const bridge = new OpenClawChatBridge();
+        const thinking = bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    itemId: "thinking-1",
+                    kind: "reasoning",
+                    phase: "update",
+                    progressText: "private reasoning",
+                    suppressChannelProgress: true,
+                },
+                runId: "run-1",
+                sessionKey: MAIN,
+                stream: "item",
+            },
+            []
+        );
+        const tool = bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    item: {
+                        arguments: { command: "true" },
+                        id: "call-1",
+                        name: "exec",
+                        type: "toolCall",
+                    },
+                    suppressChannelProgress: true,
+                },
+                runId: "run-1",
+                sessionKey: MAIN,
+                stream: "item",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN).events).toEqual([thinking, tool]);
+    });
+
+    it("does not let a runless session start displace an explicit completed run", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent("session.started", { sessionKey: MAIN }, []);
+        const final = bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                runId: "provider-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [final],
+        });
+    });
+
     it("drops provider-internal replay noise without affecting live sequencing", () => {
         const bridge = new OpenClawChatBridge();
         const ignored = bridge.recordEvent(

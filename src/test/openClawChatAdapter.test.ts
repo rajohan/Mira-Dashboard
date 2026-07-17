@@ -453,17 +453,20 @@ describe("OpenClaw chat adapter", () => {
             "model failed"
         );
         expect(runlessToolError[0]?.kind === "finish" && runlessToolError[0].error).toBe(
-            undefined
+            "⚠️ 🛠️ `run lint` failed"
         );
         expect(
             repeatedToolError[0]?.kind === "finish" && repeatedToolError[0].error
-        ).toBe(undefined);
+        ).toBe("tool execution failed: database is locked");
+        expect(
+            repeatedToolError[0]?.kind === "finish" && repeatedToolError[0].toolFailure
+        ).toBe(true);
         expect(
             duplicateToolMessage[0]?.kind === "finish" && duplicateToolMessage[0].message
         ).toBeUndefined();
         expect(
             duplicateToolMessage[0]?.kind === "finish" && duplicateToolMessage[0].error
-        ).toBeUndefined();
+        ).toBe("tool execution failed: database is locked");
         expect(
             legitimateFinal[0]?.kind === "finish" && legitimateFinal[0].message?.text
         ).toBe("⚠️ 🛠️ warnings can also be ordinary final text");

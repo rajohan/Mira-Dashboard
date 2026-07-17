@@ -16,6 +16,14 @@ const cancelFrame = jest.fn((frameId: number) => {
     animationFrameState.frames.delete(frameId);
 });
 
+function chatRow(key: string, role: string): ChatRow {
+    return {
+        key,
+        kind: "message",
+        message: { content: key, role, text: key },
+    };
+}
+
 beforeEach(() => {
     animationFrameState.nextFrameId = 0;
     animationFrameState.frames.clear();
@@ -54,6 +62,53 @@ afterEach(() => {
 });
 
 describe("chat scroll", () => {
+    it("keeps the same bubble anchored when another bubble is inserted above it", () => {
+        const initialRows = [
+            chatRow("assistant-before", "assistant"),
+            chatRow("tool-being-read", "tool"),
+            chatRow("user-after", "user"),
+        ];
+        const stickToBottomReference = { current: false };
+        const { result, rerender, unmount } = renderHook(
+            ({ rows }: { rows: ChatRow[] }) =>
+                useChatScroll(
+                    rows,
+                    "activity",
+                    "agent:main:main",
+                    jest.fn(),
+                    stickToBottomReference
+                ),
+            { initialProps: { rows: initialRows } }
+        );
+        const container = document.createElement("div");
+        const scrollTo = jest.fn((options: ScrollToOptions) => {
+            container.scrollTop = Number(options.top || 0);
+        });
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 1000 },
+            scrollTo: { configurable: true, value: scrollTo },
+        });
+        result.current.messagesContainerReference.current = container;
+
+        rerender({ rows: initialRows });
+        result.current.virtualizer.getTotalSize();
+        stickToBottomReference.current = false;
+        result.current.virtualizer.scrollOffset = 170;
+        container.scrollTop = 170;
+        scrollTo.mockClear();
+
+        rerender({
+            rows: [chatRow("new-thinking", "assistant"), ...initialRows],
+        });
+
+        expect(result.current.virtualizer.scrollOffset).toBe(330);
+        expect(container.scrollTop).toBe(330);
+        expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 330 }));
+
+        unmount();
+    });
+
     it("does not force a queued bottom follow after the user scrolls away", () => {
         const row: ChatRow = {
             key: "answer",
@@ -96,5 +151,54 @@ describe("chat scroll", () => {
         unmount();
         expect(cancelFrame).toHaveBeenCalledWith(pendingFrameId);
         expect(animationFrameState.frames.has(pendingFrameId)).toBe(false);
+    });
+
+    it("follows late virtual measurements after a hard-refresh history load", () => {
+        const row: ChatRow = {
+            key: "answer",
+            kind: "message",
+            message: { content: "answer", role: "assistant", text: "answer" },
+        };
+        const stickToBottomReference = { current: true };
+        const scrollIntoView = jest.fn();
+        const { result, rerender, unmount } = renderHook(
+            ({ rows }: { rows: ChatRow[] }) =>
+                useChatScroll(
+                    rows,
+                    "activity",
+                    "agent:main:main",
+                    jest.fn(),
+                    stickToBottomReference
+                ),
+            { initialProps: { rows: [] as ChatRow[] } }
+        );
+        let scrollHeight = 400;
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, get: () => scrollHeight },
+        });
+        const bottom = document.createElement("div");
+        Object.defineProperty(bottom, "scrollIntoView", {
+            configurable: true,
+            value: scrollIntoView,
+        });
+        result.current.messagesContainerReference.current = container;
+        result.current.messagesBottomReference.current = bottom;
+
+        rerender({ rows: [row] });
+        expect(container.scrollTop).toBe(400);
+
+        scrollHeight = 700;
+        const firstFrameId = animationFrameState.nextFrameId;
+        act(() => animationFrameState.frames.get(firstFrameId)?.(0));
+        expect(container.scrollTop).toBe(700);
+
+        scrollHeight = 900;
+        const secondFrameId = animationFrameState.nextFrameId;
+        act(() => animationFrameState.frames.get(secondFrameId)?.(0));
+        expect(container.scrollTop).toBe(900);
+
+        unmount();
     });
 });

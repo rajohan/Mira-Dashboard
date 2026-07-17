@@ -83,13 +83,14 @@ function responseSegment(
     const anchorAt = Date.parse(
         run.phase === "active" ? run.updatedAt : (run.terminalAt ?? run.updatedAt)
     );
-    if (userIndex === -1 && !Number.isNaN(anchorAt)) {
-        userIndex = messages.findLastIndex((message) => {
+    if (!Number.isNaN(anchorAt)) {
+        const chronologicalUserIndex = messages.findLastIndex((message) => {
             const timestamp = messageTimestamp(message);
             return (
                 isUserMessage(message) && timestamp !== undefined && timestamp <= anchorAt
             );
         });
+        userIndex = Math.max(userIndex, chronologicalUserIndex);
 
         const initiatingUserIndex = messages.findIndex((message) => {
             const timestamp = messageTimestamp(message);
@@ -138,15 +139,17 @@ function canonicalFinalIndex(
                 return index;
             }
             const finalTimestamp = messageTimestamp(message);
-            const latestDiagnosticTimestamp = Math.max(
+            const startedAt = Date.parse(run.startedAt);
+            const latestEvidenceTimestamp = Math.max(
+                Number.isNaN(startedAt) ? -Infinity : startedAt,
                 ...run.diagnostics.map(
                     (entry) => messageTimestamp(entry.message) ?? -Infinity
                 )
             );
             if (
                 finalTimestamp !== undefined &&
-                Number.isFinite(latestDiagnosticTimestamp) &&
-                finalTimestamp >= latestDiagnosticTimestamp
+                Number.isFinite(latestEvidenceTimestamp) &&
+                finalTimestamp >= latestEvidenceTimestamp
             ) {
                 return index;
             }
@@ -192,9 +195,22 @@ function toolSignatures(message: ChatHistoryMessage): string[] {
 }
 
 function thinkingSignatures(message: ChatHistoryMessage): string[] {
-    return (message.thinking || []).map((block) =>
-        JSON.stringify({ id: block.id || "", text: block.text })
-    );
+    return (message.thinking || []).map((block) => block.text);
+}
+
+function hasEverySignature(expected: string[], recovered: string[]): boolean {
+    const available = new Map<string, number>();
+    for (const signature of recovered) {
+        available.set(signature, (available.get(signature) || 0) + 1);
+    }
+    for (const signature of expected) {
+        const count = available.get(signature) || 0;
+        if (count === 0) {
+            return false;
+        }
+        available.set(signature, count - 1);
+    }
+    return true;
 }
 
 function isDiagnosticRecovered(
@@ -203,29 +219,27 @@ function isDiagnosticRecovered(
     segment: ResponseSegment,
     run: ChatRunState
 ): boolean {
-    const candidates = messages.slice(segment.start, segment.end);
-    const tool = new Set(toolSignatures(diagnostic));
-    const thinking = new Set(thinkingSignatures(diagnostic));
+    const candidates = messages
+        .slice(segment.start, segment.end)
+        .filter((candidate) => !candidate.runId || isRunMatchingMessage(run, candidate));
+    const tool = toolSignatures(diagnostic);
+    const thinking = thinkingSignatures(diagnostic);
     const identity = messageIdentity(diagnostic);
 
-    return candidates.some((candidate) => {
-        if (candidate.runId && !isRunMatchingMessage(run, candidate)) {
-            return false;
-        }
-        if (messageIdentity(candidate) === identity) {
-            return true;
-        }
-        if (
-            tool.size > 0 &&
-            toolSignatures(candidate).some((signature) => tool.has(signature))
-        ) {
-            return true;
-        }
-        return (
-            thinking.size > 0 &&
-            thinkingSignatures(candidate).some((signature) => thinking.has(signature))
-        );
-    });
+    if (candidates.some((candidate) => messageIdentity(candidate) === identity)) {
+        return true;
+    }
+    if (tool.length === 0 && thinking.length === 0) {
+        return false;
+    }
+    const recoveredTools = candidates.flatMap((candidate) => toolSignatures(candidate));
+    const recoveredThinking = candidates.flatMap((candidate) =>
+        thinkingSignatures(candidate)
+    );
+    return (
+        hasEverySignature(tool, recoveredTools) &&
+        hasEverySignature(thinking, recoveredThinking)
+    );
 }
 
 function transientMessage(
@@ -253,6 +267,16 @@ export function reconcileChatMessages(
 ): ChatHistoryMessage[] {
     const messages = [...history];
     for (const run of orderedRuns(session)) {
+        for (const [index, message] of messages.entries()) {
+            if (
+                message.thinking?.length &&
+                !message.text.trim() &&
+                isRunMatchingMessage(run, message) &&
+                message.runId !== run.runId
+            ) {
+                messages[index] = { ...message, runId: run.runId };
+            }
+        }
         const segment = responseSegment(messages, run);
         const diagnostics = run.diagnostics
             .toSorted(

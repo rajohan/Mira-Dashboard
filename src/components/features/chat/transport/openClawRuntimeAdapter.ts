@@ -82,10 +82,15 @@ function chatEventDrafts(
             : normalizeAssistant(rawMessage, common.runId);
     const isCommand = asRecord(payload.message)?.command === true;
     const explicitError = stringValue(payload.errorMessage) || stringValue(payload.error);
-    const error = explicitError || (state === "error" ? "Chat run failed" : undefined);
-    const isToolFailure =
-        isToolFailureError(explicitError) ||
-        (state === "error" && isToolFailureError(message?.text));
+    const isMessageToolFailure = state === "error" && isToolFailureError(message?.text);
+    const error =
+        explicitError ||
+        (isMessageToolFailure
+            ? message?.text
+            : state === "error"
+              ? "Chat run failed"
+              : undefined);
+    const isToolFailure = isToolFailureError(explicitError) || isMessageToolFailure;
     const isDuplicateToolFailureMessage = Boolean(
         isToolFailure &&
         message &&
@@ -96,7 +101,7 @@ function chatEventDrafts(
             ...common,
             authoritative: true,
             kind: "finish",
-            error: isToolFailure ? undefined : error,
+            error,
             message:
                 message && !isDuplicateToolFailureMessage
                     ? {
@@ -112,6 +117,7 @@ function chatEventDrafts(
                     : state === "aborted"
                       ? "aborted"
                       : "error",
+            toolFailure: isToolFailure || undefined,
         },
     ];
 }
@@ -213,8 +219,9 @@ function runtimeStreamDrafts(
         drafts.push({
             ...common,
             kind: "finish",
-            error: isToolFailureError(terminalError) ? undefined : terminalError,
+            error: terminalError,
             outcome,
+            toolFailure: isToolFailureError(terminalError) || undefined,
         });
     } else if (!progress.text && OPENCLAW_WORK_STREAMS.has(stream) && phase === "start") {
         drafts.push({ ...common, kind: "status", text: "Thinking" });

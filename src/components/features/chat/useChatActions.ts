@@ -51,6 +51,10 @@ interface ChatActionsOptions {
     transport: ChatTransport;
 }
 
+function dashboardRunId(operation: "chat" | "compact"): string {
+    return `dashboard-${operation}-${crypto.randomUUID()}`;
+}
+
 /** Owns stateful chat commands while the page remains a view composition. */
 export function useChatActions({
     activeRunCount,
@@ -174,9 +178,7 @@ export function useChatActions({
         }
 
         const resetCommand = isResetSlashCommand(text);
-        const idempotencyKey = resetCommand
-            ? undefined
-            : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const idempotencyKey = resetCommand ? undefined : dashboardRunId("chat");
         const userMessage: ChatHistoryMessage = {
             role: "user",
             content: text,
@@ -348,7 +350,7 @@ export function useChatActions({
             return;
         }
         const compactSessionKey = selectedSessionKey;
-        const idempotencyKey = `dashboard-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const idempotencyKey = dashboardRunId("compact");
         runtime.beginRun(compactSessionKey, idempotencyKey, "compact");
         setSendError(undefined);
         try {

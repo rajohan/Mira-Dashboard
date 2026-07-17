@@ -11,6 +11,7 @@ import { didScheduleBottomFollow } from "./chatPageUtilities";
 import type { ChatRow } from "./chatTypes";
 
 const BOTTOM_THRESHOLD_PX = 32;
+const BOTTOM_FOLLOW_FRAME_COUNT = 4;
 const NO_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
 /** Owns virtualized chat scrolling independently from transport/runtime state. */
@@ -27,6 +28,7 @@ export function useChatScroll(
     const previousSessionKeyReference = useRef("");
     const previousActivityReference = useRef("");
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
+    const bottomFollowFramesRemainingReference = useRef(0);
 
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
@@ -57,23 +59,39 @@ export function useChatScroll(
     };
 
     const scheduleBottomFollow = () => {
+        bottomFollowFramesRemainingReference.current = BOTTOM_FOLLOW_FRAME_COUNT;
         if (bottomFollowFrameReference.current !== undefined) {
             return;
         }
-        bottomFollowFrameReference.current = requestAnimationFrame(() => {
+
+        const followMeasuredLayout = () => {
             bottomFollowFrameReference.current = undefined;
-            if (shouldStickToBottomReference.current) {
-                scrollToBottom();
+            if (
+                !shouldStickToBottomReference.current ||
+                bottomFollowFramesRemainingReference.current <= 0
+            ) {
+                bottomFollowFramesRemainingReference.current = 0;
+                return;
             }
-        });
+            bottomFollowFramesRemainingReference.current -= 1;
+            scrollToBottom();
+            if (bottomFollowFramesRemainingReference.current > 0) {
+                bottomFollowFrameReference.current =
+                    requestAnimationFrame(followMeasuredLayout);
+            }
+        };
+
+        bottomFollowFrameReference.current = requestAnimationFrame(followMeasuredLayout);
     };
 
     const virtualizer = useVirtualizer({
+        anchorTo: "end",
         count: rows.length,
         getItemKey: (index) => rows[index]?.key ?? `row-${index}`,
         getScrollElement: () => messagesContainerReference.current ?? NO_SCROLL_ELEMENT,
         estimateSize: (index) => (rows[index]?.kind === "typing" ? 76 : 160),
         overscan: 12,
+        scrollEndThreshold: BOTTOM_THRESHOLD_PX,
         useAnimationFrameWithResizeObserver: true,
         onChange: (_instance, sync) => {
             if (!sync && shouldStickToBottomReference.current) {
@@ -106,6 +124,7 @@ export function useChatScroll(
         if (isSessionChanged) {
             shouldStickToBottomReference.current = true;
             scrollToBottom();
+            scheduleBottomFollow();
             return;
         }
         if (
@@ -116,16 +135,12 @@ export function useChatScroll(
         }
 
         scrollToBottom();
-        const frame = requestAnimationFrame(() => {
-            if (shouldStickToBottomReference.current) {
-                scrollToBottom();
-            }
-        });
-        return () => cancelAnimationFrame(frame);
+        scheduleBottomFollow();
     }, [activityFingerprint, rows.length, selectedSessionKey]);
 
     useLayoutEffect(
         () => () => {
+            bottomFollowFramesRemainingReference.current = 0;
             if (bottomFollowFrameReference.current === undefined) {
                 return;
             }

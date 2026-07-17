@@ -11,6 +11,8 @@ import type { Session } from "../types/session";
 
 const SESSION_A = "agent:main:main";
 const SESSION_B = "agent:other:main";
+const DASHBOARD_CHAT_RUN_ID =
+    /^dashboard-chat-[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/u;
 
 function fakeRuntime(): ChatRuntimeController {
     return {
@@ -114,9 +116,10 @@ describe("chat actions", () => {
         });
         await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(2));
         expect(messages.map((message) => message.text)).toEqual(["first", "steer"]);
-        expect(
-            messages.every((message) => message.runId?.startsWith("dashboard-chat-"))
-        ).toBe(true);
+        expect(messages.map((message) => message.runId)).toEqual([
+            expect.stringMatching(DASHBOARD_CHAT_RUN_ID),
+            expect.stringMatching(DASHBOARD_CHAT_RUN_ID),
+        ]);
 
         await act(async () => {
             sendDeferred.resolve({ runId: "run-1" });

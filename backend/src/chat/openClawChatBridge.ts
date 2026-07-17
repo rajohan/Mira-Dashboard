@@ -87,6 +87,9 @@ function shouldRetainRuntimeEvent(
     event: unknown,
     payload: Record<string, unknown>
 ): boolean {
+    if (event === "session.started" && !stringField(payload, "runId")) {
+        return false;
+    }
     if (event !== "agent") {
         return true;
     }
@@ -97,9 +100,6 @@ function shouldRetainRuntimeEvent(
     const data = asRecord(payload.data);
     if (stream !== "item" || !data) {
         return true;
-    }
-    if (data.suppressChannelProgress === true) {
-        return false;
     }
     const item = nestedRuntimeItem(data) || data;
     const phase = stringField(data, "phase") || stringField(item, "phase") || "";

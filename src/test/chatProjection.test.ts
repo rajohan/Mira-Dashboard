@@ -10,6 +10,7 @@ import {
     reconcileChatMessages,
 } from "../components/features/chat/domain/chatProjection";
 import {
+    acknowledgeChatRun,
     addOptimisticChatRun,
     type ChatRuntimeEvent,
     createChatRuntimeState,
@@ -267,6 +268,78 @@ describe("chat projection", () => {
         });
     });
 
+    it("keeps a grouped thinking diagnostic when history recovered only one block", () => {
+        const optimistic = addOptimisticChatRun(
+            createChatRuntimeState(),
+            SESSION,
+            "dashboard-chat-original"
+        );
+        const withThinking = reduceChatRuntime(optimistic, [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "first", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "first" }],
+                },
+                runId: "provider-run",
+            }),
+            event(32, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "second", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-2", text: "second" }],
+                },
+                runId: "provider-run",
+            }),
+        ]);
+        const runtime = acknowledgeChatRun(
+            withThinking,
+            SESSION,
+            "dashboard-chat-original",
+            "provider-run"
+        );
+        const history = [
+            message("user", "question", "dashboard-chat-original"),
+            {
+                content: [{ text: "first", type: "thinking" }],
+                role: "assistant",
+                runId: "dashboard-chat-original",
+                text: "",
+                thinking: [{ text: "first" }],
+            },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+        const grouped = reconciled.find(
+            (item) => item.local === true && item.runtimeKey === "thinking:primary"
+        );
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const thinkingRows = projection.rows.filter(
+            (row) => (row.message.thinking?.length || 0) > 0
+        );
+
+        expect(grouped?.thinking?.map((block) => block.text)).toEqual([
+            "first",
+            "second",
+        ]);
+        expect(thinkingRows).toHaveLength(1);
+        expect(thinkingRows[0]?.message.thinking?.map((block) => block.text)).toEqual([
+            "first",
+            "second",
+        ]);
+    });
+
     it("moves active-run thinking below a live steer message", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             eventAt(16, "2026-07-16T12:00:01.000Z", {
@@ -286,8 +359,18 @@ describe("chat projection", () => {
             }),
         ]);
         const history = [
-            { ...message("user", "first"), timestamp: "2026-07-16T12:00:00.000Z" },
-            { ...message("user", "steer"), timestamp: "2026-07-16T12:05:00.000Z" },
+            {
+                ...message("user", "first", "run-1"),
+                timestamp: "2026-07-16T12:00:00.000Z",
+            },
+            {
+                ...message("user", "steer", "dashboard-chat-steer-1"),
+                timestamp: "2026-07-16T12:04:00.000Z",
+            },
+            {
+                ...message("user", "latest steer", "dashboard-chat-steer-2"),
+                timestamp: "2026-07-16T12:05:00.000Z",
+            },
         ];
 
         const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
@@ -300,8 +383,13 @@ describe("chat projection", () => {
             new Set()
         );
 
-        expect(reconciled.map((item) => item.text)).toEqual(["first", "steer", ""]);
-        expect(reconciled[2]?.thinking?.[0]?.text).toBe("after steer");
+        expect(reconciled.map((item) => item.text)).toEqual([
+            "first",
+            "steer",
+            "latest steer",
+            "",
+        ]);
+        expect(reconciled[3]?.thinking?.[0]?.text).toBe("after steer");
         expect(projection.rows.at(-1)).toMatchObject({
             kind: "typing",
             message: { text: "Thinking" },
@@ -322,7 +410,10 @@ describe("chat projection", () => {
             }),
         ]);
         const history = [
-            { ...message("user", "previous"), timestamp: "2026-07-16T12:00:00.000Z" },
+            {
+                ...message("user", "previous", "compact-run"),
+                timestamp: "2026-07-16T12:00:00.000Z",
+            },
             {
                 ...message("user", "Extract key decisions"),
                 timestamp: "2026-07-16T12:05:37.764Z",
@@ -496,6 +587,35 @@ describe("chat projection", () => {
         expect(projection.rows.map((row) => row.message.text)).toEqual([
             "question",
             "done",
+            "answer",
+        ]);
+        expect(projection.rows.some((row) => row.kind === "typing")).toBe(false);
+    });
+
+    it("does not append stale activity after a status-only run final", () => {
+        const history = [
+            { ...message("user", "question"), timestamp: "2026-07-16T12:00:00.000Z" },
+            { ...message("assistant", "answer"), timestamp: "2026-07-16T12:00:41.000Z" },
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:40.000Z", {
+                kind: "status",
+                runId: "status-only-run",
+                text: "Thinking",
+            }),
+        ]);
+
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projection.rows.map((row) => row.message.text)).toEqual([
+            "question",
             "answer",
         ]);
         expect(projection.rows.some((row) => row.kind === "typing")).toBe(false);
