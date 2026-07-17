@@ -103,6 +103,143 @@ describe("OpenClaw chat bridge", () => {
         expect(bridge.snapshot("main").events).toEqual([]);
     });
 
+    it("quarantines a short session key until the provider index can resolve it", () => {
+        const bridge = new OpenClawChatBridge();
+        const event = bridge.recordEvent(
+            "chat",
+            {
+                message: "early answer",
+                runId: "early-run",
+                sessionKey: "main",
+                state: "final",
+            },
+            []
+        );
+
+        expect(event.payload).toMatchObject({ sessionKey: "main" });
+        expect(bridge.snapshot("main").events).toEqual([event]);
+
+        bridge.reconcileSessions([{ id: "main", key: MAIN }]);
+
+        expect(bridge.snapshot("main").events).toEqual([]);
+        expect(payloads(bridge)).toEqual([
+            expect.objectContaining({
+                message: "early answer",
+                runId: "early-run",
+                sessionKey: MAIN,
+            }),
+        ]);
+
+        const clearedBridge = new OpenClawChatBridge();
+        clearedBridge.recordEvent(
+            "agent",
+            { runId: "clear-run", sessionKey: "main", stream: "thinking" },
+            []
+        );
+        clearedBridge.clearSession(MAIN);
+        expect(clearedBridge.snapshot("main").events).toEqual([]);
+    });
+
+    it("merges quarantined and canonical replay for the same run", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "early" },
+                runId: "shared-alias-run",
+                sessionKey: "main",
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                runId: "shared-alias-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        bridge.reconcileSessions([{ id: "main", key: MAIN }]);
+
+        expect(payloads(bridge)).toEqual([
+            expect.objectContaining({
+                data: { delta: "early" },
+                runId: "shared-alias-run",
+                sessionKey: MAIN,
+            }),
+            expect.objectContaining({
+                message: "done",
+                runId: "shared-alias-run",
+                sessionKey: MAIN,
+            }),
+        ]);
+        expect(
+            bridge.recordEvent("agent", { runId: "shared-alias-run" }, []).payload
+        ).toMatchObject({ sessionKey: MAIN });
+    });
+
+    it("keeps conflicting index and run associations quarantined", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            { sessionKey: MAIN },
+            { runId: "conflicting-run" }
+        );
+
+        const event = bridge.recordEvent(
+            "agent",
+            {
+                runId: "conflicting-run",
+                sessionKey: "main",
+                stream: "thinking",
+            },
+            [{ id: "main", key: "agent:other:main" }]
+        );
+
+        expect(event.payload).not.toHaveProperty("sessionKey");
+    });
+
+    it("reconciles quarantined runs only when index and correlation agree", () => {
+        const bridge = new OpenClawChatBridge();
+        const event = bridge.recordEvent(
+            "chat",
+            {
+                message: "correlated answer",
+                runId: "delayed-correlation-run",
+                sessionKey: "main",
+                state: "final",
+            },
+            []
+        );
+        const otherSessionKey = "agent:other:main";
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            { sessionKey: otherSessionKey },
+            { runId: "delayed-correlation-run" }
+        );
+
+        bridge.reconcileSessions([{ id: "main", key: MAIN }]);
+        expect(bridge.snapshot("main").events).toEqual([event]);
+        expect(bridge.snapshot(MAIN).events).toEqual([]);
+
+        bridge.reconcileSessions([
+            { id: "main", key: MAIN },
+            { id: "other", key: otherSessionKey },
+        ]);
+        expect(bridge.snapshot("main").events).toEqual([]);
+        expect(payloads(bridge, otherSessionKey)).toEqual([
+            expect.objectContaining({
+                message: "correlated answer",
+                runId: "delayed-correlation-run",
+                sessionKey: otherSessionKey,
+            }),
+        ]);
+    });
+
     it("does not guess between ambiguous provider session aliases", () => {
         const bridge = new OpenClawChatBridge();
         const event = bridge.recordEvent(
@@ -140,6 +277,30 @@ describe("OpenClaw chat bridge", () => {
             sessionKey: MAIN,
         });
         expect(bridge.snapshot(MAIN).events).toEqual([event]);
+    });
+
+    it("does not let a stale run association override an ambiguous index", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            { sessionKey: "agent:stale:main" },
+            { runId: "stale-associated-run" }
+        );
+        const event = bridge.recordEvent(
+            "agent",
+            {
+                runId: "stale-associated-run",
+                sessionKey: "main",
+                stream: "thinking",
+            },
+            [
+                { id: "main", key: MAIN },
+                { id: "main", key: "agent:other:main" },
+            ]
+        );
+
+        expect(event.payload).not.toHaveProperty("sessionKey");
+        expect(bridge.snapshot("agent:stale:main").events).toEqual([]);
     });
 
     it("promotes acknowledged provisional runs and prefers a concrete final", () => {
@@ -472,6 +633,97 @@ describe("OpenClaw chat bridge", () => {
                 []
             ).payload
         ).toMatchObject({ sessionKey: MAIN });
+    });
+
+    it("promotes an explicit non-dashboard idempotency run on acknowledgement", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "notification delivered",
+                runId: "tasks-notify-123",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "tasks-notify-123",
+                message: "notify",
+                sessionKey: MAIN,
+            },
+            { runId: "provider-notify-123" }
+        );
+
+        expect(payloads(bridge)).toEqual([
+            expect.objectContaining({
+                message: "notification delivered",
+                runId: "provider-notify-123",
+                state: "final",
+            }),
+        ]);
+    });
+
+    it("promotes a short-key idempotency replay before the session index loads", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "older canonical answer",
+                runId: "older-canonical-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "early notification",
+                runId: "tasks-notify-early",
+                sessionKey: "main",
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "unrelated quarantined answer",
+                runId: "unrelated-short-run",
+                sessionKey: "main",
+                state: "final",
+            },
+            []
+        );
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "tasks-notify-early",
+                message: "notify",
+                sessionKey: MAIN,
+            },
+            { runId: "provider-notify-early" }
+        );
+
+        expect(payloads(bridge)).toEqual([
+            expect.objectContaining({
+                message: "early notification",
+                runId: "provider-notify-early",
+                sessionKey: MAIN,
+            }),
+        ]);
+        expect(payloads(bridge, "main")).toEqual([
+            expect.objectContaining({
+                message: "unrelated quarantined answer",
+                runId: "unrelated-short-run",
+                sessionKey: "main",
+            }),
+        ]);
     });
 
     it("promotes a completed runless turn emitted after the send started", () => {

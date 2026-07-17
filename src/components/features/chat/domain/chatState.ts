@@ -32,6 +32,7 @@ export interface ChatRunState {
     sessionKey: string;
     startedAt: string;
     statusText?: string;
+    terminalSequence?: number;
     updatedAt: string;
 }
 
@@ -204,7 +205,11 @@ function latestCompletedRunEntry(
 ): [string, ChatRunState] | undefined {
     return Object.entries(session.runs)
         .filter(([, candidate]) => candidate.phase !== "active")
-        .toSorted(([, left], [, right]) => right.lastSequence - left.lastSequence)[0];
+        .toSorted(
+            ([, left], [, right]) =>
+                (right.terminalSequence ?? right.lastSequence) -
+                (left.terminalSequence ?? left.lastSequence)
+        )[0];
 }
 
 function resolveRun(
@@ -601,6 +606,20 @@ function mergeAcknowledgedRuns(
             ? existing
             : optimistic
     ).startedAt;
+    const terminalSequence =
+        existing.terminalSequence === undefined
+            ? optimistic.terminalSequence
+            : optimistic.terminalSequence === undefined
+              ? existing.terminalSequence
+              : Math.max(existing.terminalSequence, optimistic.terminalSequence);
+    const terminalRun = [existing, optimistic]
+        .filter((run) => run.phase !== "active")
+        .toSorted(
+            (left, right) =>
+                (right.terminalSequence ?? right.lastSequence) -
+                (left.terminalSequence ?? left.lastSequence)
+        )[0];
+    const phase = terminalRun?.phase ?? newer.phase;
 
     return {
         ...newer,
@@ -613,12 +632,14 @@ function mergeAcknowledgedRuns(
         assistant,
         assistantSource: newer.assistantSource || older.assistantSource,
         diagnostics: mergeRunDiagnostics(older, newer),
+        error: (terminalRun ?? newer).error,
         lastSequence: Math.max(existing.lastSequence, optimistic.lastSequence),
         operation: newer.operation ?? older.operation,
+        phase,
         runId: providerRunId,
         startedAt,
-        statusText:
-            newer.phase === "active" ? newer.statusText || older.statusText : undefined,
+        statusText: phase === "active" ? newer.statusText || older.statusText : undefined,
+        terminalSequence,
     };
 }
 
@@ -661,6 +682,7 @@ function applyFinishEvent(
         error,
         phase: event.outcome,
         statusText: undefined,
+        terminalSequence: event.sequence,
     };
 }
 

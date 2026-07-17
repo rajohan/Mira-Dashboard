@@ -211,6 +211,39 @@ describe("chat projection", () => {
         ).toEqual(["run-1", "run-2"]);
     });
 
+    it("keeps completed runs in terminal order after a delayed diagnostic", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "finish",
+                message: message("assistant", "first", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "finish",
+                message: message("assistant", "second", "run-2"),
+                outcome: "completed",
+                runId: "run-2",
+            }),
+            event(48, {
+                kind: "thinking",
+                message: thinkingMessage("run-1"),
+                runId: "run-1",
+            }),
+        ]);
+
+        const reconciled = reconcileChatMessages(
+            [message("user", "question")],
+            runtime.sessions[SESSION]
+        );
+
+        expect(
+            reconciled
+                .filter((item) => item.role === "assistant" && item.text)
+                .map((item) => item.text)
+        ).toEqual(["first", "second"]);
+    });
+
     it("keeps repeated no-id tool invocations distinct within one run", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             noIdToolCall(16),

@@ -23,7 +23,15 @@ export interface ChatProjection {
 
 function orderedRuns(session?: ChatSessionRuntimeState): ChatRunState[] {
     return Object.values(session?.runs || {}).toSorted((left, right) => {
-        const sequenceDifference = left.lastSequence - right.lastSequence;
+        const leftSequence =
+            left.phase === "active"
+                ? left.lastSequence
+                : (left.terminalSequence ?? left.lastSequence);
+        const rightSequence =
+            right.phase === "active"
+                ? right.lastSequence
+                : (right.terminalSequence ?? right.lastSequence);
+        const sequenceDifference = leftSequence - rightSequence;
         return sequenceDifference || left.runId.localeCompare(right.runId);
     });
 }

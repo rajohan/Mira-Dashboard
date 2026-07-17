@@ -94,17 +94,17 @@ function isSameSessionKey(left: string, right: string): boolean {
         : rightMatch?.[2] === normalizedLeft;
 }
 
-function canonicalSessionKey(
+function matchingSessionKeys(
     sessionKey: string,
     sessions: readonly OpenClawChatSessionIdentity[]
-): string | undefined {
+): Map<string, string> {
     const matches = new Map<string, string>();
     for (const session of sessions) {
         if (isSameSessionKey(session.key, sessionKey)) {
             matches.set(session.key.toLowerCase(), session.key);
         }
     }
-    return matches.size === 1 ? matches.values().next().value : undefined;
+    return matches;
 }
 
 function isTerminalEvent(event: unknown, payload: unknown): boolean {
@@ -324,6 +324,161 @@ export class OpenClawChatBridge {
         }
     }
 
+    #promoteSessionEntry(
+        sourceSessionKey: string,
+        canonicalSessionKey: string,
+        preferredRunId?: string
+    ): void {
+        if (sourceSessionKey === canonicalSessionKey) {
+            return;
+        }
+        const sourceRuns = this.#runsBySession.get(sourceSessionKey);
+        if (!sourceRuns || (preferredRunId && !sourceRuns.has(preferredRunId))) {
+            return;
+        }
+
+        const canonicalRuns = this.#runsBySession.get(canonicalSessionKey) || new Map();
+        const runIds: Iterable<string> = preferredRunId
+            ? [preferredRunId]
+            : sourceRuns.keys();
+        for (const runId of runIds) {
+            const sourceRun = sourceRuns.get(runId);
+            if (!sourceRun) {
+                continue;
+            }
+            const rewrittenEvents = sourceRun.events.flatMap((envelope) => {
+                const payload = asRecord(envelope.payload);
+                if (stringField(payload, "sessionKey") !== sourceSessionKey) {
+                    return [envelope];
+                }
+                const rewritten = {
+                    ...envelope,
+                    payload: { ...payload, sessionKey: canonicalSessionKey },
+                };
+                if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_RUN) {
+                    return [rewritten];
+                }
+                if (!isTerminalEvent(envelope.event, rewritten.payload)) {
+                    return [];
+                }
+                const compact = {
+                    ...envelope,
+                    payload: compactTerminalPayload(
+                        asRecord(rewritten.payload),
+                        stringField(payload, "runId"),
+                        canonicalSessionKey
+                    ),
+                };
+                return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_RUN
+                    ? [compact]
+                    : [];
+            });
+            this.#replaceRunEvents(sourceRun, rewrittenEvents);
+            if (sourceRun.events.length === 0) {
+                sourceRuns.delete(runId);
+                this.#forgetRunSession(runId, sourceSessionKey);
+                continue;
+            }
+            const existing = canonicalRuns.get(runId);
+            if (existing) {
+                this.#replaceRunEvents(existing, [
+                    ...existing.events,
+                    ...sourceRun.events,
+                ]);
+                existing.completed ||= sourceRun.completed;
+                existing.terminalSequence = Math.max(
+                    existing.terminalSequence,
+                    sourceRun.terminalSequence
+                );
+                existing.updatedAt = Math.max(existing.updatedAt, sourceRun.updatedAt);
+            } else {
+                canonicalRuns.set(runId, sourceRun);
+            }
+            sourceRuns.delete(runId);
+            this.#forgetRunSession(runId, sourceSessionKey);
+            this.#rememberRunSession(runId, canonicalSessionKey);
+        }
+
+        if (sourceRuns.size === 0) {
+            this.#runsBySession.delete(sourceSessionKey);
+        }
+        while (canonicalRuns.size > MAX_RUNS_PER_SESSION) {
+            const oldestRunId = canonicalRuns
+                .values()
+                .toArray()
+                .toSorted((left, right) => left.updatedAt - right.updatedAt)[0]?.runId;
+            if (!oldestRunId) {
+                break;
+            }
+            canonicalRuns.delete(oldestRunId);
+            this.#forgetRunSession(oldestRunId, canonicalSessionKey);
+        }
+        if (canonicalRuns.size === 0) {
+            this.#runsBySession.delete(canonicalSessionKey);
+        } else {
+            this.#runsBySession.set(canonicalSessionKey, canonicalRuns);
+        }
+        this.#enforceSessionLimit();
+    }
+
+    #enforceSessionLimit(): void {
+        while (this.#runsBySession.size > MAX_SESSIONS) {
+            const oldestSessionKey = this.#runsBySession
+                .keys()
+                .map((key) => ({
+                    key,
+                    updatedAt: Math.max(
+                        ...this.#runsBySession
+                            .get(key)!
+                            .values()
+                            .map((entry) => entry.updatedAt)
+                    ),
+                }))
+                .toArray()
+                .toSorted((left, right) => left.updatedAt - right.updatedAt)[0]?.key;
+            if (!oldestSessionKey) {
+                break;
+            }
+            this.clearSession(oldestSessionKey);
+        }
+    }
+
+    #sessionCandidates(
+        providedSessionKey: string,
+        runId: string | undefined,
+        sessions: readonly OpenClawChatSessionIdentity[]
+    ): Map<string, string> {
+        const indexedCandidates = matchingSessionKeys(providedSessionKey, sessions);
+        const associatedCandidates = new Map<string, string>();
+        if (runId) {
+            const normalizedProvidedKey = providedSessionKey.toLowerCase();
+            const associatedSessionKeys = this.#sessionsByRun.get(runId) || [];
+            for (const associatedSessionKey of associatedSessionKeys) {
+                if (
+                    associatedSessionKey.toLowerCase() !== normalizedProvidedKey &&
+                    isSameSessionKey(associatedSessionKey, providedSessionKey)
+                ) {
+                    associatedCandidates.set(
+                        associatedSessionKey.toLowerCase(),
+                        associatedSessionKey
+                    );
+                }
+            }
+        }
+        if (indexedCandidates.size > 1 && associatedCandidates.size > 0) {
+            const indexedAssociations = new Map<string, string>();
+            for (const [normalizedKey, candidate] of associatedCandidates) {
+                if (indexedCandidates.has(normalizedKey)) {
+                    indexedAssociations.set(normalizedKey, candidate);
+                }
+            }
+            if (indexedAssociations.size > 0) {
+                return indexedAssociations;
+            }
+        }
+        return new Map([...indexedCandidates, ...associatedCandidates]);
+    }
+
     #enrichPayload(
         event: unknown,
         payload: unknown,
@@ -338,32 +493,23 @@ export class OpenClawChatBridge {
             return payload;
         }
 
+        this.reconcileSessions(sessions);
+
         const runId = stringField(record, "runId");
         const providedSessionKey = stringField(record, "sessionKey");
         if (providedSessionKey) {
-            const candidates = new Map<string, string>();
-            const indexedSessionKey = canonicalSessionKey(providedSessionKey, sessions);
-            if (indexedSessionKey) {
-                candidates.set(indexedSessionKey.toLowerCase(), indexedSessionKey);
-            }
-            if (runId) {
-                const associatedSessionKeys = this.#sessionsByRun.get(runId) || [];
-                for (const associatedSessionKey of associatedSessionKeys) {
-                    if (isSameSessionKey(associatedSessionKey, providedSessionKey)) {
-                        candidates.set(
-                            associatedSessionKey.toLowerCase(),
-                            associatedSessionKey
-                        );
-                    }
-                }
-            }
+            const candidates = this.#sessionCandidates(
+                providedSessionKey,
+                runId,
+                sessions
+            );
             if (candidates.size === 1) {
                 const canonical = candidates.values().next().value;
                 return canonical && canonical !== providedSessionKey
                     ? { ...record, sessionKey: canonical }
                     : payload;
             }
-            if (!isAgentSessionKey(providedSessionKey)) {
+            if (candidates.size > 1 && !isAgentSessionKey(providedSessionKey)) {
                 const unscoped = { ...record };
                 delete unscoped.sessionKey;
                 return unscoped;
@@ -522,7 +668,27 @@ export class OpenClawChatBridge {
         preferredProvisionalRunId?: string,
         requestBoundary?: number
     ): void {
-        const runs = this.#runsBySession.get(sessionKey);
+        let runs = this.#runsBySession.get(sessionKey);
+        if (
+            preferredProvisionalRunId &&
+            !runs?.has(preferredProvisionalRunId) &&
+            isAgentSessionKey(sessionKey)
+        ) {
+            const aliasEntries = [...this.#runsBySession].filter(
+                ([candidateSessionKey, candidateRuns]) =>
+                    !isAgentSessionKey(candidateSessionKey) &&
+                    isSameSessionKey(candidateSessionKey, sessionKey) &&
+                    candidateRuns.has(preferredProvisionalRunId)
+            );
+            if (aliasEntries.length === 1) {
+                this.#promoteSessionEntry(
+                    aliasEntries[0]![0],
+                    sessionKey,
+                    preferredProvisionalRunId
+                );
+                runs = this.#runsBySession.get(sessionKey);
+            }
+        }
         if (!runs) {
             return;
         }
@@ -530,11 +696,7 @@ export class OpenClawChatBridge {
         const preferred = preferredProvisionalRunId
             ? runs.get(preferredProvisionalRunId)
             : undefined;
-        if (
-            preferredProvisionalRunId &&
-            preferred &&
-            isProvisionalRunId(preferred.runId)
-        ) {
+        if (preferredProvisionalRunId && preferred) {
             this.#promoteRunEntry(
                 sessionKey,
                 runs,
@@ -725,31 +887,35 @@ export class OpenClawChatBridge {
         }
 
         this.#runsBySession.set(sessionKey, runs);
-        while (this.#runsBySession.size > MAX_SESSIONS) {
-            const oldestSessionKey = this.#runsBySession
-                .keys()
-                .map((key) => ({
-                    key,
-                    updatedAt: Math.max(
-                        ...this.#runsBySession
-                            .get(key)!
-                            .values()
-                            .map((entry) => entry.updatedAt)
-                    ),
-                }))
-                .toArray()
-                .toSorted((left, right) => left.updatedAt - right.updatedAt)[0]?.key;
-            if (!oldestSessionKey) {
-                break;
-            }
-            this.clearSession(oldestSessionKey);
-        }
+        this.#enforceSessionLimit();
     }
 
     /** Clears all ephemeral replay state, for example after credentials change. */
     clear(): void {
         this.#runsBySession.clear();
         this.#sessionsByRun.clear();
+    }
+
+    /** Canonicalizes quarantined short session keys after the session index loads. */
+    reconcileSessions(sessions: readonly OpenClawChatSessionIdentity[]): void {
+        for (const sessionKey of this.#runsBySession.keys()) {
+            if (isAgentSessionKey(sessionKey)) {
+                continue;
+            }
+            const runs = this.#runsBySession.get(sessionKey);
+            if (!runs) {
+                continue;
+            }
+            for (const runId of runs.keys()) {
+                const candidates = this.#sessionCandidates(sessionKey, runId, sessions);
+                if (candidates.size === 1) {
+                    const canonical = candidates.values().next().value;
+                    if (canonical && canonical !== sessionKey) {
+                        this.#promoteSessionEntry(sessionKey, canonical, runId);
+                    }
+                }
+            }
+        }
     }
 
     /** Captures the runtime cutoff immediately before a Gateway request starts. */
@@ -759,9 +925,22 @@ export class OpenClawChatBridge {
 
     /** Clears replay state associated with one reset, aborted, or deleted session. */
     clearSession(sessionKey: string): void {
-        this.#runsBySession.delete(sessionKey);
-        for (const runId of this.#sessionsByRun.keys()) {
-            this.#forgetRunSession(runId, sessionKey);
+        const sessionKeys = new Set([sessionKey]);
+        if (isAgentSessionKey(sessionKey)) {
+            for (const candidateSessionKey of this.#runsBySession.keys()) {
+                if (
+                    !isAgentSessionKey(candidateSessionKey) &&
+                    isSameSessionKey(candidateSessionKey, sessionKey)
+                ) {
+                    sessionKeys.add(candidateSessionKey);
+                }
+            }
+        }
+        for (const matchingSessionKey of sessionKeys) {
+            this.#runsBySession.delete(matchingSessionKey);
+            for (const runId of this.#sessionsByRun.keys()) {
+                this.#forgetRunSession(runId, matchingSessionKey);
+            }
         }
     }
 

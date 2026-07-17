@@ -337,6 +337,91 @@ describe("chat runtime state", () => {
         ).toBe("reasoning");
     });
 
+    it("keeps the latest terminal order when a completed alias gets later diagnostics", () => {
+        const withOptimistic = addOptimisticChatRun(
+            createChatRuntimeState(),
+            SESSION,
+            "dashboard-chat-1"
+        );
+        const accumulated = reduceChatRuntime(withOptimistic, [
+            event(16, {
+                kind: "finish",
+                message: { content: "early", role: "assistant", text: "early" },
+                outcome: "completed",
+                runId: "dashboard-chat-1",
+            }),
+            event(32, {
+                authoritative: true,
+                kind: "finish",
+                message: { content: "done", role: "assistant", text: "done" },
+                outcome: "completed",
+                runId: "provider-1",
+            }),
+            event(48, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "late diagnostic" }],
+                },
+                runId: "dashboard-chat-1",
+            }),
+        ]);
+
+        const acknowledged = acknowledgeChatRun(
+            accumulated,
+            SESSION,
+            "dashboard-chat-1",
+            "provider-1"
+        );
+
+        expect(acknowledged.sessions[SESSION]?.runs["provider-1"]?.terminalSequence).toBe(
+            32
+        );
+    });
+
+    it("does not reactivate a completed provider run when its alias gets late diagnostics", () => {
+        const withOptimistic = addOptimisticChatRun(
+            createChatRuntimeState(),
+            SESSION,
+            "dashboard-chat-1"
+        );
+        const accumulated = reduceChatRuntime(withOptimistic, [
+            event(16, {
+                authoritative: true,
+                kind: "finish",
+                message: { content: "done", role: "assistant", text: "done" },
+                outcome: "completed",
+                runId: "provider-1",
+            }),
+            event(32, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "late diagnostic" }],
+                },
+                runId: "dashboard-chat-1",
+            }),
+        ]);
+
+        const acknowledged = acknowledgeChatRun(
+            accumulated,
+            SESSION,
+            "dashboard-chat-1",
+            "provider-1"
+        );
+
+        expect(acknowledged.sessions[SESSION]?.runs["provider-1"]).toMatchObject({
+            assistant: { text: "done" },
+            lastSequence: 32,
+            phase: "completed",
+            terminalSequence: 16,
+        });
+    });
+
     it("reconciles a tool call and result split across acknowledged run aliases", () => {
         const providerFirst = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -711,6 +796,7 @@ describe("chat runtime state", () => {
             lastSequence: 32,
             phase: "completed",
             runId: "run-1",
+            terminalSequence: 16,
         });
     });
 
@@ -856,6 +942,55 @@ describe("chat runtime state", () => {
             assistant: { text: "Different" },
             phase: "active",
         });
+    });
+
+    it("ranks session echo targets by terminal order after delayed diagnostics", () => {
+        const completed = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                authoritative: true,
+                kind: "finish",
+                message: { content: "old", role: "assistant", text: "old" },
+                outcome: "completed",
+                runId: "old-run",
+            }),
+            event(32, {
+                authoritative: true,
+                kind: "finish",
+                message: { content: "new", role: "assistant", text: "new" },
+                outcome: "completed",
+                runId: "new-run",
+            }),
+            event(48, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "late old diagnostic" }],
+                },
+                runId: "old-run",
+            }),
+        ]);
+
+        const echoed = reduceChatRuntime(completed, [
+            event(64, {
+                kind: "assistant",
+                message: { content: "new", role: "assistant", text: "new" },
+                mode: "merge",
+                source: "session",
+            }),
+        ]);
+
+        expect(echoed.sessions[SESSION]?.runs["old-run"]).toMatchObject({
+            lastSequence: 48,
+            terminalSequence: 16,
+        });
+        expect(echoed.sessions[SESSION]?.runs["new-run"]).toMatchObject({
+            lastSequence: 64,
+            phase: "completed",
+            terminalSequence: 32,
+        });
+        expect(echoed.sessions[SESSION]?.runs["runtime-runless-64"]).toBeUndefined();
     });
 
     it("keeps an attachment-only session echo on its completed run", () => {

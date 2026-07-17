@@ -586,6 +586,37 @@ describe("chat runtime controller", () => {
         );
     });
 
+    it("expires an unscoped finish after a delayed event advances the run", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+        const oldTimestamp = new Date(Date.now() - 16 * 60_000).toISOString();
+
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [
+                    assistant(SELECTED, 8, "partial"),
+                    {
+                        ...finish(SELECTED, 16, undefined, oldTimestamp),
+                        runId: undefined,
+                    },
+                    assistant(SELECTED, 32, "late"),
+                ],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        await waitFor(() =>
+            expect(
+                Object.keys(result.current.state.sessions[SELECTED]?.runs || {})
+            ).toHaveLength(0)
+        );
+    });
+
     it("processes live events immediately when no session is selected", () => {
         const fake = fakeTransport(
             Promise.resolve({

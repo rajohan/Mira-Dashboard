@@ -758,6 +758,7 @@ async function refreshSessions(
                             : undefined,
                 });
             });
+        openClawChatBridge.reconcileSessions(gatewayState.sessions);
         broadcast({ type: "sessions", sessions: gatewayState.sessions });
     }
 }

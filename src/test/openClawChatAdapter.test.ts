@@ -419,6 +419,30 @@ describe("OpenClaw chat adapter", () => {
         ).toBe(true);
     });
 
+    it("retains an empty error-only tool result as a failure", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        error: "",
+                        name: "functions.exec_command",
+                        phase: "end",
+                    },
+                    stream: "tool",
+                },
+                15
+            )
+        );
+        const tool = events.find((event) => event.kind === "tool");
+
+        expect(tool?.kind === "tool" && tool.message.toolResult).toMatchObject({
+            content: "",
+            isError: true,
+        });
+    });
+
     it("normalizes malformed raw history metadata without throwing", () => {
         const adapter = new OpenClawChatAdapter();
         const messages = adapter.history([

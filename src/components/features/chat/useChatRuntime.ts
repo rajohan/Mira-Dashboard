@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
     acknowledgeChatRun,
     addOptimisticChatRun,
+    type ChatRunState,
     type ChatRuntimeEvent,
     type ChatRuntimeState,
     clearChatRun,
@@ -20,6 +21,13 @@ const MAX_COMPLETION_TIMERS = 500;
 
 function isLocallyOptimisticRunId(runId: string): boolean {
     return runId.startsWith("dashboard-chat-") || runId.startsWith("dashboard-compact-");
+}
+
+function isRunFinishedAtSequence(run: ChatRunState, sequence: number): boolean {
+    return (
+        run.phase !== "active" &&
+        (run.terminalSequence === sequence || run.lastSequence === sequence)
+    );
 }
 
 function completedRunRetentionDelay(timestamp: string): number {
@@ -176,11 +184,7 @@ export function useChatRuntime({
                 }
                 const run = Object.values(
                     findChatSessionRuntimeState(current, completedSessionKey)?.runs || {}
-                ).find(
-                    (candidate) =>
-                        candidate.lastSequence === event.sequence &&
-                        candidate.phase !== "active"
-                );
+                ).find((candidate) => isRunFinishedAtSequence(candidate, event.sequence));
                 return run
                     ? clearChatRun(current, completedSessionKey, run.runId)
                     : current;
@@ -195,8 +199,8 @@ export function useChatRuntime({
             clearCompletionTimers((candidate) => candidate === oldestKey);
         }
         if (isSameChatSession(event.sessionKey, selectedSessionReference.current)) {
-            const completedRun = Object.values(runtimeSession?.runs || {}).find(
-                (run) => run.lastSequence === event.sequence
+            const completedRun = Object.values(runtimeSession?.runs || {}).find((run) =>
+                isRunFinishedAtSequence(run, event.sequence)
             );
             const { error: visibleError } = completedRun || event;
             if (visibleError) {
