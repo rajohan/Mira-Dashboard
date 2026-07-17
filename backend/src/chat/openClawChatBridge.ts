@@ -38,6 +38,7 @@ const MAX_BYTES_PER_RUN = 1_000_000;
 const MAX_RUNS_PER_SESSION = 4;
 const MAX_SESSIONS = 50;
 const MAX_RUN_ASSOCIATIONS = 200;
+const SESSION_ECHO_WINDOW_MS = 60_000;
 const TERMINAL_FAILURE_STATES = new Set(["aborted", "error", "failed"]);
 const RETAINED_EVENTS = new Set([
     "agent",
@@ -72,6 +73,10 @@ function hasRunIdentifier(session: OpenClawChatSessionIdentity, runId: string): 
     ].includes(runId);
 }
 
+function isAgentSessionKey(sessionKey: string): boolean {
+    return /^agent:[^:]+:.+$/iu.test(sessionKey.trim());
+}
+
 function isSameSessionKey(left: string, right: string): boolean {
     const normalizedLeft = left.trim().toLowerCase();
     const normalizedRight = right.trim().toLowerCase();
@@ -92,16 +97,13 @@ function canonicalSessionKey(
     sessionKey: string,
     sessions: readonly OpenClawChatSessionIdentity[]
 ): string | undefined {
-    const exact = sessions.find(
-        (session) => session.key.toLowerCase() === sessionKey.toLowerCase()
-    );
-    if (exact) {
-        return exact.key;
+    const matches = new Map<string, string>();
+    for (const session of sessions) {
+        if (isSameSessionKey(session.key, sessionKey)) {
+            matches.set(session.key.toLowerCase(), session.key);
+        }
     }
-    const matches = sessions.filter((session) =>
-        isSameSessionKey(session.key, sessionKey)
-    );
-    return matches.length === 1 ? matches[0]?.key : undefined;
+    return matches.size === 1 ? matches.values().next().value : undefined;
 }
 
 function isTerminalEvent(event: unknown, payload: unknown): boolean {
@@ -152,44 +154,146 @@ function compactTerminalPayload(
 
 function isProvisionalRunId(runId: string): boolean {
     return (
-        runId === "runless" ||
+        isRunlessRunId(runId) ||
         runId.startsWith("dashboard-chat-") ||
         runId.startsWith("dashboard-compact-")
     );
 }
 
-function isMetadataOnlyRunlessCompletion(run: RetainedRun): boolean {
-    if (run.runId !== "runless" || run.events.length === 0) {
+function isRunlessRunId(runId: string): boolean {
+    return runId === "runless" || /^runless:\d+$/u.test(runId);
+}
+
+function isMetadataOnlyCompletionEnvelope(envelope: OpenClawRuntimeEnvelope): boolean {
+    if (envelope.event !== "session.ended" && envelope.event !== "model.completed") {
         return false;
     }
-    return run.events.every((envelope) => {
-        if (envelope.event !== "session.ended" && envelope.event !== "model.completed") {
-            return false;
-        }
-        const payload = asRecord(envelope.payload);
-        const data = asRecord(payload?.data);
-        const terminalStates = [
-            stringField(payload, "state"),
-            stringField(payload, "status"),
-            stringField(data, "phase"),
-            stringField(data, "status"),
-        ].map((value) => value?.toLowerCase());
-        return (
-            payload?.aborted !== true &&
-            data?.aborted !== true &&
-            !stringField(payload, "error") &&
-            !stringField(payload, "errorMessage") &&
-            !stringField(payload, "promptError") &&
-            !stringField(data, "error") &&
-            !stringField(data, "errorMessage") &&
-            !stringField(data, "promptError") &&
-            terminalStates.every((value) => !TERMINAL_FAILURE_STATES.has(value || ""))
-        );
-    });
+    const payload = asRecord(envelope.payload);
+    const data = asRecord(payload?.data);
+    const terminalStates = [
+        stringField(payload, "state"),
+        stringField(payload, "status"),
+        stringField(data, "phase"),
+        stringField(data, "status"),
+    ].map((value) => value?.toLowerCase());
+    return (
+        payload?.aborted !== true &&
+        data?.aborted !== true &&
+        !stringField(payload, "error") &&
+        !stringField(payload, "errorMessage") &&
+        !stringField(payload, "promptError") &&
+        !stringField(data, "error") &&
+        !stringField(data, "errorMessage") &&
+        !stringField(data, "promptError") &&
+        payload?.message === undefined &&
+        payload?.content === undefined &&
+        payload?.text === undefined &&
+        terminalStates.every((value) => !TERMINAL_FAILURE_STATES.has(value || ""))
+    );
+}
+
+function isMetadataOnlyRunlessCompletion(run: RetainedRun): boolean {
+    return (
+        isRunlessRunId(run.runId) &&
+        run.events.length > 0 &&
+        run.events.every((event) => isMetadataOnlyCompletionEnvelope(event))
+    );
 }
 
 function lastSequence(run: RetainedRun): number {
     return run.events.at(-1)?.runtimeSequence ?? -1;
+}
+
+function normalizedMessageText(value: unknown): string {
+    if (typeof value === "string") {
+        return value.trim();
+    }
+    if (!Array.isArray(value)) {
+        return "";
+    }
+    return value
+        .map((block) => {
+            if (typeof block === "string") {
+                return block;
+            }
+            const record = asRecord(block);
+            if (["thinking", "toolCall"].includes(String(record?.type))) {
+                return "";
+            }
+            return typeof record?.text === "string" ? record.text : "";
+        })
+        .filter(Boolean)
+        .join("\n\n")
+        .trim();
+}
+
+function messageSignature(payload: unknown): string | undefined {
+    const record = asRecord(payload);
+    if (!record) {
+        return undefined;
+    }
+    const message = asRecord(record.message);
+    const candidates = message
+        ? [message.text, message.content]
+        : [record.message, record.content, record.text];
+    for (const candidate of candidates) {
+        const text = normalizedMessageText(candidate);
+        if (text) {
+            return `text:${text}`;
+        }
+    }
+    for (const candidate of candidates) {
+        if (
+            candidate === undefined ||
+            candidate === null ||
+            candidate === "" ||
+            (Array.isArray(candidate) && candidate.length === 0)
+        ) {
+            continue;
+        }
+        try {
+            const serialized = JSON.stringify(candidate);
+            if (serialized) {
+                return `content:${serialized}`;
+            }
+        } catch {
+            return undefined;
+        }
+    }
+    return undefined;
+}
+
+function hasChatFinal(run: RetainedRun): boolean {
+    return run.events.some(
+        (candidate) =>
+            candidate.event === "chat" && asRecord(candidate.payload)?.state === "final"
+    );
+}
+
+function isMatchingSessionEcho(
+    run: RetainedRun,
+    envelope: OpenClawRuntimeEnvelope
+): boolean {
+    const payload = asRecord(envelope.payload);
+    const nestedMessage = asRecord(payload?.message);
+    const role = stringField(payload, "role") || stringField(nestedMessage, "role");
+    if (role && role.toLowerCase() !== "assistant") {
+        return false;
+    }
+    const elapsedMilliseconds = envelope.runtimeRecordedAt - run.updatedAt;
+    if (elapsedMilliseconds < -5000 || elapsedMilliseconds > SESSION_ECHO_WINDOW_MS) {
+        return false;
+    }
+    const signature = messageSignature(envelope.payload);
+    return Boolean(
+        signature &&
+        run.events.some(
+            (candidate) =>
+                candidate.event === "chat" &&
+                asRecord(candidate.payload)?.state === "final" &&
+                messageSignature(candidate.payload) === signature
+        )
+    );
 }
 
 /**
@@ -233,15 +337,39 @@ export class OpenClawChatBridge {
             return payload;
         }
 
+        const runId = stringField(record, "runId");
         const providedSessionKey = stringField(record, "sessionKey");
         if (providedSessionKey) {
-            const canonical = canonicalSessionKey(providedSessionKey, sessions);
-            return canonical && canonical !== providedSessionKey
-                ? { ...record, sessionKey: canonical }
-                : payload;
+            const candidates = new Map<string, string>();
+            const indexedSessionKey = canonicalSessionKey(providedSessionKey, sessions);
+            if (indexedSessionKey) {
+                candidates.set(indexedSessionKey.toLowerCase(), indexedSessionKey);
+            }
+            if (runId) {
+                const associatedSessionKeys = this.#sessionsByRun.get(runId) || [];
+                for (const associatedSessionKey of associatedSessionKeys) {
+                    if (isSameSessionKey(associatedSessionKey, providedSessionKey)) {
+                        candidates.set(
+                            associatedSessionKey.toLowerCase(),
+                            associatedSessionKey
+                        );
+                    }
+                }
+            }
+            if (candidates.size === 1) {
+                const canonical = candidates.values().next().value;
+                return canonical && canonical !== providedSessionKey
+                    ? { ...record, sessionKey: canonical }
+                    : payload;
+            }
+            if (!isAgentSessionKey(providedSessionKey)) {
+                const unscoped = { ...record };
+                delete unscoped.sessionKey;
+                return unscoped;
+            }
+            return payload;
         }
 
-        const runId = stringField(record, "runId");
         if (!runId) {
             return payload;
         }
@@ -418,7 +546,7 @@ export class OpenClawChatBridge {
                 runId !== providerRunId &&
                 isProvisionalRunId(run.runId) &&
                 isCurrentRequest &&
-                (!run.completed || run.runId === "runless")
+                (!run.completed || isRunlessRunId(run.runId))
             );
         });
         if (provisionalEntries.length !== 1) {
@@ -494,15 +622,60 @@ export class OpenClawChatBridge {
             .values()
             .filter((snapshot) => !snapshot.completed)
             .toArray();
+        const activeRunlessRuns = activeRuns.filter((run) => isRunlessRunId(run.runId));
+        const compatibleActiveRun =
+            activeRuns.length === 1
+                ? activeRuns[0]
+                : activeRunlessRuns.length === 1
+                  ? activeRunlessRuns[0]
+                  : undefined;
+        const isMetadataOnlyCompletion =
+            !explicitRunId && isMetadataOnlyCompletionEnvelope(retainedEnvelope);
+        const completedRuns =
+            !explicitRunId &&
+            (envelope.event === "session.message" || isMetadataOnlyCompletion)
+                ? runs
+                      .values()
+                      .filter((run) => run.completed)
+                      .toArray()
+                      .toSorted((left, right) => lastSequence(right) - lastSequence(left))
+                : [];
+        const latestMeaningfulCompletion = completedRuns.find(
+            (run) => !isMetadataOnlyRunlessCompletion(run)
+        );
+        if (
+            isMetadataOnlyCompletion &&
+            activeRuns.length === 0 &&
+            latestMeaningfulCompletion
+        ) {
+            return;
+        }
+        const metadataCompletionRun = isMetadataOnlyCompletion
+            ? completedRuns.find((run) => isMetadataOnlyRunlessCompletion(run))
+            : undefined;
+        const completedEchoRun =
+            !explicitRunId &&
+            envelope.event === "session.message" &&
+            latestMeaningfulCompletion &&
+            hasChatFinal(latestMeaningfulCompletion) &&
+            isMatchingSessionEcho(latestMeaningfulCompletion, envelope)
+                ? latestMeaningfulCompletion
+                : undefined;
         const runId =
             explicitRunId ||
-            (activeRuns.length === 1 ? activeRuns[0]?.runId : undefined) ||
-            "runless";
+            completedEchoRun?.runId ||
+            compatibleActiveRun?.runId ||
+            metadataCompletionRun?.runId ||
+            `runless:${envelope.runtimeSequence}`;
         let snapshot = runs.get(runId);
 
-        if (!snapshot && explicitRunId && activeRuns.length === 1) {
-            const provisional = activeRuns[0];
-            if (provisional && isProvisionalRunId(provisional.runId)) {
+        if (!snapshot && explicitRunId) {
+            const provisionalRuns = activeRuns.filter((run) =>
+                isProvisionalRunId(run.runId)
+            );
+            const provisional =
+                provisionalRuns.length === 1 ? provisionalRuns[0] : undefined;
+            if (provisional) {
                 snapshot = this.#promoteRunEntry(
                     sessionKey,
                     runs,
@@ -672,8 +845,9 @@ export class OpenClawChatBridge {
         const newestCompleted = completed[0];
         const completedToReplay =
             newestCompleted && isMetadataOnlyRunlessCompletion(newestCompleted)
-                ? completed.find((snapshot) => snapshot.runId !== "runless") ||
-                  newestCompleted
+                ? completed.find(
+                      (snapshot) => !isMetadataOnlyRunlessCompletion(snapshot)
+                  ) || newestCompleted
                 : newestCompleted;
         const selected =
             active.length > 0 ? active : completedToReplay ? [completedToReplay] : [];

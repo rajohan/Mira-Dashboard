@@ -114,9 +114,32 @@ describe("OpenClaw chat bridge", () => {
             ]
         );
 
-        expect(event.payload).toMatchObject({ sessionKey: "main" });
+        expect(event.payload).not.toHaveProperty("sessionKey");
         expect(bridge.snapshot(MAIN).events).toEqual([]);
         expect(bridge.snapshot("agent:other:main").events).toEqual([]);
+    });
+
+    it("uses a run association to disambiguate a short provider session alias", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            { sessionKey: MAIN },
+            { runId: "associated-run" }
+        );
+        const event = bridge.recordEvent(
+            "agent",
+            { runId: "associated-run", sessionKey: "main", stream: "thinking" },
+            [
+                { id: "main", key: MAIN },
+                { id: "main", key: "agent:other:main" },
+            ]
+        );
+
+        expect(event.payload).toMatchObject({
+            runId: "associated-run",
+            sessionKey: MAIN,
+        });
+        expect(bridge.snapshot(MAIN).events).toEqual([event]);
     });
 
     it("promotes provisional runs and prefers a concrete final over runless metadata", () => {
@@ -150,6 +173,49 @@ describe("OpenClaw chat bridge", () => {
             runId: "real-run",
             state: "final",
         });
+    });
+
+    it("prefers an unscoped final over later runless terminal metadata", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent("session.ended", { sessionKey: MAIN }, []);
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [
+                expect.objectContaining({
+                    event: "chat",
+                    payload: expect.objectContaining({ message: "done" }),
+                }),
+            ],
+        });
+    });
+
+    it("does not let repeated terminal metadata displace an unscoped final", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            { message: "done", sessionKey: MAIN, state: "final" },
+            []
+        );
+        for (let index = 0; index < 6; index += 1) {
+            bridge.recordEvent("model.completed", { sessionKey: MAIN }, []);
+        }
+
+        expect(bridge.snapshot(MAIN).events).toEqual([
+            expect.objectContaining({
+                event: "chat",
+                payload: expect.objectContaining({ message: "done" }),
+            }),
+        ]);
     });
 
     it("clears replay data after abort, delete and reset acknowledgements", () => {
@@ -286,7 +352,9 @@ describe("OpenClaw chat bridge", () => {
                 }),
             ],
         });
+    });
 
+    it("promotes a completed runless turn without a provider run id", () => {
         const withoutProvider = new OpenClawChatBridge();
         const withoutProviderBoundary = withoutProvider.captureRequestBoundary();
         withoutProvider.recordEvent(
@@ -382,7 +450,7 @@ describe("OpenClaw chat bridge", () => {
         ]);
     });
 
-    it("rewrites runless and active provisional replay payloads on promotion", () => {
+    it("rewrites runless replay payloads on promotion", () => {
         const runlessBridge = new OpenClawChatBridge();
         runlessBridge.recordEvent(
             "agent",
@@ -401,7 +469,9 @@ describe("OpenClaw chat bridge", () => {
         expect(payloads(runlessBridge)).toEqual([
             expect.objectContaining({ runId: "provider-runless" }),
         ]);
+    });
 
+    it("rewrites an active provisional replay when the provider run arrives", () => {
         const activeBridge = new OpenClawChatBridge();
         activeBridge.recordEvent(
             "agent",
@@ -427,7 +497,43 @@ describe("OpenClaw chat bridge", () => {
             "provider-active",
             "provider-active",
         ]);
+    });
 
+    it("promotes a grouped runless stream beside parallel concrete runs", () => {
+        const bridge = new OpenClawChatBridge();
+        for (const runId of ["parallel-a", "parallel-b"]) {
+            bridge.recordEvent(
+                "agent",
+                { runId, sessionKey: MAIN, stream: "thinking" },
+                []
+            );
+        }
+        bridge.recordEvent(
+            "agent",
+            { data: { delta: "first" }, sessionKey: MAIN, stream: "thinking" },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            { data: { delta: "second" }, sessionKey: MAIN, stream: "thinking" },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            { runId: "provider-run", sessionKey: MAIN, stream: "thinking" },
+            []
+        );
+
+        expect(
+            payloads(bridge)
+                .filter(
+                    (payload) => (payload.data as { delta?: unknown } | undefined)?.delta
+                )
+                .map((payload) => payload.runId)
+        ).toEqual(["provider-run", "provider-run"]);
+    });
+
+    it("merges a completed provisional replay into an existing provider run", () => {
         const mergedBridge = new OpenClawChatBridge();
         mergedBridge.recordEvent(
             "chat",
@@ -505,6 +611,148 @@ describe("OpenClaw chat bridge", () => {
             bridge.recordEvent("agent", { runId: "provider-new", stream: "thinking" }, [])
                 .payload
         ).toMatchObject({ runId: "provider-new", sessionKey: MAIN });
+    });
+
+    it("keeps a new unscoped turn separate from an older runless completion", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "old answer",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        const requestBoundary = bridge.captureRequestBoundary();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "new reasoning" },
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-new",
+                message: "new question",
+                sessionKey: MAIN,
+            },
+            { runId: "provider-new" },
+            requestBoundary
+        );
+
+        expect(payloads(bridge)).toEqual([
+            expect.objectContaining({
+                data: { delta: "new reasoning" },
+                runId: "provider-new",
+            }),
+        ]);
+    });
+
+    it("retains an unscoped assistant session echo with its completed final", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: {
+                    content: [{ text: "done", type: "text" }],
+                    role: "assistant",
+                },
+                runId: "completed-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.message",
+            {
+                content: "done",
+                role: "assistant",
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [
+                expect.objectContaining({ event: "chat" }),
+                expect.objectContaining({ event: "session.message" }),
+            ],
+        });
+    });
+
+    it("does not attach a session message to an older matching final", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "OK",
+                runId: "older-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { error: "new failure", phase: "error" },
+                runId: "newer-run",
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.message",
+            { content: "OK", role: "assistant", sessionKey: MAIN },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: false,
+            events: [expect.objectContaining({ event: "session.message" })],
+        });
+    });
+
+    it("keeps a late session echo out of an active follow-up", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "OK",
+                runId: "completed-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "new work" },
+                runId: "active-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.message",
+            { content: "OK", role: "assistant", sessionKey: MAIN },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN).events.map((event) => event.event)).toEqual([
+            "agent",
+        ]);
     });
 
     it("does not promote stale active provisional work into a later send", () => {

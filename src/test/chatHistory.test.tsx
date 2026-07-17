@@ -38,6 +38,53 @@ function transportWithHistory(history: ChatTransport["history"]): ChatTransport 
 }
 
 describe("chat history controller", () => {
+    it("preserves an optimistic send while the first history request is pending", async () => {
+        const initialLoad = Promise.withResolvers<ChatHistoryMessage[]>();
+        const history = jest
+            .fn<ChatTransport["history"]>()
+            .mockImplementationOnce(() => initialLoad.promise);
+        const selectedSessionKeyReference = {
+            current: SESSION,
+        } as MutableRefObject<string>;
+        const stickToBottomReference = {
+            current: true,
+        } as MutableRefObject<boolean>;
+        const { result } = renderHook(() =>
+            useChatHistory({
+                isConnected: true,
+                onError: jest.fn(),
+                selectedSessionKey: SESSION,
+                selectedSessionKeyReference,
+                setIsAtBottom: jest.fn(),
+                shouldStickToBottomReference: stickToBottomReference,
+                transport: transportWithHistory(history),
+            })
+        );
+
+        await waitFor(() => expect(history).toHaveBeenCalledTimes(1));
+        act(() =>
+            result.current.setMessages([
+                {
+                    content: "new prompt",
+                    local: true,
+                    role: "user",
+                    text: "new prompt",
+                    timestamp: "2026-07-17T01:00:00.000Z",
+                },
+            ])
+        );
+
+        await act(async () => {
+            initialLoad.resolve([message("older answer")]);
+            await initialLoad.promise;
+        });
+
+        expect(result.current.messages.map((entry) => entry.text)).toEqual([
+            "older answer",
+            "new prompt",
+        ]);
+    });
+
     it("shows a background refresh that wins the initial-load race", async () => {
         const initialLoad = Promise.withResolvers<ChatHistoryMessage[]>();
         const backgroundRefresh = Promise.withResolvers<ChatHistoryMessage[]>();

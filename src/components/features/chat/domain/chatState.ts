@@ -228,7 +228,15 @@ function resolveRun(
         run = runKey ? session.runs[runKey] : undefined;
     }
 
-    if (!run && !event.runId && event.kind === "finish") {
+    if (
+        !run &&
+        !event.runId &&
+        event.kind === "finish" &&
+        event.outcome === "completed" &&
+        !event.authoritative &&
+        !event.error &&
+        !event.message
+    ) {
         const completedEntry = latestCompletedRunEntry(session);
         if (completedEntry) {
             [runKey, run] = completedEntry;

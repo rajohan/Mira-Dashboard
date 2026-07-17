@@ -681,6 +681,69 @@ describe("chat runtime state", () => {
         });
     });
 
+    it("starts a new run for an unscoped terminal failure after completion", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "finish",
+                message: {
+                    content: "old answer",
+                    role: "assistant",
+                    text: "old answer",
+                },
+                outcome: "completed",
+                runId: "old-run",
+            }),
+            event(32, {
+                error: "new failure",
+                kind: "finish",
+                outcome: "error",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["old-run"]).toMatchObject({
+            assistant: { text: "old answer" },
+            lastSequence: 16,
+            phase: "completed",
+        });
+        expect(state.sessions[SESSION]?.runs["runtime-runless-32"]).toMatchObject({
+            error: "new failure",
+            phase: "error",
+        });
+    });
+
+    it("starts a new run for an unscoped final message after completion", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "finish",
+                message: {
+                    content: "old answer",
+                    role: "assistant",
+                    text: "old answer",
+                },
+                outcome: "completed",
+                runId: "old-run",
+            }),
+            event(32, {
+                kind: "finish",
+                message: {
+                    content: "new answer",
+                    role: "assistant",
+                    text: "new answer",
+                },
+                outcome: "completed",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["old-run"]).toMatchObject({
+            assistant: { text: "old answer" },
+            lastSequence: 16,
+        });
+        expect(state.sessions[SESSION]?.runs["runtime-runless-32"]).toMatchObject({
+            assistant: { text: "new answer" },
+            phase: "completed",
+        });
+    });
+
     it("keeps a matching runless session echo on the completed run", () => {
         const completed = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

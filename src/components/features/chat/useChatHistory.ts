@@ -46,7 +46,7 @@ export function useChatHistory({
 }: ChatHistoryOptions) {
     const [messages, setMessages] = useState<ChatHistoryMessage[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-    const loadedSessionReference = useRef("");
+    const messageSessionReference = useRef("");
     const liveRefreshTimerReference = useRef<ReturnType<typeof setTimeout> | undefined>(
         undefined
     );
@@ -77,11 +77,8 @@ export function useChatHistory({
         sessionKey: string,
         nextMessages: ChatHistoryMessage[]
     ) => {
-        const isFirstLoad = loadedSessionReference.current !== sessionKey;
-        loadedSessionReference.current = sessionKey;
-        setMessages((previous) =>
-            isFirstLoad ? nextMessages : nextRefreshedChatMessages(previous, nextMessages)
-        );
+        messageSessionReference.current = sessionKey;
+        setMessages((previous) => nextRefreshedChatMessages(previous, nextMessages));
     };
 
     const refreshSoon = (sessionKey: string, delayMs = 450) => {
@@ -124,13 +121,15 @@ export function useChatHistory({
     }, [isConnected]);
 
     useEffect(() => {
-        const isNewSession = loadedSessionReference.current !== selectedSessionKey;
+        const isNewSession = messageSessionReference.current !== selectedSessionKey;
         if (isNewSession) {
+            messageSessionReference.current = selectedSessionKey;
             shouldStickToBottomReference.current = true;
             setIsAtBottom(true);
+            setMessages([]);
         }
         if (!selectedSessionKey) {
-            loadedSessionReference.current = "";
+            messageSessionReference.current = "";
             setMessages([]);
             setIsLoadingHistory(false);
             return;
@@ -156,12 +155,8 @@ export function useChatHistory({
                 ) {
                     return;
                 }
-                const isFirstLoad = loadedSessionReference.current !== selectedSessionKey;
-                loadedSessionReference.current = selectedSessionKey;
                 setMessages((previous) =>
-                    isFirstLoad
-                        ? nextMessages
-                        : mergeWithRecentOptimisticMessages(previous, nextMessages)
+                    mergeWithRecentOptimisticMessages(previous, nextMessages)
                 );
                 if (isNewSession) {
                     shouldStickToBottomReference.current = true;
@@ -298,7 +293,7 @@ export function useChatHistory({
     );
 
     const visibleMessages =
-        loadedSessionReference.current === selectedSessionKey ? messages : [];
+        messageSessionReference.current === selectedSessionKey ? messages : [];
     return {
         isLoadingHistory,
         messages: visibleMessages,
