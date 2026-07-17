@@ -45,7 +45,7 @@ describe("OpenClaw adapter variants", () => {
                 20
             )
         );
-        const ignoredUser = adapter.event(
+        const userMessage = adapter.event(
             envelope(
                 "session.message",
                 { message: { content: "prompt", role: "user" } },
@@ -59,10 +59,10 @@ describe("OpenClaw adapter variants", () => {
                 22
             )
         );
-        const ignoredTopLevelUser = adapter.event(
+        const topLevelUser = adapter.event(
             envelope("session.message", { content: "top-level prompt", role: "user" }, 23)
         );
-        const ignoredNestedTopLevelUser = adapter.event(
+        const nestedTopLevelUser = adapter.event(
             envelope(
                 "session.message",
                 { message: "nested top-level prompt", role: "user" },
@@ -106,14 +106,23 @@ describe("OpenClaw adapter variants", () => {
             kind: "assistant",
             source: "session",
         });
-        expect(ignoredUser).toEqual([]);
+        expect(userMessage[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "prompt" },
+        });
         expect(topLevelAssistant[0]).toMatchObject({
             kind: "assistant",
             message: { role: "assistant", text: "top-level preamble" },
             source: "session",
         });
-        expect(ignoredTopLevelUser).toEqual([]);
-        expect(ignoredNestedTopLevelUser).toEqual([]);
+        expect(topLevelUser[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "top-level prompt" },
+        });
+        expect(nestedTopLevelUser[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "nested top-level prompt" },
+        });
         expect(nestedTopLevelAssistant[0]).toMatchObject({
             kind: "assistant",
             message: { role: "assistant", text: "nested top-level answer" },

@@ -223,6 +223,52 @@ describe("chat runtime controller", () => {
         ).toBe("continued");
     });
 
+    it("rebuilds from a persisted completed snapshot after a backend restart", async () => {
+        const first = fakeTransport(
+            Promise.resolve({
+                completed: false,
+                events: [assistant(SELECTED, 16, "working", "replace")],
+                runtimeGeneration: "backend-1",
+                throughSequence: 16,
+            }),
+            1
+        );
+        const restartSnapshot = deferred<ChatRuntimeSnapshot>();
+        const second = fakeTransport(restartSnapshot.promise, 2);
+        const { result, rerender } = renderHook(
+            ({ transport }) =>
+                useChatRuntime({ selectedSessionKey: SELECTED, transport }),
+            { initialProps: { transport: first.transport } }
+        );
+
+        await waitFor(() =>
+            expect(
+                result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
+            ).toBe("working")
+        );
+        rerender({ transport: second.transport });
+        await act(async () => {
+            restartSnapshot.resolve({
+                completed: true,
+                events: [
+                    assistant(SELECTED, 16, "working", "replace"),
+                    finish(SELECTED, 32),
+                ],
+                runtimeGeneration: "backend-2",
+                throughSequence: 32,
+            });
+            await restartSnapshot.promise;
+        });
+
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "run-1",
+        ]);
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]).toMatchObject({
+            assistant: { text: "working" },
+            phase: "completed",
+        });
+    });
+
     it("rebuilds replayed deltas when reconnecting to the same backend", async () => {
         const first = fakeTransport(
             Promise.resolve({
@@ -362,6 +408,32 @@ describe("chat runtime controller", () => {
         });
     });
 
+    it("does not restore a stale acknowledged run after a completed snapshot", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result, rerender } = renderHook(
+            ({ selectedSessionKey }) =>
+                useChatRuntime({ selectedSessionKey, transport: fake.transport }),
+            { initialProps: { selectedSessionKey: "" } }
+        );
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-chat-stale");
+            result.current.acknowledgeRun(
+                SELECTED,
+                "dashboard-chat-stale",
+                "provider-stale"
+            );
+        });
+        rerender({ selectedSessionKey: SELECTED });
+        await act(async () => {
+            snapshot.resolve({ completed: true, events: [], throughSequence: 16 });
+            await snapshot.promise;
+        });
+
+        expect(result.current.state.sessions[SELECTED]).toBeUndefined();
+    });
+
     it("clears a completed optimistic run with an authoritative empty snapshot", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
@@ -387,7 +459,7 @@ describe("chat runtime controller", () => {
         expect(result.current.state.sessions[SELECTED]).toBeUndefined();
     });
 
-    it("preserves a local run started while snapshot recovery is in flight", async () => {
+    it("preserves a new local run started during a completed snapshot", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
         const { result } = renderHook(() =>
@@ -396,7 +468,7 @@ describe("chat runtime controller", () => {
 
         act(() => result.current.beginRun(SELECTED, "dashboard-chat-new"));
         await act(async () => {
-            snapshot.resolve({ completed: false, events: [], throughSequence: 0 });
+            snapshot.resolve({ completed: true, events: [], throughSequence: 0 });
             await snapshot.promise;
         });
 
@@ -677,7 +749,7 @@ describe("chat runtime controller", () => {
         expect(onError).toHaveBeenCalledWith("tool execution failed: missing diagnostic");
     });
 
-    it("expires an old completed snapshot from its original finish time", async () => {
+    it("retains an old completed snapshot until a new run begins", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
         const { result } = renderHook(() =>
@@ -694,14 +766,18 @@ describe("chat runtime controller", () => {
             await snapshot.promise;
         });
 
-        await waitFor(() =>
-            expect(
-                Object.keys(result.current.state.sessions[SELECTED]?.runs || {})
-            ).toHaveLength(0)
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]?.phase).toBe(
+            "completed"
         );
+
+        act(() => result.current.beginRun(SELECTED, "dashboard-chat-next"));
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]).toBeUndefined();
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["dashboard-chat-next"]?.phase
+        ).toBe("active");
     });
 
-    it("expires an unscoped finish after a delayed event advances the run", async () => {
+    it("retains an unscoped finish after a delayed event advances the run", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
         const { result } = renderHook(() =>
@@ -725,11 +801,10 @@ describe("chat runtime controller", () => {
             await snapshot.promise;
         });
 
-        await waitFor(() =>
-            expect(
-                Object.keys(result.current.state.sessions[SELECTED]?.runs || {})
-            ).toHaveLength(0)
-        );
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]).toMatchObject({
+            assistant: { text: "partiallate" },
+            phase: "completed",
+        });
     });
 
     it("processes live events immediately when no session is selected", () => {

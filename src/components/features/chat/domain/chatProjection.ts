@@ -6,6 +6,7 @@ import {
 } from "../chatTypes";
 import {
     dedupeMessages,
+    insertMessagesByTimestamp,
     isRecoveredAssistantText,
     mergeChatMessageDetails,
     messageDeleteKey,
@@ -20,9 +21,9 @@ import type {
 import { findChatSessionRuntimeState } from "./chatState";
 
 const RUN_START_USER_SKEW_MS = 1000;
+const RUNTIME_USER_ECHO_WINDOW_MS = 5000;
 
 export interface ChatProjection {
-    activityFingerprint: string;
     activeRuns: ChatRunState[];
     isCompacting: boolean;
     rows: ChatRow[];
@@ -102,6 +103,15 @@ function stableDiagnosticRowKey(message: ChatHistoryMessage): string | undefined
         return `diagnostic-${message.runId}-tool-result-${message.toolResult.id}`;
     }
     return undefined;
+}
+
+function projectedMessageRowKey(message: ChatHistoryMessage): string {
+    return (
+        stableDiagnosticRowKey(message) ||
+        (message.local === true && message.runId
+            ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
+            : messageDeleteKey(message))
+    );
 }
 
 function isMatchedToAnotherRun(
@@ -244,36 +254,34 @@ function canonicalFinalIndex(
 }
 
 function toolSignatures(message: ChatHistoryMessage): string[] {
-    const calls = (message.toolCalls || []).map((call) =>
+    const signatures: string[] = [];
+    const toolCalls = message.toolCalls || [];
+    const resultSignature = (result: NonNullable<ChatHistoryMessage["toolResult"]>) =>
         JSON.stringify({
-            arguments: call.arguments ?? undefined,
-            id: call.id || "",
-            name: call.name,
-            result: call.toolResult
-                ? {
-                      content: call.toolResult.content,
-                      error: call.toolResult.isError || false,
-                      id: call.toolResult.id || "",
-                      images: call.toolResult.images || [],
-                      name: call.toolResult.name || "",
-                  }
-                : undefined,
-        })
-    );
-    if (message.toolResult) {
-        calls.push(
+            result: {
+                content: result.content,
+                error: result.isError || false,
+                id: result.id || "",
+                images: result.images || [],
+                name: result.name || "",
+            },
+        });
+    for (const call of toolCalls) {
+        signatures.push(
             JSON.stringify({
-                result: {
-                    content: message.toolResult.content,
-                    error: message.toolResult.isError || false,
-                    id: message.toolResult.id || "",
-                    images: message.toolResult.images || [],
-                    name: message.toolResult.name || "",
-                },
+                arguments: call.arguments ?? undefined,
+                id: call.id || "",
+                name: call.name,
             })
         );
+        if (call.toolResult) {
+            signatures.push(resultSignature(call.toolResult));
+        }
     }
-    return calls;
+    if (message.toolResult) {
+        signatures.push(resultSignature(message.toolResult));
+    }
+    return signatures;
 }
 
 function thinkingSignatures(message: ChatHistoryMessage): string[] {
@@ -338,8 +346,89 @@ function transientMessage(
     };
 }
 
-function diagnosticRank(message: ChatHistoryMessage): number {
-    return message.toolCalls?.length || message.toolResult ? 0 : 1;
+function isMatchingRuntimeUser(
+    candidate: ChatHistoryMessage,
+    runtimeMessage: ChatHistoryMessage,
+    run: ChatRunState
+): boolean {
+    if (
+        !isUserMessage(candidate) ||
+        messageIdentity(candidate) !== messageIdentity(runtimeMessage) ||
+        (candidate.runId &&
+            candidate.runId !== run.runId &&
+            !run.aliases.includes(candidate.runId))
+    ) {
+        return false;
+    }
+    const candidateTimestamp = messageTimestamp(candidate);
+    const runtimeTimestamp = messageTimestamp(runtimeMessage);
+    return (
+        candidateTimestamp === undefined ||
+        runtimeTimestamp === undefined ||
+        Math.abs(candidateTimestamp - runtimeTimestamp) <= RUNTIME_USER_ECHO_WINDOW_MS
+    );
+}
+
+function runtimeUserMatchIndex(
+    messages: ChatHistoryMessage[],
+    runtimeMessage: ChatHistoryMessage,
+    run: ChatRunState,
+    claimedCandidates: ReadonlySet<ChatHistoryMessage>
+): number {
+    const runtimeTimestamp = messageTimestamp(runtimeMessage);
+    let bestDistance = Infinity;
+    let bestIndex = -1;
+    for (const [index, candidate] of messages.entries()) {
+        if (
+            claimedCandidates.has(candidate) ||
+            !isMatchingRuntimeUser(candidate, runtimeMessage, run)
+        ) {
+            continue;
+        }
+        const candidateTimestamp = messageTimestamp(candidate);
+        const distance =
+            candidateTimestamp === undefined || runtimeTimestamp === undefined
+                ? 0
+                : Math.abs(candidateTimestamp - runtimeTimestamp);
+        if (distance < bestDistance || (distance === bestDistance && index > bestIndex)) {
+            bestDistance = distance;
+            bestIndex = index;
+        }
+    }
+    return bestIndex;
+}
+
+function mergeAllRuntimeUserMessages(
+    messages: ChatHistoryMessage[],
+    runs: ChatRunState[]
+): ChatHistoryMessage[] {
+    const next = [...messages];
+    const recoveredCandidates = new Set<ChatHistoryMessage>();
+    const missingMessages: ChatHistoryMessage[] = [];
+    const runtimeMessages = runs
+        .flatMap((run) => run.userMessages.map((entry) => ({ entry, run })))
+        .toReversed();
+    for (const { entry, run } of runtimeMessages) {
+        const runtimeMessage = transientMessage(entry.message, run, entry.key);
+        const recoveredIndex = runtimeUserMatchIndex(
+            next,
+            runtimeMessage,
+            run,
+            recoveredCandidates
+        );
+        if (recoveredIndex === -1) {
+            missingMessages.push(runtimeMessage);
+            continue;
+        }
+        const recovered = next[recoveredIndex]!;
+        const enriched = {
+            ...recovered,
+            runId: recovered.runId || run.runId,
+        };
+        next[recoveredIndex] = enriched;
+        recoveredCandidates.add(enriched);
+    }
+    return insertMessagesByTimestamp(next, missingMessages.toReversed());
 }
 
 /** Reconciles history with the current provider-independent runtime turn. */
@@ -347,8 +436,8 @@ export function reconcileChatMessages(
     history: ChatHistoryMessage[],
     session?: ChatSessionRuntimeState
 ): ChatHistoryMessage[] {
-    const messages = [...history];
     const runs = orderedRuns(session);
+    const messages = mergeAllRuntimeUserMessages(history, runs);
     for (const run of runs) {
         for (const [index, message] of messages.entries()) {
             if (
@@ -361,10 +450,6 @@ export function reconcileChatMessages(
         }
         const segment = responseSegment(messages, run, runs);
         const diagnostics = run.diagnostics
-            .toSorted(
-                (left, right) =>
-                    diagnosticRank(left.message) - diagnosticRank(right.message)
-            )
             .map((entry) => transientMessage(entry.message, run, entry.key))
             .filter((message) => !isDiagnosticRecovered(message, messages, segment, run));
         const finalIndex = canonicalFinalIndex(messages, run, segment);
@@ -405,21 +490,14 @@ function visibleAssistantRunIds(messages: ChatHistoryMessage[]): Set<string> {
 
 function statusRow(
     runs: ChatRunState[],
-    visibleRunIdSet: Set<string>,
-    messages: ChatHistoryMessage[]
+    visibleRunIdSet: Set<string>
 ): ChatRow | undefined {
     const run = runs
-        .filter((candidate) => candidate.phase === "active")
         .toSorted((left, right) => right.lastSequence - left.lastSequence)
         .find(
             (candidate) =>
                 !visibleRunIdSet.has(candidate.runId) &&
-                candidate.aliases.every((alias) => !visibleRunIdSet.has(alias)) &&
-                canonicalFinalIndex(
-                    messages,
-                    candidate,
-                    responseSegment(messages, candidate, runs)
-                ) === -1
+                candidate.aliases.every((alias) => !visibleRunIdSet.has(alias))
         );
     if (!run) {
         return undefined;
@@ -443,41 +521,35 @@ export function projectChat(
 ): ChatProjection {
     const session = findChatSessionRuntimeState(runtime, sessionKey);
     const runs = orderedRuns(session);
+    const boundaryMessages = mergeAllRuntimeUserMessages(history, runs);
     const reconciled = reconcileChatMessages(history, session);
     const presented = presentChatMessages(
         reconciled,
         visibility,
         shouldKeepThinkingAfterFinal
-    ).filter((message) => !deletedMessageKeys.has(messageDeleteKey(message)));
+    ).filter((message) => !deletedMessageKeys.has(projectedMessageRowKey(message)));
     const rows: ChatRow[] = presented.map((message) => {
-        const diagnosticKey = stableDiagnosticRowKey(message);
         return {
-            key:
-                diagnosticKey ||
-                (message.local === true && message.runId
-                    ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
-                    : messageDeleteKey(message)),
+            key: projectedMessageRowKey(message),
             kind: message.local === true && message.runId ? "stream" : "message",
             message,
         };
     });
-    const typing = statusRow(runs, visibleAssistantRunIds(presented), history);
+    const activeRuns = runs.filter(
+        (run) =>
+            run.phase === "active" &&
+            canonicalFinalIndex(
+                boundaryMessages,
+                run,
+                responseSegment(boundaryMessages, run, runs)
+            ) === -1
+    );
+    const typing = statusRow(activeRuns, visibleAssistantRunIds(presented));
     if (typing) {
         rows.push(typing);
     }
 
-    const activeRuns = runs.filter((run) => run.phase === "active");
     return {
-        activityFingerprint: runs
-            .map((run) =>
-                [
-                    run.runId,
-                    run.lastSequence,
-                    run.statusText || "",
-                    run.assistant?.text || "",
-                ].join(":")
-            )
-            .join("|"),
         activeRuns,
         isCompacting: activeRuns.some(
             (run) =>

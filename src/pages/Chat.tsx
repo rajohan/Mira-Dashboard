@@ -172,10 +172,8 @@ export function Chat() {
         deletedMessageKeys
     );
     const chatRows = projection.rows;
-    const selectedStreamsText = projection.activityFingerprint;
     const scroll = useChatScroll(
         chatRows,
-        selectedStreamsText,
         selectedSessionKey,
         setIsAtBottom,
         shouldStickToBottomReference

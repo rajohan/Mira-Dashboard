@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import {
     acknowledgeChatRun,
     addOptimisticChatRun,
-    type ChatRunState,
     type ChatRuntimeEvent,
     type ChatRuntimeState,
     clearChatRun,
     clearChatSessionRuntime,
+    clearCompletedChatRuns,
     createChatRuntimeState,
     findChatSessionRuntimeState,
     isProvisionalChatRunId,
@@ -16,34 +16,22 @@ import {
 } from "./domain/chatState";
 import type { ChatTransport } from "./transport/chatTransport";
 
-const COMPLETED_RUN_RETENTION_MS = 15 * 60_000;
-const MAX_COMPLETION_TIMERS = 500;
+const MAX_HANDLED_FINISH_SEQUENCES = 500;
 
 function isLocallyOptimisticRunId(runId: string): boolean {
     return runId.startsWith("dashboard-chat-") || runId.startsWith("dashboard-compact-");
 }
 
-function isRunFinishedAtSequence(run: ChatRunState, sequence: number): boolean {
-    return (
-        run.phase !== "active" &&
-        (run.terminalSequence === sequence || run.lastSequence === sequence)
-    );
-}
-
-function completedRunRetentionDelay(timestamp: string): number {
-    const completedAt = Date.parse(timestamp);
-    if (Number.isNaN(completedAt)) {
-        return COMPLETED_RUN_RETENTION_MS;
-    }
-    return Math.min(
-        COMPLETED_RUN_RETENTION_MS,
-        Math.max(0, COMPLETED_RUN_RETENTION_MS - (Date.now() - completedAt))
-    );
-}
-
 interface SnapshotGate {
     events: ChatRuntimeEvent[];
-    optimisticRuns: Map<string, { operation?: "compact"; providerRunId?: string }>;
+    optimisticRuns: Map<
+        string,
+        {
+            observedAfterSnapshotRequest: boolean;
+            operation?: "compact";
+            providerRunId?: string;
+        }
+    >;
     reconnecting: boolean;
     sessionKey: string;
     token: number;
@@ -89,7 +77,12 @@ function carryActiveRunsToGeneration(
                     if (run.phase !== "active") {
                         return [];
                     }
-                    const retained = { ...run, lastSequence: -1 };
+                    const retained = {
+                        ...run,
+                        diagnostics: [...run.diagnostics],
+                        lastSequence: -1,
+                        userMessages: [...run.userMessages],
+                    };
                     delete retained.terminalSequence;
                     return [[runKey, retained]];
                 })
@@ -141,9 +134,6 @@ export function useChatRuntime({
     const selectedSessionReference = useRef(selectedSessionKey);
     const callbacksReference = useRef({ onError, onSettled });
     const transportReference = useRef(transport);
-    const completionTimersReference = useRef(
-        new Map<string, { sequence: number; timer: ReturnType<typeof setTimeout> }>()
-    );
     const handledFinishSequencesReference = useRef(new Set<number>());
 
     selectedSessionReference.current = selectedSessionKey;
@@ -166,25 +156,10 @@ export function useChatRuntime({
         }
         reconnectGenerationReference.current = transport.connectionGeneration;
         handledFinishSequencesReference.current.clear();
-        for (const entry of completionTimersReference.current.values()) {
-            clearTimeout(entry.timer);
-        }
-        completionTimersReference.current.clear();
         updateState((current) =>
             carryActiveRunsToGeneration(current, transport.connectionGeneration)
         );
     }, [transport.connectionGeneration]);
-
-    const clearCompletionTimers = (shouldClear: (key: string) => boolean) => {
-        for (const [key, entry] of completionTimersReference.current) {
-            if (!shouldClear(key)) {
-                continue;
-            }
-            clearTimeout(entry.timer);
-            completionTimersReference.current.delete(key);
-            handledFinishSequencesReference.current.delete(entry.sequence);
-        }
-    };
 
     const handleFinishSideEffects = (
         event: FinishEvent,
@@ -194,46 +169,28 @@ export function useChatRuntime({
             return;
         }
         handledFinishSequencesReference.current.add(event.sequence);
+        while (
+            handledFinishSequencesReference.current.size > MAX_HANDLED_FINISH_SEQUENCES
+        ) {
+            const oldestSequence = handledFinishSequencesReference.current
+                .values()
+                .next().value;
+            if (oldestSequence === undefined) {
+                break;
+            }
+            handledFinishSequencesReference.current.delete(oldestSequence);
+        }
 
         const runtimeSession = findChatSessionRuntimeState(
             stateAfterEvent,
             event.sessionKey
         );
-        const completedSessionKey = runtimeSession?.sessionKey || event.sessionKey;
-        const completedRunId = event.runId;
-        const key = `${completedSessionKey}\u{0}${completedRunId || `sequence:${event.sequence}`}`;
-        const previous = completionTimersReference.current.get(key);
-        if (previous !== undefined) {
-            clearTimeout(previous.timer);
-            handledFinishSequencesReference.current.delete(previous.sequence);
-            completionTimersReference.current.delete(key);
-        }
-        const timer = setTimeout(() => {
-            completionTimersReference.current.delete(key);
-            handledFinishSequencesReference.current.delete(event.sequence);
-            updateState((current) => {
-                if (completedRunId) {
-                    return clearChatRun(current, completedSessionKey, completedRunId);
-                }
-                const run = Object.values(
-                    findChatSessionRuntimeState(current, completedSessionKey)?.runs || {}
-                ).find((candidate) => isRunFinishedAtSequence(candidate, event.sequence));
-                return run
-                    ? clearChatRun(current, completedSessionKey, run.runId)
-                    : current;
-            });
-        }, completedRunRetentionDelay(event.timestamp));
-        completionTimersReference.current.set(key, { sequence: event.sequence, timer });
-        while (completionTimersReference.current.size > MAX_COMPLETION_TIMERS) {
-            const oldestKey = completionTimersReference.current.keys().next().value;
-            if (oldestKey === undefined) {
-                break;
-            }
-            clearCompletionTimers((candidate) => candidate === oldestKey);
-        }
         if (isSameChatSession(event.sessionKey, selectedSessionReference.current)) {
-            const completedRun = Object.values(runtimeSession?.runs || {}).find((run) =>
-                isRunFinishedAtSequence(run, event.sequence)
+            const completedRun = Object.values(runtimeSession?.runs || {}).find(
+                (run) =>
+                    run.phase !== "active" &&
+                    (run.terminalSequence === event.sequence ||
+                        run.lastSequence === event.sequence)
             );
             const { error: visibleError } = completedRun || event;
             if (visibleError) {
@@ -289,6 +246,7 @@ export function useChatRuntime({
             );
             for (const optimisticRunId of optimisticAliases) {
                 optimisticRuns.set(optimisticRunId, {
+                    observedAfterSnapshotRequest: false,
                     operation: run.operation,
                     providerRunId,
                 });
@@ -330,20 +288,13 @@ export function useChatRuntime({
                     snapshot.runtimeGeneration !== previousRuntimeGeneration
                 );
                 const shouldPreserveActiveRuns =
-                    isBackendRestart ||
-                    (gate.reconnecting &&
-                        !snapshot.runtimeGeneration &&
-                        snapshot.events.length === 0);
+                    !snapshot.completed &&
+                    gate.reconnecting &&
+                    snapshot.events.length === 0 &&
+                    (isBackendRestart || !snapshot.runtimeGeneration);
                 if (snapshot.runtimeGeneration) {
                     runtimeGenerationReference.current = snapshot.runtimeGeneration;
                 }
-                const retainedSessionKey =
-                    findChatSessionRuntimeState(
-                        stateReference.current,
-                        selectedSessionKey
-                    )?.sessionKey || selectedSessionKey;
-                const sessionPrefix = `${retainedSessionKey}\u{0}`;
-                clearCompletionTimers((key) => key.startsWith(sessionPrefix));
                 const replayedSequences = new Set(
                     snapshot.events.map((event) => event.sequence)
                 );
@@ -431,6 +382,9 @@ export function useChatRuntime({
                         );
                         continue;
                     }
+                    if (snapshot.completed && !pendingRun.observedAfterSnapshotRequest) {
+                        continue;
+                    }
                     next = addOptimisticChatRun(
                         next,
                         selectedSessionKey,
@@ -488,24 +442,25 @@ export function useChatRuntime({
         };
     }, [selectedSessionKey, transport.connectionGeneration, transport.isConnected]);
 
-    useEffect(
-        () => () => {
-            for (const entry of completionTimersReference.current.values()) {
-                clearTimeout(entry.timer);
-            }
-            completionTimersReference.current.clear();
-            handledFinishSequencesReference.current.clear();
-        },
-        []
-    );
+    useEffect(() => () => handledFinishSequencesReference.current.clear(), []);
 
     const beginRun = (sessionKey: string, runId: string, operation?: "compact") => {
         const gate = gateReference.current;
         if (gate && isSameChatSession(gate.sessionKey, sessionKey)) {
-            gate.optimisticRuns.set(runId, { operation });
+            const pendingRun = gate.optimisticRuns.get(runId);
+            gate.optimisticRuns.set(runId, {
+                ...pendingRun,
+                observedAfterSnapshotRequest: true,
+                operation: operation ?? pendingRun?.operation,
+            });
         }
         updateState((current) =>
-            addOptimisticChatRun(current, sessionKey, runId, operation)
+            addOptimisticChatRun(
+                clearCompletedChatRuns(current, sessionKey),
+                sessionKey,
+                runId,
+                operation
+            )
         );
     };
     const acknowledgeRun = (
@@ -519,6 +474,7 @@ export function useChatRuntime({
                 ? gate.optimisticRuns.get(optimisticRunId)
                 : undefined;
         if (pendingRun) {
+            pendingRun.observedAfterSnapshotRequest = true;
             pendingRun.providerRunId = providerRunId;
         }
         updateState((current) =>
@@ -534,11 +490,6 @@ export function useChatRuntime({
                 }
             }
         }
-        const canonicalSessionKey =
-            findChatSessionRuntimeState(stateReference.current, sessionKey)?.sessionKey ||
-            sessionKey;
-        const completionKey = `${canonicalSessionKey}\u{0}${runId}`;
-        clearCompletionTimers((key) => key === completionKey);
         updateState((current) => clearChatRun(current, sessionKey, runId));
     };
     const clearSession = (sessionKey: string) => {
@@ -547,11 +498,6 @@ export function useChatRuntime({
             // the runtime state that this explicit clear just removed.
             gateReference.current = undefined;
         }
-        const canonicalSessionKey =
-            findChatSessionRuntimeState(stateReference.current, sessionKey)?.sessionKey ||
-            sessionKey;
-        const sessionPrefix = `${canonicalSessionKey}\u{0}`;
-        clearCompletionTimers((key) => key.startsWith(sessionPrefix));
         updateState((current) => clearChatSessionRuntime(current, sessionKey));
     };
 

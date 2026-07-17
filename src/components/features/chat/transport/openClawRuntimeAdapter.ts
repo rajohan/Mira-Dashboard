@@ -339,15 +339,26 @@ function sessionMessageDrafts(
           }
         : (payload.message ?? payload.content ?? payload.deltaText ?? payload.text);
     const message = normalizeAssistant(rawMessage, common.runId);
-    return message.role.toLowerCase() === "assistant"
-        ? [
-              {
-                  ...common,
-                  kind: "assistant",
-                  message: { ...message, timestamp: common.timestamp },
-                  mode: "merge",
-                  source: "session",
-              },
-          ]
-        : [];
+    const role = message.role.toLowerCase();
+    if (role === "assistant") {
+        return [
+            {
+                ...common,
+                kind: "assistant",
+                message: { ...message, timestamp: common.timestamp },
+                mode: "merge",
+                source: "session",
+            },
+        ];
+    }
+    if (role === "user") {
+        return [
+            {
+                ...common,
+                kind: "user",
+                message: { ...message, timestamp: common.timestamp },
+            },
+        ];
+    }
+    return [];
 }

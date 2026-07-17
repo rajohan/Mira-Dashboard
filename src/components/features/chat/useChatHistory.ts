@@ -1,6 +1,6 @@
 import {
     type Dispatch,
-    type MutableRefObject,
+    type RefObject,
     type SetStateAction,
     useEffect,
     useRef,
@@ -26,10 +26,10 @@ interface ChatHistoryOptions {
     isConnected: boolean;
     onError: Dispatch<SetStateAction<string | undefined>>;
     selectedSessionKey: string;
-    selectedSessionKeyReference: MutableRefObject<string>;
+    selectedSessionKeyReference: RefObject<string>;
     selectedSessionUpdatedAt?: number;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
-    shouldStickToBottomReference: MutableRefObject<boolean>;
+    shouldStickToBottomReference: RefObject<boolean>;
     transport: ChatTransport;
 }
 

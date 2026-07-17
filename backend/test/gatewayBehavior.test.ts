@@ -1205,12 +1205,26 @@ describe("gateway behavior", () => {
                         (raw) =>
                             JSON.parse(raw) as {
                                 id?: string;
-                                payload?: { events?: unknown[] };
+                                payload?: {
+                                    completed?: boolean;
+                                    events?: Array<{ payload?: unknown }>;
+                                };
                             }
                     )
                     .find((message) => message.id === "runtime-snapshot-after-close")
-                    ?.payload?.events
-            ).toEqual([]);
+                    ?.payload
+            ).toMatchObject({
+                completed: true,
+                events: [
+                    {
+                        payload: {
+                            runId: "oversized-run",
+                            sessionKey: "agent:oversized:main",
+                            state: "final",
+                        },
+                    },
+                ],
+            });
         } finally {
             errorSpy.mockRestore();
             warnSpy.mockRestore();

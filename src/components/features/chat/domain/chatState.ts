@@ -35,6 +35,7 @@ export interface ChatRunState {
     terminalAt?: string;
     terminalSequence?: number;
     updatedAt: string;
+    userMessages: ChatDiagnosticEntry[];
 }
 
 export interface ChatSessionRuntimeState {
@@ -56,6 +57,10 @@ interface RuntimeEventBase {
 }
 
 export type ChatRuntimeEvent =
+    | (RuntimeEventBase & {
+          kind: "user";
+          message: ChatHistoryMessage;
+      })
     | (RuntimeEventBase & {
           kind: "assistant";
           message: ChatHistoryMessage;
@@ -176,6 +181,7 @@ function emptyRun(
         sessionKey,
         startedAt: timestamp,
         updatedAt: timestamp,
+        userMessages: [],
     };
 }
 
@@ -194,6 +200,19 @@ function matchingRunKey(
     );
     if (activeRuns.length === 1) {
         return activeRuns[0]?.[0];
+    }
+    const establishedRuns = activeRuns.filter(
+        ([, run]) =>
+            !(
+                (run.runId.startsWith("dashboard-chat-") ||
+                    run.runId.startsWith("dashboard-compact-")) &&
+                !run.assistant &&
+                run.diagnostics.length === 0 &&
+                run.userMessages.length === 0
+            )
+    );
+    if (establishedRuns.length === 1) {
+        return establishedRuns[0]?.[0];
     }
     const runlessRuns = activeRuns.filter(([, run]) =>
         run.runId.startsWith("runtime-runless-")
@@ -563,6 +582,29 @@ function applyDiagnosticEvent(
     };
 }
 
+function applyUserEvent(
+    run: ChatRunState,
+    event: Extract<ChatRuntimeEvent, { kind: "user" }>
+): ChatRunState {
+    const key = `user:${event.sequence}`;
+    if (run.userMessages.some((entry) => entry.key === key)) {
+        return run;
+    }
+    return {
+        ...run,
+        userMessages: [
+            ...run.userMessages,
+            {
+                key,
+                message: {
+                    ...event.message,
+                    timestamp: event.message.timestamp || event.timestamp,
+                },
+            },
+        ],
+    };
+}
+
 function mergeRunDiagnostics(
     older: ChatRunState,
     newer: ChatRunState
@@ -584,6 +626,27 @@ function mergeRunDiagnostics(
         }
     }
     return diagnostics;
+}
+
+function mergeRunUserMessages(
+    older: ChatRunState,
+    newer: ChatRunState
+): ChatDiagnosticEntry[] {
+    const entries = new Map<string, ChatDiagnosticEntry>();
+    for (const entry of [...older.userMessages, ...newer.userMessages]) {
+        entries.set(entry.key, entry);
+    }
+    return entries
+        .values()
+        .toArray()
+        .toSorted((left, right) => {
+            const leftTimestamp = Date.parse(left.message.timestamp || "");
+            const rightTimestamp = Date.parse(right.message.timestamp || "");
+            if (Number.isNaN(leftTimestamp) || Number.isNaN(rightTimestamp)) {
+                return left.key.localeCompare(right.key);
+            }
+            return leftTimestamp - rightTimestamp;
+        });
 }
 
 function mergeAcknowledgedRuns(
@@ -642,6 +705,7 @@ function mergeAcknowledgedRuns(
         statusText: phase === "active" ? newer.statusText || older.statusText : undefined,
         terminalAt: terminalRun?.terminalAt ?? newer.terminalAt ?? older.terminalAt,
         terminalSequence,
+        userMessages: mergeRunUserMessages(older, newer),
     };
 }
 
@@ -722,6 +786,7 @@ export function reduceChatRuntime(
                               ...run,
                               diagnostics: [...run.diagnostics],
                               sessionKey,
+                              userMessages: [...run.userMessages],
                           },
                       ])
                   ),
@@ -759,6 +824,9 @@ export function reduceChatRuntime(
 
 function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState {
     switch (event.kind) {
+        case "user": {
+            return applyUserEvent(run, event);
+        }
         case "assistant": {
             return applyAssistantEvent(run, event);
         }
@@ -904,6 +972,31 @@ export function clearChatRun(
             ([key, run]) => key !== runId && !run.aliases.includes(runId)
         )
     );
+    return {
+        ...state,
+        sessions: {
+            ...state.sessions,
+            [previousSessionKey]: { ...previousSession, runs },
+        },
+    };
+}
+
+/** Removes the previous completed replay when a new local run starts. */
+export function clearCompletedChatRuns(
+    state: ChatRuntimeState,
+    sessionKey: string
+): ChatRuntimeState {
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    if (!previousEntry) {
+        return state;
+    }
+    const [previousSessionKey, previousSession] = previousEntry;
+    const runs = Object.fromEntries(
+        Object.entries(previousSession.runs).filter(([, run]) => run.phase === "active")
+    );
+    if (Object.keys(runs).length === Object.keys(previousSession.runs).length) {
+        return state;
+    }
     return {
         ...state,
         sessions: {

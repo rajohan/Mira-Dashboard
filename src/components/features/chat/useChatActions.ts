@@ -1,6 +1,6 @@
 import {
     type Dispatch,
-    type MutableRefObject,
+    type RefObject,
     type SetStateAction,
     useEffect,
     useRef,
@@ -30,7 +30,7 @@ import { useChatSlashCommands } from "./useChatSlashCommands";
 interface ChatActionsOptions {
     activeRunCount: number;
     attachments: ChatSendAttachment[];
-    attachmentsReference: MutableRefObject<ChatSendAttachment[]>;
+    attachmentsReference: RefObject<ChatSendAttachment[]>;
     clearAttachments(): void;
     confirmResetSession(): Promise<boolean>;
     draft: string;
@@ -42,12 +42,12 @@ interface ChatActionsOptions {
     scheduleBottomFollow(): void;
     selectedSession?: Session;
     selectedSessionKey: string;
-    selectedSessionKeyReference: MutableRefObject<string>;
+    selectedSessionKeyReference: RefObject<string>;
     setDraft: Dispatch<SetStateAction<string>>;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setSendError: Dispatch<SetStateAction<string | undefined>>;
-    shouldStickToBottomReference: MutableRefObject<boolean>;
+    shouldStickToBottomReference: RefObject<boolean>;
     transport: ChatTransport;
 }
 

@@ -5,6 +5,7 @@ import {
     addOptimisticChatRun,
     type ChatRuntimeEvent,
     clearChatRun,
+    clearCompletedChatRuns,
     createChatRuntimeState,
     reduceChatRuntime,
 } from "../components/features/chat/domain/chatState";
@@ -599,7 +600,7 @@ describe("chat runtime state", () => {
         expect(new Set(diagnostics?.map((entry) => entry.key)).size).toBe(2);
     });
 
-    it("retains a completed turn while the next run starts", () => {
+    it("keeps concurrent runtime evidence but clears completed replay for a local run", () => {
         const completed = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
                 kind: "finish",
@@ -619,11 +620,11 @@ describe("chat runtime state", () => {
         expect(next.sessions[SESSION]?.runs["new-run"]?.phase).toBe("active");
 
         const optimistic = addOptimisticChatRun(
-            completed,
+            clearCompletedChatRuns(completed, SESSION),
             SESSION,
             "dashboard-chat-next"
         );
-        expect(optimistic.sessions[SESSION]?.runs["old-run"]?.phase).toBe("completed");
+        expect(optimistic.sessions[SESSION]?.runs["old-run"]).toBeUndefined();
         expect(optimistic.sessions[SESSION]?.runs["dashboard-chat-next"]?.phase).toBe(
             "active"
         );
@@ -769,6 +770,68 @@ describe("chat runtime state", () => {
             runId: "runtime-runless-16",
         });
         expect(runs[0]?.diagnostics[0]?.message.thinking?.[0]?.text).toBe("working");
+    });
+
+    it("attaches an unscoped user steer to the single active run", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "user",
+                message: { content: "steer", role: "user", text: "steer" },
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["run-1"]?.userMessages).toEqual([
+            expect.objectContaining({
+                key: "user:32",
+                message: expect.objectContaining({ role: "user", text: "steer" }),
+            }),
+        ]);
+        expect(state.sessions[SESSION]?.runs["runtime-runless-32"]).toBeUndefined();
+    });
+
+    it("keeps a pre-ack steer on the established run beside an optimistic alias", () => {
+        const active = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "status",
+                runId: "provider-run",
+                text: "Thinking",
+            }),
+        ]);
+        const optimistic = addOptimisticChatRun(active, SESSION, "dashboard-chat-steer");
+        const steered = reduceChatRuntime(optimistic, [
+            event(32, {
+                kind: "user",
+                message: { content: "steer", role: "user", text: "steer" },
+            }),
+        ]);
+
+        expect(
+            steered.sessions[SESSION]?.runs["provider-run"]?.userMessages[0]?.message.text
+        ).toBe("steer");
+        expect(
+            steered.sessions[SESSION]?.runs["dashboard-chat-steer"]?.userMessages
+        ).toEqual([]);
+        expect(steered.sessions[SESSION]?.runs["runtime-runless-32"]).toBeUndefined();
+
+        const acknowledged = acknowledgeChatRun(
+            steered,
+            SESSION,
+            "dashboard-chat-steer",
+            "provider-run"
+        );
+        expect(
+            acknowledged.sessions[SESSION]?.runs["provider-run"]?.userMessages
+        ).toHaveLength(1);
     });
 
     it("keeps a concrete final when a runless terminal event follows it", () => {

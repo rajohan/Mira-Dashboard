@@ -4,6 +4,7 @@ import os from "node:os";
 import Path from "node:path";
 
 import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
+import { openClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import { errorMessage } from "./lib/errors.ts";
 import {
@@ -189,7 +190,7 @@ const gatewayState: {
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
-const openClawChatBridge = new OpenClawChatBridge();
+const openClawChatBridge = new OpenClawChatBridge(openClawChatSnapshotStore);
 const chatRuntimeGeneration = randomUUID();
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
@@ -817,7 +818,7 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        openClawChatBridge.clear();
+        openClawChatBridge.clearMemory();
         gatewayState.isConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         /** Subscribes to Gateway session index events for live session updates. */
@@ -878,7 +879,7 @@ function init(token: string): void {
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
-        openClawChatBridge.clear();
+        openClawChatBridge.clearMemory();
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
@@ -1295,7 +1296,7 @@ function shutdown(): void {
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
     gatewayState.currentToken = undefined;
-    openClawChatBridge.clear();
+    openClawChatBridge.clearMemory();
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
 }

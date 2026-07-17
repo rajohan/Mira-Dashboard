@@ -1,8 +1,37 @@
 import { describe, expect, it } from "bun:test";
 
-import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
+import {
+    OpenClawChatBridge,
+    type OpenClawChatSnapshotStore,
+    type OpenClawRuntimeSnapshot,
+} from "../src/chat/openClawChatBridge.ts";
 
 const MAIN = "agent:main:main";
+
+class MemorySnapshotStore implements OpenClawChatSnapshotStore {
+    readonly snapshots = new Map<string, OpenClawRuntimeSnapshot>();
+
+    clear(): void {
+        this.snapshots.clear();
+    }
+
+    delete(sessionKey: string): void {
+        this.snapshots.delete(sessionKey);
+    }
+
+    keys(): string[] {
+        return this.snapshots.keys().toArray();
+    }
+
+    load(sessionKey: string): OpenClawRuntimeSnapshot | undefined {
+        const snapshot = this.snapshots.get(sessionKey);
+        return snapshot ? structuredClone(snapshot) : undefined;
+    }
+
+    save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {
+        this.snapshots.set(sessionKey, structuredClone(snapshot));
+    }
+}
 
 function payloads(bridge: OpenClawChatBridge, sessionKey = MAIN) {
     return bridge
@@ -11,6 +40,109 @@ function payloads(bridge: OpenClawChatBridge, sessionKey = MAIN) {
 }
 
 describe("OpenClaw chat bridge", () => {
+    it("restores the latest run after process memory is replaced", () => {
+        const store = new MemorySnapshotStore();
+        const firstBridge = new OpenClawChatBridge(store);
+        const thinking = firstBridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "still working" },
+                runId: "persisted-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+
+        const restoredBridge = new OpenClawChatBridge(store);
+        expect(restoredBridge.snapshot(MAIN)).toEqual({
+            completed: false,
+            events: [thinking],
+            throughSequence: thinking.runtimeSequence,
+        });
+
+        restoredBridge.recordEvent(
+            "chat",
+            {
+                message: "finished",
+                runId: "persisted-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        restoredBridge.clearMemory();
+
+        expect(restoredBridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [thinking, expect.objectContaining({ event: "chat" })],
+        });
+    });
+
+    it("removes the previous persisted replay when a new send starts", () => {
+        const store = new MemorySnapshotStore();
+        const firstBridge = new OpenClawChatBridge(store);
+        firstBridge.recordEvent(
+            "chat",
+            {
+                message: "old final",
+                runId: "old-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        const restoredBridge = new OpenClawChatBridge(store);
+        restoredBridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-next",
+                message: "next question",
+                sessionKey: MAIN,
+            },
+            { runId: "next-run" },
+            restoredBridge.captureRequestBoundary()
+        );
+
+        expect(new OpenClawChatBridge(store).snapshot(MAIN).events).toEqual([]);
+    });
+
+    it("keeps the active persisted run when chat.send is a live steer", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        const thinking = bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "working" },
+                runId: "active-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-steer",
+                message: "steer",
+                sessionKey: MAIN,
+            },
+            { runId: "active-run" },
+            bridge.captureRequestBoundary()
+        );
+        const steer = bridge.recordEvent(
+            "session.message",
+            { message: { content: "steer", role: "user" }, sessionKey: MAIN },
+            []
+        );
+
+        expect(new OpenClawChatBridge(store).snapshot(MAIN)).toMatchObject({
+            completed: false,
+            events: [thinking, steer],
+        });
+    });
+
     it("retains run activity while coalescing full item progress snapshots", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

@@ -527,7 +527,7 @@ function messageTimestampMs(message: ChatHistoryMessage): number | undefined {
 }
 
 /** Performs insert messages by timestamp. */
-function insertMessagesByTimestamp(
+export function insertMessagesByTimestamp(
     baseMessages: ChatHistoryMessage[],
     messagesToInsert: ChatHistoryMessage[]
 ): ChatHistoryMessage[] {
