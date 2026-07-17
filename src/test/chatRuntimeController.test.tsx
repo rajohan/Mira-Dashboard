@@ -181,6 +181,7 @@ describe("chat runtime controller", () => {
             Promise.resolve({
                 completed: false,
                 events: [thinking, tool],
+                runtimeGeneration: "backend-1",
                 throughSequence: 32,
             }),
             1
@@ -206,6 +207,7 @@ describe("chat runtime controller", () => {
             reconnectSnapshot.resolve({
                 completed: false,
                 events: [],
+                runtimeGeneration: "backend-2",
                 throughSequence: 0,
             });
             await reconnectSnapshot.promise;
@@ -219,6 +221,46 @@ describe("chat runtime controller", () => {
         expect(
             result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
         ).toBe("continued");
+    });
+
+    it("rebuilds replayed deltas when reconnecting to the same backend", async () => {
+        const first = fakeTransport(
+            Promise.resolve({
+                completed: false,
+                events: [assistant(SELECTED, 16, "Hel")],
+                runtimeGeneration: "backend-1",
+                throughSequence: 16,
+            }),
+            1
+        );
+        const second = fakeTransport(
+            Promise.resolve({
+                completed: false,
+                events: [assistant(SELECTED, 16, "Hel"), assistant(SELECTED, 32, "lo")],
+                runtimeGeneration: "backend-1",
+                throughSequence: 32,
+            }),
+            2
+        );
+        const { result, rerender } = renderHook(
+            ({ transport }) =>
+                useChatRuntime({ selectedSessionKey: SELECTED, transport }),
+            { initialProps: { transport: first.transport } }
+        );
+
+        await waitFor(() =>
+            expect(
+                result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
+            ).toBe("Hel")
+        );
+
+        rerender({ transport: second.transport });
+
+        await waitFor(() =>
+            expect(
+                result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
+            ).toBe("Hello")
+        );
     });
 
     it("replays an earlier live-only event before a later snapshot finish", async () => {

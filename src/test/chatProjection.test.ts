@@ -417,7 +417,7 @@ describe("chat projection", () => {
                 runId: "run-1",
                 text: "Thinking",
             }),
-            eventAt(32, "2026-07-16T12:06:00.000Z", {
+            eventAt(32, "2026-07-16T12:04:30.000Z", {
                 kind: "thinking",
                 message: {
                     content: [{ text: "after steer", type: "thinking" }],
@@ -433,19 +433,6 @@ describe("chat projection", () => {
             SESSION,
             "dashboard-chat-steer-2"
         );
-        const runtime = reduceChatRuntime(optimistic, [
-            eventAt(48, "2026-07-16T12:05:30.000Z", {
-                kind: "tool",
-                message: {
-                    content: "",
-                    role: "assistant",
-                    text: "",
-                    toolCalls: [{ id: "call-1", name: "exec" }],
-                },
-                runId: "dashboard-chat-steer-2",
-                toolKey: "tool:call-1",
-            }),
-        ]);
         const history = [
             {
                 ...message("user", "first", "run-1"),
@@ -461,10 +448,10 @@ describe("chat projection", () => {
             },
         ];
 
-        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+        const reconciled = reconcileChatMessages(history, optimistic.sessions[SESSION]);
         const projection = projectChat(
             history,
-            runtime,
+            optimistic,
             SESSION,
             createChatVisibility(true, true),
             true,
@@ -482,6 +469,40 @@ describe("chat projection", () => {
             kind: "typing",
             message: { text: "Thinking" },
         });
+    });
+
+    it("keeps an unscoped completed run with its initiating prompt", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:00.000Z", {
+                kind: "status",
+                runId: "run-1",
+                text: "Thinking",
+            }),
+            eventAt(32, "2026-07-16T12:02:00.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer one", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const history = [
+            {
+                ...message("user", "question one"),
+                timestamp: "2026-07-16T11:59:59.900Z",
+            },
+            {
+                ...message("user", "question two"),
+                timestamp: "2026-07-16T12:01:00.000Z",
+            },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+
+        expect(reconciled.map((item) => item.text)).toEqual([
+            "question one",
+            "answer one",
+            "question two",
+        ]);
     });
 
     it("keeps an explicit older run anchored before a concurrent user turn", () => {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
@@ -189,6 +190,7 @@ const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
 const openClawChatBridge = new OpenClawChatBridge();
+const chatRuntimeGeneration = randomUUID();
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
 ) => OpenClawGatewayClientInstance;
@@ -1149,7 +1151,10 @@ function handleDashboardClient(ws: DashboardSocket): void {
                                     type: "response",
                                     id: message.id,
                                     isOk: true,
-                                    payload: openClawChatBridge.snapshot(sessionKey),
+                                    payload: {
+                                        ...openClawChatBridge.snapshot(sessionKey),
+                                        runtimeGeneration: chatRuntimeGeneration,
+                                    },
                                 })
                             );
                         }

@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 describe("chat scroll", () => {
-    it("keeps the same bubble anchored when another bubble is inserted above it", () => {
+    it("keeps the centered bubble anchored through a delayed insertion above it", () => {
         const initialRows = [
             chatRow("assistant-before", "assistant"),
             chatRow("thinking-being-read", "assistant"),
@@ -85,10 +85,10 @@ describe("chat scroll", () => {
             container.scrollTop = Number(options.top || 0);
         });
         Object.defineProperties(container, {
-            clientHeight: { configurable: true, value: 100 },
+            clientHeight: { configurable: true, value: 300 },
             getBoundingClientRect: {
                 configurable: true,
-                value: () => ({ bottom: 100, top: 0 }) as DOMRect,
+                value: () => ({ bottom: 300, top: 0 }) as DOMRect,
             },
             scrollHeight: { configurable: true, value: 1000 },
             scrollTo: { configurable: true, value: scrollTo },
@@ -96,7 +96,13 @@ describe("chat scroll", () => {
         const positions = new Map([
             ["assistant-before", 0],
             ["thinking-being-read", 160],
-            ["user-after", 320],
+            ["user-after", 460],
+        ]);
+        const heights = new Map([
+            ["assistant-before", 160],
+            ["thinking-being-read", 300],
+            ["user-after", 160],
+            ["new-tool", 237],
         ]);
         const rowElements = new Map(
             initialRows.map((row) => {
@@ -106,7 +112,10 @@ describe("chat scroll", () => {
                     configurable: true,
                     value: () => {
                         const top = (positions.get(row.key) || 0) - container.scrollTop;
-                        return { bottom: top + 160, top } as DOMRect;
+                        return {
+                            bottom: top + (heights.get(row.key) || 160),
+                            top,
+                        } as DOMRect;
                     },
                 });
                 container.append(element);
@@ -118,20 +127,22 @@ describe("chat scroll", () => {
         rerender({ rows: initialRows });
         result.current.virtualizer.getTotalSize();
         stickToBottomReference.current = false;
-        container.scrollTop = 170;
+        container.scrollTop = 120;
         scrollTo.mockClear();
         act(() => result.current.handleScroll());
+        animationFrameState.frames.clear();
 
         positions.set("new-tool", 160);
-        positions.set("thinking-being-read", 320);
-        positions.set("user-after", 480);
         const newToolElement = document.createElement("div");
         newToolElement.dataset.chatRowKey = "new-tool";
         Object.defineProperty(newToolElement, "getBoundingClientRect", {
             configurable: true,
             value: () => {
                 const top = (positions.get("new-tool") || 0) - container.scrollTop;
-                return { bottom: top + 160, top } as DOMRect;
+                return {
+                    bottom: top + (heights.get("new-tool") || 160),
+                    top,
+                } as DOMRect;
             },
         });
         container.insertBefore(newToolElement, rowElements.get("thinking-being-read")!);
@@ -140,8 +151,17 @@ describe("chat scroll", () => {
             rows: [initialRows[0]!, chatRow("new-tool", "tool"), ...initialRows.slice(1)],
         });
 
-        expect(container.scrollTop).toBe(330);
-        expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 330 }));
+        expect(container.scrollTop).toBe(120);
+        positions.set("thinking-being-read", 397);
+        positions.set("user-after", 697);
+        const anchorFrameId = animationFrameState.nextFrameId;
+        const anchorFrame = animationFrameState.frames.get(anchorFrameId);
+        expect(anchorFrame).toBeDefined();
+        animationFrameState.frames.delete(anchorFrameId);
+        act(() => anchorFrame?.(0));
+
+        expect(container.scrollTop).toBe(357);
+        expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 357 }));
 
         unmount();
     });

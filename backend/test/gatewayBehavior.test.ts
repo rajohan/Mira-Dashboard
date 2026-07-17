@@ -509,6 +509,7 @@ describe("gateway behavior", () => {
                         id?: string;
                         payload?: {
                             events?: Array<Record<string, unknown>>;
+                            runtimeGeneration?: string;
                             throughSequence?: number;
                         };
                     }
@@ -527,6 +528,7 @@ describe("gateway behavior", () => {
                     type: "event",
                 },
             ],
+            runtimeGeneration: expect.any(String),
             throughSequence: expect.any(Number),
         });
         expect(

@@ -12,6 +12,7 @@ import type { ChatRow } from "./chatTypes";
 
 const BOTTOM_THRESHOLD_PX = 32;
 const BOTTOM_FOLLOW_FRAME_COUNT = 4;
+const VIEWPORT_ANCHOR_FOLLOW_FRAME_COUNT = 6;
 const NO_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
 interface ChatViewportAnchor {
@@ -28,15 +29,26 @@ function captureViewportAnchor(
 ): ChatViewportAnchor | undefined {
     const containerBounds = container.getBoundingClientRect();
     const viewportBottom = containerBounds.top + container.clientHeight;
-    const element = chatRowElements(container).find((candidate) => {
-        const bounds = candidate.getBoundingClientRect();
-        return bounds.bottom > containerBounds.top && bounds.top < viewportBottom;
+    const viewportCenter = containerBounds.top + container.clientHeight / 2;
+    const visibleRows = chatRowElements(container).flatMap((element) => {
+        const bounds = element.getBoundingClientRect();
+        const visibleHeight =
+            Math.min(bounds.bottom, viewportBottom) -
+            Math.max(bounds.top, containerBounds.top);
+        return visibleHeight > 0 ? [{ bounds, element, visibleHeight }] : [];
     });
-    const key = element?.dataset.chatRowKey;
-    return element && key
+    const selected =
+        visibleRows.find(
+            ({ bounds }) => bounds.top <= viewportCenter && bounds.bottom > viewportCenter
+        ) ||
+        visibleRows.toSorted(
+            (left, right) => right.visibleHeight - left.visibleHeight
+        )[0];
+    const key = selected?.element.dataset.chatRowKey;
+    return selected && key
         ? {
               key,
-              offset: element.getBoundingClientRect().top - containerBounds.top,
+              offset: selected.bounds.top - containerBounds.top,
           }
         : undefined;
 }
@@ -82,6 +94,8 @@ export function useChatScroll(
     const viewportAnchorReference = useRef<ChatViewportAnchor | undefined>(undefined);
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
     const bottomFollowFramesRemainingReference = useRef(0);
+    const viewportAnchorFollowFrameReference = useRef<number | undefined>(undefined);
+    const viewportAnchorFollowFramesRemainingReference = useRef(0);
     const rowKeysFingerprint = rows.map((row) => row.key).join("\u{0}");
 
     const checkIsAtBottom = () => {
@@ -95,9 +109,21 @@ export function useChatScroll(
         );
     };
 
+    const cancelViewportAnchorFollow = () => {
+        viewportAnchorFollowFramesRemainingReference.current = 0;
+        if (viewportAnchorFollowFrameReference.current === undefined) {
+            return;
+        }
+        cancelAnimationFrame(viewportAnchorFollowFrameReference.current);
+        viewportAnchorFollowFrameReference.current = undefined;
+    };
+
     const handleScroll = () => {
         const atBottom = checkIsAtBottom();
         shouldStickToBottomReference.current = atBottom;
+        if (atBottom) {
+            cancelViewportAnchorFollow();
+        }
         viewportAnchorReference.current = atBottom
             ? undefined
             : messagesContainerReference.current
@@ -111,6 +137,8 @@ export function useChatScroll(
         if (!container || rows.length === 0) {
             return;
         }
+        cancelViewportAnchorFollow();
+        viewportAnchorReference.current = undefined;
         messagesBottomReference.current?.scrollIntoView({ block: "end" });
         container.scrollTop = container.scrollHeight;
         shouldStickToBottomReference.current = true;
@@ -143,6 +171,46 @@ export function useChatScroll(
         bottomFollowFrameReference.current = requestAnimationFrame(followMeasuredLayout);
     };
 
+    const scheduleViewportAnchorFollow = () => {
+        if (shouldStickToBottomReference.current || !viewportAnchorReference.current) {
+            return;
+        }
+        viewportAnchorFollowFramesRemainingReference.current =
+            VIEWPORT_ANCHOR_FOLLOW_FRAME_COUNT;
+        if (viewportAnchorFollowFrameReference.current !== undefined) {
+            return;
+        }
+
+        const followMeasuredLayout = () => {
+            const container = messagesContainerReference.current;
+            const anchor = viewportAnchorReference.current;
+            if (
+                shouldStickToBottomReference.current ||
+                !container ||
+                !anchor ||
+                viewportAnchorFollowFramesRemainingReference.current <= 0
+            ) {
+                viewportAnchorFollowFramesRemainingReference.current = 0;
+                viewportAnchorFollowFrameReference.current = undefined;
+                return;
+            }
+
+            restoreViewportAnchor(container, anchor);
+            viewportAnchorFollowFramesRemainingReference.current -= 1;
+            if (viewportAnchorFollowFramesRemainingReference.current > 0) {
+                viewportAnchorFollowFrameReference.current =
+                    requestAnimationFrame(followMeasuredLayout);
+                return;
+            }
+
+            viewportAnchorReference.current = captureViewportAnchor(container);
+            viewportAnchorFollowFrameReference.current = undefined;
+        };
+
+        viewportAnchorFollowFrameReference.current =
+            requestAnimationFrame(followMeasuredLayout);
+    };
+
     const virtualizer = useVirtualizer({
         anchorTo: "end",
         count: rows.length,
@@ -153,8 +221,13 @@ export function useChatScroll(
         scrollEndThreshold: BOTTOM_THRESHOLD_PX,
         useAnimationFrameWithResizeObserver: true,
         onChange: (_instance, sync) => {
-            if (!sync && shouldStickToBottomReference.current) {
+            if (sync) {
+                return;
+            }
+            if (shouldStickToBottomReference.current) {
                 scheduleBottomFollow();
+            } else {
+                scheduleViewportAnchorFollow();
             }
         },
     });
@@ -162,10 +235,13 @@ export function useChatScroll(
     const handleDynamicContentLoad = () => {
         const container = messagesContainerReference.current;
         if (!shouldStickToBottomReference.current && container) {
+            if (!viewportAnchorReference.current) {
+                viewportAnchorReference.current = captureViewportAnchor(container);
+            }
             if (viewportAnchorReference.current) {
                 restoreViewportAnchor(container, viewportAnchorReference.current);
+                scheduleViewportAnchorFollow();
             }
-            viewportAnchorReference.current = captureViewportAnchor(container);
             return;
         }
         didScheduleBottomFollow(
@@ -188,10 +264,12 @@ export function useChatScroll(
         previousActivityReference.current = activityFingerprint;
 
         if (rows.length === 0) {
+            cancelViewportAnchorFollow();
             viewportAnchorReference.current = undefined;
             return;
         }
         if (isSessionChanged) {
+            cancelViewportAnchorFollow();
             viewportAnchorReference.current = undefined;
             shouldStickToBottomReference.current = true;
             scrollToBottom();
@@ -200,11 +278,14 @@ export function useChatScroll(
         }
         if (!shouldStickToBottomReference.current) {
             const container = messagesContainerReference.current;
-            if (container) {
-                if (areRowsChanged && viewportAnchorReference.current) {
-                    restoreViewportAnchor(container, viewportAnchorReference.current);
+            if (container && (areRowsChanged || isActivityChanged)) {
+                if (!viewportAnchorReference.current) {
+                    viewportAnchorReference.current = captureViewportAnchor(container);
                 }
-                viewportAnchorReference.current = captureViewportAnchor(container);
+                if (viewportAnchorReference.current) {
+                    restoreViewportAnchor(container, viewportAnchorReference.current);
+                    scheduleViewportAnchorFollow();
+                }
             }
             return;
         }
@@ -219,11 +300,11 @@ export function useChatScroll(
     useLayoutEffect(
         () => () => {
             bottomFollowFramesRemainingReference.current = 0;
-            if (bottomFollowFrameReference.current === undefined) {
-                return;
+            if (bottomFollowFrameReference.current !== undefined) {
+                cancelAnimationFrame(bottomFollowFrameReference.current);
+                bottomFollowFrameReference.current = undefined;
             }
-            cancelAnimationFrame(bottomFollowFrameReference.current);
-            bottomFollowFrameReference.current = undefined;
+            cancelViewportAnchorFollow();
         },
         []
     );

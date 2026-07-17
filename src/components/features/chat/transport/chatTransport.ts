@@ -20,6 +20,7 @@ export interface ChatSessionPreferences {
 export interface ChatRuntimeSnapshot {
     completed: boolean;
     events: ChatRuntimeEvent[];
+    runtimeGeneration?: string;
     throughSequence: number;
 }
 

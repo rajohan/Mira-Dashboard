@@ -44,7 +44,7 @@ function completedRunRetentionDelay(timestamp: string): number {
 interface SnapshotGate {
     events: ChatRuntimeEvent[];
     optimisticRuns: Map<string, { operation?: "compact"; providerRunId?: string }>;
-    preserveActiveRuns: boolean;
+    reconnecting: boolean;
     sessionKey: string;
     token: number;
 }
@@ -137,6 +137,7 @@ export function useChatRuntime({
     const gateReference = useRef<SnapshotGate | undefined>(undefined);
     const gateTokenReference = useRef(0);
     const reconnectGenerationReference = useRef<number | undefined>(undefined);
+    const runtimeGenerationReference = useRef<string | undefined>(undefined);
     const selectedSessionReference = useRef(selectedSessionKey);
     const callbacksReference = useRef({ onError, onSettled });
     const transportReference = useRef(transport);
@@ -296,7 +297,7 @@ export function useChatRuntime({
         const gate: SnapshotGate = {
             events: [],
             optimisticRuns,
-            preserveActiveRuns:
+            reconnecting:
                 reconnectGenerationReference.current === transport.connectionGeneration,
             sessionKey: selectedSessionKey,
             token,
@@ -321,6 +322,21 @@ export function useChatRuntime({
                 ) {
                     reconnectGenerationReference.current = undefined;
                 }
+                const previousRuntimeGeneration = runtimeGenerationReference.current;
+                const isBackendRestart = Boolean(
+                    gate.reconnecting &&
+                    snapshot.runtimeGeneration &&
+                    previousRuntimeGeneration &&
+                    snapshot.runtimeGeneration !== previousRuntimeGeneration
+                );
+                const shouldPreserveActiveRuns =
+                    isBackendRestart ||
+                    (gate.reconnecting &&
+                        !snapshot.runtimeGeneration &&
+                        snapshot.events.length === 0);
+                if (snapshot.runtimeGeneration) {
+                    runtimeGenerationReference.current = snapshot.runtimeGeneration;
+                }
                 const retainedSessionKey =
                     findChatSessionRuntimeState(
                         stateReference.current,
@@ -337,7 +353,7 @@ export function useChatRuntime({
                         !replayedSequences.has(event.sequence)
                 );
                 const replayReduction = reduceRuntimeEvents(
-                    gate.preserveActiveRuns
+                    shouldPreserveActiveRuns
                         ? stateReference.current
                         : clearChatSessionRuntime(
                               stateReference.current,

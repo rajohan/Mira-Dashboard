@@ -68,6 +68,12 @@ function isRunMatchingMessage(run: ChatRunState, message: ChatHistoryMessage): b
     );
 }
 
+function isDashboardRunId(runId?: string): boolean {
+    return Boolean(
+        runId?.startsWith("dashboard-chat-") || runId?.startsWith("dashboard-compact-")
+    );
+}
+
 function isStandaloneDiagnostic(message: ChatHistoryMessage): boolean {
     const hasDetails = Boolean(
         message.thinking?.length || message.toolCalls?.length || message.toolResult
@@ -106,8 +112,9 @@ function isMatchedToAnotherRun(
     return runs.some((candidate) => {
         const isUnacknowledgedDashboardRun =
             candidate.phase === "active" &&
-            (candidate.runId.startsWith("dashboard-chat-") ||
-                candidate.runId.startsWith("dashboard-compact-"));
+            !candidate.assistant &&
+            candidate.diagnostics.length === 0 &&
+            isDashboardRunId(candidate.runId);
         return (
             candidate.runId !== run.runId &&
             !isUnacknowledgedDashboardRun &&
@@ -116,18 +123,63 @@ function isMatchedToAnotherRun(
     });
 }
 
-function canAnchorRunChronologically(
+function canUseDashboardTurn(
     message: ChatHistoryMessage,
     run: ChatRunState,
     runs: ChatRunState[]
 ): boolean {
-    if (!message.runId || isRunMatchingMessage(run, message)) {
-        return true;
+    return (
+        isDashboardRunId(message.runId) &&
+        (isRunMatchingMessage(run, message) || !isMatchedToAnotherRun(message, run, runs))
+    );
+}
+
+function userBoundaryIndex(
+    messages: ChatHistoryMessage[],
+    run: ChatRunState,
+    runs: ChatRunState[]
+): number {
+    let userIndex = messages.findLastIndex(
+        (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
+    );
+    const startedAt = Date.parse(run.startedAt);
+
+    if (!Number.isNaN(startedAt)) {
+        const startBoundary = messages.findLastIndex((message) => {
+            const timestamp = messageTimestamp(message);
+            return (
+                isUserMessage(message) &&
+                (!message.runId || canUseDashboardTurn(message, run, runs)) &&
+                timestamp !== undefined &&
+                timestamp <= startedAt + RUN_START_USER_SKEW_MS
+            );
+        });
+        userIndex = Math.max(userIndex, startBoundary);
     }
-    const isDashboardMessage =
-        message.runId.startsWith("dashboard-chat-") ||
-        message.runId.startsWith("dashboard-compact-");
-    return isDashboardMessage && !isMatchedToAnotherRun(message, run, runs);
+
+    if (userIndex === -1 && Number.isNaN(startedAt)) {
+        const matchingIndex = messages.findIndex((message) =>
+            isRunMatchingMessage(run, message)
+        );
+        userIndex = messages.findLastIndex(
+            (message, index) => index < matchingIndex && isUserMessage(message)
+        );
+    }
+
+    const terminalAt = Date.parse(run.terminalAt ?? run.updatedAt);
+    const dashboardBoundary = messages.findLastIndex((message) => {
+        const timestamp = messageTimestamp(message);
+        return (
+            isUserMessage(message) &&
+            canUseDashboardTurn(message, run, runs) &&
+            timestamp !== undefined &&
+            (Number.isNaN(startedAt) ||
+                timestamp >= startedAt - RUN_START_USER_SKEW_MS) &&
+            (run.phase === "active" ||
+                (!Number.isNaN(terminalAt) && timestamp <= terminalAt))
+        );
+    });
+    return Math.max(userIndex, dashboardBoundary);
 }
 
 function responseSegment(
@@ -135,49 +187,7 @@ function responseSegment(
     run: ChatRunState,
     runs: ChatRunState[]
 ): ResponseSegment {
-    let userIndex = messages.findLastIndex(
-        (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
-    );
-    const matchingIndex = messages.findIndex((message) =>
-        isRunMatchingMessage(run, message)
-    );
-    if (userIndex === -1 && matchingIndex !== -1) {
-        userIndex = messages.findLastIndex(
-            (message, index) => index < matchingIndex && isUserMessage(message)
-        );
-    }
-
-    const startedAt = Date.parse(run.startedAt);
-    const anchorAt = Date.parse(
-        run.phase === "active" ? run.updatedAt : (run.terminalAt ?? run.updatedAt)
-    );
-    if (!Number.isNaN(anchorAt)) {
-        const chronologicalUserIndex = messages.findLastIndex((message) => {
-            const timestamp = messageTimestamp(message);
-            return (
-                isUserMessage(message) &&
-                canAnchorRunChronologically(message, run, runs) &&
-                timestamp !== undefined &&
-                timestamp <= anchorAt
-            );
-        });
-        userIndex = Math.max(userIndex, chronologicalUserIndex);
-
-        const initiatingUserIndex = messages.findIndex((message) => {
-            const timestamp = messageTimestamp(message);
-            return (
-                isUserMessage(message) &&
-                canAnchorRunChronologically(message, run, runs) &&
-                timestamp !== undefined &&
-                !Number.isNaN(startedAt) &&
-                timestamp >= startedAt &&
-                timestamp - startedAt <= RUN_START_USER_SKEW_MS
-            );
-        });
-        if (initiatingUserIndex > userIndex) {
-            userIndex = initiatingUserIndex;
-        }
-    }
+    const userIndex = userBoundaryIndex(messages, run, runs);
     const start = userIndex === -1 ? currentResponseStart(messages) : userIndex + 1;
     const nextUserOffset = messages
         .slice(start)

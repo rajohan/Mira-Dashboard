@@ -78,6 +78,7 @@ export function useOpenClawChatTransport(): ChatTransport {
         return {
             completed: result?.completed === true,
             events: adapter.snapshot(rawResult),
+            runtimeGeneration: stringValue(result?.runtimeGeneration) || undefined,
             throughSequence: openClawThroughSequence(result?.throughSequence),
         };
     };
