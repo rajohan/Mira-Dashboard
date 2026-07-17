@@ -307,6 +307,37 @@ describe("chat projection", () => {
         ).toBe("diagnostic-run-1-thinking");
     });
 
+    it("keeps sibling tool call and result row keys distinct", () => {
+        const projection = projectChat(
+            [
+                {
+                    content: "",
+                    role: "assistant",
+                    runId: "run-1",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "exec" }],
+                },
+                {
+                    content: "done",
+                    role: "tool",
+                    runId: "run-1",
+                    text: "done",
+                    toolResult: { content: "done", id: "call-1", name: "exec" },
+                },
+            ],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projection.rows.map((row) => row.key)).toEqual([
+            "diagnostic-run-1-tool-call-call-1",
+            "diagnostic-run-1-tool-result-call-1",
+        ]);
+    });
+
     it("keeps a grouped thinking diagnostic when history recovered only one block", () => {
         const optimistic = addOptimisticChatRun(
             createChatRuntimeState(),
@@ -397,7 +428,24 @@ describe("chat projection", () => {
                 runId: "run-1",
             }),
         ]);
-        const runtime = addOptimisticChatRun(active, SESSION, "dashboard-chat-steer-2");
+        const optimistic = addOptimisticChatRun(
+            active,
+            SESSION,
+            "dashboard-chat-steer-2"
+        );
+        const runtime = reduceChatRuntime(optimistic, [
+            eventAt(48, "2026-07-16T12:05:30.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "exec" }],
+                },
+                runId: "dashboard-chat-steer-2",
+                toolKey: "tool:call-1",
+            }),
+        ]);
         const history = [
             {
                 ...message("user", "first", "run-1"),
@@ -423,13 +471,13 @@ describe("chat projection", () => {
             new Set()
         );
 
-        expect(reconciled.map((item) => item.text)).toEqual([
-            "first",
-            "steer",
-            "latest steer",
-            "",
-        ]);
-        expect(reconciled[3]?.thinking?.[0]?.text).toBe("after steer");
+        const latestSteerIndex = reconciled.findIndex(
+            (item) => item.text === "latest steer"
+        );
+        const thinkingIndex = reconciled.findIndex((item) => item.thinking?.length);
+        expect(latestSteerIndex).toBeGreaterThanOrEqual(0);
+        expect(thinkingIndex).toBeGreaterThan(latestSteerIndex);
+        expect(reconciled[thinkingIndex]?.thinking?.[0]?.text).toBe("after steer");
         expect(projection.rows.at(-1)).toMatchObject({
             kind: "typing",
             message: { text: "Thinking" },

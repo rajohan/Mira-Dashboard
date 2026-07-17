@@ -90,10 +90,10 @@ function stableDiagnosticRowKey(message: ChatHistoryMessage): string | undefined
         .map((toolCall) => toolCall.id)
         .filter((id): id is string => Boolean(id));
     if (toolCalls.length > 0 && toolCallIds.length === toolCalls.length) {
-        return `diagnostic-${message.runId}-tool-${toolCallIds.join(":")}`;
+        return `diagnostic-${message.runId}-tool-call-${toolCallIds.join(":")}`;
     }
     if (toolCalls.length === 0 && message.toolResult?.id) {
-        return `diagnostic-${message.runId}-tool-${message.toolResult.id}`;
+        return `diagnostic-${message.runId}-tool-result-${message.toolResult.id}`;
     }
     return undefined;
 }
@@ -106,8 +106,6 @@ function isMatchedToAnotherRun(
     return runs.some((candidate) => {
         const isUnacknowledgedDashboardRun =
             candidate.phase === "active" &&
-            !candidate.assistant &&
-            candidate.diagnostics.length === 0 &&
             (candidate.runId.startsWith("dashboard-chat-") ||
                 candidate.runId.startsWith("dashboard-compact-"));
         return (

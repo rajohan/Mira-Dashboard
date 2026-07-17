@@ -427,6 +427,7 @@ export function ChatMessagesList({
                             return (
                                 <div
                                     key={virtualItem.key}
+                                    data-chat-row-key={row.key}
                                     data-index={virtualItem.index}
                                     ref={messagesVirtualizer.measureElement}
                                     className="w-full pb-3"
@@ -457,6 +458,7 @@ export function ChatMessagesList({
                         return (
                             <div
                                 key={virtualItem.key}
+                                data-chat-row-key={row.key}
                                 data-index={virtualItem.index}
                                 ref={messagesVirtualizer.measureElement}
                                 className="w-full pb-3"

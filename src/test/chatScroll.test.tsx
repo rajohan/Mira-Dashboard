@@ -86,23 +86,60 @@ describe("chat scroll", () => {
         });
         Object.defineProperties(container, {
             clientHeight: { configurable: true, value: 100 },
+            getBoundingClientRect: {
+                configurable: true,
+                value: () => ({ bottom: 100, top: 0 }) as DOMRect,
+            },
             scrollHeight: { configurable: true, value: 1000 },
             scrollTo: { configurable: true, value: scrollTo },
         });
+        const positions = new Map([
+            ["assistant-before", 0],
+            ["thinking-being-read", 160],
+            ["user-after", 320],
+        ]);
+        const rowElements = new Map(
+            initialRows.map((row) => {
+                const element = document.createElement("div");
+                element.dataset.chatRowKey = row.key;
+                Object.defineProperty(element, "getBoundingClientRect", {
+                    configurable: true,
+                    value: () => {
+                        const top = (positions.get(row.key) || 0) - container.scrollTop;
+                        return { bottom: top + 160, top } as DOMRect;
+                    },
+                });
+                container.append(element);
+                return [row.key, element] as const;
+            })
+        );
         result.current.messagesContainerReference.current = container;
 
         rerender({ rows: initialRows });
         result.current.virtualizer.getTotalSize();
         stickToBottomReference.current = false;
-        result.current.virtualizer.scrollOffset = 170;
         container.scrollTop = 170;
         scrollTo.mockClear();
+        act(() => result.current.handleScroll());
+
+        positions.set("new-tool", 160);
+        positions.set("thinking-being-read", 320);
+        positions.set("user-after", 480);
+        const newToolElement = document.createElement("div");
+        newToolElement.dataset.chatRowKey = "new-tool";
+        Object.defineProperty(newToolElement, "getBoundingClientRect", {
+            configurable: true,
+            value: () => {
+                const top = (positions.get("new-tool") || 0) - container.scrollTop;
+                return { bottom: top + 160, top } as DOMRect;
+            },
+        });
+        container.insertBefore(newToolElement, rowElements.get("thinking-being-read")!);
 
         rerender({
             rows: [initialRows[0]!, chatRow("new-tool", "tool"), ...initialRows.slice(1)],
         });
 
-        expect(result.current.virtualizer.scrollOffset).toBe(330);
         expect(container.scrollTop).toBe(330);
         expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 330 }));
 

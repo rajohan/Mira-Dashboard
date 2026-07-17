@@ -44,6 +44,7 @@ function completedRunRetentionDelay(timestamp: string): number {
 interface SnapshotGate {
     events: ChatRuntimeEvent[];
     optimisticRuns: Map<string, { operation?: "compact"; providerRunId?: string }>;
+    preserveActiveRuns: boolean;
     sessionKey: string;
     token: number;
 }
@@ -75,6 +76,30 @@ function reduceRuntimeEvents(
         }
     }
     return { finishes, state };
+}
+
+function carryActiveRunsToGeneration(
+    state: ChatRuntimeState,
+    generation: number
+): ChatRuntimeState {
+    const sessions = Object.fromEntries(
+        Object.entries(state.sessions).flatMap(([sessionKey, session]) => {
+            const runs = Object.fromEntries(
+                Object.entries(session.runs).flatMap(([runKey, run]) => {
+                    if (run.phase !== "active") {
+                        return [];
+                    }
+                    const retained = { ...run, lastSequence: -1 };
+                    delete retained.terminalSequence;
+                    return [[runKey, retained]];
+                })
+            );
+            return Object.keys(runs).length > 0
+                ? [[sessionKey, { ...session, lastSequence: -1, runs }]]
+                : [];
+        })
+    );
+    return { generation, sessions };
 }
 
 interface UseChatRuntimeOptions {
@@ -111,6 +136,7 @@ export function useChatRuntime({
     const stateReference = useRef(state);
     const gateReference = useRef<SnapshotGate | undefined>(undefined);
     const gateTokenReference = useRef(0);
+    const reconnectGenerationReference = useRef<number | undefined>(undefined);
     const selectedSessionReference = useRef(selectedSessionKey);
     const callbacksReference = useRef({ onError, onSettled });
     const transportReference = useRef(transport);
@@ -134,12 +160,18 @@ export function useChatRuntime({
 
     useEffect(() => {
         gateReference.current = undefined;
+        if (stateReference.current.generation === transport.connectionGeneration) {
+            return;
+        }
+        reconnectGenerationReference.current = transport.connectionGeneration;
         handledFinishSequencesReference.current.clear();
         for (const entry of completionTimersReference.current.values()) {
             clearTimeout(entry.timer);
         }
         completionTimersReference.current.clear();
-        updateState(() => createChatRuntimeState(transport.connectionGeneration));
+        updateState((current) =>
+            carryActiveRunsToGeneration(current, transport.connectionGeneration)
+        );
     }, [transport.connectionGeneration]);
 
     const clearCompletionTimers = (shouldClear: (key: string) => boolean) => {
@@ -264,6 +296,8 @@ export function useChatRuntime({
         const gate: SnapshotGate = {
             events: [],
             optimisticRuns,
+            preserveActiveRuns:
+                reconnectGenerationReference.current === transport.connectionGeneration,
             sessionKey: selectedSessionKey,
             token,
         };
@@ -281,6 +315,12 @@ export function useChatRuntime({
                     return;
                 }
                 gateReference.current = undefined;
+                if (
+                    reconnectGenerationReference.current ===
+                    transport.connectionGeneration
+                ) {
+                    reconnectGenerationReference.current = undefined;
+                }
                 const retainedSessionKey =
                     findChatSessionRuntimeState(
                         stateReference.current,
@@ -297,7 +337,12 @@ export function useChatRuntime({
                         !replayedSequences.has(event.sequence)
                 );
                 const replayReduction = reduceRuntimeEvents(
-                    clearChatSessionRuntime(stateReference.current, selectedSessionKey),
+                    gate.preserveActiveRuns
+                        ? stateReference.current
+                        : clearChatSessionRuntime(
+                              stateReference.current,
+                              selectedSessionKey
+                          ),
                     [...snapshot.events, ...queuedAfterSnapshot]
                 );
                 let next = replayReduction.state;
@@ -393,6 +438,12 @@ export function useChatRuntime({
                     return;
                 }
                 gateReference.current = undefined;
+                if (
+                    reconnectGenerationReference.current ===
+                    transport.connectionGeneration
+                ) {
+                    reconnectGenerationReference.current = undefined;
+                }
                 if (gate.events.length > 0) {
                     const reduction = reduceRuntimeEvents(
                         stateReference.current,

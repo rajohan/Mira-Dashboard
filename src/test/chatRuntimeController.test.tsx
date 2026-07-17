@@ -149,6 +149,78 @@ describe("chat runtime controller", () => {
         ).toBe("stale");
     });
 
+    it("preserves active diagnostics across a backend reconnect", async () => {
+        const thinking: ChatRuntimeEvent = {
+            kind: "thinking",
+            message: {
+                content: [{ text: "reasoning", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ text: "reasoning" }],
+            },
+            runId: "run-1",
+            sequence: 16,
+            sessionKey: SELECTED,
+            timestamp: "2026-07-16T12:00:00.000Z",
+        };
+        const tool: ChatRuntimeEvent = {
+            kind: "tool",
+            message: {
+                content: "",
+                role: "assistant",
+                text: "",
+                toolCalls: [{ id: "call-1", name: "exec" }],
+            },
+            runId: "run-1",
+            sequence: 32,
+            sessionKey: SELECTED,
+            timestamp: "2026-07-16T12:00:01.000Z",
+            toolKey: "tool:call-1",
+        };
+        const first = fakeTransport(
+            Promise.resolve({
+                completed: false,
+                events: [thinking, tool],
+                throughSequence: 32,
+            }),
+            1
+        );
+        const reconnectSnapshot = deferred<ChatRuntimeSnapshot>();
+        const second = fakeTransport(reconnectSnapshot.promise, 2);
+        const { result, rerender } = renderHook(
+            ({ transport }) =>
+                useChatRuntime({ selectedSessionKey: SELECTED, transport }),
+            { initialProps: { transport: first.transport } }
+        );
+
+        await waitFor(() =>
+            expect(
+                result.current.state.sessions[SELECTED]?.runs["run-1"]?.diagnostics
+            ).toHaveLength(2)
+        );
+
+        rerender({ transport: second.transport });
+        await waitFor(() => expect(result.current.state.generation).toBe(2));
+        await waitFor(() => expect(second.transport.snapshot).toHaveBeenCalled());
+        await act(async () => {
+            reconnectSnapshot.resolve({
+                completed: false,
+                events: [],
+                throughSequence: 0,
+            });
+            await reconnectSnapshot.promise;
+        });
+
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["run-1"]?.diagnostics
+        ).toHaveLength(2);
+
+        act(() => second.emit(assistant(SELECTED, 1, "continued", "replace")));
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
+        ).toBe("continued");
+    });
+
     it("replays an earlier live-only event before a later snapshot finish", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
