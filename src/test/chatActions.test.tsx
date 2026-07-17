@@ -74,7 +74,7 @@ describe("chat actions", () => {
             messages = typeof update === "function" ? update(messages) : update;
         });
         const { result, rerender } = renderHook(
-            ({ activeRunCount, draft }) =>
+            ({ activeRunCount, draft, isCompacting }) =>
                 useChatActions({
                     activeRunCount,
                     attachments: [],
@@ -82,7 +82,7 @@ describe("chat actions", () => {
                     clearAttachments: jest.fn(),
                     confirmResetSession: jest.fn(async () => true),
                     draft,
-                    isCompacting: false,
+                    isCompacting,
                     isConnected: true,
                     isRecording: false,
                     isTranscribing: false,
@@ -98,7 +98,13 @@ describe("chat actions", () => {
                     shouldStickToBottomReference: { current: true },
                     transport,
                 }),
-            { initialProps: { activeRunCount: 0, draft: "first" } }
+            {
+                initialProps: {
+                    activeRunCount: 0,
+                    draft: "first",
+                    isCompacting: false,
+                },
+            }
         );
 
         let firstSend: Promise<void> | undefined;
@@ -107,7 +113,7 @@ describe("chat actions", () => {
         });
         await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(1));
 
-        rerender({ activeRunCount: 1, draft: "steer" });
+        rerender({ activeRunCount: 1, draft: "steer", isCompacting: true });
         expect(result.current.canSend).toBe(true);
 
         let secondSend: Promise<void> | undefined;

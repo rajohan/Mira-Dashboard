@@ -273,7 +273,6 @@ export function useChatActions({
         !isRecording &&
         !isTranscribing &&
         !isPatchingSession &&
-        !isCompacting &&
         !isStopping &&
         !isBlockedByInFlightSend() &&
         (draftText || attachments.length > 0)

@@ -268,6 +268,45 @@ describe("chat projection", () => {
         });
     });
 
+    it("keeps a thinking row anchored while runtime output recovers into history", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "same reasoning", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "same reasoning" }],
+                },
+                runId: "run-1",
+            }),
+        ]);
+        const user = message("user", "question", "run-1");
+        const runtimeProjection = projectChat(
+            [user],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const recoveredProjection = projectChat(
+            [user, thinkingMessage("run-1")],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            runtimeProjection.rows.find((row) => row.message.thinking?.length)?.key
+        ).toBe("diagnostic-run-1-thinking");
+        expect(
+            recoveredProjection.rows.find((row) => row.message.thinking?.length)?.key
+        ).toBe("diagnostic-run-1-thinking");
+    });
+
     it("keeps a grouped thinking diagnostic when history recovered only one block", () => {
         const optimistic = addOptimisticChatRun(
             createChatRuntimeState(),
@@ -341,7 +380,7 @@ describe("chat projection", () => {
     });
 
     it("moves active-run thinking below a live steer message", () => {
-        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+        const active = reduceChatRuntime(createChatRuntimeState(), [
             eventAt(16, "2026-07-16T12:00:01.000Z", {
                 kind: "status",
                 runId: "run-1",
@@ -358,6 +397,7 @@ describe("chat projection", () => {
                 runId: "run-1",
             }),
         ]);
+        const runtime = addOptimisticChatRun(active, SESSION, "dashboard-chat-steer-2");
         const history = [
             {
                 ...message("user", "first", "run-1"),
@@ -394,6 +434,52 @@ describe("chat projection", () => {
             kind: "typing",
             message: { text: "Thinking" },
         });
+    });
+
+    it("keeps an explicit older run anchored before a concurrent user turn", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(8, "2026-07-16T12:00:00.000Z", {
+                kind: "status",
+                runId: "run-1",
+                text: "Thinking",
+            }),
+            eventAt(16, "2026-07-16T12:01:00.000Z", {
+                kind: "status",
+                runId: "run-2",
+                text: "Thinking",
+            }),
+            eventAt(24, "2026-07-16T12:02:00.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer one", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+            eventAt(32, "2026-07-16T12:03:00.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer two", "run-2"),
+                outcome: "completed",
+                runId: "run-2",
+            }),
+        ]);
+        const history = [
+            {
+                ...message("user", "question one", "run-1"),
+                timestamp: "2026-07-16T12:00:00.000Z",
+            },
+            {
+                ...message("user", "question two", "run-2"),
+                timestamp: "2026-07-16T12:01:00.000Z",
+            },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+
+        expect(reconciled.map((item) => item.text)).toEqual([
+            "question one",
+            "answer one",
+            "question two",
+            "answer two",
+        ]);
     });
 
     it("places compaction thinking below a prompt persisted just after run start", () => {

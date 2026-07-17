@@ -65,7 +65,7 @@ describe("chat scroll", () => {
     it("keeps the same bubble anchored when another bubble is inserted above it", () => {
         const initialRows = [
             chatRow("assistant-before", "assistant"),
-            chatRow("tool-being-read", "tool"),
+            chatRow("thinking-being-read", "assistant"),
             chatRow("user-after", "user"),
         ];
         const stickToBottomReference = { current: false };
@@ -99,7 +99,7 @@ describe("chat scroll", () => {
         scrollTo.mockClear();
 
         rerender({
-            rows: [chatRow("new-thinking", "assistant"), ...initialRows],
+            rows: [initialRows[0]!, chatRow("new-tool", "tool"), ...initialRows.slice(1)],
         });
 
         expect(result.current.virtualizer.scrollOffset).toBe(330);

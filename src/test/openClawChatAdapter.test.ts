@@ -95,10 +95,29 @@ describe("OpenClaw chat adapter", () => {
     it("restores active-run status from a replayed session start", () => {
         const adapter = new OpenClawChatAdapter();
         const started = adapter.event(envelope("session.started", {}, 8));
+        const runlessStart = envelope("session.started", { runId: undefined }, 9);
+        const ignoredRunlessStart = adapter.event(runlessStart);
+        const final = adapter.event(
+            envelope(
+                "chat",
+                {
+                    message: { content: "done", role: "assistant" },
+                    state: "final",
+                },
+                10
+            )
+        );
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            ...ignoredRunlessStart,
+            ...final,
+        ]);
 
         expect(started).toEqual([
             expect.objectContaining({ kind: "status", text: "Thinking" }),
         ]);
+        expect(ignoredRunlessStart).toEqual([]);
+        expect(Object.keys(state.sessions[SESSION]?.runs || {})).toEqual(["run-1"]);
+        expect(state.sessions[SESSION]?.runs["run-1"]?.phase).toBe("completed");
     });
 
     it("ignores non-chat envelopes and delivery-noise tools", () => {

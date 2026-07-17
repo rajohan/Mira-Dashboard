@@ -301,6 +301,9 @@ export function adaptOpenClawRuntimeEvent(
         return [];
     }
     const { eventName, payload, runId, sessionKey, timestamp } = context;
+    if (eventName === "session.started" && !runId) {
+        return [];
+    }
     const common = { runId, sessionKey, timestamp };
     const drafts =
         eventName === "chat"

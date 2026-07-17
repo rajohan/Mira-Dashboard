@@ -1,4 +1,9 @@
-import type { ChatHistoryMessage, ChatRow, ChatVisibilitySettings } from "../chatTypes";
+import {
+    type ChatHistoryMessage,
+    type ChatRow,
+    type ChatVisibilitySettings,
+    TOOL_ROLE_VARIANTS,
+} from "../chatTypes";
 import {
     dedupeMessages,
     isRecoveredAssistantText,
@@ -63,9 +68,74 @@ function isRunMatchingMessage(run: ChatRunState, message: ChatHistoryMessage): b
     );
 }
 
+function isStandaloneDiagnostic(message: ChatHistoryMessage): boolean {
+    const hasDetails = Boolean(
+        message.thinking?.length || message.toolCalls?.length || message.toolResult
+    );
+    return Boolean(
+        hasDetails &&
+        (!message.text.trim() || TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase()))
+    );
+}
+
+function stableDiagnosticRowKey(message: ChatHistoryMessage): string | undefined {
+    if (!message.runId || !isStandaloneDiagnostic(message)) {
+        return undefined;
+    }
+    if (message.thinking?.length && !message.toolCalls?.length && !message.toolResult) {
+        return `diagnostic-${message.runId}-thinking`;
+    }
+    const toolCalls = message.toolCalls || [];
+    const toolCallIds = toolCalls
+        .map((toolCall) => toolCall.id)
+        .filter((id): id is string => Boolean(id));
+    if (toolCalls.length > 0 && toolCallIds.length === toolCalls.length) {
+        return `diagnostic-${message.runId}-tool-${toolCallIds.join(":")}`;
+    }
+    if (toolCalls.length === 0 && message.toolResult?.id) {
+        return `diagnostic-${message.runId}-tool-${message.toolResult.id}`;
+    }
+    return undefined;
+}
+
+function isMatchedToAnotherRun(
+    message: ChatHistoryMessage,
+    run: ChatRunState,
+    runs: ChatRunState[]
+): boolean {
+    return runs.some((candidate) => {
+        const isUnacknowledgedDashboardRun =
+            candidate.phase === "active" &&
+            !candidate.assistant &&
+            candidate.diagnostics.length === 0 &&
+            (candidate.runId.startsWith("dashboard-chat-") ||
+                candidate.runId.startsWith("dashboard-compact-"));
+        return (
+            candidate.runId !== run.runId &&
+            !isUnacknowledgedDashboardRun &&
+            isRunMatchingMessage(candidate, message)
+        );
+    });
+}
+
+function canAnchorRunChronologically(
+    message: ChatHistoryMessage,
+    run: ChatRunState,
+    runs: ChatRunState[]
+): boolean {
+    if (!message.runId || isRunMatchingMessage(run, message)) {
+        return true;
+    }
+    const isDashboardMessage =
+        message.runId.startsWith("dashboard-chat-") ||
+        message.runId.startsWith("dashboard-compact-");
+    return isDashboardMessage && !isMatchedToAnotherRun(message, run, runs);
+}
+
 function responseSegment(
     messages: ChatHistoryMessage[],
-    run: ChatRunState
+    run: ChatRunState,
+    runs: ChatRunState[]
 ): ResponseSegment {
     let userIndex = messages.findLastIndex(
         (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
@@ -87,7 +157,10 @@ function responseSegment(
         const chronologicalUserIndex = messages.findLastIndex((message) => {
             const timestamp = messageTimestamp(message);
             return (
-                isUserMessage(message) && timestamp !== undefined && timestamp <= anchorAt
+                isUserMessage(message) &&
+                canAnchorRunChronologically(message, run, runs) &&
+                timestamp !== undefined &&
+                timestamp <= anchorAt
             );
         });
         userIndex = Math.max(userIndex, chronologicalUserIndex);
@@ -96,6 +169,7 @@ function responseSegment(
             const timestamp = messageTimestamp(message);
             return (
                 isUserMessage(message) &&
+                canAnchorRunChronologically(message, run, runs) &&
                 timestamp !== undefined &&
                 !Number.isNaN(startedAt) &&
                 timestamp >= startedAt &&
@@ -266,18 +340,18 @@ export function reconcileChatMessages(
     session?: ChatSessionRuntimeState
 ): ChatHistoryMessage[] {
     const messages = [...history];
-    for (const run of orderedRuns(session)) {
+    const runs = orderedRuns(session);
+    for (const run of runs) {
         for (const [index, message] of messages.entries()) {
             if (
-                message.thinking?.length &&
-                !message.text.trim() &&
+                isStandaloneDiagnostic(message) &&
                 isRunMatchingMessage(run, message) &&
                 message.runId !== run.runId
             ) {
                 messages[index] = { ...message, runId: run.runId };
             }
         }
-        const segment = responseSegment(messages, run);
+        const segment = responseSegment(messages, run, runs);
         const diagnostics = run.diagnostics
             .toSorted(
                 (left, right) =>
@@ -336,7 +410,7 @@ function statusRow(
                 canonicalFinalIndex(
                     messages,
                     candidate,
-                    responseSegment(messages, candidate)
+                    responseSegment(messages, candidate, runs)
                 ) === -1
         );
     if (!run) {
@@ -367,14 +441,18 @@ export function projectChat(
         visibility,
         shouldKeepThinkingAfterFinal
     ).filter((message) => !deletedMessageKeys.has(messageDeleteKey(message)));
-    const rows: ChatRow[] = presented.map((message) => ({
-        key:
-            message.local === true && message.runId
-                ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
-                : messageDeleteKey(message),
-        kind: message.local === true && message.runId ? "stream" : "message",
-        message,
-    }));
+    const rows: ChatRow[] = presented.map((message) => {
+        const diagnosticKey = stableDiagnosticRowKey(message);
+        return {
+            key:
+                diagnosticKey ||
+                (message.local === true && message.runId
+                    ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
+                    : messageDeleteKey(message)),
+            kind: message.local === true && message.runId ? "stream" : "message",
+            message,
+        };
+    });
     const typing = statusRow(runs, visibleAssistantRunIds(presented), history);
     if (typing) {
         rows.push(typing);
