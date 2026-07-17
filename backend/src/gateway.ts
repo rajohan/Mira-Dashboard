@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
 import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
-import { openClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
+import { SqliteOpenClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import { errorMessage } from "./lib/errors.ts";
 import {
@@ -190,7 +190,13 @@ const gatewayState: {
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
-const openClawChatBridge = new OpenClawChatBridge(openClawChatSnapshotStore);
+const chatReplayState: {
+    bridge: OpenClawChatBridge;
+    scope: string | undefined;
+} = {
+    bridge: new OpenClawChatBridge(),
+    scope: undefined,
+};
 const chatRuntimeGeneration = randomUUID();
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
@@ -209,6 +215,28 @@ const gatewayRuntime = {
         "OPENCLAW_HOME"
     ),
 };
+
+function chatReplayGatewayScope(endpoint: string, token: string): string {
+    const credentialFingerprint = createHash("sha256").update(token).digest("hex");
+    return createHash("sha256")
+        .update("mira-dashboard:openclaw-chat-replay:v1\0")
+        .update(endpoint.trim())
+        .update("\0")
+        .update(credentialFingerprint)
+        .digest("hex");
+}
+
+function selectChatReplayScope(endpoint: string, token: string): void {
+    const gatewayScope = chatReplayGatewayScope(endpoint, token);
+    if (gatewayScope === chatReplayState.scope) {
+        return;
+    }
+    chatReplayState.bridge.flush();
+    chatReplayState.bridge = new OpenClawChatBridge(
+        new SqliteOpenClawChatSnapshotStore(gatewayScope)
+    );
+    chatReplayState.scope = gatewayScope;
+}
 
 export function setGatewayClientConstructorForTests(
     constructor: GatewayClientConstructor
@@ -761,7 +789,7 @@ async function refreshSessions(
                             : undefined,
                 });
             });
-        openClawChatBridge.reconcileSessions(gatewayState.sessions);
+        chatReplayState.bridge.reconcileSessions(gatewayState.sessions);
         broadcast({ type: "sessions", sessions: gatewayState.sessions });
     }
 }
@@ -785,10 +813,8 @@ function init(token: string): void {
     if (gatewayState.currentToken === token && gatewayState.client) {
         return;
     }
+    const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
     const previousGatewayClient = gatewayState.client;
-    if (gatewayState.currentToken && gatewayState.currentToken !== token) {
-        openClawChatBridge.clear();
-    }
     try {
         previousGatewayClient?.stop();
     } catch (error) {
@@ -805,6 +831,7 @@ function init(token: string): void {
     gatewayState.connectError = undefined;
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
+    selectChatReplayScope(gatewayUrl, token);
     gatewayState.currentToken = token;
     /** Returns the active Gateway client when this callback belongs to it. */
     function getCurrentInitGatewayClient(): OpenClawGatewayClientInstance | undefined {
@@ -818,7 +845,7 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        openClawChatBridge.clearMemory();
+        chatReplayState.bridge.clearMemory();
         gatewayState.isConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         /** Subscribes to Gateway session index events for live session updates. */
@@ -854,7 +881,7 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        const envelope = openClawChatBridge.recordEvent(
+        const envelope = chatReplayState.bridge.recordEvent(
             event.event,
             event.payload,
             gatewayState.sessions
@@ -879,12 +906,12 @@ function init(token: string): void {
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
-        openClawChatBridge.clearMemory();
+        chatReplayState.bridge.clearMemory();
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
     const thisGatewayClient = new gatewayRuntime.clientConstructor({
-        url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
+        url: gatewayUrl,
         token,
         role: "operator",
         scopes: ["operator.read", "operator.write", "operator.admin"],
@@ -981,9 +1008,9 @@ async function forwardRequest(
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
-            const requestBoundary = openClawChatBridge.captureRequestBoundary();
+            const requestBoundary = chatReplayState.bridge.captureRequestBoundary();
             let payload = await activeGateway.request(method, parameters);
-            openClawChatBridge.handleSuccessfulRequest(
+            chatReplayState.bridge.handleSuccessfulRequest(
                 method,
                 parameters,
                 payload,
@@ -1027,9 +1054,9 @@ async function forwardRequest(
     }
 
     try {
-        const requestBoundary = openClawChatBridge.captureRequestBoundary();
+        const requestBoundary = chatReplayState.bridge.captureRequestBoundary();
         const payload = await activeGateway.request(method, parameters);
-        openClawChatBridge.handleSuccessfulRequest(
+        chatReplayState.bridge.handleSuccessfulRequest(
             method,
             parameters,
             payload,
@@ -1153,7 +1180,7 @@ function handleDashboardClient(ws: DashboardSocket): void {
                                     id: message.id,
                                     isOk: true,
                                     payload: {
-                                        ...openClawChatBridge.snapshot(sessionKey),
+                                        ...chatReplayState.bridge.snapshot(sessionKey),
                                         runtimeGeneration: chatRuntimeGeneration,
                                     },
                                 })
@@ -1224,9 +1251,9 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
-    const requestBoundary = openClawChatBridge.captureRequestBoundary();
+    const requestBoundary = chatReplayState.bridge.captureRequestBoundary();
     const payload = await gatewayState.client.request(method, parameters);
-    openClawChatBridge.handleSuccessfulRequest(
+    chatReplayState.bridge.handleSuccessfulRequest(
         method,
         parameters,
         payload,
@@ -1296,7 +1323,7 @@ function shutdown(): void {
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
     gatewayState.currentToken = undefined;
-    openClawChatBridge.clearMemory();
+    chatReplayState.bridge.clearMemory();
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
 }

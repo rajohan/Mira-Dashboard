@@ -169,9 +169,11 @@ describe("chat scroll", () => {
 
         scrollHeight = 700;
         const firstFrameId = animationFrameState.nextFrameId;
-        act(() => animationFrameState.frames.get(firstFrameId)?.(0));
+        const firstFrame = animationFrameState.frames.get(firstFrameId);
+        animationFrameState.frames.delete(firstFrameId);
+        act(() => firstFrame?.(0));
         expect(container.scrollTop).toBe(700);
-        expect(animationFrameState.frames.size).toBe(1);
+        expect(animationFrameState.frames.size).toBe(0);
 
         unmount();
     });

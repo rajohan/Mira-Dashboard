@@ -133,6 +133,44 @@ describe("chat actions", () => {
         });
     });
 
+    it("clears a steer placeholder when the provider omits its run id", async () => {
+        const transport = fakeTransport(jest.fn(async () => ({})));
+        const runtime = fakeRuntime();
+        const { result } = renderHook(() =>
+            useChatActions({
+                activeRunCount: 1,
+                attachments: [],
+                attachmentsReference: { current: [] },
+                clearAttachments: jest.fn(),
+                confirmResetSession: jest.fn(async () => true),
+                draft: "steer",
+                isCompacting: false,
+                isConnected: true,
+                isRecording: false,
+                isTranscribing: false,
+                runtime,
+                scheduleBottomFollow: jest.fn(),
+                selectedSession: selectedSession(),
+                selectedSessionKey: SESSION_A,
+                selectedSessionKeyReference: { current: SESSION_A },
+                setDraft: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                transport,
+            })
+        );
+
+        await act(async () => result.current.handleSend());
+
+        const optimisticRunId = (runtime.beginRun as ReturnType<typeof jest.fn>).mock
+            .calls[0]?.[1] as string;
+        expect(optimisticRunId).toMatch(DASHBOARD_CHAT_RUN_ID);
+        expect(runtime.clearRun).toHaveBeenCalledWith(SESSION_A, optimisticRunId);
+        expect(runtime.acknowledgeRun).not.toHaveBeenCalled();
+    });
+
     it("keeps failed sends scoped to their initiating session", async () => {
         const sendDeferred = Promise.withResolvers<{ runId?: string }>();
         const transport = fakeTransport(jest.fn(() => sendDeferred.promise));

@@ -141,13 +141,41 @@ function isStandaloneThinking(message: ChatHistoryMessage): boolean {
     );
 }
 
-/** Keeps one standalone thinking bubble per run, at its latest position. */
+function isStandaloneToolDiagnostic(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        (message.toolCalls?.length || message.toolResult) &&
+        (!message.text.trim() || TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase()))
+    );
+}
+
+function thinkingAnchorIndex(
+    messages: ChatHistoryMessage[],
+    runId: string,
+    firstThinkingIndex: number
+): number {
+    let latestPrerequisiteIndex = -1;
+    for (const [index, message] of messages.entries()) {
+        if (message.runId !== runId) {
+            continue;
+        }
+        const isUser = message.role.toLowerCase() === "user";
+        if (isUser || isStandaloneToolDiagnostic(message)) {
+            latestPrerequisiteIndex = index;
+        }
+    }
+    return latestPrerequisiteIndex === -1
+        ? firstThinkingIndex
+        : latestPrerequisiteIndex + 1;
+}
+
+/** Keeps one standalone thinking bubble per run, after that turn's tool rows. */
 function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
     const groups = new Map<
         string,
         {
             blocks: NonNullable<ChatHistoryMessage["thinking"]>;
-            lastIndex: number;
+            firstIndex: number;
+            template: ChatHistoryMessage;
         }
     >();
 
@@ -156,7 +184,11 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
         if (!runId || !isStandaloneThinking(message)) {
             continue;
         }
-        const group = groups.get(runId) || { blocks: [], lastIndex: index };
+        const group = groups.get(runId) || {
+            blocks: [],
+            firstIndex: index,
+            template: message,
+        };
         const blocks = message.thinking || [];
         for (const block of blocks) {
             let matchingIndex = block.id
@@ -177,21 +209,40 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
                 };
             }
         }
-        group.lastIndex = index;
+        if (message.local === true || group.template.local !== true) {
+            group.template = message;
+        }
         groups.set(runId, group);
     }
 
-    return messages.flatMap((message, index) => {
-        const runId = message.runId;
-        if (!runId || !isStandaloneThinking(message)) {
-            return [message];
+    const groupsByAnchorIndex = new Map<
+        number,
+        Array<{ message: ChatHistoryMessage; order: number }>
+    >();
+    for (const [runId, group] of groups) {
+        const anchorIndex = thinkingAnchorIndex(messages, runId, group.firstIndex);
+        const anchoredGroups = groupsByAnchorIndex.get(anchorIndex) || [];
+        anchoredGroups.push({
+            message: { ...group.template, thinking: group.blocks },
+            order: group.firstIndex,
+        });
+        groupsByAnchorIndex.set(anchorIndex, anchoredGroups);
+    }
+
+    const collapsed: ChatHistoryMessage[] = [];
+    for (let index = 0; index <= messages.length; index += 1) {
+        const anchoredGroups = groupsByAnchorIndex
+            .get(index)
+            ?.toSorted((left, right) => left.order - right.order);
+        if (anchoredGroups) {
+            collapsed.push(...anchoredGroups.map((group) => group.message));
         }
-        const group = groups.get(runId);
-        if (!group || group.lastIndex !== index) {
-            return [];
+        const message = messages[index];
+        if (message && !isStandaloneThinking(message)) {
+            collapsed.push(message);
         }
-        return [{ ...message, thinking: group.blocks }];
-    });
+    }
+    return collapsed;
 }
 
 /**

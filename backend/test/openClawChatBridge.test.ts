@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, jest } from "bun:test";
 
 import {
     OpenClawChatBridge,
@@ -10,16 +10,35 @@ const MAIN = "agent:main:main";
 
 class MemorySnapshotStore implements OpenClawChatSnapshotStore {
     readonly snapshots = new Map<string, OpenClawRuntimeSnapshot>();
+    clearFailures = 0;
+    deleteFailures = 0;
+    keysCount = 0;
+    keysFailures = 0;
+    saveCount = 0;
+    saveFailures = 0;
 
     clear(): void {
+        if (this.clearFailures > 0) {
+            this.clearFailures -= 1;
+            throw new Error("clear failed");
+        }
         this.snapshots.clear();
     }
 
     delete(sessionKey: string): void {
+        if (this.deleteFailures > 0) {
+            this.deleteFailures -= 1;
+            throw new Error("delete failed");
+        }
         this.snapshots.delete(sessionKey);
     }
 
     keys(): string[] {
+        this.keysCount += 1;
+        if (this.keysFailures > 0) {
+            this.keysFailures -= 1;
+            throw new Error("keys failed");
+        }
         return this.snapshots.keys().toArray();
     }
 
@@ -29,6 +48,11 @@ class MemorySnapshotStore implements OpenClawChatSnapshotStore {
     }
 
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {
+        this.saveCount += 1;
+        if (this.saveFailures > 0) {
+            this.saveFailures -= 1;
+            throw new Error("save failed");
+        }
         this.snapshots.set(sessionKey, structuredClone(snapshot));
     }
 }
@@ -37,6 +61,29 @@ function payloads(bridge: OpenClawChatBridge, sessionKey = MAIN) {
     return bridge
         .snapshot(sessionKey)
         .events.map((event) => event.payload as Record<string, unknown>);
+}
+
+function persistedSnapshot(
+    sessionKey: string,
+    runId: string,
+    runtimeRecordedAt = Date.now(),
+    state?: "final"
+): OpenClawRuntimeSnapshot {
+    return {
+        completed: state === "final",
+        events: [
+            {
+                event: state ? "chat" : "agent",
+                payload: state
+                    ? { message: "done", runId, sessionKey, state }
+                    : { runId, sessionKey, stream: "thinking" },
+                runtimeRecordedAt,
+                runtimeSequence: 1,
+                type: "event",
+            },
+        ],
+        throughSequence: 1,
+    };
 }
 
 describe("OpenClaw chat bridge", () => {
@@ -53,6 +100,7 @@ describe("OpenClaw chat bridge", () => {
             },
             []
         );
+        firstBridge.flush();
 
         const restoredBridge = new OpenClawChatBridge(store);
         expect(restoredBridge.snapshot(MAIN)).toEqual({
@@ -136,11 +184,237 @@ describe("OpenClaw chat bridge", () => {
             { message: { content: "steer", role: "user" }, sessionKey: MAIN },
             []
         );
+        bridge.flush();
 
         expect(new OpenClawChatBridge(store).snapshot(MAIN)).toMatchObject({
             completed: false,
             events: [thinking, steer],
         });
+    });
+
+    it("coalesces progress persistence and flushes terminal events immediately", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        for (const progressText of ["one", "two", "three"]) {
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: {
+                        itemId: "progress-1",
+                        kind: "preamble",
+                        phase: "update",
+                        progressText,
+                    },
+                    runId: "run-1",
+                    sessionKey: MAIN,
+                    stream: "item",
+                },
+                []
+            );
+        }
+
+        expect(store.saveCount).toBe(0);
+        expect(store.keysCount).toBe(1);
+        bridge.flush();
+        expect(store.saveCount).toBe(1);
+
+        bridge.recordEvent(
+            "chat",
+            { message: "done", runId: "run-1", sessionKey: MAIN, state: "final" },
+            []
+        );
+        expect(store.saveCount).toBe(2);
+        expect(store.snapshots.get(MAIN)?.completed).toBe(true);
+    });
+
+    it("keeps a failed coalesced write pending for the next flush", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "working" },
+                runId: "run-1",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        store.saveFailures = 1;
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            bridge.flush();
+            expect(store.snapshots.has(MAIN)).toBe(false);
+
+            bridge.flush();
+            expect(store.snapshots.get(MAIN)?.events).toHaveLength(1);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("promotes an already-loaded short session alias to its canonical key", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set("main", persistedSnapshot("main", "run-1"));
+        const bridge = new OpenClawChatBridge(store);
+
+        expect(bridge.snapshot("main").events).toHaveLength(1);
+        expect(bridge.snapshot(MAIN).events[0]?.payload).toMatchObject({
+            runId: "run-1",
+            sessionKey: MAIN,
+        });
+        expect(store.snapshots.has("main")).toBe(false);
+        expect(store.snapshots.has(MAIN)).toBe(true);
+    });
+
+    it("does not delete a promoted canonical replay while retrying its old alias", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set("main", persistedSnapshot("main", "run-1"));
+        const bridge = new OpenClawChatBridge(store);
+        bridge.snapshot("main");
+        store.deleteFailures = 1;
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            bridge.snapshot(MAIN);
+            bridge.clearMemory();
+
+            expect(bridge.snapshot(MAIN).events[0]?.payload).toMatchObject({
+                runId: "run-1",
+                sessionKey: MAIN,
+            });
+            expect(store.snapshots.has("main")).toBe(false);
+            expect(store.snapshots.has(MAIN)).toBe(true);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("retries a failed replay delete before the session can hydrate again", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, "old-run", Date.now(), "final")
+        );
+        const bridge = new OpenClawChatBridge(store);
+        bridge.snapshot(MAIN);
+        store.deleteFailures = 1;
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            bridge.handleSuccessfulRequest(
+                "chat.send",
+                {
+                    idempotencyKey: "dashboard-chat-next",
+                    message: "next",
+                    sessionKey: MAIN,
+                },
+                { runId: "next-run" },
+                bridge.captureRequestBoundary()
+            );
+            bridge.clearMemory();
+
+            expect(bridge.snapshot(MAIN).events).toEqual([]);
+            expect(store.snapshots.has(MAIN)).toBe(false);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("blocks hydration until a failed full clear succeeds", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(MAIN, persistedSnapshot(MAIN, "old-run"));
+        const bridge = new OpenClawChatBridge(store);
+        bridge.snapshot(MAIN);
+        store.clearFailures = 1;
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            bridge.clear();
+            expect(bridge.snapshot(MAIN).events).toEqual([]);
+            expect(store.snapshots.size).toBe(0);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("retains a broad tombstone when stored alias enumeration fails", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set("main", persistedSnapshot("main", "old-run"));
+        store.keysFailures = 1;
+        const bridge = new OpenClawChatBridge(store);
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            bridge.clearSession(MAIN);
+            expect(bridge.snapshot(MAIN).events).toEqual([]);
+            expect(store.snapshots.has("main")).toBe(false);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("clears an old broad tombstone before persisting a new run", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set("main", persistedSnapshot("main", "old-run"));
+        store.keysFailures = 1;
+        const bridge = new OpenClawChatBridge(store);
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            bridge.clearSession(MAIN);
+            store.deleteFailures = 1;
+            const nextEvent = bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "new run" },
+                    runId: "new-run",
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.flush();
+
+            expect(store.snapshots.has("main")).toBe(false);
+            expect(store.snapshots.get(MAIN)?.events).toEqual([nextEvent]);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("deletes persisted snapshots when the in-memory session limit evicts them", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        for (let index = 0; index <= 50; index += 1) {
+            bridge.recordEvent(
+                "chat",
+                {
+                    message: `done ${index}`,
+                    runId: `run-${index}`,
+                    sessionKey: `agent:test:${index}`,
+                    state: "final",
+                },
+                []
+            );
+        }
+
+        expect(store.snapshots.size).toBe(50);
+        expect(store.snapshots.has("agent:test:0")).toBe(false);
+        expect(store.snapshots.has("agent:test:50")).toBe(true);
+    });
+
+    it("expires an active persisted replay from more than six hours ago", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, "stale-run", Date.now() - 6 * 60 * 60_000 - 1)
+        );
+        const bridge = new OpenClawChatBridge(store);
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({ completed: false, events: [] });
+        expect(store.snapshots.has(MAIN)).toBe(false);
     });
 
     it("retains run activity while coalescing full item progress snapshots", () => {

@@ -220,6 +220,9 @@ function canonicalFinalIndex(
         if (role !== "assistant" && role !== "system") {
             continue;
         }
+        if (isStandaloneDiagnostic(message)) {
+            continue;
+        }
         if (isRunMatchingMessage(run, message)) {
             return index;
         }
@@ -255,6 +258,7 @@ function canonicalFinalIndex(
 
 function toolSignatures(message: ChatHistoryMessage): string[] {
     const signatures: string[] = [];
+    const nestedResultSignatures: string[] = [];
     const toolCalls = message.toolCalls || [];
     const resultSignature = (result: NonNullable<ChatHistoryMessage["toolResult"]>) =>
         JSON.stringify({
@@ -275,11 +279,16 @@ function toolSignatures(message: ChatHistoryMessage): string[] {
             })
         );
         if (call.toolResult) {
-            signatures.push(resultSignature(call.toolResult));
+            const signature = resultSignature(call.toolResult);
+            signatures.push(signature);
+            nestedResultSignatures.push(signature);
         }
     }
     if (message.toolResult) {
-        signatures.push(resultSignature(message.toolResult));
+        const signature = resultSignature(message.toolResult);
+        if (!nestedResultSignatures.includes(signature)) {
+            signatures.push(signature);
+        }
     }
     return signatures;
 }
@@ -288,48 +297,81 @@ function thinkingSignatures(message: ChatHistoryMessage): string[] {
     return (message.thinking || []).map((block) => block.text);
 }
 
-function hasEverySignature(expected: string[], recovered: string[]): boolean {
-    const available = new Map<string, number>();
-    for (const signature of recovered) {
-        available.set(signature, (available.get(signature) || 0) + 1);
-    }
-    for (const signature of expected) {
-        const count = available.get(signature) || 0;
-        if (count === 0) {
-            return false;
-        }
-        available.set(signature, count - 1);
-    }
-    return true;
+function diagnosticSignatures(message: ChatHistoryMessage): string[] {
+    return [
+        ...toolSignatures(message).map((signature) => `tool:${signature}`),
+        ...thinkingSignatures(message).map((signature) => `thinking:${signature}`),
+    ];
 }
 
-function isDiagnosticRecovered(
+function countSignatures(signatures: string[]): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const signature of signatures) {
+        counts.set(signature, (counts.get(signature) || 0) + 1);
+    }
+    return counts;
+}
+
+function consumeCandidateSignatures(
+    message: ChatHistoryMessage,
+    claimed: ReadonlyMap<string, number>,
+    remaining: Map<string, number>
+): Map<string, number> {
+    const consumed = new Map<string, number>();
+    const availableSignatures = countSignatures(diagnosticSignatures(message));
+    for (const [signature, availableCount] of availableSignatures) {
+        const remainingCount = remaining.get(signature) || 0;
+        const unclaimedCount = availableCount - (claimed.get(signature) || 0);
+        const consumedCount = Math.min(remainingCount, unclaimedCount);
+        if (consumedCount > 0) {
+            remaining.set(signature, remainingCount - consumedCount);
+            consumed.set(signature, consumedCount);
+        }
+    }
+    return consumed;
+}
+
+function recoveredDiagnosticIndexes(
     diagnostic: ChatHistoryMessage,
     messages: ChatHistoryMessage[],
     segment: ResponseSegment,
-    run: ChatRunState
-): boolean {
+    run: ChatRunState,
+    claimedSignatures: Map<number, Map<string, number>>
+): number[] | undefined {
     const candidates = messages
         .slice(segment.start, segment.end)
-        .filter((candidate) => !candidate.runId || isRunMatchingMessage(run, candidate));
-    const tool = toolSignatures(diagnostic);
-    const thinking = thinkingSignatures(diagnostic);
-    const identity = messageIdentity(diagnostic);
-
-    if (candidates.some((candidate) => messageIdentity(candidate) === identity)) {
-        return true;
+        .map((message, offset) => ({ index: segment.start + offset, message }))
+        .filter(
+            (candidate) =>
+                !candidate.message.runId || isRunMatchingMessage(run, candidate.message)
+        );
+    const expected = diagnosticSignatures(diagnostic);
+    if (expected.length === 0) {
+        return undefined;
     }
-    if (tool.length === 0 && thinking.length === 0) {
-        return false;
+    const remaining = countSignatures(expected);
+    const consumedByIndex = new Map<number, Map<string, number>>();
+    for (const candidate of candidates) {
+        const consumed = consumeCandidateSignatures(
+            candidate.message,
+            claimedSignatures.get(candidate.index) || new Map(),
+            remaining
+        );
+        if (consumed.size > 0) {
+            consumedByIndex.set(candidate.index, consumed);
+        }
     }
-    const recoveredTools = candidates.flatMap((candidate) => toolSignatures(candidate));
-    const recoveredThinking = candidates.flatMap((candidate) =>
-        thinkingSignatures(candidate)
-    );
-    return (
-        hasEverySignature(tool, recoveredTools) &&
-        hasEverySignature(thinking, recoveredThinking)
-    );
+    if (remaining.values().some((count) => count > 0)) {
+        return undefined;
+    }
+    for (const [index, consumed] of consumedByIndex) {
+        const claimed = claimedSignatures.get(index) || new Map<string, number>();
+        for (const [signature, count] of consumed) {
+            claimed.set(signature, (claimed.get(signature) || 0) + count);
+        }
+        claimedSignatures.set(index, claimed);
+    }
+    return consumedByIndex.keys().toArray();
 }
 
 function transientMessage(
@@ -353,20 +395,23 @@ function isMatchingRuntimeUser(
 ): boolean {
     if (
         !isUserMessage(candidate) ||
-        messageIdentity(candidate) !== messageIdentity(runtimeMessage) ||
-        (candidate.runId &&
-            candidate.runId !== run.runId &&
-            !run.aliases.includes(candidate.runId))
+        messageIdentity(candidate) !== messageIdentity(runtimeMessage)
     ) {
         return false;
     }
     const candidateTimestamp = messageTimestamp(candidate);
     const runtimeTimestamp = messageTimestamp(runtimeMessage);
-    return (
-        candidateTimestamp === undefined ||
-        runtimeTimestamp === undefined ||
-        Math.abs(candidateTimestamp - runtimeTimestamp) <= RUNTIME_USER_ECHO_WINDOW_MS
-    );
+    const canAdoptCandidateRun =
+        !candidate.runId ||
+        isRunMatchingMessage(run, candidate) ||
+        isDashboardRunId(candidate.runId);
+    if (!canAdoptCandidateRun) {
+        return false;
+    }
+    if (candidateTimestamp === undefined || runtimeTimestamp === undefined) {
+        return true;
+    }
+    return Math.abs(candidateTimestamp - runtimeTimestamp) <= RUNTIME_USER_ECHO_WINDOW_MS;
 }
 
 function runtimeUserMatchIndex(
@@ -423,7 +468,7 @@ function mergeAllRuntimeUserMessages(
         const recovered = next[recoveredIndex]!;
         const enriched = {
             ...recovered,
-            runId: recovered.runId || run.runId,
+            runId: run.runId,
         };
         next[recoveredIndex] = enriched;
         recoveredCandidates.add(enriched);
@@ -440,18 +485,34 @@ export function reconcileChatMessages(
     const messages = mergeAllRuntimeUserMessages(history, runs);
     for (const run of runs) {
         for (const [index, message] of messages.entries()) {
-            if (
-                isStandaloneDiagnostic(message) &&
+            const shouldUseCanonicalRunId =
+                (isUserMessage(message) || isStandaloneDiagnostic(message)) &&
                 isRunMatchingMessage(run, message) &&
-                message.runId !== run.runId
-            ) {
+                message.runId !== run.runId;
+            if (shouldUseCanonicalRunId) {
                 messages[index] = { ...message, runId: run.runId };
             }
         }
         const segment = responseSegment(messages, run, runs);
-        const diagnostics = run.diagnostics
-            .map((entry) => transientMessage(entry.message, run, entry.key))
-            .filter((message) => !isDiagnosticRecovered(message, messages, segment, run));
+        const diagnostics: ChatHistoryMessage[] = [];
+        const claimedRecoveredSignatures = new Map<number, Map<string, number>>();
+        for (const entry of run.diagnostics) {
+            const diagnostic = transientMessage(entry.message, run, entry.key);
+            const recoveredIndexes = recoveredDiagnosticIndexes(
+                diagnostic,
+                messages,
+                segment,
+                run,
+                claimedRecoveredSignatures
+            );
+            if (recoveredIndexes) {
+                for (const index of recoveredIndexes) {
+                    messages[index] = { ...messages[index]!, runId: run.runId };
+                }
+            } else {
+                diagnostics.push(diagnostic);
+            }
+        }
         const finalIndex = canonicalFinalIndex(messages, run, segment);
         if (finalIndex !== -1) {
             const canonical = messages[finalIndex]!;

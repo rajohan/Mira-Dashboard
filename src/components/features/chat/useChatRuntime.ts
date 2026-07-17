@@ -193,7 +193,7 @@ export function useChatRuntime({
                         run.lastSequence === event.sequence)
             );
             const { error: visibleError } = completedRun || event;
-            if (visibleError) {
+            if (visibleError && !event.toolFailure) {
                 callbacksReference.current.onError?.(visibleError);
             }
             callbacksReference.current.onSettled?.(selectedSessionReference.current);

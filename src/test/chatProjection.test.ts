@@ -84,6 +84,22 @@ function noIdToolResult(sequence: number, content: string): ChatRuntimeEvent {
     });
 }
 
+function recoveredNoIdTool(timestamp: string): ChatHistoryMessage {
+    return {
+        content: "",
+        role: "assistant",
+        text: "",
+        timestamp,
+        toolCalls: [
+            {
+                arguments: { cmd: "date" },
+                name: "exec",
+                toolResult: { content: "same", name: "exec" },
+            },
+        ],
+    };
+}
+
 describe("chat projection", () => {
     it("keeps a completed runtime answer in its turn when a follow-up starts", () => {
         const history = [
@@ -307,7 +323,7 @@ describe("chat projection", () => {
         ).toBe("diagnostic-run-1-thinking");
     });
 
-    it("appends a new tool after the existing thinking row", () => {
+    it("keeps the thinking key stable while a new tool moves before it", () => {
         const thinkingRuntime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
                 kind: "thinking",
@@ -352,8 +368,8 @@ describe("chat projection", () => {
         const thinkingKey = "diagnostic-run-1-thinking";
 
         expect(before.rows.findIndex((row) => row.key === thinkingKey)).toBe(1);
-        expect(after.rows.findIndex((row) => row.key === thinkingKey)).toBe(1);
-        expect(after.rows.findIndex((row) => row.message.toolCalls?.length)).toBe(2);
+        expect(after.rows.findIndex((row) => row.message.toolCalls?.length)).toBe(1);
+        expect(after.rows.findIndex((row) => row.key === thinkingKey)).toBe(2);
     });
 
     it("keeps sibling tool call and result row keys distinct", () => {
@@ -557,8 +573,8 @@ describe("chat projection", () => {
             ...message("user", "question"),
             timestamp: "2026-07-16T11:59:59.000Z",
         };
-        const runtimeOnly = reconcileChatMessages([question], runtime.sessions[SESSION]);
-        const recovered = reconcileChatMessages(
+        const histories = [
+            [question],
             [
                 question,
                 {
@@ -566,17 +582,25 @@ describe("chat projection", () => {
                     timestamp: "2026-07-16T12:00:20.000Z",
                 },
             ],
-            runtime.sessions[SESSION]
-        );
+        ];
 
-        for (const projected of [runtimeOnly, recovered]) {
-            expect(projected.filter((item) => item.text === "steer")).toHaveLength(1);
+        for (const history of histories) {
+            const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+            const projected = projectChat(
+                history,
+                runtime,
+                SESSION,
+                createChatVisibility(true, true),
+                true,
+                new Set()
+            ).rows.map((row) => row.message);
+            expect(reconciled.filter((item) => item.text === "steer")).toHaveLength(1);
             const steerIndex = projected.findIndex((item) => item.text === "steer");
             const thinkingIndex = projected.findIndex((item) => item.thinking?.length);
             const toolIndex = projected.findIndex((item) => item.toolCalls?.length);
             expect(steerIndex).toBeGreaterThan(0);
             expect(thinkingIndex).toBeGreaterThan(steerIndex);
-            expect(toolIndex).toBeGreaterThan(thinkingIndex);
+            expect(thinkingIndex).toBeGreaterThan(toolIndex);
             expect(projected[steerIndex]?.runId).toBe("run-1");
         }
     });
@@ -616,6 +640,127 @@ describe("chat projection", () => {
 
         expect(repeated).toHaveLength(2);
         expect(repeated.every((item) => item.runId === "run-1")).toBe(true);
+    });
+
+    it("deduplicates a recovered steer whose optimistic alias is absent after refresh", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(8, "2026-07-16T12:00:00.000Z", {
+                kind: "status",
+                runId: "provider-run",
+                text: "Thinking",
+            }),
+            eventAt(16, "2026-07-16T12:00:10.000Z", {
+                kind: "user",
+                message: { content: "steer", role: "user", text: "steer" },
+            }),
+        ]);
+        const history = [
+            {
+                ...message("user", "steer", "dashboard-chat-refresh-alias"),
+                timestamp: "2026-07-16T12:00:09.500Z",
+            },
+        ];
+
+        const steers = reconcileChatMessages(history, runtime.sessions[SESSION]).filter(
+            (item) => item.text === "steer"
+        );
+
+        expect(steers).toHaveLength(1);
+        expect(steers[0]?.runId).toBe("provider-run");
+    });
+
+    it("does not reassign an identical user message from another provider run", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:10.000Z", {
+                kind: "user",
+                message: { content: "repeat", role: "user", text: "repeat" },
+                runId: "run-1",
+            }),
+        ]);
+        const history = [
+            {
+                ...message("user", "repeat", "run-2"),
+                timestamp: "2026-07-16T12:00:10.000Z",
+            },
+        ];
+
+        const repeated = reconcileChatMessages(history, runtime.sessions[SESSION]).filter(
+            (item) => item.text === "repeat"
+        );
+
+        expect(repeated.map((item) => item.runId)).toEqual(["run-2", "run-1"]);
+    });
+
+    it("anchors grouped thinking after recovered and live tools on refresh", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, {
+                kind: "status",
+                runId: "run-1",
+                text: "Working",
+            }),
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "working", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "working" }],
+                },
+                runId: "run-1",
+            }),
+            event(24, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-recovered", name: "read" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-recovered",
+            }),
+            event(32, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-live", name: "exec" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-live",
+            }),
+        ]);
+        const history = [
+            message("user", "question", "run-1"),
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                toolCalls: [{ id: "call-recovered", name: "read" }],
+            },
+        ];
+
+        const rows = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).rows;
+        const thinkingIndex = rows.findIndex((row) => row.message.thinking?.length);
+        const recoveredToolIndex = rows.findIndex((row) =>
+            row.message.toolCalls?.some((call) => call.id === "call-recovered")
+        );
+        const liveToolIndex = rows.findIndex((row) =>
+            row.message.toolCalls?.some((call) => call.id === "call-live")
+        );
+
+        expect(recoveredToolIndex).toBe(1);
+        expect(rows[recoveredToolIndex]?.message.runId).toBe("run-1");
+        expect(liveToolIndex).toBeGreaterThan(recoveredToolIndex);
+        expect(thinkingIndex).toBeGreaterThan(liveToolIndex);
     });
 
     it("keeps activity visible when a runtime steer starts after older history", () => {
@@ -827,6 +972,74 @@ describe("chat projection", () => {
             toolRows.map((row) => row.message.toolCalls?.[0]?.toolResult?.content)
         ).toEqual(["first", "second"]);
         expect(new Set(toolRows.map((row) => row.key)).size).toBe(2);
+    });
+
+    it("matches repeated recovered tools to distinct history rows", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            noIdToolCall(16),
+            noIdToolResult(32, "same"),
+            noIdToolCall(48),
+            noIdToolResult(64, "same"),
+        ]);
+
+        const reconciled = reconcileChatMessages(
+            [
+                message("user", "repeat"),
+                recoveredNoIdTool("2026-07-16T12:00:01.000Z"),
+                recoveredNoIdTool("2026-07-16T12:00:02.000Z"),
+            ],
+            runtime.sessions[SESSION]
+        );
+        const tools = reconciled.filter((item) => item.toolCalls?.length);
+
+        expect(tools).toHaveLength(2);
+        expect(tools.every((item) => item.runId === "run-1")).toBe(true);
+    });
+
+    it("matches separate runtime tools inside one recovered history row", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-2", name: "write" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-2",
+            }),
+        ]);
+        const history: ChatHistoryMessage[] = [
+            message("user", "two tools"),
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                toolCalls: [
+                    { id: "call-1", name: "read" },
+                    { id: "call-2", name: "write" },
+                ],
+            },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+        const tools = reconciled.filter((item) => item.toolCalls?.length);
+
+        expect(tools).toHaveLength(1);
+        expect(tools[0]?.runId).toBe("run-1");
+        expect(tools[0]?.toolCalls?.map((call) => call.id)).toEqual(["call-1", "call-2"]);
     });
 
     it("inserts unrecovered diagnostics immediately before a canonical final", () => {
@@ -1063,6 +1276,13 @@ describe("chat projection", () => {
                 (item) => item.toolCalls?.length || item.toolResult?.id === "call-1"
             )
         ).toHaveLength(2);
+        expect(
+            reconciled
+                .filter(
+                    (item) => item.toolCalls?.length || item.toolResult?.id === "call-1"
+                )
+                .every((item) => item.runId === "run-1")
+        ).toBe(true);
     });
 
     it("keeps a deleted runtime diagnostic hidden by its stable row key", () => {

@@ -238,7 +238,16 @@ export function useChatActions({
                     setMessages([]);
                 }
             } else if (idempotencyKey) {
-                runtime.acknowledgeRun(pendingSessionKey, idempotencyKey, result.runId);
+                if (result.runId) {
+                    runtime.acknowledgeRun(
+                        pendingSessionKey,
+                        idempotencyKey,
+                        result.runId
+                    );
+                } else {
+                    // A runless steer continues on the already-active provider run.
+                    runtime.clearRun(pendingSessionKey, idempotencyKey);
+                }
             }
         } catch (error) {
             if (idempotencyKey) {

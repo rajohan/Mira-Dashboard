@@ -298,9 +298,11 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_started
     ON scheduled_job_runs(job_id, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS chat_runtime_snapshots (
-    session_key TEXT PRIMARY KEY,
+    gateway_scope TEXT NOT NULL,
+    session_key TEXT NOT NULL,
     snapshot_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (gateway_scope, session_key)
 );
 
 CREATE TABLE IF NOT EXISTS docker_managed_services (

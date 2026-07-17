@@ -687,7 +687,7 @@ describe("chat runtime controller", () => {
         ).toBe("working");
     });
 
-    it("suppresses tool failures only after a failed diagnostic row", async () => {
+    it("keeps tool failures out of the global error surface", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
         const onError = jest.fn();
@@ -746,7 +746,10 @@ describe("chat runtime controller", () => {
                 toolFailure: true,
             });
         });
-        expect(onError).toHaveBeenCalledWith("tool execution failed: missing diagnostic");
+        expect(onError).not.toHaveBeenCalled();
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]?.error).toBe(
+            "tool execution failed: missing diagnostic"
+        );
     });
 
     it("retains an old completed snapshot until a new run begins", async () => {
