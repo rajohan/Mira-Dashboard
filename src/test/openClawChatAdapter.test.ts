@@ -335,9 +335,7 @@ describe("OpenClaw chat adapter", () => {
                 {
                     data: {
                         error: "database is locked",
-                        isError: true,
                         name: "functions.exec_command",
-                        phase: "error",
                     },
                     stream: "tool",
                 },
@@ -399,7 +397,12 @@ describe("OpenClaw chat adapter", () => {
             runtimeSequence: 14,
             type: "event",
         });
+        const failedToolEvent = failedTool.find((event) => event.kind === "tool");
 
+        expect(
+            failedToolEvent?.kind === "tool" &&
+                failedToolEvent.message.toolResult?.isError
+        ).toBe(true);
         expect(repeatedState.sessions[SESSION]?.runs["run-1"]?.error).toBeUndefined();
         expect(nonMatchingState.sessions[SESSION]?.runs["run-1"]?.error).toBe(
             "request failed"

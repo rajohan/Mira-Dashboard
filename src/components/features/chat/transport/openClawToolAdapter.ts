@@ -42,6 +42,7 @@ export function openClawToolMessage(
     const arguments_ = data.args ?? data.arguments ?? data.input;
     const result = data.result ?? data.output ?? data.content ?? data.text ?? data.error;
     const phase = stringValue(data.phase) || "";
+    const hasErrorResult = data.error !== undefined && result === data.error;
     const hasResult =
         phase === "result" ||
         phase === "end" ||
@@ -68,7 +69,8 @@ export function openClawToolMessage(
             resultContent ||
             resultImages.length > 0 ||
             resultMessage.attachments?.length ||
-            data.isError === true)
+            data.isError === true ||
+            hasErrorResult)
     );
     const toolResult = shouldCreateResult
         ? {
@@ -76,7 +78,7 @@ export function openClawToolMessage(
               name,
               content: resultContent,
               images: resultImages,
-              isError: phase === "error" || data.isError === true,
+              isError: phase === "error" || data.isError === true || hasErrorResult,
           }
         : undefined;
     const toolCall =

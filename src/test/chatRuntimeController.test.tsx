@@ -192,6 +192,87 @@ describe("chat runtime controller", () => {
         expect(result.current.state.sessions[SELECTED]).toBeUndefined();
     });
 
+    it("preserves a locally optimistic run created before the snapshot gate", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result, rerender } = renderHook(
+            ({ selectedSessionKey }) =>
+                useChatRuntime({ selectedSessionKey, transport: fake.transport }),
+            { initialProps: { selectedSessionKey: "" } }
+        );
+
+        act(() => result.current.beginRun(SELECTED, "dashboard-chat-pre-gate"));
+        rerender({ selectedSessionKey: SELECTED });
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 0 });
+            await snapshot.promise;
+        });
+
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["dashboard-chat-pre-gate"]
+        ).toMatchObject({ phase: "active" });
+    });
+
+    it("preserves an acknowledged compact run created before the snapshot gate", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result, rerender } = renderHook(
+            ({ selectedSessionKey }) =>
+                useChatRuntime({ selectedSessionKey, transport: fake.transport }),
+            { initialProps: { selectedSessionKey: "" } }
+        );
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-compact-pre-gate", "compact");
+            result.current.acknowledgeRun(
+                SELECTED,
+                "dashboard-compact-pre-gate",
+                "provider-compact-pre-gate"
+            );
+        });
+        rerender({ selectedSessionKey: SELECTED });
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 0 });
+            await snapshot.promise;
+        });
+
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["provider-compact-pre-gate"]
+        ).toMatchObject({
+            aliases: expect.arrayContaining([
+                "dashboard-compact-pre-gate",
+                "provider-compact-pre-gate",
+            ]),
+            operation: "compact",
+            phase: "active",
+        });
+    });
+
+    it("clears a completed optimistic run with an authoritative empty snapshot", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result, rerender } = renderHook(
+            ({ selectedSessionKey }) =>
+                useChatRuntime({ selectedSessionKey, transport: fake.transport }),
+            { initialProps: { selectedSessionKey: "" } }
+        );
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-chat-completed");
+            fake.emit({
+                ...finish(SELECTED, 16),
+                runId: "dashboard-chat-completed",
+            });
+        });
+        rerender({ selectedSessionKey: SELECTED });
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 16 });
+            await snapshot.promise;
+        });
+
+        expect(result.current.state.sessions[SELECTED]).toBeUndefined();
+    });
+
     it("preserves a local run started while snapshot recovery is in flight", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);

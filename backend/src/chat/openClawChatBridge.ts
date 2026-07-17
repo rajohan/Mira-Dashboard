@@ -650,7 +650,17 @@ export class OpenClawChatBridge {
         const latestMeaningfulCompletion = completedRuns.find(
             (run) => !isMetadataOnlyRunlessCompletion(run)
         );
-        if (isMetadataOnlyCompletion && latestMeaningfulCompletion) {
+        const hasNewerActiveRunlessWork = Boolean(
+            compatibleActiveRun &&
+            isRunlessRunId(compatibleActiveRun.runId) &&
+            lastSequence(compatibleActiveRun) >
+                (latestMeaningfulCompletion?.terminalSequence ?? -1)
+        );
+        if (
+            isMetadataOnlyCompletion &&
+            latestMeaningfulCompletion &&
+            !hasNewerActiveRunlessWork
+        ) {
             return;
         }
         const metadataCompletionRun = isMetadataOnlyCompletion

@@ -262,6 +262,66 @@ describe("OpenClaw chat bridge", () => {
         ]);
     });
 
+    it("retains terminal metadata for newer active runless work", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "old answer",
+                runId: "old-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "new reasoning" },
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent("session.ended", { sessionKey: MAIN }, []);
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(true);
+        expect(snapshot.events.map((event) => event.event)).toEqual([
+            "agent",
+            "session.ended",
+        ]);
+    });
+
+    it("does not assign terminal metadata backward to older runless work", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "older reasoning" },
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "new answer",
+                runId: "new-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent("session.ended", { sessionKey: MAIN }, []);
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: false,
+            events: [expect.objectContaining({ event: "agent" })],
+        });
+    });
+
     it("selects completed replay by terminal order after delayed older events", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

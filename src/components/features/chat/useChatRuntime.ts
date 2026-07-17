@@ -18,6 +18,10 @@ import type { ChatTransport } from "./transport/chatTransport";
 const COMPLETED_RUN_RETENTION_MS = 15 * 60_000;
 const MAX_COMPLETION_TIMERS = 500;
 
+function isLocallyOptimisticRunId(runId: string): boolean {
+    return runId.startsWith("dashboard-chat-") || runId.startsWith("dashboard-compact-");
+}
+
 function completedRunRetentionDelay(timestamp: string): number {
     const completedAt = Date.parse(timestamp);
     if (Number.isNaN(completedAt)) {
@@ -230,9 +234,32 @@ export function useChatRuntime({
         }
 
         const token = ++gateTokenReference.current;
+        const optimisticRuns: SnapshotGate["optimisticRuns"] = new Map();
+        const existingSession = findChatSessionRuntimeState(
+            stateReference.current,
+            selectedSessionKey
+        );
+        const existingRuns = Object.entries(existingSession?.runs || {});
+        for (const [runKey, run] of existingRuns) {
+            if (run.phase !== "active") {
+                continue;
+            }
+            const providerRunId = isLocallyOptimisticRunId(runKey) ? undefined : runKey;
+            const optimisticAliases = new Set(
+                [runKey, ...run.aliases].filter((runId) =>
+                    isLocallyOptimisticRunId(runId)
+                )
+            );
+            for (const optimisticRunId of optimisticAliases) {
+                optimisticRuns.set(optimisticRunId, {
+                    operation: run.operation,
+                    providerRunId,
+                });
+            }
+        }
         const gate: SnapshotGate = {
             events: [],
-            optimisticRuns: new Map(),
+            optimisticRuns,
             sessionKey: selectedSessionKey,
             token,
         };
