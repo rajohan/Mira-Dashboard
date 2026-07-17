@@ -299,10 +299,23 @@ function sessionMessageDrafts(
     payload: Record<string, unknown>,
     common: { runId?: string; sessionKey: string; timestamp: string }
 ): ChatRuntimeEventDraft[] {
-    const message = normalizeAssistant(
-        payload.message ?? payload.content ?? payload.deltaText ?? payload.text,
-        common.runId
-    );
+    const nestedMessage = asRecord(payload.message);
+    const topLevelRole = stringValue(payload.role);
+    const rawMessage = topLevelRole
+        ? {
+              ...nestedMessage,
+              content:
+                  nestedMessage?.content ??
+                  (nestedMessage
+                      ? undefined
+                      : (payload.message ??
+                        payload.content ??
+                        payload.deltaText ??
+                        payload.text)),
+              role: topLevelRole,
+          }
+        : (payload.message ?? payload.content ?? payload.deltaText ?? payload.text);
+    const message = normalizeAssistant(rawMessage, common.runId);
     return message.role.toLowerCase() === "assistant"
         ? [
               {

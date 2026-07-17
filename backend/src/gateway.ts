@@ -977,8 +977,14 @@ async function forwardRequest(
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
+            const requestBoundary = openClawChatBridge.captureRequestBoundary();
             let payload = await activeGateway.request(method, parameters);
-            openClawChatBridge.handleSuccessfulRequest(method, parameters, payload);
+            openClawChatBridge.handleSuccessfulRequest(
+                method,
+                parameters,
+                payload,
+                requestBoundary
+            );
             if (method === "chat.history") {
                 payload = hydrateOmittedChatHistoryImages(
                     payload,
@@ -1017,8 +1023,14 @@ async function forwardRequest(
     }
 
     try {
+        const requestBoundary = openClawChatBridge.captureRequestBoundary();
         const payload = await activeGateway.request(method, parameters);
-        openClawChatBridge.handleSuccessfulRequest(method, parameters, payload);
+        openClawChatBridge.handleSuccessfulRequest(
+            method,
+            parameters,
+            payload,
+            requestBoundary
+        );
         if (method.startsWith("sessions.")) {
             await refreshSessionsAfterRequest(activeGateway);
         }
@@ -1205,8 +1217,14 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
+    const requestBoundary = openClawChatBridge.captureRequestBoundary();
     const payload = await gatewayState.client.request(method, parameters);
-    openClawChatBridge.handleSuccessfulRequest(method, parameters, payload);
+    openClawChatBridge.handleSuccessfulRequest(
+        method,
+        parameters,
+        payload,
+        requestBoundary
+    );
     return payload;
 }
 

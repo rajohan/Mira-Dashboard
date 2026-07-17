@@ -76,6 +76,53 @@ function noIdToolResult(sequence: number, content: string): ChatRuntimeEvent {
 }
 
 describe("chat projection", () => {
+    it("keeps a completed runtime answer in its turn when a follow-up starts", () => {
+        const history = [
+            {
+                ...message("user", "first"),
+                timestamp: "2026-07-16T11:59:00.000Z",
+            },
+            {
+                ...message("user", "follow-up"),
+                local: true,
+                timestamp: "2026-07-16T12:01:00.000Z",
+            },
+        ];
+        const completed = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "finish",
+                message: message("assistant", "first answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const runtime = addOptimisticChatRun(
+            completed,
+            SESSION,
+            "dashboard-chat-follow-up"
+        );
+
+        expect(
+            reconcileChatMessages(history, runtime.sessions[SESSION]).map(
+                (item) => item.text
+            )
+        ).toEqual(["first", "first answer", "follow-up"]);
+
+        const canonicalHistory = [
+            history[0]!,
+            {
+                ...message("assistant", "first answer"),
+                timestamp: "2026-07-16T12:00:30.000Z",
+            },
+            history[1]!,
+        ];
+        expect(
+            reconcileChatMessages(canonicalHistory, runtime.sessions[SESSION]).map(
+                (item) => item.text
+            )
+        ).toEqual(["first", "first answer", "follow-up"]);
+    });
+
     it("matches a recovered final only inside the latest user turn", () => {
         const history = [
             message("user", "first"),
@@ -471,5 +518,29 @@ describe("chat projection", () => {
                 message: expect.objectContaining({ text: "Compacting context" }),
             }),
         ]);
+    });
+
+    it("projects an unambiguous short provider session alias", () => {
+        const aliasedEvent = {
+            ...event(16, {
+                kind: "status",
+                runId: "run-1",
+                text: "Working",
+            }),
+            sessionKey: "main",
+        } as ChatRuntimeEvent;
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [aliasedEvent]);
+
+        const projection = projectChat(
+            [],
+            runtime,
+            SESSION,
+            createChatVisibility(false, false),
+            false,
+            new Set()
+        );
+
+        expect(projection.activeRuns.map((run) => run.runId)).toEqual(["run-1"]);
+        expect(projection.rows[0]?.message.text).toBe("Working");
     });
 });

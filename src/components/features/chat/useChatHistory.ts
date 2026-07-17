@@ -73,6 +73,17 @@ export function useChatHistory({
         return true;
     };
 
+    const applyRefreshedHistory = (
+        sessionKey: string,
+        nextMessages: ChatHistoryMessage[]
+    ) => {
+        const isFirstLoad = loadedSessionReference.current !== sessionKey;
+        loadedSessionReference.current = sessionKey;
+        setMessages((previous) =>
+            isFirstLoad ? nextMessages : nextRefreshedChatMessages(previous, nextMessages)
+        );
+    };
+
     const refreshSoon = (sessionKey: string, delayMs = 450) => {
         if (liveRefreshTimerReference.current !== undefined) {
             clearTimeout(liveRefreshTimerReference.current);
@@ -91,9 +102,7 @@ export function useChatHistory({
                 if (!canApplyHistoryResponse(sessionKey, requestSequence)) {
                     return;
                 }
-                setMessages((previous) =>
-                    mergeWithRecentOptimisticMessages(previous, history)
-                );
+                applyRefreshedHistory(sessionKey, history);
                 if (shouldStickToBottomReference.current) {
                     setIsAtBottom(true);
                 }
@@ -169,8 +178,14 @@ export function useChatHistory({
                     error,
                     "Failed to load chat history"
                 );
+                const wasSuperseded =
+                    requestSequence < latestAppliedHistoryRequestReference.current;
                 onError((previous) =>
-                    nextHistoryLoadSendError(previous, isCancelled, historyError)
+                    nextHistoryLoadSendError(
+                        previous,
+                        isCancelled || wasSuperseded,
+                        historyError
+                    )
                 );
             } finally {
                 if (!isCancelled) {
@@ -213,9 +228,7 @@ export function useChatHistory({
                 ) {
                     return;
                 }
-                setMessages((previous) =>
-                    nextRefreshedChatMessages(previous, nextMessages)
-                );
+                applyRefreshedHistory(requestSessionKey, nextMessages);
                 setIsAtBottom(shouldStickToBottomReference.current);
             } catch {
                 // Ignore background refresh failures.
@@ -256,9 +269,7 @@ export function useChatHistory({
                 ) {
                     return;
                 }
-                setMessages((previous) =>
-                    nextRefreshedChatMessages(previous, nextMessages)
-                );
+                applyRefreshedHistory(selectedSessionKey, nextMessages);
                 setIsAtBottom(shouldStickToBottomReference.current);
             } catch {
                 // WebSocket runtime events remain the primary live path.

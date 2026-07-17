@@ -7,6 +7,7 @@ import type { ChatTransport } from "../components/features/chat/transport/chatTr
 import { useChatHistory } from "../components/features/chat/useChatHistory";
 
 const SESSION = "agent:main:main";
+const OTHER_SESSION = "agent:other:main";
 
 function message(text: string): ChatHistoryMessage {
     return { content: text, role: "assistant", text };
@@ -37,6 +38,56 @@ function transportWithHistory(history: ChatTransport["history"]): ChatTransport 
 }
 
 describe("chat history controller", () => {
+    it("shows a background refresh that wins the initial-load race", async () => {
+        const initialLoad = Promise.withResolvers<ChatHistoryMessage[]>();
+        const backgroundRefresh = Promise.withResolvers<ChatHistoryMessage[]>();
+        const history = jest
+            .fn<ChatTransport["history"]>()
+            .mockImplementationOnce(() => initialLoad.promise)
+            .mockImplementationOnce(() => backgroundRefresh.promise);
+        const selectedSessionKeyReference = {
+            current: SESSION,
+        } as MutableRefObject<string>;
+        const stickToBottomReference = {
+            current: true,
+        } as MutableRefObject<boolean>;
+        const onError = jest.fn();
+        const { result } = renderHook(() =>
+            useChatHistory({
+                isConnected: true,
+                onError,
+                selectedSessionKey: SESSION,
+                selectedSessionKeyReference,
+                setIsAtBottom: jest.fn(),
+                shouldStickToBottomReference: stickToBottomReference,
+                transport: transportWithHistory(history),
+            })
+        );
+
+        act(() => result.current.refreshSoon(SESSION, 0));
+        await waitFor(() => expect(history).toHaveBeenCalledTimes(2));
+        await act(async () => {
+            backgroundRefresh.resolve([message("refreshed")]);
+            await backgroundRefresh.promise;
+        });
+        expect(result.current.messages[0]?.text).toBe("refreshed");
+
+        await act(async () => {
+            initialLoad.reject(new Error("stale initial failure"));
+            try {
+                await initialLoad.promise;
+            } catch {
+                // The rejected initial request is the stale response under test.
+            }
+        });
+        expect(result.current.messages[0]?.text).toBe("refreshed");
+        expect(onError).toHaveBeenCalledTimes(2);
+        const staleErrorUpdate = onError.mock.calls[1]?.[0] as (
+            previous: string | undefined
+        ) => string | undefined;
+        expect(staleErrorUpdate("existing error")).toBe("existing error");
+    });
+
     it("does not let an older refresh overwrite a newer response", async () => {
         const olderRefresh = Promise.withResolvers<ChatHistoryMessage[]>();
         const newerRefresh = Promise.withResolvers<ChatHistoryMessage[]>();
@@ -84,6 +135,64 @@ describe("chat history controller", () => {
             await olderRefresh.promise;
         });
         expect(result.current.messages[0]?.text).toBe("newer");
+    });
+
+    it("does not merge the previous session into a refresh that wins first load", async () => {
+        const initialOtherLoad = Promise.withResolvers<ChatHistoryMessage[]>();
+        const otherRefresh = Promise.withResolvers<ChatHistoryMessage[]>();
+        const history = jest
+            .fn<ChatTransport["history"]>()
+            .mockResolvedValueOnce([message("selected history")])
+            .mockImplementationOnce(() => initialOtherLoad.promise)
+            .mockImplementationOnce(() => otherRefresh.promise);
+        const selectedSessionKeyReference = {
+            current: SESSION,
+        } as MutableRefObject<string>;
+        const stickToBottomReference = {
+            current: true,
+        } as MutableRefObject<boolean>;
+        const { result, rerender } = renderHook(
+            ({ sessionKey }: { sessionKey: string }) =>
+                useChatHistory({
+                    isConnected: true,
+                    onError: jest.fn(),
+                    selectedSessionKey: sessionKey,
+                    selectedSessionKeyReference,
+                    setIsAtBottom: jest.fn(),
+                    shouldStickToBottomReference: stickToBottomReference,
+                    transport: transportWithHistory(history),
+                }),
+            { initialProps: { sessionKey: SESSION } }
+        );
+
+        await waitFor(() =>
+            expect(result.current.messages.map((entry) => entry.text)).toEqual([
+                "selected history",
+            ])
+        );
+        act(() => {
+            selectedSessionKeyReference.current = OTHER_SESSION;
+            rerender({ sessionKey: OTHER_SESSION });
+        });
+        await waitFor(() => expect(history).toHaveBeenCalledTimes(2));
+        act(() => result.current.refreshSoon(OTHER_SESSION, 0));
+        await waitFor(() => expect(history).toHaveBeenCalledTimes(3));
+        await act(async () => {
+            otherRefresh.resolve([message("other history")]);
+            await otherRefresh.promise;
+        });
+
+        expect(result.current.messages.map((entry) => entry.text)).toEqual([
+            "other history",
+        ]);
+
+        await act(async () => {
+            initialOtherLoad.resolve([message("stale other history")]);
+            await initialOtherLoad.promise;
+        });
+        expect(result.current.messages.map((entry) => entry.text)).toEqual([
+            "other history",
+        ]);
     });
 
     it("refreshes settled history without changing scroll stickiness", async () => {

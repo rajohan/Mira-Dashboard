@@ -107,6 +107,32 @@ export function isSameChatSession(left?: string, right?: string): boolean {
         : rightMatch?.[2] === normalizedLeft;
 }
 
+function matchingSessionEntry(
+    state: ChatRuntimeState,
+    sessionKey: string
+): [string, ChatSessionRuntimeState] | undefined {
+    const exact = state.sessions[sessionKey];
+    if (exact) {
+        return [sessionKey, exact];
+    }
+    const matches = Object.entries(state.sessions).filter(([candidate]) =>
+        isSameChatSession(candidate, sessionKey)
+    );
+    return matches.length === 1 ? matches[0] : undefined;
+}
+
+function preferredSessionKey(existingKey: string, incomingKey: string): string {
+    return /^agent:[^:]+:.+$/iu.test(incomingKey.trim()) ? incomingKey : existingKey;
+}
+
+/** Resolves an exact or unambiguous provider session alias for presentation. */
+export function findChatSessionRuntimeState(
+    state: ChatRuntimeState,
+    sessionKey: string
+): ChatSessionRuntimeState | undefined {
+    return matchingSessionEntry(state, sessionKey)?.[1];
+}
+
 export function uniqueChatRunIds(values: Array<string | undefined>): string[] {
     return [...new Set(values.filter(Boolean))] as string[];
 }
@@ -173,35 +199,38 @@ function matchingRunKey(
     return runlessRuns.length === 1 ? runlessRuns[0]?.[0] : undefined;
 }
 
+function latestCompletedRunEntry(
+    session: ChatSessionRuntimeState
+): [string, ChatRunState] | undefined {
+    return Object.entries(session.runs)
+        .filter(([, candidate]) => candidate.phase !== "active")
+        .toSorted(([, left], [, right]) => right.lastSequence - left.lastSequence)[0];
+}
+
 function resolveRun(
     session: ChatSessionRuntimeState,
     event: ChatRuntimeEvent
 ): { run: ChatRunState; runKey: string } | undefined {
-    let runKey = matchingRunKey(session, event.runId);
-    let run = runKey ? session.runs[runKey] : undefined;
-
-    if (!run && !event.runId && event.kind === "finish") {
-        const completedEntry = Object.entries(session.runs)
-            .filter(([, candidate]) => candidate.phase !== "active")
-            .toSorted(([, left], [, right]) => right.lastSequence - left.lastSequence)[0];
-        if (completedEntry) {
-            [runKey, run] = completedEntry;
-        }
-    }
-
-    if (
-        !run &&
-        !event.runId &&
-        event.kind === "assistant" &&
-        event.source === "session"
-    ) {
-        const completedEntry = Object.entries(session.runs)
-            .filter(([, candidate]) => candidate.phase !== "active")
-            .toSorted(([, left], [, right]) => right.lastSequence - left.lastSequence)[0];
+    let runKey: string | undefined;
+    let run: ChatRunState | undefined;
+    if (!event.runId && event.kind === "assistant" && event.source === "session") {
+        const completedEntry = latestCompletedRunEntry(session);
         if (
             completedEntry &&
             isCompatibleSessionEcho(completedEntry[1], event.message, event.timestamp)
         ) {
+            [runKey, run] = completedEntry;
+        }
+    }
+
+    if (!run) {
+        runKey = matchingRunKey(session, event.runId);
+        run = runKey ? session.runs[runKey] : undefined;
+    }
+
+    if (!run && !event.runId && event.kind === "finish") {
+        const completedEntry = latestCompletedRunEntry(session);
+        if (completedEntry) {
             [runKey, run] = completedEntry;
         }
     }
@@ -230,27 +259,12 @@ function resolveRun(
     }
 
     if (!run && event.runId) {
-        const hasActiveRun = Object.values(session.runs).some(
-            (candidate) => candidate.phase === "active"
-        );
-        if (!hasActiveRun) {
-            session.runs = Object.fromEntries(
-                Object.entries(session.runs).filter(
-                    ([, candidate]) => candidate.phase === "active"
-                )
-            );
-        }
         runKey = event.runId;
         run = emptyRun(event.sessionKey, event.runId, event.sequence, event.timestamp);
         session.runs[runKey] = run;
     }
 
     if (!run && !event.runId) {
-        session.runs = Object.fromEntries(
-            Object.entries(session.runs).filter(
-                ([, candidate]) => candidate.phase === "active"
-            )
-        );
         runKey = `runtime-runless-${event.sequence}`;
         run = emptyRun(event.sessionKey, runKey, event.sequence, event.timestamp);
         session.runs[runKey] = run;
@@ -354,11 +368,16 @@ function applyAssistantEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "assistant" }>
 ): ChatRunState {
+    const isSessionUpdateAfterCanonicalFinal =
+        run.phase !== "active" &&
+        event.source === "session" &&
+        run.assistantSource === "chat";
     const canUseText =
-        !event.message.text ||
-        !run.assistantSource ||
-        run.assistantSource === event.source ||
-        run.phase !== "active";
+        !isSessionUpdateAfterCanonicalFinal &&
+        (!event.message.text ||
+            !run.assistantSource ||
+            run.assistantSource === event.source ||
+            run.phase !== "active");
     const incoming = canUseText
         ? event.message
         : { ...event.message, content: [], text: "" };
@@ -385,8 +404,11 @@ function applyAssistantEvent(
     return {
         ...run,
         assistant: mergeMessageDetails(run.assistant, incoming, text),
-        assistantSource:
-            incoming.text && !run.assistantSource ? event.source : run.assistantSource,
+        assistantSource: incoming.text
+            ? event.mode === "replace"
+                ? event.source
+                : (run.assistantSource ?? event.source)
+            : run.assistantSource,
     };
 }
 
@@ -667,43 +689,59 @@ export function reduceChatRuntime(
         (left, right) => left.sequence - right.sequence
     );
     for (const event of orderedEvents) {
-        const previousSession = nextState.sessions[event.sessionKey];
-        if (previousSession && event.sequence <= previousSession.lastSequence) {
+        const previousEntry = matchingSessionEntry(nextState, event.sessionKey);
+        const previousSessionKey = previousEntry?.[0];
+        const previousSession = previousEntry?.[1];
+        const sessionKey = previousSessionKey
+            ? preferredSessionKey(previousSessionKey, event.sessionKey)
+            : event.sessionKey;
+        const normalizedEvent =
+            event.sessionKey === sessionKey ? event : { ...event, sessionKey };
+        if (previousSession && normalizedEvent.sequence <= previousSession.lastSequence) {
             continue;
         }
 
         const session: ChatSessionRuntimeState = previousSession
             ? {
                   ...previousSession,
+                  sessionKey,
                   runs: Object.fromEntries(
                       Object.entries(previousSession.runs).map(([key, run]) => [
                           key,
-                          { ...run, diagnostics: [...run.diagnostics] },
+                          {
+                              ...run,
+                              diagnostics: [...run.diagnostics],
+                              sessionKey,
+                          },
                       ])
                   ),
               }
-            : { lastSequence: -1, runs: {}, sessionKey: event.sessionKey };
-        const resolved = resolveRun(session, event);
-        session.lastSequence = event.sequence;
+            : { lastSequence: -1, runs: {}, sessionKey };
+        const resolved = resolveRun(session, normalizedEvent);
+        session.lastSequence = normalizedEvent.sequence;
+        const sessions = { ...nextState.sessions };
+        if (previousSessionKey && previousSessionKey !== sessionKey) {
+            delete sessions[previousSessionKey];
+        }
         if (!resolved) {
             nextState = {
                 ...nextState,
-                sessions: { ...nextState.sessions, [event.sessionKey]: session },
+                sessions: { ...sessions, [sessionKey]: session },
             };
             continue;
         }
 
-        const run = applyRunEvent(resolved.run, event);
+        const run = applyRunEvent(resolved.run, normalizedEvent);
 
         session.runs[resolved.runKey] = {
             ...run,
-            aliases: uniqueChatRunIds([...run.aliases, event.runId]),
-            lastSequence: event.sequence,
-            updatedAt: event.timestamp,
+            aliases: uniqueChatRunIds([...run.aliases, normalizedEvent.runId]),
+            lastSequence: normalizedEvent.sequence,
+            updatedAt: normalizedEvent.timestamp,
         };
         nextState = {
             ...nextState,
-            sessions: { ...nextState.sessions, [event.sessionKey]: session },
+            sessions: { ...sessions, [sessionKey]: session },
         };
     }
     return nextState;
@@ -739,23 +777,52 @@ export function addOptimisticChatRun(
     operation?: "compact"
 ): ChatRuntimeState {
     const timestamp = currentIsoString();
-    const previousSession = state.sessions[sessionKey];
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    const previousSessionKey = previousEntry?.[0];
+    const previousSession = previousEntry?.[1];
+    const canonicalSessionKey = previousSessionKey
+        ? preferredSessionKey(previousSessionKey, sessionKey)
+        : sessionKey;
     const session: ChatSessionRuntimeState = previousSession
         ? {
               ...previousSession,
+              sessionKey: canonicalSessionKey,
               runs: Object.fromEntries(
-                  Object.entries(previousSession.runs).filter(
-                      ([, run]) => run.phase === "active"
-                  )
+                  Object.entries(previousSession.runs).map(([key, run]) => [
+                      key,
+                      { ...run, sessionKey: canonicalSessionKey },
+                  ])
               ),
           }
-        : { lastSequence: -1, runs: {}, sessionKey };
-    session.runs[runId] = {
-        ...emptyRun(sessionKey, runId, session.lastSequence, timestamp),
-        operation,
-        statusText: operation === "compact" ? "Compacting context" : "Thinking",
-    };
-    return { ...state, sessions: { ...state.sessions, [sessionKey]: session } };
+        : { lastSequence: -1, runs: {}, sessionKey: canonicalSessionKey };
+    const existingEntry = Object.entries(session.runs).find(
+        ([key, run]) => key === runId || run.aliases.includes(runId)
+    );
+    if (existingEntry) {
+        const [existingKey, existingRun] = existingEntry;
+        session.runs[existingKey] = {
+            ...existingRun,
+            operation: operation ?? existingRun.operation,
+            statusText:
+                existingRun.phase === "active"
+                    ? operation === "compact"
+                        ? "Compacting context"
+                        : (existingRun.statusText ?? "Thinking")
+                    : existingRun.statusText,
+        };
+    } else {
+        session.runs[runId] = {
+            ...emptyRun(canonicalSessionKey, runId, session.lastSequence, timestamp),
+            operation,
+            statusText: operation === "compact" ? "Compacting context" : "Thinking",
+        };
+    }
+    const sessions = { ...state.sessions };
+    if (previousSessionKey && previousSessionKey !== canonicalSessionKey) {
+        delete sessions[previousSessionKey];
+    }
+    sessions[canonicalSessionKey] = session;
+    return { ...state, sessions };
 }
 
 /** Promotes one optimistic run to the provider run id without changing row order. */
@@ -768,7 +835,9 @@ export function acknowledgeChatRun(
     if (!providerRunId) {
         return state;
     }
-    const previousSession = state.sessions[sessionKey];
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    const previousSessionKey = previousEntry?.[0];
+    const previousSession = previousEntry?.[1];
     const optimisticEntry = Object.entries(previousSession?.runs || {}).find(
         ([key, run]) => key === optimisticRunId || run.aliases.includes(optimisticRunId)
     );
@@ -790,13 +859,24 @@ export function acknowledgeChatRun(
               ]),
               runId: providerRunId,
           };
-    return {
-        ...state,
-        sessions: {
-            ...state.sessions,
-            [sessionKey]: { ...previousSession, runs },
-        },
+    const canonicalSessionKey = previousSessionKey
+        ? preferredSessionKey(previousSessionKey, sessionKey)
+        : sessionKey;
+    const sessions = { ...state.sessions };
+    if (previousSessionKey && previousSessionKey !== canonicalSessionKey) {
+        delete sessions[previousSessionKey];
+    }
+    sessions[canonicalSessionKey] = {
+        ...previousSession,
+        runs: Object.fromEntries(
+            Object.entries(runs).map(([key, run]) => [
+                key,
+                { ...run, sessionKey: canonicalSessionKey },
+            ])
+        ),
+        sessionKey: canonicalSessionKey,
     };
+    return { ...state, sessions };
 }
 
 export function clearChatRun(
@@ -804,10 +884,11 @@ export function clearChatRun(
     sessionKey: string,
     runId: string
 ): ChatRuntimeState {
-    const previousSession = state.sessions[sessionKey];
-    if (!previousSession) {
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    if (!previousEntry) {
         return state;
     }
+    const [previousSessionKey, previousSession] = previousEntry;
     const runs = Object.fromEntries(
         Object.entries(previousSession.runs).filter(
             ([key, run]) => key !== runId && !run.aliases.includes(runId)
@@ -817,7 +898,7 @@ export function clearChatRun(
         ...state,
         sessions: {
             ...state.sessions,
-            [sessionKey]: { ...previousSession, runs },
+            [previousSessionKey]: { ...previousSession, runs },
         },
     };
 }
@@ -826,10 +907,11 @@ export function clearChatSessionRuntime(
     state: ChatRuntimeState,
     sessionKey: string
 ): ChatRuntimeState {
-    if (state.sessions[sessionKey] === undefined) {
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    if (!previousEntry) {
         return state;
     }
     const sessions = { ...state.sessions };
-    delete sessions[sessionKey];
+    delete sessions[previousEntry[0]];
     return { ...state, sessions };
 }

@@ -156,6 +156,33 @@ describe("chat runtime state", () => {
         );
     });
 
+    it("keeps recovered deltas when an optimistic begin is repeated", () => {
+        const recovered = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "assistant",
+                message: { content: "working", role: "assistant", text: "working" },
+                mode: "merge",
+                runId: "dashboard-compact-recovered",
+                source: "runtime",
+            }),
+        ]);
+
+        const repeated = addOptimisticChatRun(
+            recovered,
+            SESSION,
+            "dashboard-compact-recovered",
+            "compact"
+        );
+
+        expect(
+            repeated.sessions[SESSION]?.runs["dashboard-compact-recovered"]
+        ).toMatchObject({
+            assistant: { text: "working" },
+            operation: "compact",
+            phase: "active",
+        });
+    });
+
     it("merges optimistic payloads into an existing provider run", () => {
         const providerFirst = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -386,7 +413,25 @@ describe("chat runtime state", () => {
 
         const run = state.sessions[SESSION]?.runs["run-1"];
         expect(run?.assistant?.text).toBe("canonical final");
+        expect(run?.assistantSource).toBe("chat");
         expect(run?.phase).toBe("completed");
+
+        const lateSessionUpdate = reduceChatRuntime(state, [
+            event(48, {
+                kind: "assistant",
+                message: {
+                    content: "different session copy",
+                    role: "assistant",
+                    text: "different session copy",
+                },
+                mode: "merge",
+                runId: "run-1",
+                source: "session",
+            }),
+        ]);
+        expect(lateSessionUpdate.sessions[SESSION]?.runs["run-1"]?.assistant?.text).toBe(
+            "canonical final"
+        );
     });
 
     it("merges a no-id tool result into its latest matching call", () => {
@@ -436,7 +481,7 @@ describe("chat runtime state", () => {
         expect(new Set(diagnostics?.map((entry) => entry.key)).size).toBe(2);
     });
 
-    it("drops a completed turn when the next run starts", () => {
+    it("retains a completed turn while the next run starts", () => {
         const completed = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
                 kind: "finish",
@@ -452,8 +497,128 @@ describe("chat runtime state", () => {
             }),
         ]);
 
-        expect(next.sessions[SESSION]?.runs["old-run"]).toBeUndefined();
+        expect(next.sessions[SESSION]?.runs["old-run"]?.phase).toBe("completed");
         expect(next.sessions[SESSION]?.runs["new-run"]?.phase).toBe("active");
+
+        const optimistic = addOptimisticChatRun(
+            completed,
+            SESSION,
+            "dashboard-chat-next"
+        );
+        expect(optimistic.sessions[SESSION]?.runs["old-run"]?.phase).toBe("completed");
+        expect(optimistic.sessions[SESSION]?.runs["dashboard-chat-next"]?.phase).toBe(
+            "active"
+        );
+    });
+
+    it("normalizes unambiguous provider session aliases without crossing agents", () => {
+        const optimistic = addOptimisticChatRun(
+            createChatRuntimeState(),
+            SESSION,
+            "dashboard-chat-1"
+        );
+        const aliasedEvent = {
+            ...event(16, {
+                kind: "assistant",
+                message: { content: "done", role: "assistant", text: "done" },
+                mode: "merge",
+                runId: "provider-1",
+                source: "chat",
+            }),
+            sessionKey: "main",
+        } as ChatRuntimeEvent;
+        const normalized = reduceChatRuntime(optimistic, [aliasedEvent]);
+
+        expect(normalized.sessions.main).toBeUndefined();
+        expect(normalized.sessions[SESSION]?.runs["provider-1"]?.assistant?.text).toBe(
+            "done"
+        );
+
+        const shortOptimistic = addOptimisticChatRun(
+            optimistic,
+            "main",
+            "dashboard-chat-short"
+        );
+        expect(shortOptimistic.sessions.main).toBeUndefined();
+        expect(shortOptimistic.sessions[SESSION]?.runs).toMatchObject({
+            "dashboard-chat-1": { sessionKey: SESSION },
+            "dashboard-chat-short": { sessionKey: SESSION },
+        });
+
+        const ambiguous = reduceChatRuntime(
+            reduceChatRuntime(createChatRuntimeState(), [
+                event(16, {
+                    kind: "status",
+                    runId: "main-run",
+                    text: "main",
+                }),
+                {
+                    ...event(32, {
+                        kind: "status",
+                        runId: "other-run",
+                        text: "other",
+                    }),
+                    sessionKey: "agent:other:main",
+                } as ChatRuntimeEvent,
+            ]),
+            [
+                {
+                    ...event(48, {
+                        kind: "status",
+                        runId: "short-run",
+                        text: "short",
+                    }),
+                    sessionKey: "main",
+                } as ChatRuntimeEvent,
+            ]
+        );
+        expect(ambiguous.sessions.main?.runs["short-run"]?.statusText).toBe("short");
+        expect(ambiguous.sessions[SESSION]?.runs["short-run"]).toBeUndefined();
+        expect(ambiguous.sessions["agent:other:main"]?.runs["short-run"]).toBeUndefined();
+    });
+
+    it("rekeys a short provider session when its full identity becomes known", () => {
+        const shortFirst = reduceChatRuntime(createChatRuntimeState(), [
+            {
+                ...event(16, { kind: "status", runId: "run-1", text: "short" }),
+                sessionKey: "main",
+            } as ChatRuntimeEvent,
+        ]);
+        const providerRekeyed = reduceChatRuntime(shortFirst, [
+            event(32, {
+                kind: "assistant",
+                message: { content: "answer", role: "assistant", text: "answer" },
+                mode: "merge",
+                runId: "run-1",
+                source: "chat",
+            }),
+        ]);
+        expect(providerRekeyed.sessions.main).toBeUndefined();
+        expect(providerRekeyed.sessions[SESSION]?.runs["run-1"]?.assistant?.text).toBe(
+            "answer"
+        );
+
+        const optimisticRekeyed = addOptimisticChatRun(
+            shortFirst,
+            SESSION,
+            "dashboard-chat-2"
+        );
+        expect(optimisticRekeyed.sessions.main).toBeUndefined();
+        expect(Object.keys(optimisticRekeyed.sessions[SESSION]?.runs || {})).toEqual([
+            "run-1",
+            "dashboard-chat-2",
+        ]);
+
+        const acknowledgedRekeyed = acknowledgeChatRun(
+            addOptimisticChatRun(createChatRuntimeState(), "main", "dashboard-chat-3"),
+            SESSION,
+            "dashboard-chat-3",
+            "provider-3"
+        );
+        expect(acknowledgedRekeyed.sessions.main).toBeUndefined();
+        expect(acknowledgedRekeyed.sessions[SESSION]?.runs["provider-3"]?.runId).toBe(
+            "provider-3"
+        );
     });
 
     it("creates and reuses a provisional run for runless events", () => {
@@ -547,6 +712,24 @@ describe("chat runtime state", () => {
             }),
         });
 
+        const withFollowUp = addOptimisticChatRun(
+            completed,
+            SESSION,
+            "dashboard-chat-follow-up"
+        );
+        const lateEcho = reduceChatRuntime(withFollowUp, [
+            event(32, {
+                kind: "assistant",
+                message: { content: "OK", role: "assistant", text: "OK" },
+                mode: "merge",
+                source: "session",
+            }),
+        ]);
+        expect(lateEcho.sessions[SESSION]?.runs["run-1"]?.lastSequence).toBe(32);
+        expect(
+            lateEcho.sessions[SESSION]?.runs["dashboard-chat-follow-up"]?.assistant
+        ).toBeUndefined();
+
         const delayedEcho = {
             ...event(48, {
                 kind: "assistant",
@@ -557,13 +740,11 @@ describe("chat runtime state", () => {
             timestamp: "2026-07-16T12:02:00.000Z",
         } as ChatRuntimeEvent;
         const nextTurn = reduceChatRuntime(echoed, [delayedEcho]);
-        expect(Object.values(nextTurn.sessions[SESSION]?.runs || {})).toEqual([
-            expect.objectContaining({
-                assistant: expect.objectContaining({ text: "OK" }),
-                phase: "active",
-                runId: "runtime-runless-48",
-            }),
-        ]);
+        expect(nextTurn.sessions[SESSION]?.runs["run-1"]?.phase).toBe("completed");
+        expect(nextTurn.sessions[SESSION]?.runs["runtime-runless-48"]).toMatchObject({
+            assistant: { text: "OK" },
+            phase: "active",
+        });
 
         const differentImmediateMessage = reduceChatRuntime(completed, [
             event(48, {

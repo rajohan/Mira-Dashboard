@@ -52,14 +52,38 @@ describe("OpenClaw adapter variants", () => {
                 21
             )
         );
+        const topLevelAssistant = adapter.event(
+            envelope(
+                "session.message",
+                { content: "top-level preamble", role: "assistant" },
+                22
+            )
+        );
+        const ignoredTopLevelUser = adapter.event(
+            envelope("session.message", { content: "top-level prompt", role: "user" }, 23)
+        );
+        const ignoredNestedTopLevelUser = adapter.event(
+            envelope(
+                "session.message",
+                { message: "nested top-level prompt", role: "user" },
+                24
+            )
+        );
+        const nestedTopLevelAssistant = adapter.event(
+            envelope(
+                "session.message",
+                { message: "nested top-level answer", role: "assistant" },
+                25
+            )
+        );
         const assistant = adapter.event(
-            envelope("agent", { data: { delta: "answer" }, stream: "assistant" }, 22)
+            envelope("agent", { data: { delta: "answer" }, stream: "assistant" }, 26)
         );
         const thinking = adapter.event(
-            envelope("agent", { data: { text: "considering" }, stream: "thinking" }, 23)
+            envelope("agent", { data: { text: "considering" }, stream: "thinking" }, 27)
         );
         const emptyThinking = adapter.event(
-            envelope("agent", { data: {}, stream: "reasoning" }, 24)
+            envelope("agent", { data: {}, stream: "reasoning" }, 28)
         );
         const itemThinking = adapter.event(
             envelope(
@@ -74,7 +98,7 @@ describe("OpenClaw adapter variants", () => {
                     },
                     stream: "item",
                 },
-                25
+                29
             )
         );
 
@@ -83,6 +107,17 @@ describe("OpenClaw adapter variants", () => {
             source: "session",
         });
         expect(ignoredUser).toEqual([]);
+        expect(topLevelAssistant[0]).toMatchObject({
+            kind: "assistant",
+            message: { role: "assistant", text: "top-level preamble" },
+            source: "session",
+        });
+        expect(ignoredTopLevelUser).toEqual([]);
+        expect(ignoredNestedTopLevelUser).toEqual([]);
+        expect(nestedTopLevelAssistant[0]).toMatchObject({
+            kind: "assistant",
+            message: { role: "assistant", text: "nested top-level answer" },
+        });
         expect(assistant.map((event) => event.kind)).toEqual(["assistant"]);
         expect(assistant[0]?.kind === "assistant" && assistant[0].message.text).toBe(
             "answer"

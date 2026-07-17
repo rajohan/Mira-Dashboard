@@ -12,6 +12,7 @@ import type {
     ChatRuntimeState,
     ChatSessionRuntimeState,
 } from "./chatState";
+import { findChatSessionRuntimeState } from "./chatState";
 
 export interface ChatProjection {
     activityFingerprint: string;
@@ -31,6 +32,20 @@ function currentResponseStart(messages: ChatHistoryMessage[]): number {
     return messages.findLastIndex((message) => message.role.toLowerCase() === "user") + 1;
 }
 
+interface ResponseSegment {
+    end: number;
+    start: number;
+}
+
+function isUserMessage(message: ChatHistoryMessage): boolean {
+    return message.role.toLowerCase() === "user";
+}
+
+function messageTimestamp(message: ChatHistoryMessage): number | undefined {
+    const timestamp = Date.parse(message.timestamp || "");
+    return Number.isNaN(timestamp) ? undefined : timestamp;
+}
+
 function isRunMatchingMessage(run: ChatRunState, message: ChatHistoryMessage): boolean {
     return Boolean(
         message.runId &&
@@ -38,10 +53,56 @@ function isRunMatchingMessage(run: ChatRunState, message: ChatHistoryMessage): b
     );
 }
 
-function canonicalFinalIndex(messages: ChatHistoryMessage[], run: ChatRunState): number {
-    const start = currentResponseStart(messages);
+function responseSegment(
+    messages: ChatHistoryMessage[],
+    run: ChatRunState
+): ResponseSegment {
+    const matchingIndex = messages.findIndex((message) =>
+        isRunMatchingMessage(run, message)
+    );
+    let userIndex =
+        matchingIndex === -1
+            ? -1
+            : messages.findLastIndex(
+                  (message, index) => index < matchingIndex && isUserMessage(message)
+              );
+    const startedAt = Date.parse(run.startedAt);
+    if (userIndex === -1 && !Number.isNaN(startedAt)) {
+        const nextUserIndex = messages.findIndex((message) => {
+            const timestamp = messageTimestamp(message);
+            return (
+                isUserMessage(message) && timestamp !== undefined && timestamp > startedAt
+            );
+        });
+        const hasNextUser = nextUserIndex !== -1;
+        userIndex = messages.findLastIndex((message, index) => {
+            if (!isUserMessage(message)) {
+                return false;
+            }
+            if (hasNextUser) {
+                return index < nextUserIndex;
+            }
+            const timestamp = messageTimestamp(message);
+            return timestamp !== undefined && timestamp <= startedAt;
+        });
+    }
+    const start = userIndex === -1 ? currentResponseStart(messages) : userIndex + 1;
+    const nextUserOffset = messages
+        .slice(start)
+        .findIndex((message) => isUserMessage(message));
+    return {
+        end: nextUserOffset === -1 ? messages.length : start + nextUserOffset,
+        start,
+    };
+}
+
+function canonicalFinalIndex(
+    messages: ChatHistoryMessage[],
+    run: ChatRunState,
+    segment: ResponseSegment
+): number {
     const assistantText = run.assistant?.text || "";
-    for (let index = messages.length - 1; index >= start; index -= 1) {
+    for (let index = segment.end - 1; index >= segment.start; index -= 1) {
         const message = messages[index]!;
         const role = message.role.toLowerCase();
         if (role !== "assistant" && role !== "system") {
@@ -105,10 +166,10 @@ function thinkingSignatures(message: ChatHistoryMessage): string[] {
 function isDiagnosticRecovered(
     diagnostic: ChatHistoryMessage,
     messages: ChatHistoryMessage[],
-    responseStart: number,
+    segment: ResponseSegment,
     run: ChatRunState
 ): boolean {
-    const candidates = messages.slice(responseStart);
+    const candidates = messages.slice(segment.start, segment.end);
     const tool = new Set(toolSignatures(diagnostic));
     const thinking = new Set(thinkingSignatures(diagnostic));
     const identity = messageIdentity(diagnostic);
@@ -158,17 +219,15 @@ export function reconcileChatMessages(
 ): ChatHistoryMessage[] {
     const messages = [...history];
     for (const run of orderedRuns(session)) {
-        const responseStart = currentResponseStart(messages);
+        const segment = responseSegment(messages, run);
         const diagnostics = run.diagnostics
             .toSorted(
                 (left, right) =>
                     diagnosticRank(left.message) - diagnosticRank(right.message)
             )
             .map((entry) => transientMessage(entry.message, run, entry.key))
-            .filter(
-                (message) => !isDiagnosticRecovered(message, messages, responseStart, run)
-            );
-        const finalIndex = canonicalFinalIndex(messages, run);
+            .filter((message) => !isDiagnosticRecovered(message, messages, segment, run));
+        const finalIndex = canonicalFinalIndex(messages, run, segment);
         if (finalIndex !== -1) {
             const canonical = messages[finalIndex]!;
             if (run.assistant) {
@@ -181,10 +240,11 @@ export function reconcileChatMessages(
             continue;
         }
 
-        messages.push(...diagnostics);
+        const additions = [...diagnostics];
         if (run.assistant) {
-            messages.push(transientMessage(run.assistant, run, "assistant"));
+            additions.push(transientMessage(run.assistant, run, "assistant"));
         }
+        messages.splice(segment.end, 0, ...additions);
     }
     return dedupeMessages(messages);
 }
@@ -230,7 +290,7 @@ export function projectChat(
     shouldKeepThinkingAfterFinal: boolean,
     deletedMessageKeys: ReadonlySet<string>
 ): ChatProjection {
-    const session = runtime.sessions[sessionKey];
+    const session = findChatSessionRuntimeState(runtime, sessionKey);
     const runs = orderedRuns(session);
     const reconciled = reconcileChatMessages(history, session);
     const presented = presentChatMessages(

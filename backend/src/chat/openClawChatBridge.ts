@@ -72,6 +72,38 @@ function hasRunIdentifier(session: OpenClawChatSessionIdentity, runId: string): 
     ].includes(runId);
 }
 
+function isSameSessionKey(left: string, right: string): boolean {
+    const normalizedLeft = left.trim().toLowerCase();
+    const normalizedRight = right.trim().toLowerCase();
+    if (normalizedLeft === normalizedRight) {
+        return true;
+    }
+    const leftMatch = normalizedLeft.match(/^agent:([^:]+):(.+)$/u);
+    const rightMatch = normalizedRight.match(/^agent:([^:]+):(.+)$/u);
+    if (leftMatch && rightMatch) {
+        return leftMatch[1] === rightMatch[1] && leftMatch[2] === rightMatch[2];
+    }
+    return leftMatch
+        ? leftMatch[2] === normalizedRight
+        : rightMatch?.[2] === normalizedLeft;
+}
+
+function canonicalSessionKey(
+    sessionKey: string,
+    sessions: readonly OpenClawChatSessionIdentity[]
+): string | undefined {
+    const exact = sessions.find(
+        (session) => session.key.toLowerCase() === sessionKey.toLowerCase()
+    );
+    if (exact) {
+        return exact.key;
+    }
+    const matches = sessions.filter((session) =>
+        isSameSessionKey(session.key, sessionKey)
+    );
+    return matches.length === 1 ? matches[0]?.key : undefined;
+}
+
 function isTerminalEvent(event: unknown, payload: unknown): boolean {
     if (event === "model.completed" || event === "session.ended") {
         return true;
@@ -197,8 +229,16 @@ export class OpenClawChatBridge {
         }
 
         const record = asRecord(payload);
-        if (!record || stringField(record, "sessionKey")) {
+        if (!record) {
             return payload;
+        }
+
+        const providedSessionKey = stringField(record, "sessionKey");
+        if (providedSessionKey) {
+            const canonical = canonicalSessionKey(providedSessionKey, sessions);
+            return canonical && canonical !== providedSessionKey
+                ? { ...record, sessionKey: canonical }
+                : payload;
         }
 
         const runId = stringField(record, "runId");
@@ -346,7 +386,8 @@ export class OpenClawChatBridge {
     #promoteProvisionalRun(
         sessionKey: string,
         providerRunId: string,
-        preferredProvisionalRunId?: string
+        preferredProvisionalRunId?: string,
+        requestBoundary?: number
     ): void {
         const runs = this.#runsBySession.get(sessionKey);
         if (!runs) {
@@ -370,10 +411,16 @@ export class OpenClawChatBridge {
             return;
         }
 
-        const provisionalEntries = [...runs].filter(
-            ([runId, run]) =>
-                runId !== providerRunId && !run.completed && isProvisionalRunId(run.runId)
-        );
+        const provisionalEntries = [...runs].filter(([runId, run]) => {
+            const isCurrentRequest =
+                requestBoundary === undefined || lastSequence(run) > requestBoundary;
+            return (
+                runId !== providerRunId &&
+                isProvisionalRunId(run.runId) &&
+                isCurrentRequest &&
+                (!run.completed || run.runId === "runless")
+            );
+        });
         if (provisionalEntries.length !== 1) {
             return;
         }
@@ -531,6 +578,11 @@ export class OpenClawChatBridge {
         this.#sessionsByRun.clear();
     }
 
+    /** Captures the runtime cutoff immediately before a Gateway request starts. */
+    captureRequestBoundary(): number {
+        return this.#sequence;
+    }
+
     /** Clears replay state associated with one reset, aborted, or deleted session. */
     clearSession(sessionKey: string): void {
         this.#runsBySession.delete(sessionKey);
@@ -543,7 +595,8 @@ export class OpenClawChatBridge {
     handleSuccessfulRequest(
         method: string,
         parameters: Record<string, unknown>,
-        payload: unknown
+        payload: unknown,
+        requestBoundary?: number
     ): void {
         if (method === "chat.abort") {
             const sessionKey = stringField(parameters, "sessionKey");
@@ -572,12 +625,18 @@ export class OpenClawChatBridge {
         const runId = stringField(asRecord(payload), "runId");
         const provisionalRunId = stringField(parameters, "idempotencyKey");
         if (sessionKey) {
-            if (runId) {
-                this.#promoteProvisionalRun(sessionKey, runId, provisionalRunId);
+            const acknowledgedRunId = runId || provisionalRunId;
+            if (acknowledgedRunId) {
+                this.#promoteProvisionalRun(
+                    sessionKey,
+                    acknowledgedRunId,
+                    provisionalRunId,
+                    requestBoundary
+                );
             }
-            this.#clearCompletedRuns(sessionKey, runId || provisionalRunId);
-            if (runId) {
-                this.#rememberRunSession(runId, sessionKey);
+            this.#clearCompletedRuns(sessionKey, acknowledgedRunId);
+            if (acknowledgedRunId) {
+                this.#rememberRunSession(acknowledgedRunId, sessionKey);
             }
         }
     }

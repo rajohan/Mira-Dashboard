@@ -247,6 +247,47 @@ describe("chat runtime controller", () => {
         ).toBe("working");
     });
 
+    it("retains optimistic operation metadata when snapshot already has the run", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-compact-new", "compact");
+            result.current.acknowledgeRun(
+                SELECTED,
+                "dashboard-compact-new",
+                "provider-compact"
+            );
+        });
+        await act(async () => {
+            snapshot.resolve({
+                completed: false,
+                events: [
+                    {
+                        ...assistant(SELECTED, 16, "compacting"),
+                        runId: "provider-compact",
+                    },
+                ],
+                throughSequence: 16,
+            });
+            await snapshot.promise;
+        });
+
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["provider-compact"]
+        ).toMatchObject({
+            aliases: expect.arrayContaining([
+                "dashboard-compact-new",
+                "provider-compact",
+            ]),
+            assistant: { text: "compacting" },
+            operation: "compact",
+        });
+    });
+
     it("merges a runless snapshot into the pending acknowledged send", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
@@ -317,6 +358,66 @@ describe("chat runtime controller", () => {
         expect(onError).toHaveBeenNthCalledWith(1, "snapshot failure");
         expect(onError).toHaveBeenNthCalledWith(2, "queued failure");
         expect(onSettled).toHaveBeenCalledTimes(2);
+    });
+
+    it("gates aliased selected-session events and settles the canonical session", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const onError = jest.fn();
+        const onSettled = jest.fn();
+        const { result } = renderHook(() =>
+            useChatRuntime({
+                onError,
+                onSettled,
+                selectedSessionKey: SELECTED,
+                transport: fake.transport,
+            })
+        );
+
+        act(() => fake.emit(finish("main", 16, "alias failure")));
+        expect(result.current.state.sessions.main).toBeUndefined();
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 16 });
+            await snapshot.promise;
+        });
+
+        expect(result.current.state.sessions.main?.runs["run-1"]?.phase).toBe("error");
+        expect(onError).toHaveBeenCalledWith("alias failure");
+        expect(onSettled).toHaveBeenCalledWith(SELECTED);
+    });
+
+    it("reconciles an aliased queued run with the selected optimistic run", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-chat-alias");
+            result.current.acknowledgeRun(
+                SELECTED,
+                "dashboard-chat-alias",
+                "provider-alias"
+            );
+            fake.emit({
+                ...assistant("main", 16, "working"),
+                runId: undefined,
+            });
+        });
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 16 });
+            await snapshot.promise;
+        });
+
+        expect(result.current.state.sessions.main).toBeUndefined();
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "provider-alias",
+        ]);
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["provider-alias"]?.assistant
+                ?.text
+        ).toBe("working");
     });
 
     it("suppresses a duplicate terminal banner after a represented tool failure", async () => {
