@@ -11,6 +11,117 @@ function payloads(bridge: OpenClawChatBridge, sessionKey = MAIN) {
 }
 
 describe("OpenClaw chat bridge", () => {
+    it("retains run activity while coalescing full item progress snapshots", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.started",
+            { runId: "long-run", sessionKey: MAIN },
+            []
+        );
+        for (let index = 0; index < 600; index += 1) {
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: {
+                        itemId: "preamble-1",
+                        kind: "preamble",
+                        phase: "update",
+                        progressText: `Working ${index}`,
+                    },
+                    runId: "long-run",
+                    sessionKey: MAIN,
+                    stream: "item",
+                },
+                []
+            );
+        }
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(false);
+        expect(snapshot.events.map((event) => event.event)).toEqual([
+            "session.started",
+            "agent",
+        ]);
+        expect(snapshot.events[1]?.payload).toMatchObject({
+            data: { progressText: "Working 599" },
+        });
+    });
+
+    it("drops provider-internal replay noise without affecting live sequencing", () => {
+        const bridge = new OpenClawChatBridge();
+        const ignored = bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "started" },
+                runId: "run-1",
+                sessionKey: MAIN,
+                stream: "codex_app_server.hook",
+            },
+            []
+        );
+        const retained = bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "reasoning" },
+                runId: "run-1",
+                stream: "thinking",
+            },
+            []
+        );
+
+        expect(ignored.runtimeSequence).toBe(1);
+        expect(retained.runtimeSequence).toBe(2);
+        expect(retained.payload).toMatchObject({ sessionKey: MAIN });
+        expect(bridge.snapshot(MAIN).events).toEqual([retained]);
+    });
+
+    it("keeps the latest full thinking snapshot after a run completes", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.started",
+            { runId: "completed-run", sessionKey: MAIN },
+            []
+        );
+        for (const progressText of ["First", "First and second"]) {
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: {
+                        itemId: "preamble-1",
+                        kind: "preamble",
+                        phase: "update",
+                        progressText,
+                    },
+                    runId: "completed-run",
+                    sessionKey: MAIN,
+                    stream: "item",
+                },
+                []
+            );
+        }
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                runId: "completed-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(true);
+        expect(snapshot.events.map((event) => event.event)).toEqual([
+            "session.started",
+            "agent",
+            "chat",
+        ]);
+        expect(snapshot.events[1]?.payload).toMatchObject({
+            data: { progressText: "First and second" },
+        });
+    });
+
     it("sequences, enriches and quarantines ambiguous run associations", () => {
         const bridge = new OpenClawChatBridge();
         bridge.handleSuccessfulRequest(

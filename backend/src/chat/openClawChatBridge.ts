@@ -47,6 +47,7 @@ const RETAINED_EVENTS = new Set([
     "model.completed",
     "session.ended",
     "session.message",
+    "session.started",
     "session.tool",
 ]);
 
@@ -62,6 +63,75 @@ function stringField(
 ): string | undefined {
     const value = record?.[key];
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function nestedRuntimeItem(
+    data: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+    return asRecord(data?.item) || asRecord(data?.payload) || data;
+}
+
+function hasRuntimeItemText(
+    data: Record<string, unknown>,
+    item: Record<string, unknown>
+): boolean {
+    return ["delta", "progressText", "summary", "text", "meta", "content"].some((key) => {
+        const value = data[key] ?? item[key];
+        return Array.isArray(value)
+            ? value.length > 0
+            : value !== undefined && value !== null && value !== "";
+    });
+}
+
+function shouldRetainRuntimeEvent(
+    event: unknown,
+    payload: Record<string, unknown>
+): boolean {
+    if (event !== "agent") {
+        return true;
+    }
+    const stream = stringField(payload, "stream") || "";
+    if (stream.startsWith("codex_app_server.")) {
+        return false;
+    }
+    const data = asRecord(payload.data);
+    if (stream !== "item" || !data) {
+        return true;
+    }
+    if (data.suppressChannelProgress === true) {
+        return false;
+    }
+    const item = nestedRuntimeItem(data) || data;
+    const phase = stringField(data, "phase") || stringField(item, "phase") || "";
+    const kind = (
+        stringField(item, "kind") ||
+        stringField(item, "type") ||
+        stringField(data, "kind") ||
+        ""
+    ).toLowerCase();
+    return (
+        !["start", "end"].includes(phase) ||
+        !/\b(?:analysis|reasoning|thinking)\b/u.test(kind) ||
+        hasRuntimeItemText(data, item)
+    );
+}
+
+function replayCoalescingKey(envelope: OpenClawRuntimeEnvelope): string | undefined {
+    if (envelope.event !== "agent") {
+        return undefined;
+    }
+    const payload = asRecord(envelope.payload);
+    const data = asRecord(payload?.data);
+    if (stringField(payload, "stream") !== "item" || !data) {
+        return undefined;
+    }
+    const item = nestedRuntimeItem(data) || data;
+    const phase = stringField(data, "phase") || stringField(item, "phase");
+    if (phase !== "update" || data.delta !== undefined || item.delta !== undefined) {
+        return undefined;
+    }
+    const itemId = stringField(data, "itemId") || stringField(item, "itemId");
+    return itemId ? `agent:item:${itemId}` : undefined;
 }
 
 function hasRunIdentifier(session: OpenClawChatSessionIdentity, runId: string): boolean {
@@ -744,6 +814,9 @@ export class OpenClawChatBridge {
         }
 
         const payload = asRecord(envelope.payload);
+        if (!payload) {
+            return;
+        }
         const sessionKey = stringField(payload, "sessionKey");
         if (!sessionKey) {
             return;
@@ -757,6 +830,9 @@ export class OpenClawChatBridge {
             : 0;
         if (explicitRunId && associationBytes <= MAX_BYTES_PER_RUN) {
             this.#rememberRunSession(explicitRunId, sessionKey);
+        }
+        if (!shouldRetainRuntimeEvent(envelope.event, payload)) {
+            return;
         }
         const serializedBytes = Buffer.byteLength(JSON.stringify(envelope));
         const retainedEnvelope =
@@ -784,7 +860,8 @@ export class OpenClawChatBridge {
             return;
         }
 
-        const runs = this.#runsBySession.get(sessionKey) || new Map();
+        const runs =
+            this.#runsBySession.get(sessionKey) || new Map<string, RetainedRun>();
         const activeRuns = runs
             .values()
             .filter((snapshot) => !snapshot.completed)
@@ -857,9 +934,23 @@ export class OpenClawChatBridge {
             runs.set(runId, snapshot);
         }
 
-        snapshot.events.push(retainedEnvelope);
-        snapshot.eventBytes.push(retainedBytes);
-        snapshot.totalBytes += retainedBytes;
+        const coalescingKey = replayCoalescingKey(retainedEnvelope);
+        const coalescingIndex = coalescingKey
+            ? snapshot.events.findLastIndex(
+                  (candidate) => replayCoalescingKey(candidate) === coalescingKey
+              )
+            : -1;
+        if (coalescingIndex === -1) {
+            snapshot.events.push(retainedEnvelope);
+            snapshot.eventBytes.push(retainedBytes);
+            snapshot.totalBytes += retainedBytes;
+        } else {
+            snapshot.events.splice(coalescingIndex, 1);
+            snapshot.totalBytes -= snapshot.eventBytes.splice(coalescingIndex, 1)[0] || 0;
+            snapshot.events.push(retainedEnvelope);
+            snapshot.eventBytes.push(retainedBytes);
+            snapshot.totalBytes += retainedBytes;
+        }
         while (
             snapshot.events.length > 1 &&
             (snapshot.events.length > MAX_EVENTS_PER_RUN ||
@@ -1017,7 +1108,8 @@ export class OpenClawChatBridge {
     /** Returns active runs or the latest completed run for one session. */
     snapshot(sessionKey: string): OpenClawRuntimeSnapshot {
         this.#prune();
-        const snapshots = [...(this.#runsBySession.get(sessionKey)?.values() || [])];
+        const runs = this.#runsBySession.get(sessionKey);
+        const snapshots = runs ? runs.values().toArray() : [];
         const active = snapshots.filter((snapshot) => !snapshot.completed);
         const completed = snapshots
             .filter((snapshot) => snapshot.completed)

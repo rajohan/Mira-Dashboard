@@ -21,6 +21,15 @@ import {
 type WithoutSequence<Event> = Event extends unknown ? Omit<Event, "sequence"> : never;
 type ChatRuntimeEventDraft = WithoutSequence<ChatRuntimeEvent>;
 
+function isToolFailureError(value: string | undefined): boolean {
+    const normalized = value?.trim() || "";
+    return (
+        normalized.startsWith("⚠️ 🛠️") ||
+        /^tool (?:call|execution) failed\b/iu.test(normalized) ||
+        /\bcodex native tool failed\b/iu.test(normalized)
+    );
+}
+
 export interface OpenClawRuntimeEnvelope {
     event?: unknown;
     payload?: unknown;
@@ -72,35 +81,37 @@ function chatEventDrafts(
             ? undefined
             : normalizeAssistant(rawMessage, common.runId);
     const isCommand = asRecord(payload.message)?.command === true;
-    const error =
-        stringValue(payload.errorMessage) ||
-        stringValue(payload.error) ||
-        (state === "error" ? "Chat run failed" : undefined);
+    const explicitError = stringValue(payload.errorMessage) || stringValue(payload.error);
+    const error = explicitError || (state === "error" ? "Chat run failed" : undefined);
+    const isToolFailure =
+        isToolFailureError(explicitError) ||
+        (state === "error" && isToolFailureError(message?.text));
+    const isDuplicateToolFailureMessage = Boolean(
+        isToolFailure &&
+        message &&
+        (message.text.trim() === error?.trim() || isToolFailureError(message.text))
+    );
     return [
         {
             ...common,
             authoritative: true,
             kind: "finish",
-            error,
-            message: message
-                ? {
-                      ...message,
-                      role: isCommand ? "system" : message.role,
-                      local: isCommand || undefined,
-                      timestamp: common.timestamp,
-                  }
-                : undefined,
+            error: isToolFailure ? undefined : error,
+            message:
+                message && !isDuplicateToolFailureMessage
+                    ? {
+                          ...message,
+                          role: isCommand ? "system" : message.role,
+                          local: isCommand || undefined,
+                          timestamp: common.timestamp,
+                      }
+                    : undefined,
             outcome:
                 state === "final"
                     ? "completed"
                     : state === "aborted"
                       ? "aborted"
                       : "error",
-            suppressIfToolFailure: Boolean(
-                error &&
-                (error.startsWith("⚠️ 🛠️") ||
-                    /^tool (?:call|execution) failed\b/iu.test(error))
-            ),
         },
     ];
 }
@@ -197,10 +208,12 @@ function runtimeStreamDrafts(
             status === "error" ||
             status === "failed";
         const outcome = isAborted ? "aborted" : isError ? "error" : "completed";
+        const terminalError =
+            explicitError || (outcome === "error" ? "Chat run failed" : undefined);
         drafts.push({
             ...common,
             kind: "finish",
-            error: explicitError || (outcome === "error" ? "Chat run failed" : undefined),
+            error: isToolFailureError(terminalError) ? undefined : terminalError,
             outcome,
         });
     } else if (!progress.text && OPENCLAW_WORK_STREAMS.has(stream) && phase === "start") {

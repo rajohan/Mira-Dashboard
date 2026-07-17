@@ -32,6 +32,7 @@ export interface ChatRunState {
     sessionKey: string;
     startedAt: string;
     statusText?: string;
+    terminalAt?: string;
     terminalSequence?: number;
     updatedAt: string;
 }
@@ -81,7 +82,6 @@ export type ChatRuntimeEvent =
           error?: string;
           message?: ChatHistoryMessage;
           outcome: Exclude<ChatRunPhase, "active">;
-          suppressIfToolFailure?: boolean;
       });
 
 export function createChatRuntimeState(generation = 0): ChatRuntimeState {
@@ -546,17 +546,17 @@ function applyDiagnosticEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "thinking" | "tool" }>
 ): ChatRunState {
-    const key =
-        event.kind === "tool"
-            ? event.toolKey
-            : `thinking:${event.message.thinking?.[0]?.id || "primary"}`;
+    const key = event.kind === "tool" ? event.toolKey : "thinking:primary";
     return {
         ...run,
         diagnostics: mergeDiagnosticEntry(
             run.diagnostics,
             key,
             event.kind,
-            event.message,
+            {
+                ...event.message,
+                timestamp: event.message.timestamp || event.timestamp,
+            },
             event.sequence
         ),
     };
@@ -575,7 +575,7 @@ function mergeRunDiagnostics(
                     : "thinking";
             diagnostics = mergeDiagnosticEntry(
                 diagnostics,
-                entry.key,
+                kind === "thinking" ? "thinking:primary" : entry.key,
                 kind,
                 entry.message,
                 `merge-${runIndex}-${entryIndex}-${run.lastSequence}`
@@ -639,6 +639,7 @@ function mergeAcknowledgedRuns(
         runId: providerRunId,
         startedAt,
         statusText: phase === "active" ? newer.statusText || older.statusText : undefined,
+        terminalAt: terminalRun?.terminalAt ?? newer.terminalAt ?? older.terminalAt,
         terminalSequence,
     };
 }
@@ -657,14 +658,6 @@ function applyFinishEvent(
         return { ...run, statusText: undefined };
     }
 
-    const hasFailedTool = run.diagnostics.some((entry) =>
-        [
-            entry.message.toolResult,
-            ...(entry.message.toolCalls || []).map((call) => call.toolResult),
-        ].some((result) => result?.isError === true)
-    );
-    const error = event.suppressIfToolFailure && hasFailedTool ? undefined : event.error;
-
     const withMessage = event.message
         ? applyAssistantEvent(
               { ...run, phase: event.outcome },
@@ -679,9 +672,10 @@ function applyFinishEvent(
         : run;
     return {
         ...withMessage,
-        error,
+        error: event.error,
         phase: event.outcome,
         statusText: undefined,
+        terminalAt: event.timestamp,
         terminalSequence: event.sequence,
     };
 }

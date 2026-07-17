@@ -62,6 +62,68 @@ function selectedSession(): Session {
 }
 
 describe("chat actions", () => {
+    it("allows a new message to steer while the previous send acknowledgement is pending", async () => {
+        const sendDeferred = Promise.withResolvers<{ runId?: string }>();
+        const transport = fakeTransport(jest.fn(() => sendDeferred.promise));
+        const runtime = fakeRuntime();
+        const selectedSessionKeyReference = { current: SESSION_A };
+        let messages: ChatHistoryMessage[] = [];
+        const setMessages = jest.fn((update: SetStateAction<ChatHistoryMessage[]>) => {
+            messages = typeof update === "function" ? update(messages) : update;
+        });
+        const { result, rerender } = renderHook(
+            ({ activeRunCount, draft }) =>
+                useChatActions({
+                    activeRunCount,
+                    attachments: [],
+                    attachmentsReference: { current: [] },
+                    clearAttachments: jest.fn(),
+                    confirmResetSession: jest.fn(async () => true),
+                    draft,
+                    isCompacting: false,
+                    isConnected: true,
+                    isRecording: false,
+                    isTranscribing: false,
+                    runtime,
+                    scheduleBottomFollow: jest.fn(),
+                    selectedSession: selectedSession(),
+                    selectedSessionKey: SESSION_A,
+                    selectedSessionKeyReference,
+                    setDraft: jest.fn(),
+                    setIsAtBottom: jest.fn(),
+                    setMessages,
+                    setSendError: jest.fn(),
+                    shouldStickToBottomReference: { current: true },
+                    transport,
+                }),
+            { initialProps: { activeRunCount: 0, draft: "first" } }
+        );
+
+        let firstSend: Promise<void> | undefined;
+        act(() => {
+            firstSend = result.current.handleSend();
+        });
+        await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(1));
+
+        rerender({ activeRunCount: 1, draft: "steer" });
+        expect(result.current.canSend).toBe(true);
+
+        let secondSend: Promise<void> | undefined;
+        act(() => {
+            secondSend = result.current.handleSend();
+        });
+        await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(2));
+        expect(messages.map((message) => message.text)).toEqual(["first", "steer"]);
+        expect(
+            messages.every((message) => message.runId?.startsWith("dashboard-chat-"))
+        ).toBe(true);
+
+        await act(async () => {
+            sendDeferred.resolve({ runId: "run-1" });
+            await Promise.all([firstSend, secondSend]);
+        });
+    });
+
     it("keeps failed sends scoped to their initiating session", async () => {
         const sendDeferred = Promise.withResolvers<{ runId?: string }>();
         const transport = fakeTransport(jest.fn(() => sendDeferred.promise));

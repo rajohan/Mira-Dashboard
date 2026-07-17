@@ -501,7 +501,7 @@ describe("chat runtime controller", () => {
         ).toBe("working");
     });
 
-    it("suppresses a duplicate terminal banner after a represented tool failure", async () => {
+    it("keeps normalized tool failures out of the global error callback", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
         const onError = jest.fn();
@@ -541,8 +541,8 @@ describe("chat runtime controller", () => {
                 toolKey: "tool:tool-1",
             });
             fake.emit({
-                ...finish(SELECTED, 32, "tool execution failed: exec"),
-                suppressIfToolFailure: true,
+                ...finish(SELECTED, 32),
+                outcome: "error",
             });
         });
 
@@ -554,12 +554,9 @@ describe("chat runtime controller", () => {
 
         act(() => {
             result.current.clearSession(SELECTED);
-            fake.emit({
-                ...finish(SELECTED, 48, "tool execution failed: missing diagnostic"),
-                suppressIfToolFailure: true,
-            });
+            fake.emit(finish(SELECTED, 48, "request failed"));
         });
-        expect(onError).toHaveBeenCalledWith("tool execution failed: missing diagnostic");
+        expect(onError).toHaveBeenCalledWith("request failed");
     });
 
     it("expires an old completed snapshot from its original finish time", async () => {

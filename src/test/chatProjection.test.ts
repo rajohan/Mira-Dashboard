@@ -33,6 +33,14 @@ function event(sequence: number, draft: EventDraft): ChatRuntimeEvent {
     } as ChatRuntimeEvent;
 }
 
+function eventAt(
+    sequence: number,
+    timestamp: string,
+    draft: EventDraft
+): ChatRuntimeEvent {
+    return { ...event(sequence, draft), timestamp };
+}
+
 function message(role: string, text: string, runId?: string): ChatHistoryMessage {
     return { content: text, role, runId, text };
 }
@@ -211,6 +219,126 @@ describe("chat projection", () => {
         ).toEqual(["run-1", "run-2"]);
     });
 
+    it("groups all thinking items for one run while keeping activity visible", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, { kind: "status", runId: "run-1", text: "Working" }),
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "first", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "first" }],
+                },
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "second", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-2", text: "second" }],
+                },
+                runId: "run-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [message("user", "question")],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const thinkingRows = projection.rows.filter(
+            (row) => (row.message.thinking?.length || 0) > 0
+        );
+
+        expect(thinkingRows).toHaveLength(1);
+        expect(thinkingRows[0]?.message.thinking?.map((block) => block.text)).toEqual([
+            "first",
+            "second",
+        ]);
+        expect(projection.rows.at(-1)).toMatchObject({
+            kind: "typing",
+            message: { text: "Working" },
+        });
+    });
+
+    it("moves active-run thinking below a live steer message", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:01.000Z", {
+                kind: "status",
+                runId: "run-1",
+                text: "Thinking",
+            }),
+            eventAt(32, "2026-07-16T12:06:00.000Z", {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "after steer", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "after steer" }],
+                },
+                runId: "run-1",
+            }),
+        ]);
+        const history = [
+            { ...message("user", "first"), timestamp: "2026-07-16T12:00:00.000Z" },
+            { ...message("user", "steer"), timestamp: "2026-07-16T12:05:00.000Z" },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(reconciled.map((item) => item.text)).toEqual(["first", "steer", ""]);
+        expect(reconciled[2]?.thinking?.[0]?.text).toBe("after steer");
+        expect(projection.rows.at(-1)).toMatchObject({
+            kind: "typing",
+            message: { text: "Thinking" },
+        });
+    });
+
+    it("places compaction thinking below a prompt persisted just after run start", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:05:37.641Z", {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "compacting", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "compacting" }],
+                },
+                runId: "compact-run",
+            }),
+        ]);
+        const history = [
+            { ...message("user", "previous"), timestamp: "2026-07-16T12:00:00.000Z" },
+            {
+                ...message("user", "Extract key decisions"),
+                timestamp: "2026-07-16T12:05:37.764Z",
+            },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+
+        expect(reconciled.map((item) => item.text)).toEqual([
+            "previous",
+            "Extract key decisions",
+            "",
+        ]);
+        expect(reconciled[2]?.thinking?.[0]?.text).toBe("compacting");
+    });
+
     it("keeps completed runs in terminal order after a delayed diagnostic", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -335,6 +463,42 @@ describe("chat projection", () => {
         const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
         expect(reconciled.map((item) => item.text)).toEqual(["question", "", "answer"]);
         expect(reconciled[1]?.thinking?.[0]?.text).toBe("reasoning");
+    });
+
+    it("places a detached active tool row before its later unscoped final", () => {
+        const history = [
+            { ...message("user", "question"), timestamp: "2026-07-16T12:00:00.000Z" },
+            { ...message("assistant", "answer"), timestamp: "2026-07-16T12:02:41.000Z" },
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:02:40.000Z", {
+                kind: "tool",
+                message: {
+                    content: "done",
+                    role: "tool",
+                    text: "done",
+                    toolResult: { content: "done", id: "call-1", name: "exec" },
+                },
+                runId: "detached-run",
+                toolKey: "tool:call-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projection.rows.map((row) => row.message.text)).toEqual([
+            "question",
+            "done",
+            "answer",
+        ]);
+        expect(projection.rows.some((row) => row.kind === "typing")).toBe(false);
     });
 
     it("does not replay completed tool diagnostics already present in history", () => {

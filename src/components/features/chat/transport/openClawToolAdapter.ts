@@ -135,6 +135,9 @@ export function openClawProgress(
     phase: string,
     data: Record<string, unknown>
 ): { operation?: "compact"; text?: string } {
+    if (eventName === "session.started") {
+        return { text: "Thinking" };
+    }
     if (stream === "lifecycle") {
         return { text: phase === "start" ? "Thinking" : undefined };
     }

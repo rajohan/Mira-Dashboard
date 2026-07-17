@@ -123,13 +123,8 @@ export function useChatActions({
         setIsSending(sendCountReference.current > 0);
     };
 
-    const isBlockedByInFlightSend = (
-        text: string,
-        attachmentCount = attachments.length
-    ) => {
-        const slashCommand = text.startsWith("/") && attachmentCount === 0;
-        return sendCountReference.current > 0 && !(slashCommand && activeRunCount > 0);
-    };
+    const isBlockedByInFlightSend = () =>
+        sendCountReference.current > 0 && activeRunCount === 0;
 
     const handleSend = async () => {
         if (!selectedSessionKey) {
@@ -137,10 +132,7 @@ export function useChatActions({
         }
         const pendingSessionKey = selectedSessionKey;
         let text = draft.trim();
-        if (
-            isBlockedByInFlightSend(text, attachments.length) ||
-            (!text && attachments.length === 0)
-        ) {
+        if (isBlockedByInFlightSend() || (!text && attachments.length === 0)) {
             return;
         }
 
@@ -156,10 +148,7 @@ export function useChatActions({
 
         text = draftReference.current.trim();
         const currentAttachments = attachmentsReference.current;
-        if (
-            isBlockedByInFlightSend(text, currentAttachments.length) ||
-            (!text && currentAttachments.length === 0)
-        ) {
+        if (isBlockedByInFlightSend() || (!text && currentAttachments.length === 0)) {
             return;
         }
 
@@ -185,6 +174,9 @@ export function useChatActions({
         }
 
         const resetCommand = isResetSlashCommand(text);
+        const idempotencyKey = resetCommand
+            ? undefined
+            : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const userMessage: ChatHistoryMessage = {
             role: "user",
             content: text,
@@ -192,6 +184,7 @@ export function useChatActions({
             images: [],
             attachments: optimisticAttachmentDisplay(currentAttachments),
             local: true,
+            runId: idempotencyKey,
             timestamp: currentIsoString(),
         };
         const optimisticIdentity = messageIdentity(userMessage);
@@ -216,9 +209,6 @@ export function useChatActions({
         setIsAtBottom(true);
         scheduleBottomFollow();
 
-        const idempotencyKey = resetCommand
-            ? undefined
-            : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         if (idempotencyKey) {
             runtime.beginRun(pendingSessionKey, idempotencyKey);
         }
@@ -283,7 +273,7 @@ export function useChatActions({
         !isPatchingSession &&
         !isCompacting &&
         !isStopping &&
-        !isBlockedByInFlightSend(draftText) &&
+        !isBlockedByInFlightSend() &&
         (draftText || attachments.length > 0)
     );
     const canStop = Boolean(
