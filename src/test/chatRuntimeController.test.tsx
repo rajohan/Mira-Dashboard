@@ -434,6 +434,48 @@ describe("chat runtime controller", () => {
         ).toMatchObject({ phase: "active" });
     });
 
+    it("preserves an unacknowledged send across a completed snapshot gate", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result, rerender } = renderHook(
+            ({ selectedSessionKey }) =>
+                useChatRuntime({ selectedSessionKey, transport: fake.transport }),
+            { initialProps: { selectedSessionKey: "" } }
+        );
+
+        act(() => result.current.beginRun(SELECTED, "dashboard-chat-pending"));
+        rerender({ selectedSessionKey: SELECTED });
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [
+                    assistant(SELECTED, 16, "previous answer", "replace"),
+                    finish(SELECTED, 32),
+                ],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "dashboard-chat-pending",
+        ]);
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["dashboard-chat-pending"]
+        ).toMatchObject({ phase: "active" });
+
+        act(() =>
+            result.current.acknowledgeRun(
+                SELECTED,
+                "dashboard-chat-pending",
+                "provider-pending"
+            )
+        );
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "provider-pending",
+        ]);
+    });
+
     it("preserves an acknowledged compact run created before the snapshot gate", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);

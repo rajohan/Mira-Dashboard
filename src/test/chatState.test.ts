@@ -879,6 +879,63 @@ describe("chat runtime state", () => {
         });
     });
 
+    it("keeps a dedicated compaction run separate from a runless user echo", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: {
+                    content: "message from another client",
+                    role: "user",
+                    text: "message from another client",
+                },
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "active",
+                runId: "compaction:automatic",
+                text: "Compacting context",
+            }),
+            event(48, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "complete",
+                runId: "compaction:automatic",
+            }),
+            event(64, {
+                kind: "finish",
+                message: {
+                    content: "provider answer",
+                    role: "assistant",
+                    text: "provider answer",
+                },
+                outcome: "completed",
+                runId: "provider-run",
+            }),
+        ]);
+
+        const runs = Object.values(state.sessions[SESSION]?.runs || {});
+        const chatRun = runs.find((run) => run.aliases.includes("provider-run"));
+        const compactionRun = runs.find((run) => run.operation === "compact");
+        expect(runs).toHaveLength(2);
+        expect(chatRun).toMatchObject({
+            assistant: { text: "provider answer" },
+            phase: "completed",
+            userMessages: [
+                expect.objectContaining({
+                    message: expect.objectContaining({
+                        text: "message from another client",
+                    }),
+                }),
+            ],
+        });
+        expect(compactionRun).toMatchObject({
+            operationPhase: "complete",
+            phase: "completed",
+            userMessages: [],
+        });
+    });
+
     it("keeps runless work with its user echo when the provider id arrives", () => {
         const state = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

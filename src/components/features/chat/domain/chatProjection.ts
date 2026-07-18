@@ -285,7 +285,7 @@ function canonicalFinalIndex(
         if (message.runId) {
             continue;
         }
-        if (!assistantText && message.text.trim()) {
+        if (!assistantText && hasPrimaryAnswerContent(message)) {
             if (run.phase !== "active") {
                 return index;
             }

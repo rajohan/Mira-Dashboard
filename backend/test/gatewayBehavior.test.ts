@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, jest } from "bun:test";
 
+import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import type {
     OpenClawGatewayClientInstance,
@@ -339,6 +340,80 @@ describe("gateway behavior", () => {
 
         await expect(initPromise).rejects.toThrow("gateway token mismatch");
         expect(gateway.isConnected()).toBe(false);
+    });
+
+    it("captures replay request boundaries only for chat sends", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const root = createTemporaryRoot("mira-gateway-request-boundary-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+        const captureBoundary = jest
+            .spyOn(OpenClawChatBridge.prototype, "captureRequestBoundary")
+            .mockImplementation(() => {
+                throw new Error("unexpected replay boundary capture");
+            });
+        cleanupCallbacks.push(() => captureBoundary.mockRestore());
+
+        gateway.init("request-boundary-token");
+        const client = fakeClients.at(-1);
+        client?.options.onHelloOk?.({ type: "hello-ok" });
+        await waitFor(() => gateway.isConnected());
+
+        await expect(
+            gateway.request("models.list", { sessionKey: "agent:main:main" })
+        ).resolves.toBeDefined();
+
+        const socket = new FakeDashboardSocket();
+        gateway.handleDashboardClient(socket);
+        socket.emitMessage({
+            id: "models-with-response",
+            method: "models.list",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some(
+                (raw) =>
+                    raw.includes('"id":"models-with-response"') &&
+                    raw.includes('"isOk":true')
+            )
+        );
+
+        const requestCount = client?.requests.length ?? 0;
+        socket.emitMessage({
+            method: "models.list",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() => (client?.requests.length ?? 0) > requestCount);
+
+        expect(captureBoundary).not.toHaveBeenCalled();
+        captureBoundary.mockReturnValue(0);
+        await expect(
+            gateway.request("chat.send", {
+                message: "hello",
+                sessionKey: "agent:main:main",
+            })
+        ).resolves.toBeDefined();
+        expect(captureBoundary).toHaveBeenCalledTimes(1);
+        socket.close();
     });
 
     it("rehydrates run associations before reconnect events resume", async () => {

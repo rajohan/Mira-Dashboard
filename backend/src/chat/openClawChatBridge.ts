@@ -861,6 +861,13 @@ export class OpenClawChatBridge {
             }
         });
         const prunedStaleRun = this.#pruneStaleActiveRuns(storedStorageKey);
+        if (prunedStaleRun && !this.#runsBySession.has(storedStorageKey)) {
+            if (!this.#flushSessionPersistence(storedStorageKey)) {
+                this.#hydratedSessionLookups.delete(storageSessionKey);
+            }
+            this.#enforceSessionLimit(storageSessionKey);
+            return;
+        }
         if (
             storedStorageKey !== storageSessionKey &&
             isAgentSessionKey(storageSessionKey)

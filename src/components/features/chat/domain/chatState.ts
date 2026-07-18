@@ -272,6 +272,10 @@ function pendingRunlessUserEntry(
     return candidates.length === 1 ? candidates[0] : undefined;
 }
 
+function isDedicatedCompactionStatus(event: ChatRuntimeEvent): boolean {
+    return event.kind === "status" && event.operation === "compact";
+}
+
 function resolveRun(
     session: ChatSessionRuntimeState,
     event: ChatRuntimeEvent
@@ -308,7 +312,7 @@ function resolveRun(
         }
     }
 
-    if (!run && event.runId) {
+    if (!run && event.runId && !isDedicatedCompactionStatus(event)) {
         const pendingUserEntry = pendingRunlessUserEntry(session);
         if (pendingUserEntry) {
             [runKey, run] = pendingUserEntry;

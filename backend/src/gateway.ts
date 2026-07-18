@@ -1001,6 +1001,18 @@ async function initAndWait(token: string): Promise<void> {
     await waitForConnection(token);
 }
 
+function captureChatSendRequestBoundary(
+    method: string,
+    parameters: Record<string, unknown>
+): number | undefined {
+    if (method !== "chat.send") {
+        return undefined;
+    }
+    return chatReplayState.bridge.captureRequestBoundary(
+        typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
+    );
+}
+
 /** Performs forward request. */
 async function forwardRequest(
     method: string,
@@ -1023,11 +1035,7 @@ async function forwardRequest(
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
-            const requestBoundary = chatReplayState.bridge.captureRequestBoundary(
-                typeof parameters.sessionKey === "string"
-                    ? parameters.sessionKey
-                    : undefined
-            );
+            const requestBoundary = captureChatSendRequestBoundary(method, parameters);
             let payload = await activeGateway.request(method, parameters, requestOptions);
             chatReplayState.bridge.handleSuccessfulRequest(
                 method,
@@ -1073,9 +1081,7 @@ async function forwardRequest(
     }
 
     try {
-        const requestBoundary = chatReplayState.bridge.captureRequestBoundary(
-            typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
-        );
+        const requestBoundary = captureChatSendRequestBoundary(method, parameters);
         const payload = await activeGateway.request(method, parameters, requestOptions);
         chatReplayState.bridge.handleSuccessfulRequest(
             method,
@@ -1274,9 +1280,7 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
-    const requestBoundary = chatReplayState.bridge.captureRequestBoundary(
-        typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
-    );
+    const requestBoundary = captureChatSendRequestBoundary(method, parameters);
     const payload = await gatewayState.client.request(method, parameters);
     chatReplayState.bridge.handleSuccessfulRequest(
         method,

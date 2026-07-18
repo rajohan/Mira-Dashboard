@@ -420,7 +420,10 @@ export function useChatRuntime({
                         continue;
                     }
                     if (snapshot.completed) {
-                        if (!pendingRun.observedAfterSnapshotRequest) {
+                        if (
+                            !pendingRun.observedAfterSnapshotRequest &&
+                            pendingRun.providerRunId
+                        ) {
                             continue;
                         }
                         next = clearCompletedChatRuns(next, selectedSessionKey);

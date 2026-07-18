@@ -1483,6 +1483,63 @@ describe("chat projection", () => {
         expect(projection.activeRuns).toEqual([]);
     });
 
+    it.each([
+        {
+            answer: {
+                attachments: [{ fileName: "answer.txt", id: "answer", kind: "text" }],
+                content: "",
+                role: "assistant",
+                text: "",
+            } satisfies ChatHistoryMessage,
+            label: "attachment-only",
+        },
+        {
+            answer: {
+                content: "",
+                images: [{ data: "image-data", type: "image" }],
+                role: "assistant",
+                text: "",
+            } satisfies ChatHistoryMessage,
+            label: "image-only",
+        },
+        {
+            answer: {
+                attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+                content: "",
+                isFinal: true,
+                role: "assistant",
+                text: "",
+                toolCalls: [{ id: "call-1", name: "write" }],
+            } satisfies ChatHistoryMessage,
+            label: "final tool-bearing",
+        },
+    ])("adopts an unscoped $label history final", ({ answer }) => {
+        const history = [
+            { ...message("user", "question"), timestamp: "2026-07-16T12:00:00.000Z" },
+            { ...answer, timestamp: "2026-07-16T12:00:41.000Z" },
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:40.000Z", {
+                kind: "status",
+                runId: "status-only-run",
+                text: "Thinking",
+            }),
+        ]);
+
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projection.rows.at(-1)).toMatchObject({ kind: "message" });
+        expect(projection.rows.some((row) => row.kind === "typing")).toBe(false);
+        expect(projection.activeRuns).toEqual([]);
+    });
+
     it("keeps a newer active turn visible beside an older unscoped final", () => {
         const history = [
             {

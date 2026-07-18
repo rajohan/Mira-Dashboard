@@ -1036,6 +1036,19 @@ describe("OpenClaw chat bridge", () => {
         expect(store.snapshots.has(MAIN)).toBe(false);
     });
 
+    it("deletes an expired persisted alias requested through its canonical key", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(
+            "main",
+            persistedSnapshot("main", "stale-run", Date.now() - 6 * 60 * 60_000 - 1)
+        );
+        const bridge = new OpenClawChatBridge(store);
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({ completed: false, events: [] });
+        expect(store.snapshots.has("main")).toBe(false);
+        expect(store.snapshots.has(MAIN)).toBe(false);
+    });
+
     it("retains an old completed replay until a new send replaces it", () => {
         const store = new MemorySnapshotStore();
         store.snapshots.set(
