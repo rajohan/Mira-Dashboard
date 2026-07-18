@@ -1178,6 +1178,30 @@ describe("Mira Dashboard frontend behavior", () => {
             await expect(replacementPromise).resolves.toEqual({ current: true });
             expect(events.filter((event) => event === "error")).toHaveLength(1);
 
+            const timeoutPromise = client.request(
+                "custom-timeout",
+                {},
+                { timeoutMs: 20 }
+            );
+            const timeoutResult = (async () => {
+                try {
+                    await timeoutPromise;
+                    return;
+                } catch (error) {
+                    return error;
+                }
+            })();
+            expect(JSON.parse(replacementSocket.sent.at(-1)!)).toMatchObject({
+                method: "custom-timeout",
+                timeoutMs: 20,
+            });
+            await Bun.sleep(30);
+            expect(await timeoutResult).toEqual(
+                expect.objectContaining({
+                    message: "Request timeout",
+                })
+            );
+
             const disconnectedPromise = client.request("disconnect");
             client.disconnect();
             await expect(disconnectedPromise).rejects.toThrow("WebSocket disconnected");

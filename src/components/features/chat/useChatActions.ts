@@ -87,6 +87,8 @@ export function useChatActions({
     const sendEpochReference = useRef(0);
     const pendingPatchesReference = useRef(new Map<string, Set<Promise<boolean>>>());
     const draftReference = useRef(draft);
+    const isCompactingReference = useRef(isCompacting);
+    const compactingSessionKeyReference = useRef("");
     const [compactingSessionKey, setCompactingSessionKey] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [stoppingSessionKey, setStoppingSessionKey] = useState("");
@@ -95,6 +97,7 @@ export function useChatActions({
     );
 
     draftReference.current = draft;
+    isCompactingReference.current = isCompacting;
 
     useEffect(() => {
         if (isConnected) {
@@ -103,6 +106,7 @@ export function useChatActions({
 
         sendEpochReference.current += 1;
         sendCountReference.current = 0;
+        compactingSessionKeyReference.current = "";
         setCompactingSessionKey("");
         setIsSending(false);
     }, [isConnected]);
@@ -136,13 +140,21 @@ export function useChatActions({
     const isBlockedByInFlightSend = () =>
         sendCountReference.current > 0 && activeRunCount === 0;
 
+    const isSessionCompacting = (sessionKey: string) =>
+        isCompactingReference.current ||
+        isSameChatSession(compactingSessionKeyReference.current, sessionKey);
+
     const handleSend = async () => {
         if (!selectedSessionKey) {
             return;
         }
         const pendingSessionKey = selectedSessionKey;
         let text = draft.trim();
-        if (isBlockedByInFlightSend() || (!text && attachments.length === 0)) {
+        if (
+            isSessionCompacting(pendingSessionKey) ||
+            isBlockedByInFlightSend() ||
+            (!text && attachments.length === 0)
+        ) {
             return;
         }
 
@@ -158,7 +170,11 @@ export function useChatActions({
 
         text = draftReference.current.trim();
         const currentAttachments = attachmentsReference.current;
-        if (isBlockedByInFlightSend() || (!text && currentAttachments.length === 0)) {
+        if (
+            isSessionCompacting(pendingSessionKey) ||
+            isBlockedByInFlightSend() ||
+            (!text && currentAttachments.length === 0)
+        ) {
             return;
         }
 
@@ -284,11 +300,15 @@ export function useChatActions({
     const draftText = draft.trim();
     const isStopping = isSameChatSession(stoppingSessionKey, selectedSessionKey);
     const isPatchingSession = (pendingPatchCounts[selectedSessionKey] || 0) > 0;
+    const isCompactingSession = Boolean(
+        isCompacting || isSameChatSession(compactingSessionKey, selectedSessionKey)
+    );
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
+        !isCompactingSession &&
         !isPatchingSession &&
         !isStopping &&
         !isBlockedByInFlightSend() &&
@@ -299,9 +319,6 @@ export function useChatActions({
         selectedSessionKey &&
         !isStopping &&
         (activeRunCount > 0 || isSessionActive(selectedSession))
-    );
-    const isCompactingSession = Boolean(
-        isCompacting || isSameChatSession(compactingSessionKey, selectedSessionKey)
     );
     const arePreferenceControlsDisabled = !isConnected || isPatchingSession;
     const isCompactDisabled = Boolean(
@@ -371,6 +388,7 @@ export function useChatActions({
             return;
         }
         const compactSessionKey = selectedSessionKey;
+        compactingSessionKeyReference.current = compactSessionKey;
         setCompactingSessionKey(compactSessionKey);
         setSendError(undefined);
         try {
@@ -380,6 +398,14 @@ export function useChatActions({
                 setSendError(chatErrorMessage(error, "Failed to compact context"));
             }
         } finally {
+            if (
+                isSameChatSession(
+                    compactingSessionKeyReference.current,
+                    compactSessionKey
+                )
+            ) {
+                compactingSessionKeyReference.current = "";
+            }
             setCompactingSessionKey((current) =>
                 isSameChatSession(current, compactSessionKey) ? "" : current
             );

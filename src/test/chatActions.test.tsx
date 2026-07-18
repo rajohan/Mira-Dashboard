@@ -115,7 +115,7 @@ describe("chat actions", () => {
         });
         await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(1));
 
-        rerender({ activeRunCount: 1, draft: "steer", isCompacting: true });
+        rerender({ activeRunCount: 1, draft: "steer", isCompacting: false });
         expect(result.current.canSend).toBe(true);
         expect(result.current.preferenceControlsDisabled).toBe(false);
         expect(result.current.compactDisabled).toBe(true);
@@ -143,6 +143,12 @@ describe("chat actions", () => {
             { replaceStatusOnlyRuns: false }
         );
 
+        rerender({ activeRunCount: 1, draft: "blocked", isCompacting: true });
+        expect(result.current.canSend).toBe(false);
+        await act(async () => result.current.handleSend());
+        expect(transport.send).toHaveBeenCalledTimes(2);
+        expect(result.current.preferenceControlsDisabled).toBe(false);
+
         await act(async () => {
             sendDeferred.resolve({ runId: "run-1" });
             await Promise.all([firstSend, secondSend]);
@@ -161,7 +167,7 @@ describe("chat actions", () => {
                 attachmentsReference: { current: [] },
                 clearAttachments: jest.fn(),
                 confirmResetSession: jest.fn(async () => true),
-                draft: "",
+                draft: "queued message",
                 isCompacting: false,
                 isConnected: true,
                 isRecording: false,
@@ -186,14 +192,18 @@ describe("chat actions", () => {
         });
         await waitFor(() => expect(transport.compact).toHaveBeenCalledWith(SESSION_A));
         expect(result.current.isCompactingSession).toBe(true);
+        expect(result.current.canSend).toBe(false);
         expect(result.current.compactDisabled).toBe(true);
         expect(runtime.beginRun).not.toHaveBeenCalled();
+        await act(async () => result.current.handleSend());
+        expect(transport.send).not.toHaveBeenCalled();
 
         await act(async () => {
             compactDeferred.resolve();
             await compactPromise;
         });
         expect(result.current.isCompactingSession).toBe(false);
+        expect(result.current.canSend).toBe(true);
     });
 
     it("clears a steer placeholder when the provider omits its run id", async () => {

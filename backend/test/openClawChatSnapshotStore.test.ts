@@ -63,6 +63,37 @@ describe("OpenClaw chat snapshot store", () => {
         }
     });
 
+    it("ignores unsafe watermarks when calculating the maximum sequence", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const validSessionKey = "agent:test:valid-watermark";
+
+        try {
+            store.save(validSessionKey, snapshotFor(validSessionKey, 73));
+            database
+                .prepare(
+                    `INSERT INTO chat_runtime_snapshots (
+                        gateway_scope,
+                        session_key,
+                        snapshot_json,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?)`
+                )
+                .run(
+                    gatewayScope,
+                    "agent:test:unsafe-watermark",
+                    JSON.stringify({
+                        throughSequence: Number.MAX_SAFE_INTEGER + 1,
+                    }),
+                    "2026-07-17T20:00:00.000Z"
+                );
+
+            expect(store.maximumSequence()).toBe(73);
+        } finally {
+            store.clear();
+        }
+    });
+
     it("isolates identical session keys between gateway credentials", () => {
         const firstStore = new SqliteOpenClawChatSnapshotStore("gateway-scope-a");
         const secondStore = new SqliteOpenClawChatSnapshotStore("gateway-scope-b");

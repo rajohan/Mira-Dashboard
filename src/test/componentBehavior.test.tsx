@@ -1916,16 +1916,28 @@ describe("shared component helpers", () => {
             screen.getByText("Exec").closest("[class*='border-amber']")
         ).not.toContainElement(screen.getByText("answer"));
 
-        fireEvent.scroll(messagesContainerReference.current!);
-        fireEvent.wheel(messagesContainerReference.current!);
         await user.click(screen.getByRole("button", { name: /follow/i }));
+        expect(onUserScrollIntent).not.toHaveBeenCalled();
+        Object.defineProperties(messagesContainerReference.current!, {
+            clientWidth: { configurable: true, value: 90 },
+            getBoundingClientRect: {
+                configurable: true,
+                value: () => ({ right: 100 }),
+            },
+            offsetWidth: { configurable: true, value: 100 },
+        });
+        fireEvent.scroll(messagesContainerReference.current!);
+        fireEvent.pointerDown(messagesContainerReference.current!, { clientX: 95 });
+        fireEvent.wheel(messagesContainerReference.current!);
+        fireEvent.touchMove(messagesContainerReference.current!);
+        fireEvent.keyDown(messagesContainerReference.current!, { key: "PageUp" });
         await user.click(screen.getByRole("button", { name: /delete your message/i }));
         await user.click(
             screen.getByRole("button", { name: /open chat image 1 preview/i })
         );
         await user.click(screen.getByRole("button", { name: /readme.txt/i }));
         expect(onScroll).toHaveBeenCalledTimes(1);
-        expect(onUserScrollIntent).toHaveBeenCalled();
+        expect(onUserScrollIntent).toHaveBeenCalledTimes(4);
         expect(onFollow).toHaveBeenCalledTimes(1);
         expect(onDeleteMessage).toHaveBeenCalledWith("user");
         expect(onPreview).toHaveBeenCalledWith(

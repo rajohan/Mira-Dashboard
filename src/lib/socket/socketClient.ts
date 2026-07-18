@@ -17,13 +17,19 @@ interface SocketClientOptions {
     onMessage?: (data: SocketEnvelope) => void;
 }
 
+/** Configures one socket request without changing the client-wide defaults. */
+export interface SocketRequestOptions {
+    timeoutMs?: number;
+}
+
 /** Represents socket client. */
 export interface SocketClient {
     connect: () => void;
     disconnect: () => void;
     request: <T = unknown>(
         method: string,
-        parameters?: Record<string, unknown>
+        parameters?: Record<string, unknown>,
+        options?: SocketRequestOptions
     ) => Promise<T>;
     isOpen: () => boolean;
 }
@@ -123,7 +129,8 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     /** Performs request. */
     const request = <T = unknown>(
         method: string,
-        parameters?: Record<string, unknown>
+        parameters?: Record<string, unknown>,
+        requestOptions?: SocketRequestOptions
     ): Promise<T> => {
         return new Promise((resolve, reject) => {
             const socket = ws;
@@ -140,7 +147,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
 
                 pendingRequests.delete(id);
                 reject(new Error("Request timeout"));
-            }, 30_000);
+            }, requestOptions?.timeoutMs ?? 30_000);
             pendingRequests.set(id, {
                 resolve: resolve as (value: unknown) => void,
                 reject,
@@ -154,6 +161,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                     id,
                     method,
                     params: parameters,
+                    timeoutMs: requestOptions?.timeoutMs,
                 })
             );
         });

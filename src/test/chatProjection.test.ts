@@ -1215,6 +1215,47 @@ describe("chat projection", () => {
         expect(projection.activeRuns).toEqual([]);
     });
 
+    it("keeps a newer active turn visible beside an older unscoped final", () => {
+        const history = [
+            {
+                ...message("user", "question one"),
+                timestamp: "2026-07-16T12:00:00.000Z",
+            },
+            {
+                ...message("user", "question two"),
+                timestamp: "2026-07-16T12:01:00.000Z",
+            },
+            {
+                ...message("assistant", "late answer one"),
+                timestamp: "2026-07-16T12:02:00.000Z",
+            },
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:01:30.000Z", {
+                kind: "status",
+                runId: "active-second-run",
+                text: "Thinking",
+            }),
+        ]);
+
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projection.activeRuns.map((run) => run.runId)).toEqual([
+            "active-second-run",
+        ]);
+        expect(projection.rows.at(-1)).toMatchObject({
+            kind: "typing",
+            message: { text: "Thinking" },
+        });
+    });
+
     it("does not replay completed tool diagnostics already present in history", () => {
         const toolDiagnostic: ChatHistoryMessage = {
             content: "",

@@ -144,6 +144,8 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                         WHEN json_valid(snapshot_json)
                         THEN CASE
                             WHEN json_type(snapshot_json, '$.throughSequence') = 'integer'
+                                AND json_extract(snapshot_json, '$.throughSequence') >= 0
+                                AND json_extract(snapshot_json, '$.throughSequence') <= ?
                             THEN json_extract(snapshot_json, '$.throughSequence')
                         END
                     END
@@ -151,7 +153,8 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                 FROM chat_runtime_snapshots
                 WHERE gateway_scope = ?`
             )
-            .get(this.#gatewayScope) as SnapshotMaximumSequenceRow | undefined;
+            .get(Number.MAX_SAFE_INTEGER, this.#gatewayScope) as
+            SnapshotMaximumSequenceRow | undefined;
         return typeof row?.maximum_sequence === "number" &&
             Number.isSafeInteger(row.maximum_sequence) &&
             row.maximum_sequence >= 0

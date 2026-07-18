@@ -2352,12 +2352,26 @@ fi
         );
         await expect(failure).rejects.toThrow("gateway rejected");
 
+        const extendedRequest = client.request("demo.extended", {}, { timeoutMs: 500 });
+        await waitFor(() => socket!.sent.length === 4);
+        const extendedFrame = JSON.parse(socket!.sent[3]!) as { id: string };
+        await Bun.sleep(150);
+        socket?.message(
+            JSON.stringify({
+                id: extendedFrame.id,
+                isOk: true,
+                payload: { extended: true },
+                type: "response",
+            })
+        );
+        await expect(extendedRequest).resolves.toEqual({ extended: true });
+
         socket!.sendError = new Error("send failed");
         await expect(client.request("demo.send-fail")).rejects.toThrow("send failed");
         socket!.sendError = undefined;
 
         const closedRequest = client.request("demo.closed");
-        await waitFor(() => socket!.sent.length === 4);
+        await waitFor(() => socket!.sent.length === 5);
         socket?.close(4001, "gone");
         await expect(closedRequest).rejects.toThrow("gateway closed (4001): gone");
         expect(closeEvents).toContainEqual({ code: 4001, reason: "gone" });

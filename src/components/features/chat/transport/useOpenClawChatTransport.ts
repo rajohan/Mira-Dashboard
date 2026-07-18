@@ -11,6 +11,8 @@ import type {
 import { asRecord, openClawThroughSequence, stringValue } from "./openClawAdapterValues";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
 
+const COMPACTION_REQUEST_TIMEOUT_MS = 10 * 60_000;
+
 /** Connects the provider-independent chat contract to OpenClaw's Gateway RPCs. */
 export function useOpenClawChatTransport(): ChatTransport {
     const socket = useOpenClawSocket();
@@ -64,7 +66,11 @@ export function useOpenClawChatTransport(): ChatTransport {
 
     const compact = async (sessionKey: string) => {
         const result = asRecord(
-            await socket.request("sessions.compact", { key: sessionKey })
+            await socket.request(
+                "sessions.compact",
+                { key: sessionKey },
+                { timeoutMs: COMPACTION_REQUEST_TIMEOUT_MS }
+            )
         );
         if (result?.ok !== true) {
             throw new Error(stringValue(result?.reason) || "Context compaction failed");

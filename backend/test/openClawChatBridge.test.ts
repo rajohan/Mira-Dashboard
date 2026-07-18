@@ -221,6 +221,148 @@ describe("OpenClaw chat bridge", () => {
         ]);
     });
 
+    it("persists runless agent compaction with the latest completed answer", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "latest answer",
+                runId: "latest-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start", stream: "compaction" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "end", stream: "compaction" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.flush();
+
+        const restored = new OpenClawChatBridge(store).snapshot(MAIN);
+        expect(restored.completed).toBe(true);
+        expect(restored.events.map((event) => event.event)).toEqual([
+            "chat",
+            "agent",
+            "agent",
+        ]);
+        expect(restored.events[0]?.payload).toMatchObject({
+            message: "latest answer",
+            state: "final",
+        });
+    });
+
+    it("persists detached agent compaction with the latest completed answer", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "latest answer",
+                runId: "latest-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        for (const phase of ["start", "end"]) {
+            bridge.recordEvent(
+                "agent",
+                {
+                    phase,
+                    runId: "detached-compaction-run",
+                    sessionKey: MAIN,
+                    stream: "compaction",
+                },
+                []
+            );
+        }
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(true);
+        expect(snapshot.events.map((event) => event.event)).toEqual([
+            "chat",
+            "agent",
+            "agent",
+        ]);
+    });
+
+    it("completes a standalone agent compaction replay", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "start",
+                runId: "compaction-only-run",
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "error",
+                runId: "compaction-only-run",
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({ completed: true });
+    });
+
+    it("does not let agent compaction finish its active parent chat run", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                runId: "parent-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+                text: "working",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "end",
+                runId: "parent-run",
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({ completed: false });
+
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "answer after compaction",
+                runId: "parent-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+        expect(bridge.snapshot(MAIN)).toMatchObject({ completed: true });
+    });
+
     it("completes a standalone manual compaction replay", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

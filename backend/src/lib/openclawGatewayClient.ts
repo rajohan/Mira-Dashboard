@@ -95,11 +95,20 @@ export type OpenClawGatewayClientOptions = {
     onClose?: (code: number, reason: string) => void;
 };
 
+/** Configures one Gateway request without changing the connection defaults. */
+export type OpenClawGatewayRequestOptions = {
+    timeoutMs?: number;
+};
+
 /** Defines open claw gateway client instance. */
 export type OpenClawGatewayClientInstance = {
     start: () => void;
     stop: () => void;
-    request: (method: string, parameters?: unknown) => Promise<unknown>;
+    request: (
+        method: string,
+        parameters?: unknown,
+        options?: OpenClawGatewayRequestOptions
+    ) => Promise<unknown>;
 };
 
 /** Performs base64 URL encode. */
@@ -617,7 +626,11 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         this.rejectAllPending(new Error("gateway client stopped"));
     }
 
-    request(method: string, parameters: unknown = {}): Promise<unknown> {
+    request(
+        method: string,
+        parameters: unknown = {},
+        options: OpenClawGatewayRequestOptions = {}
+    ): Promise<unknown> {
         const ws = this.ws;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             return Promise.reject(new Error("Gateway not connected"));
@@ -634,11 +647,20 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             params: parameters,
         };
 
+        const configuredTimeoutMs = this.opts.requestTimeoutMs as number;
+        const requestedTimeoutMs = options.timeoutMs;
+        const timeoutMs =
+            typeof requestedTimeoutMs === "number" &&
+            Number.isFinite(requestedTimeoutMs) &&
+            requestedTimeoutMs > 0
+                ? Math.min(Math.trunc(requestedTimeoutMs), MAX_TIMER_DELAY_MS)
+                : configuredTimeoutMs;
+
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 this.pending.delete(id);
                 reject(new Error(`Gateway request timed out: ${method}`));
-            }, this.opts.requestTimeoutMs as number);
+            }, timeoutMs);
 
             this.pending.set(id, { resolve, reject, timeout });
             try {

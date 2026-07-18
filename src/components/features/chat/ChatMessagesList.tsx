@@ -9,7 +9,14 @@ import {
     Trash2,
     Volume2,
 } from "lucide-react";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import {
+    type KeyboardEvent,
+    type PointerEvent,
+    type RefObject,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
 
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
@@ -23,6 +30,30 @@ import type {
 } from "./chatTypes";
 import { TOOL_ROLE_VARIANTS } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
+
+const SCROLL_KEYS = new Set([
+    " ",
+    "ArrowDown",
+    "ArrowUp",
+    "End",
+    "Home",
+    "PageDown",
+    "PageUp",
+]);
+
+function isScrollbarPointer(event: PointerEvent<HTMLDivElement>): boolean {
+    const container = event.currentTarget;
+    const scrollbarWidth = container.offsetWidth - container.clientWidth;
+    return (
+        scrollbarWidth > 0 &&
+        event.target === container &&
+        event.clientX >= container.getBoundingClientRect().right - scrollbarWidth
+    );
+}
+
+function isKeyboardScroll(event: KeyboardEvent<HTMLDivElement>): boolean {
+    return event.target === event.currentTarget && SCROLL_KEYS.has(event.key);
+}
 
 /** Provides props for chat messages list. */
 interface ChatMessagesListProperties {
@@ -398,9 +429,18 @@ export function ChatMessagesList({
             ref={(element) => {
                 messagesContainerReference.current = element ?? undefined;
             }}
-            onPointerDownCapture={onUserScrollIntent}
+            onKeyDownCapture={(event) => {
+                if (isKeyboardScroll(event)) {
+                    onUserScrollIntent();
+                }
+            }}
+            onPointerDownCapture={(event) => {
+                if (isScrollbarPointer(event)) {
+                    onUserScrollIntent();
+                }
+            }}
             onScroll={onScroll}
-            onTouchStartCapture={onUserScrollIntent}
+            onTouchMoveCapture={onUserScrollIntent}
             onWheelCapture={onUserScrollIntent}
             className="mt-3 min-h-0 flex-1 overflow-y-auto pr-0 sm:mt-4 sm:pr-1"
             style={{ overflowAnchor: "none" }}

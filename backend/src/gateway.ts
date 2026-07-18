@@ -1003,7 +1003,8 @@ async function forwardRequest(
     method: string,
     parameters: Record<string, unknown>,
     clientWs?: DashboardSocket,
-    clientId?: string
+    clientId?: string,
+    timeoutMs?: number
 ): Promise<boolean> {
     if (!gatewayState.client || !gatewayState.isConnected) {
         return false;
@@ -1020,7 +1021,7 @@ async function forwardRequest(
                     ? parameters.sessionKey
                     : undefined
             );
-            let payload = await activeGateway.request(method, parameters);
+            let payload = await activeGateway.request(method, parameters, { timeoutMs });
             chatReplayState.bridge.handleSuccessfulRequest(
                 method,
                 parameters,
@@ -1068,7 +1069,7 @@ async function forwardRequest(
         const requestBoundary = chatReplayState.bridge.captureRequestBoundary(
             typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
         );
-        const payload = await activeGateway.request(method, parameters);
+        const payload = await activeGateway.request(method, parameters, { timeoutMs });
         chatReplayState.bridge.handleSuccessfulRequest(
             method,
             parameters,
@@ -1132,6 +1133,7 @@ function handleDashboardClient(ws: DashboardSocket): void {
                     method?: string;
                     params?: Record<string, unknown>;
                     id?: string;
+                    timeoutMs?: number;
                 };
                 if (message.type === "subscribe" && message.channel === "logs") {
                     logsSubscribe(ws);
@@ -1205,7 +1207,8 @@ function handleDashboardClient(ws: DashboardSocket): void {
                         message.method,
                         message.params || {},
                         ws,
-                        message.id
+                        message.id,
+                        message.timeoutMs
                     );
                     if (!isOk && message.id && ws.isOpen()) {
                         ws.send(

@@ -131,13 +131,13 @@ function runtimeStreamDrafts(
         timestamp: string;
     }
 ): ChatRuntimeEventDraft[] {
-    const streamRaw =
-        stringValue(payload.stream) ||
-        (eventName === "session.compaction" ? "compaction" : "");
-    const stream = streamRaw === "command_output" ? "command-output" : streamRaw;
     const nestedData = asRecord(payload.data);
     const data = nestedData ? { ...payload, ...nestedData } : payload;
-    const phase = stringValue(data.phase) || stringValue(payload.phase) || "";
+    const streamRaw =
+        stringValue(data.stream) ||
+        (eventName === "session.compaction" ? "compaction" : "");
+    const stream = streamRaw === "command_output" ? "command-output" : streamRaw;
+    const phase = stringValue(data.phase) || "";
     if (
         (stream === "tool" || eventName === "session.tool") &&
         isNonWorkTool(stringValue(data.name) || stringValue(data.toolName) || "tool")

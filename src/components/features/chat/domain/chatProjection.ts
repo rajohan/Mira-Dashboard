@@ -216,12 +216,38 @@ function responseSegment(
     };
 }
 
+function hasUnansweredUserBeforeSegment(
+    messages: ChatHistoryMessage[],
+    segment: ResponseSegment
+): boolean {
+    const boundaryIndex = segment.start - 1;
+    if (boundaryIndex < 0 || !isUserMessage(messages[boundaryIndex]!)) {
+        return false;
+    }
+    const previousUserIndex = messages.findLastIndex(
+        (message, index) => index < boundaryIndex && isUserMessage(message)
+    );
+    if (previousUserIndex === -1) {
+        return false;
+    }
+    return !messages.slice(previousUserIndex + 1, boundaryIndex).some((message) => {
+        const role = message.role.toLowerCase();
+        return (
+            (role === "assistant" || role === "system") &&
+            message.text.trim().length > 0 &&
+            !message.toolCalls?.length &&
+            !message.toolResult
+        );
+    });
+}
+
 function canonicalFinalIndex(
     messages: ChatHistoryMessage[],
     run: ChatRunState,
     segment: ResponseSegment
 ): number {
     const assistantText = run.assistant?.text || "";
+    const hasOverlappingUserTurn = hasUnansweredUserBeforeSegment(messages, segment);
     for (let index = segment.end - 1; index >= segment.start; index -= 1) {
         const message = messages[index]!;
         const role = message.role.toLowerCase();
@@ -240,6 +266,9 @@ function canonicalFinalIndex(
         if (!assistantText && message.text.trim()) {
             if (run.phase !== "active") {
                 return index;
+            }
+            if (hasOverlappingUserTurn) {
+                continue;
             }
             const finalTimestamp = messageTimestamp(message);
             const startedAt = Date.parse(run.startedAt);

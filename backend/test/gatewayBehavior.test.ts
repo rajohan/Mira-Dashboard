@@ -8,6 +8,7 @@ import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import type {
     OpenClawGatewayClientInstance,
     OpenClawGatewayClientOptions,
+    OpenClawGatewayRequestOptions,
 } from "../src/lib/openclawGatewayClient.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
@@ -54,8 +55,11 @@ function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<vo
 }
 
 class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
-    readonly requests: Array<{ method: string; parameters: Record<string, unknown> }> =
-        [];
+    readonly requests: Array<{
+        method: string;
+        options?: OpenClawGatewayRequestOptions;
+        parameters: Record<string, unknown>;
+    }> = [];
     isStarted = false;
     isStopped = false;
 
@@ -71,12 +75,16 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
         this.isStopped = true;
     }
 
-    async request(method: string, parameters?: unknown): Promise<unknown> {
+    async request(
+        method: string,
+        parameters?: unknown,
+        options?: OpenClawGatewayRequestOptions
+    ): Promise<unknown> {
         const requestParameters =
             parameters && typeof parameters === "object"
                 ? (parameters as Record<string, unknown>)
                 : {};
-        this.requests.push({ method, parameters: requestParameters });
+        this.requests.push({ method, options, parameters: requestParameters });
         if (method === "sessions.list") {
             return {
                 defaults: {
@@ -449,6 +457,23 @@ describe("gateway behavior", () => {
                 }),
             ])
         );
+
+        socket.emitMessage({
+            id: "compact-session",
+            method: "sessions.compact",
+            params: { key: "agent:main:main" },
+            timeoutMs: 600_000,
+            type: "request",
+        });
+        await waitFor(() =>
+            Boolean(client?.requests.some(({ method }) => method === "sessions.compact"))
+        );
+        expect(
+            client?.requests.find(({ method }) => method === "sessions.compact")
+        ).toMatchObject({
+            options: { timeoutMs: 600_000 },
+            parameters: { key: "agent:main:main" },
+        });
         const researcherSession = sessionsMessage?.sessions?.find(
             (session) =>
                 (session as { key?: string }).key === "agent:researcher:subagent:abc"

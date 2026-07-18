@@ -51,6 +51,16 @@ const ACTIVE_RUN_TTL_MS = 6 * 60 * 60_000;
 const PERSIST_DEBOUNCE_MS = 250;
 const SESSION_ECHO_WINDOW_MS = 60_000;
 const TERMINAL_FAILURE_STATES = new Set(["aborted", "error", "failed"]);
+const COMPACTION_TERMINAL_STATES = new Set([
+    "aborted",
+    "complete",
+    "completed",
+    "end",
+    "error",
+    "failed",
+    "failure",
+    "finished",
+]);
 const RETAINED_EVENTS = new Set([
     "agent",
     "chat",
@@ -216,6 +226,24 @@ function isSameSessionKey(left: string, right: string): boolean {
         : rightMatch?.[2] === normalizedLeft;
 }
 
+function isAgentCompactionEvent(event: unknown, payload: unknown): boolean {
+    const record = asRecord(payload);
+    const data = asRecord(record?.data);
+    const stream = stringField(data, "stream") || stringField(record, "stream");
+    return event === "agent" && stream?.toLowerCase() === "compaction";
+}
+
+function isCompactionEvent(event: unknown, payload: unknown): boolean {
+    return event === "session.compaction" || isAgentCompactionEvent(event, payload);
+}
+
+function isCompactionOnlyRun(run: RetainedRun): boolean {
+    return (
+        run.events.length > 0 &&
+        run.events.every((event) => isCompactionEvent(event.event, event.payload))
+    );
+}
+
 function matchingSessionKeys(
     sessionKey: string,
     sessions: readonly OpenClawChatSessionIdentity[]
@@ -254,27 +282,10 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
         ""
     ).toLowerCase();
     const isTerminalCompaction =
-        event === "session.compaction" &&
-        compactionOperation === "compact" &&
-        ([
-            "aborted",
-            "complete",
-            "completed",
-            "end",
-            "error",
-            "failed",
-            "failure",
-            "finished",
-        ].includes(eventPhase) ||
-            [
-                "aborted",
-                "complete",
-                "completed",
-                "error",
-                "failed",
-                "failure",
-                "finished",
-            ].includes(eventStatus));
+        ((event === "session.compaction" && compactionOperation === "compact") ||
+            isAgentCompactionEvent(event, payload)) &&
+        (COMPACTION_TERMINAL_STATES.has(eventPhase) ||
+            COMPACTION_TERMINAL_STATES.has(eventStatus));
     return (
         (event === "chat" &&
             typeof record?.state === "string" &&
@@ -360,6 +371,10 @@ function isMetadataOnlyRunlessCompletion(run: RetainedRun): boolean {
         run.events.length > 0 &&
         run.events.every((event) => isMetadataOnlyCompletionEnvelope(event))
     );
+}
+
+function isAuxiliaryOnlyCompletion(run: RetainedRun): boolean {
+    return isMetadataOnlyRunlessCompletion(run) || isCompactionOnlyRun(run);
 }
 
 function lastSequence(run: RetainedRun): number {
@@ -744,11 +759,8 @@ export class OpenClawChatBridge {
             .toSorted((left, right) => right.terminalSequence - left.terminalSequence);
         const newestCompleted = completed[0];
         const completedToReplay =
-            newestCompleted && isMetadataOnlyRunlessCompletion(newestCompleted)
-                ? completed.find(
-                      (snapshot) => !isMetadataOnlyRunlessCompletion(snapshot)
-                  ) || newestCompleted
-                : newestCompleted;
+            completed.find((snapshot) => !isAuxiliaryOnlyCompletion(snapshot)) ||
+            newestCompleted;
         const selected =
             active.length > 0 ? active : completedToReplay ? [completedToReplay] : [];
 
@@ -1371,12 +1383,11 @@ export class OpenClawChatBridge {
                   : undefined;
         const isMetadataOnlyCompletion =
             !explicitRunId && isMetadataOnlyCompletionEnvelope(retainedEnvelope);
-        const isSessionCompaction = envelope.event === "session.compaction";
+        const isCompaction = isCompactionEvent(envelope.event, envelope.payload);
         const completedRuns =
-            !explicitRunId &&
-            (envelope.event === "session.message" ||
-                isMetadataOnlyCompletion ||
-                isSessionCompaction)
+            isCompaction ||
+            (!explicitRunId &&
+                (envelope.event === "session.message" || isMetadataOnlyCompletion))
                 ? runs
                       .values()
                       .filter((run) => run.completed)
@@ -1386,7 +1397,7 @@ export class OpenClawChatBridge {
                       )
                 : [];
         const latestMeaningfulCompletion = completedRuns.find(
-            (run) => !isMetadataOnlyRunlessCompletion(run)
+            (run) => !isAuxiliaryOnlyCompletion(run)
         );
         const hasNewerActiveRunlessWork = Boolean(
             compatibleActiveRun &&
@@ -1412,11 +1423,16 @@ export class OpenClawChatBridge {
             isMatchingSessionEcho(latestMeaningfulCompletion, envelope)
                 ? latestMeaningfulCompletion
                 : undefined;
+        const retainedExplicitRunId =
+            explicitRunId && (!isCompaction || runs.has(explicitRunId))
+                ? explicitRunId
+                : undefined;
         const runId =
-            explicitRunId ||
+            retainedExplicitRunId ||
             completedEchoRun?.runId ||
             compatibleActiveRun?.runId ||
-            (isSessionCompaction ? latestMeaningfulCompletion?.runId : undefined) ||
+            (isCompaction ? latestMeaningfulCompletion?.runId : undefined) ||
+            explicitRunId ||
             metadataCompletionRun?.runId ||
             `runless:${envelope.runtimeSequence}`;
         let snapshot = runs.get(runId);
@@ -1432,6 +1448,11 @@ export class OpenClawChatBridge {
                 updatedAt: retainedEnvelope.runtimeRecordedAt,
             };
             runs.set(runId, snapshot);
+        }
+
+        if (snapshot.completed && isCompactionOnlyRun(snapshot) && !isCompaction) {
+            snapshot.completed = false;
+            snapshot.terminalSequence = -1;
         }
 
         const coalescingKey = replayCoalescingKey(retainedEnvelope);
@@ -1470,10 +1491,13 @@ export class OpenClawChatBridge {
             snapshot.events.shift();
             snapshot.totalBytes -= snapshot.eventBytes.shift() || 0;
         }
-        if (isTerminal) {
+        const completesRun =
+            isTerminal &&
+            (!isCompaction || snapshot.completed || isCompactionOnlyRun(snapshot));
+        if (completesRun) {
             snapshot.terminalSequence = envelope.runtimeSequence;
         }
-        snapshot.completed ||= isTerminal;
+        snapshot.completed ||= completesRun;
         snapshot.updatedAt = Math.max(
             snapshot.updatedAt,
             retainedEnvelope.runtimeRecordedAt

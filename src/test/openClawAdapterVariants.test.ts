@@ -349,6 +349,9 @@ describe("OpenClaw adapter variants", () => {
         const lifecycleStatusOnlyError = adapter.event(
             envelope("agent", { data: { phase: "error" }, stream: "lifecycle" }, 52)
         );
+        const nestedLifecycleEnd = adapter.event(
+            envelope("agent", { data: { phase: "end", stream: "lifecycle" } }, 53)
+        );
 
         expect(compactionEnd[0]).toMatchObject({
             kind: "status",
@@ -382,6 +385,10 @@ describe("OpenClaw adapter variants", () => {
             error: "Chat run failed",
             kind: "finish",
             outcome: "error",
+        });
+        expect(nestedLifecycleEnd.at(-1)).toMatchObject({
+            kind: "finish",
+            outcome: "completed",
         });
     });
 
