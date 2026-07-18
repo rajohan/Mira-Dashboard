@@ -1359,7 +1359,7 @@ describe("gateway behavior", () => {
                 )
                 .find((message) => message.id === "runtime-snapshot-byte-limit")
                 ?.payload?.events?.map((event) => event.payload?.data?.marker)
-        ).toEqual(["second", "third"]);
+        ).toEqual(["first", "second", "third"]);
 
         const oversizedDelta = "é".repeat(510_000);
         client?.options.onEvent?.({
