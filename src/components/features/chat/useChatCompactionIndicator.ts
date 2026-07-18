@@ -11,12 +11,14 @@ const COMPLETED_COMPACTION_VISIBILITY_MS = 5000;
 export function useChatCompactionIndicator(
     status: ChatCompactionStatus | undefined
 ): ChatCompactionStatus | undefined {
-    const [expiredKey, setExpiredKey] = useState("");
+    const [expiredStatusIdentity, setExpiredStatusIdentity] = useState("");
     const duration =
         status?.phase === "active"
             ? ACTIVE_COMPACTION_TIMEOUT_MS
             : COMPLETED_COMPACTION_VISIBILITY_MS;
-    const statusKey = status?.key;
+    const statusIdentity = status
+        ? `${status.key}:${status.phase}:${status.timestamp}`
+        : "";
     const statusTimestamp = Date.parse(status?.timestamp || "");
     const expiresAt = Number.isNaN(statusTimestamp)
         ? undefined
@@ -24,19 +26,24 @@ export function useChatCompactionIndicator(
     const hasAlreadyExpired = expiresAt !== undefined && expiresAt <= Date.now();
 
     useEffect(() => {
-        if (!statusKey || hasAlreadyExpired) {
+        if (!statusIdentity || hasAlreadyExpired) {
             return;
         }
         const remaining = Math.max(0, (expiresAt ?? Date.now() + duration) - Date.now());
         if (remaining === 0) {
-            setExpiredKey(statusKey);
+            setExpiredStatusIdentity(statusIdentity);
             return;
         }
-        const timeout = setTimeout(() => setExpiredKey(statusKey), remaining);
+        const timeout = setTimeout(
+            () => setExpiredStatusIdentity(statusIdentity),
+            remaining
+        );
         return () => clearTimeout(timeout);
-    }, [duration, expiresAt, hasAlreadyExpired, statusKey]);
+    }, [duration, expiresAt, hasAlreadyExpired, statusIdentity]);
 
-    return hasAlreadyExpired || status?.key === expiredKey ? undefined : status;
+    return hasAlreadyExpired || statusIdentity === expiredStatusIdentity
+        ? undefined
+        : status;
 }
 
 /** Converts visible lifecycle feedback into the existing activity-row contract. */

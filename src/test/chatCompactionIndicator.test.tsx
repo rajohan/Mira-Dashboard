@@ -140,6 +140,38 @@ describe("chat compaction indicator", () => {
         expect(result.current).toBeUndefined();
     });
 
+    it("expires each phase independently for the same compaction", () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date("2026-07-17T18:00:00.000Z"));
+        const activeStatus: ChatCompactionStatus = {
+            key: "compact-1",
+            phase: "active",
+            text: "Compacting context",
+            timestamp: "2026-07-17T18:00:00.000Z",
+        };
+        const { result, rerender } = renderHook(
+            ({ status }: { status: ChatCompactionStatus }) =>
+                useChatCompactionIndicator(status),
+            { initialProps: { status: activeStatus } }
+        );
+
+        act(() => jest.advanceTimersByTime(5 * 60_000));
+        expect(result.current).toBeUndefined();
+
+        const completedStatus: ChatCompactionStatus = {
+            ...activeStatus,
+            phase: "complete",
+            text: "Context compacted",
+            timestamp: "2026-07-17T18:05:00.000Z",
+        };
+        jest.setSystemTime(new Date(completedStatus.timestamp));
+        rerender({ status: completedStatus });
+        expect(result.current).toEqual(completedStatus);
+
+        act(() => jest.advanceTimersByTime(5000));
+        expect(result.current).toBeUndefined();
+    });
+
     it("does not replay stale completed feedback after refresh", () => {
         jest.useFakeTimers();
         jest.setSystemTime(new Date("2026-07-17T18:00:06.000Z"));

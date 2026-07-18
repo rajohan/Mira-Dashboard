@@ -1841,6 +1841,36 @@ describe("chat projection", () => {
         );
     });
 
+    it("recognizes visible attachments as final tool-bearing answer content", () => {
+        const finalWithAttachment: ChatHistoryMessage = {
+            attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+            content: "",
+            isFinal: true,
+            role: "assistant",
+            runId: "run-1",
+            text: "",
+            thinking: [{ text: "final reasoning" }],
+            toolCalls: [
+                {
+                    id: "call-1",
+                    name: "write",
+                    toolResult: { content: "", id: "call-1", name: "write" },
+                },
+            ],
+        };
+
+        const completed = presentChatMessages(
+            [message("user", "create report"), finalWithAttachment],
+            createChatVisibility(true, true),
+            false
+        );
+
+        expect(completed.some((item) => item.thinking?.length)).toBe(false);
+        expect(completed.find((item) => item.attachments?.length)?.attachments).toEqual(
+            finalWithAttachment.attachments
+        );
+    });
+
     it("extracts mixed unscoped thinking into one bubble before the final answer", () => {
         const raw: ChatHistoryMessage[] = [
             message("user", "heartbeat"),

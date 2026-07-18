@@ -243,6 +243,33 @@ describe("chat scroll", () => {
         unmount();
     });
 
+    it("completes a bottom follow queued before the first row renders", () => {
+        const row = chatRow("answer", "assistant");
+        const stickToBottomReference = { current: true };
+        const { result, rerender, unmount } = renderHook(
+            ({ rows }: { rows: ChatRow[] }) =>
+                useChatScroll(rows, "agent:main:main", jest.fn(), stickToBottomReference),
+            { initialProps: { rows: [] as ChatRow[] } }
+        );
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 700 },
+        });
+        result.current.messagesContainerReference.current = container;
+
+        act(() => result.current.scheduleBottomFollow());
+        const queuedFrameId = animationFrameState.nextFrameId;
+        rerender({ rows: [row] });
+        expect(animationFrameState.frames.size).toBe(1);
+
+        const queuedFrame = animationFrameState.frames.get(queuedFrameId);
+        animationFrameState.frames.delete(queuedFrameId);
+        act(() => queuedFrame?.(0));
+        expect(container.scrollTop).toBe(700);
+        unmount();
+    });
+
     it("delegates same-row growth to the virtualizer without a second scroll", () => {
         const stickToBottomReference = { current: true };
         const { result, rerender, unmount } = renderHook(

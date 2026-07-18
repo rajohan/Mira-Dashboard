@@ -190,10 +190,13 @@ describe("chat actions", () => {
         );
 
         let compactPromise: Promise<void> | undefined;
+        let duplicateCompactPromise: Promise<void> | undefined;
         act(() => {
             compactPromise = result.current.compactSelectedSession();
+            duplicateCompactPromise = result.current.compactSelectedSession();
         });
         await waitFor(() => expect(transport.compact).toHaveBeenCalledWith(SESSION_A));
+        expect(transport.compact).toHaveBeenCalledTimes(1);
         expect(result.current.isCompactingSession).toBe(true);
         expect(result.current.canSend).toBe(false);
         expect(result.current.compactDisabled).toBe(true);
@@ -203,7 +206,7 @@ describe("chat actions", () => {
 
         await act(async () => {
             compactDeferred.resolve();
-            await compactPromise;
+            await Promise.all([compactPromise, duplicateCompactPromise]);
         });
         expect(result.current.isCompactingSession).toBe(false);
         expect(result.current.canSend).toBe(true);

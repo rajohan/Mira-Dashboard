@@ -95,12 +95,15 @@ function applyFinalThinkingPreference(
         }
 
         const hasToolOutput = Boolean(message.toolCalls?.length || message.toolResult);
+        const hasVisibleAttachments = Boolean(
+            withoutThinking.attachments?.length &&
+            !withoutThinking.hasOnlyHiddenToolAttachments &&
+            (!hasToolOutput || message.isFinal === true)
+        );
         const hasPrimaryContent = Boolean(
             withoutThinking.text.trim() ||
             withoutThinking.images?.length ||
-            (withoutThinking.attachments?.length &&
-                !hasToolOutput &&
-                !withoutThinking.hasOnlyHiddenToolAttachments)
+            hasVisibleAttachments
         );
         const isDiagnosticTool = hasToolOutput && !hasPrimaryContent;
         const isPrimaryAnswer = Boolean(

@@ -717,6 +717,35 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("retries canonical alias promotion after persistence fails", () => {
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            for (const hydrationMode of ["cold", "alias-loaded"] as const) {
+                const store = new MemorySnapshotStore();
+                store.snapshots.set("main", persistedSnapshot("main", "run-1"));
+                const bridge = new OpenClawChatBridge(store);
+                if (hydrationMode === "alias-loaded") {
+                    expect(bridge.snapshot("main").events).toHaveLength(1);
+                }
+                store.saveFailures = 1;
+
+                expect(bridge.snapshot(MAIN).events).toEqual([]);
+                expect(store.snapshots.has("main")).toBe(true);
+                expect(store.snapshots.has(MAIN)).toBe(false);
+
+                expect(bridge.snapshot(MAIN).events[0]?.payload).toMatchObject({
+                    runId: "run-1",
+                    sessionKey: MAIN,
+                });
+                expect(store.snapshots.has("main")).toBe(false);
+                expect(store.snapshots.has(MAIN)).toBe(true);
+            }
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
     it("hydrates and merges an unloaded canonical replay before alias promotion", () => {
         const store = new MemorySnapshotStore();
         store.snapshots.set(

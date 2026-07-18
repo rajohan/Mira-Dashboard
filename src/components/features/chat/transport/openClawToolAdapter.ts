@@ -65,7 +65,8 @@ export function openClawToolMessage(
         phase === "result" ||
         phase === "end" ||
         phase === "error" ||
-        result !== undefined;
+        result !== undefined ||
+        isFailedResult;
     const resultMessage = normalizeOpenClawHistoryMessage({
         MediaPath: data.MediaPath,
         MediaPaths: data.MediaPaths,

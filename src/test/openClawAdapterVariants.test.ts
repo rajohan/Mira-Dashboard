@@ -113,6 +113,7 @@ describe("OpenClaw adapter variants", () => {
             "inspect disk",
             "report result",
         ]);
+        expect(lastToolIndex).toBeGreaterThanOrEqual(0);
         expect(thinkingIndex).toBeGreaterThan(lastToolIndex);
         expect(thinkingIndex).toBeLessThan(finalIndex);
         expect(visible[finalIndex]?.thinking).toBeUndefined();
@@ -609,6 +610,36 @@ describe("OpenClaw adapter variants", () => {
         expect(toolEvent?.kind === "tool" && toolEvent.message.toolResult?.isError).toBe(
             true
         );
+    });
+
+    it("marks status-only tool failures as completed error results", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        id: "status-failed-call",
+                        name: "exec",
+                        status: "failed",
+                    },
+                    stream: "tool",
+                },
+                57
+            )
+        );
+        const toolEvent = events.find((event) => event.kind === "tool");
+
+        expect(toolEvent).toMatchObject({
+            kind: "tool",
+            message: {
+                toolResult: {
+                    id: "status-failed-call",
+                    isError: true,
+                    name: "exec",
+                },
+            },
+        });
     });
 
     it("renders a coalesced replay tool with the same input and result", () => {

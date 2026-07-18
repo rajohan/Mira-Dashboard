@@ -407,7 +407,11 @@ export function useChatActions({
     };
 
     const compactSelectedSession = async () => {
-        if (!selectedSessionKey || isCompactDisabled) {
+        if (
+            !selectedSessionKey ||
+            isCompactDisabled ||
+            isSessionCompacting(selectedSessionKey)
+        ) {
             return;
         }
         const compactSessionKey = selectedSessionKey;

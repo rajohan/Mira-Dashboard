@@ -814,8 +814,13 @@ export class OpenClawChatBridge {
         }
         this.#hydratedSessionLookups.add(normalizedLookup);
         if (this.#loadedStoreKeys.has(storedKey)) {
-            if (storedKey !== sessionKey && isAgentSessionKey(sessionKey)) {
-                this.#promoteSessionEntry(storedKey, sessionKey, undefined, sessionKey);
+            const requiresCanonicalPromotion =
+                storedKey !== sessionKey && isAgentSessionKey(sessionKey);
+            if (
+                requiresCanonicalPromotion &&
+                !this.#promoteSessionEntry(storedKey, sessionKey, undefined, sessionKey)
+            ) {
+                this.#hydratedSessionLookups.delete(normalizedLookup);
             }
             return;
         }
@@ -847,6 +852,7 @@ export class OpenClawChatBridge {
             if (
                 !this.#promoteSessionEntry(storedKey, sessionKey, undefined, sessionKey)
             ) {
+                this.#hydratedSessionLookups.delete(normalizedLookup);
                 this.#enforceSessionLimit(storedKey);
             }
             return;

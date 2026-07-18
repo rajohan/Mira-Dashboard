@@ -86,7 +86,7 @@ export function useChatScroll(
 
     const scrollToBottom = () => {
         const container = messagesContainerReference.current;
-        if (!container || rows.length === 0) {
+        if (!container) {
             return;
         }
         container.scrollTop = container.scrollHeight;
