@@ -1,4 +1,4 @@
-import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import type { Dispatch, RefObject, SetStateAction } from "react";
 
 import type { ChatHistoryMessage, ChatSendAttachment } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
@@ -10,7 +10,7 @@ interface UseChatSlashCommandsParameters {
     abort: ChatTransport["abort"];
     clearRuntime: (sessionKey: string) => void;
     selectedSessionKey: string;
-    selectedSessionKeyReference: MutableRefObject<string>;
+    selectedSessionKeyReference: RefObject<string>;
     attachments: ChatSendAttachment[];
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setDraft: Dispatch<SetStateAction<string>>;

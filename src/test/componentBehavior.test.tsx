@@ -1806,11 +1806,9 @@ describe("shared component helpers", () => {
         const onFollow = jest.fn();
         const onPreview = jest.fn();
         const onScroll = jest.fn();
+        const onUserScrollIntent = jest.fn();
         const onTtsError = jest.fn();
         const onDeleteMessage = jest.fn();
-        const messagesBottomReference = {
-            current: undefined,
-        } as RefObject<HTMLDivElement | undefined>;
         const messagesContainerReference = {
             current: undefined,
         } as RefObject<HTMLDivElement | undefined>;
@@ -1900,7 +1898,6 @@ describe("shared component helpers", () => {
                             },
                         },
                     ]}
-                    messagesBottomReference={messagesBottomReference}
                     messagesContainerReference={messagesContainerReference}
                     messagesVirtualizer={virtualizer as never}
                     onDeleteMessage={onDeleteMessage}
@@ -1908,6 +1905,7 @@ describe("shared component helpers", () => {
                     onFollow={onFollow}
                     onPreview={onPreview}
                     onScroll={onScroll}
+                    onUserScrollIntent={onUserScrollIntent}
                     onTtsError={onTtsError}
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
                 />
@@ -1918,14 +1916,32 @@ describe("shared component helpers", () => {
             screen.getByText("Exec").closest("[class*='border-amber']")
         ).not.toContainElement(screen.getByText("answer"));
 
-        fireEvent.scroll(messagesContainerReference.current!);
         await user.click(screen.getByRole("button", { name: /follow/i }));
-        await user.click(screen.getByRole("button", { name: /delete your message/i }));
+        expect(onUserScrollIntent).not.toHaveBeenCalled();
+        Object.defineProperties(messagesContainerReference.current!, {
+            clientWidth: { configurable: true, value: 90 },
+            getBoundingClientRect: {
+                configurable: true,
+                value: () => ({ right: 100 }),
+            },
+            offsetWidth: { configurable: true, value: 100 },
+        });
+        fireEvent.scroll(messagesContainerReference.current!);
+        fireEvent.pointerDown(messagesContainerReference.current!, { clientX: 95 });
+        fireEvent.wheel(messagesContainerReference.current!);
+        fireEvent.touchMove(messagesContainerReference.current!);
+        const deleteMessageButton = screen.getByRole("button", {
+            name: /delete your message/i,
+        });
+        deleteMessageButton.focus();
+        fireEvent.keyDown(deleteMessageButton, { key: "PageUp" });
+        await user.click(deleteMessageButton);
         await user.click(
             screen.getByRole("button", { name: /open chat image 1 preview/i })
         );
         await user.click(screen.getByRole("button", { name: /readme.txt/i }));
         expect(onScroll).toHaveBeenCalledTimes(1);
+        expect(onUserScrollIntent).toHaveBeenCalledTimes(4);
         expect(onFollow).toHaveBeenCalledTimes(1);
         expect(onDeleteMessage).toHaveBeenCalledWith("user");
         expect(onPreview).toHaveBeenCalledWith(

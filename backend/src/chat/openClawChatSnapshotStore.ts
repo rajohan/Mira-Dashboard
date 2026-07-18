@@ -1,0 +1,232 @@
+import { database } from "../database.ts";
+import {
+    MAX_CHAT_RUNTIME_SESSIONS,
+    type OpenClawChatSnapshotStore,
+    type OpenClawRuntimeEnvelope,
+    type OpenClawRuntimeSnapshot,
+} from "./openClawChatBridge.ts";
+
+interface SnapshotRow {
+    snapshot_json: string;
+}
+
+interface SnapshotKeyRow {
+    session_key: string;
+}
+
+interface SnapshotMaximumSequenceRow {
+    maximum_sequence: unknown;
+}
+
+function hasReplay(snapshot: OpenClawRuntimeSnapshot): boolean {
+    return snapshot.events.length > 0;
+}
+
+const SAVE_SNAPSHOT_SQL = `
+    INSERT INTO chat_runtime_snapshots (
+        gateway_scope,
+        session_key,
+        snapshot_json,
+        updated_at
+    ) VALUES (?, ?, ?, ?)
+`;
+
+const PRUNE_SNAPSHOTS_SQL = `
+    DELETE FROM chat_runtime_snapshots
+    WHERE gateway_scope = ?
+      AND rowid NOT IN (
+          SELECT rowid
+          FROM chat_runtime_snapshots
+          WHERE gateway_scope = ?
+          ORDER BY updated_at DESC, rowid DESC
+          LIMIT ?
+      )
+`;
+
+function normalizedSessionKey(sessionKey: string): string {
+    const normalized = sessionKey.trim().toLowerCase();
+    if (!normalized) {
+        throw new Error("Session key is required for chat runtime persistence");
+    }
+    return normalized;
+}
+
+function isRuntimeEnvelope(value: unknown): value is OpenClawRuntimeEnvelope {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return false;
+    }
+    const envelope = value as Record<string, unknown>;
+    return (
+        envelope.type === "event" &&
+        Number.isFinite(envelope.runtimeRecordedAt) &&
+        Number.isSafeInteger(envelope.runtimeSequence) &&
+        (envelope.runtimeSequence as number) >= 0
+    );
+}
+
+function parseSnapshot(serialized: string): OpenClawRuntimeSnapshot | undefined {
+    try {
+        const value = JSON.parse(serialized) as Record<string, unknown>;
+        const events = Array.isArray(value.events) ? value.events : [];
+        const throughSequence = value.throughSequence;
+        if (
+            !value ||
+            typeof value !== "object" ||
+            Array.isArray(value) ||
+            typeof value.completed !== "boolean" ||
+            !Array.isArray(value.events) ||
+            !events.every(isRuntimeEnvelope) ||
+            !Number.isSafeInteger(throughSequence) ||
+            (throughSequence as number) < 0 ||
+            events.some(
+                (event) =>
+                    (event as OpenClawRuntimeEnvelope).runtimeSequence >
+                    (throughSequence as number)
+            )
+        ) {
+            return undefined;
+        }
+        return value as unknown as OpenClawRuntimeSnapshot;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Persists the bounded bridge replay without exposing its payload as a new API. */
+export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStore {
+    readonly #gatewayScope: string;
+    readonly #now: () => string;
+
+    constructor(
+        gatewayScope: string,
+        now: () => string = () => new Date().toISOString()
+    ) {
+        const normalizedScope = gatewayScope.trim();
+        if (!normalizedScope) {
+            throw new Error("Gateway scope is required for chat runtime persistence");
+        }
+        this.#gatewayScope = normalizedScope;
+        this.#now = now;
+    }
+
+    #insertSnapshot(
+        sessionKey: string,
+        snapshot: OpenClawRuntimeSnapshot,
+        updatedAt: string
+    ): void {
+        database
+            .prepare(SAVE_SNAPSHOT_SQL)
+            .run(this.#gatewayScope, sessionKey, JSON.stringify(snapshot), updatedAt);
+    }
+
+    #pruneSnapshots(): void {
+        database
+            .prepare(PRUNE_SNAPSHOTS_SQL)
+            .run(this.#gatewayScope, this.#gatewayScope, MAX_CHAT_RUNTIME_SESSIONS);
+    }
+
+    clear(): void {
+        database
+            .prepare("DELETE FROM chat_runtime_snapshots WHERE gateway_scope = ?")
+            .run(this.#gatewayScope);
+    }
+
+    delete(sessionKey: string): void {
+        database
+            .prepare(
+                "DELETE FROM chat_runtime_snapshots WHERE gateway_scope = ? AND session_key = ?"
+            )
+            .run(this.#gatewayScope, normalizedSessionKey(sessionKey));
+    }
+
+    keys(): string[] {
+        return (
+            database
+                .prepare(
+                    "SELECT session_key FROM chat_runtime_snapshots WHERE gateway_scope = ?"
+                )
+                .all(this.#gatewayScope) as SnapshotKeyRow[]
+        ).map((row) => normalizedSessionKey(row.session_key));
+    }
+
+    load(sessionKey: string): OpenClawRuntimeSnapshot | undefined {
+        const normalizedKey = normalizedSessionKey(sessionKey);
+        const row = database
+            .prepare(
+                `SELECT snapshot_json
+                 FROM chat_runtime_snapshots
+                 WHERE gateway_scope = ? AND session_key = ?`
+            )
+            .get(this.#gatewayScope, normalizedKey) as SnapshotRow | undefined;
+        const snapshot = row ? parseSnapshot(row.snapshot_json) : undefined;
+        if (row && !snapshot) {
+            this.delete(normalizedKey);
+        }
+        return snapshot;
+    }
+
+    maximumSequence(): number {
+        const row = database
+            .prepare(
+                `SELECT MAX(
+                    CASE
+                        WHEN json_valid(snapshot_json)
+                        THEN CASE
+                            WHEN json_type(snapshot_json, '$.throughSequence') = 'integer'
+                                AND json_extract(snapshot_json, '$.throughSequence') >= 0
+                                AND json_extract(snapshot_json, '$.throughSequence') <= ?
+                            THEN json_extract(snapshot_json, '$.throughSequence')
+                        END
+                    END
+                ) AS maximum_sequence
+                FROM chat_runtime_snapshots
+                WHERE gateway_scope = ?`
+            )
+            .get(Number.MAX_SAFE_INTEGER, this.#gatewayScope) as
+            SnapshotMaximumSequenceRow | undefined;
+        return typeof row?.maximum_sequence === "number" &&
+            Number.isSafeInteger(row.maximum_sequence) &&
+            row.maximum_sequence >= 0
+            ? row.maximum_sequence
+            : 0;
+    }
+
+    promote(
+        sourceSessionKey: string,
+        canonicalSessionKey: string,
+        sourceSnapshot: OpenClawRuntimeSnapshot,
+        canonicalSnapshot: OpenClawRuntimeSnapshot
+    ): void {
+        const sourceKey = normalizedSessionKey(sourceSessionKey);
+        const canonicalKey = normalizedSessionKey(canonicalSessionKey);
+        const persist = database.transaction(() => {
+            database
+                .prepare(
+                    `DELETE FROM chat_runtime_snapshots
+                     WHERE gateway_scope = ? AND session_key IN (?, ?)`
+                )
+                .run(this.#gatewayScope, sourceKey, canonicalKey);
+            const updatedAt = this.#now();
+            if (hasReplay(sourceSnapshot)) {
+                this.#insertSnapshot(sourceKey, sourceSnapshot, updatedAt);
+            }
+            if (hasReplay(canonicalSnapshot)) {
+                this.#insertSnapshot(canonicalKey, canonicalSnapshot, updatedAt);
+            }
+            this.#pruneSnapshots();
+        });
+        persist();
+    }
+
+    save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {
+        const normalizedKey = normalizedSessionKey(sessionKey);
+        const persist = database.transaction(() => {
+            // Reinsert so a refresh always receives a newer rowid tie-breaker,
+            // even when multiple writes share the same millisecond timestamp.
+            this.delete(normalizedKey);
+            this.#insertSnapshot(normalizedKey, snapshot, this.#now());
+            this.#pruneSnapshots();
+        });
+        persist();
+    }
+}

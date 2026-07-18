@@ -9,6 +9,7 @@ import { ChatHeader } from "../components/features/chat/ChatHeader";
 import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
     chatFastModePatchValue,
+    isSessionActive,
     readDeletedMessageKeys,
     readStoredChatDiagnosticVisibility,
     writeDeletedMessageKeys,
@@ -21,6 +22,10 @@ import { isSameChatSession } from "../components/features/chat/domain/chatState"
 import { buildSlashCommandSuggestions } from "../components/features/chat/slashCommands";
 import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
 import { useChatActions } from "../components/features/chat/useChatActions";
+import {
+    projectChatActivityRows,
+    useChatCompactionIndicator,
+} from "../components/features/chat/useChatCompactionIndicator";
 import { useChatHistory } from "../components/features/chat/useChatHistory";
 import { useChatInputMedia } from "../components/features/chat/useChatInputMedia";
 import { useChatModels } from "../components/features/chat/useChatModels";
@@ -171,11 +176,16 @@ export function Chat() {
         keepThinkingAfterFinal,
         deletedMessageKeys
     );
-    const chatRows = projection.rows;
-    const selectedStreamsText = projection.activityFingerprint;
+    const compactionIndicator = useChatCompactionIndicator(projection.compactionStatus);
+    const chatRows = projectChatActivityRows({
+        activeRuns: projection.activeRuns,
+        compactionStatus: compactionIndicator,
+        isActiveSession: isSessionActive(selectedSession),
+        rows: projection.rows,
+        sessionKey: selectedSessionKey,
+    });
     const scroll = useChatScroll(
         chatRows,
-        selectedStreamsText,
         selectedSessionKey,
         setIsAtBottom,
         shouldStickToBottomReference
@@ -183,7 +193,7 @@ export function Chat() {
     const {
         handleDynamicContentLoad: handleDynamicRowContentLoad,
         handleScroll: handleMessagesScroll,
-        messagesBottomReference,
+        handleUserScrollIntent,
         messagesContainerReference,
         scheduleBottomFollow,
         scrollToBottom: scrollMessagesToBottom,
@@ -325,7 +335,9 @@ export function Chat() {
         clearAttachments,
         confirmResetSession,
         draft,
-        isCompacting: projection.isCompacting,
+        // Mirrors Control UI's five-minute stale-status failsafe. Locally
+        // initiated compaction RPCs stay locked independently in useChatActions.
+        isCompacting: compactionIndicator?.phase === "active",
         isConnected,
         isRecording,
         isTranscribing,
@@ -344,6 +356,7 @@ export function Chat() {
     const {
         canSend,
         canStop,
+        compactDisabled,
         compactSelectedSession,
         handleSend,
         handleStop,
@@ -351,7 +364,7 @@ export function Chat() {
         isSending,
         isStopping,
         patchSelectedSession,
-        sessionControlsDisabled: isSessionControlsDisabled,
+        preferenceControlsDisabled,
     } = actions;
 
     return (
@@ -372,7 +385,6 @@ export function Chat() {
                         isLoadingHistory={isLoadingHistory}
                         isAtBottom={isAtBottom}
                         chatRows={chatRows}
-                        messagesBottomReference={messagesBottomReference}
                         messagesContainerReference={messagesContainerReference}
                         messagesVirtualizer={messagesVirtualizer}
                         onDynamicContentLoad={handleDynamicRowContentLoad}
@@ -383,6 +395,7 @@ export function Chat() {
                             showToolOutput
                         )}
                         onScroll={handleMessagesScroll}
+                        onUserScrollIntent={handleUserScrollIntent}
                         onTtsError={setSendError}
                         onDeleteMessage={handleDeleteMessage}
                     />
@@ -426,7 +439,8 @@ export function Chat() {
                         shouldShowThinking={showThinkingOutput}
                         shouldShowTools={showToolOutput}
                         shouldKeepThinkingAfterFinal={keepThinkingAfterFinal}
-                        sessionControlsDisabled={isSessionControlsDisabled}
+                        compactDisabled={compactDisabled}
+                        preferenceControlsDisabled={preferenceControlsDisabled}
                         isCompacting={isCompactingSession}
                         slashCommandSuggestions={slashCommandSuggestions}
                         onApplySlashSuggestion={applySlashSuggestion}

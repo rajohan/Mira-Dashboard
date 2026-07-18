@@ -59,7 +59,7 @@ type GatewayResponse = {
 type PendingRequestEntry = {
     resolve: (value: unknown) => void;
     reject: (error: Error) => void;
-    timeout: NodeJS.Timeout;
+    timeout?: NodeJS.Timeout;
 };
 
 async function websocketMessageToString(data: unknown): Promise<string> {
@@ -95,11 +95,22 @@ export type OpenClawGatewayClientOptions = {
     onClose?: (code: number, reason: string) => void;
 };
 
+/** Configures one Gateway request without changing the connection defaults. */
+export type OpenClawGatewayRequestOptions = {
+    timeoutMs?: number;
+    /** Leaves completion timing to the Gateway operation lifecycle. */
+    shouldWaitIndefinitely?: boolean;
+};
+
 /** Defines open claw gateway client instance. */
 export type OpenClawGatewayClientInstance = {
     start: () => void;
     stop: () => void;
-    request: (method: string, parameters?: unknown) => Promise<unknown>;
+    request: (
+        method: string,
+        parameters?: unknown,
+        options?: OpenClawGatewayRequestOptions
+    ) => Promise<unknown>;
 };
 
 /** Performs base64 URL encode. */
@@ -350,7 +361,9 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
     private rejectAllPending(error: Error): void {
         for (const [id, pending] of this.pending.entries()) {
-            clearTimeout(pending.timeout);
+            if (pending.timeout !== undefined) {
+                clearTimeout(pending.timeout);
+            }
             pending.reject(error);
             this.pending.delete(id);
         }
@@ -407,7 +420,9 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             return;
         }
 
-        clearTimeout(pending.timeout);
+        if (pending.timeout !== undefined) {
+            clearTimeout(pending.timeout);
+        }
         this.pending.delete(response.id);
 
         const isSuccess =
@@ -617,7 +632,11 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         this.rejectAllPending(new Error("gateway client stopped"));
     }
 
-    request(method: string, parameters: unknown = {}): Promise<unknown> {
+    request(
+        method: string,
+        parameters: unknown = {},
+        options: OpenClawGatewayRequestOptions = {}
+    ): Promise<unknown> {
         const ws = this.ws;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             return Promise.reject(new Error("Gateway not connected"));
@@ -634,18 +653,37 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             params: parameters,
         };
 
+        const configuredTimeoutMs = this.opts.requestTimeoutMs as number;
+        const requestedTimeoutMs = options.timeoutMs;
+        const timeoutMs =
+            options.shouldWaitIndefinitely === true
+                ? undefined
+                : typeof requestedTimeoutMs === "number" &&
+                    Number.isFinite(requestedTimeoutMs) &&
+                    requestedTimeoutMs > 0
+                  ? Math.min(
+                        Math.max(Math.trunc(requestedTimeoutMs), 1),
+                        MAX_TIMER_DELAY_MS
+                    )
+                  : configuredTimeoutMs;
+
         return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                this.pending.delete(id);
-                reject(new Error(`Gateway request timed out: ${method}`));
-            }, this.opts.requestTimeoutMs as number);
+            const timeout =
+                timeoutMs === undefined
+                    ? undefined
+                    : setTimeout(() => {
+                          this.pending.delete(id);
+                          reject(new Error(`Gateway request timed out: ${method}`));
+                      }, timeoutMs);
 
             this.pending.set(id, { resolve, reject, timeout });
             try {
                 ws.send(JSON.stringify(frame));
             } catch (error) {
                 this.pending.delete(id);
-                clearTimeout(timeout);
+                if (timeout !== undefined) {
+                    clearTimeout(timeout);
+                }
                 reject(error);
             }
         });

@@ -92,6 +92,34 @@ describe("OpenClaw chat adapter", () => {
         expect(tool[1]?.kind === "tool" && tool[1].toolKey).toBe("tool:call-1");
     });
 
+    it("restores active-run status from a replayed session start", () => {
+        const adapter = new OpenClawChatAdapter();
+        const started = adapter.event(envelope("session.started", {}, 8));
+        const runlessStart = envelope("session.started", {}, 9);
+        Reflect.deleteProperty(runlessStart.payload, "runId");
+        const ignoredRunlessStart = adapter.event(runlessStart);
+        const final = adapter.event(
+            envelope(
+                "chat",
+                {
+                    message: { content: "done", role: "assistant" },
+                    state: "final",
+                },
+                10
+            )
+        );
+        const activeState = reduceChatRuntime(createChatRuntimeState(), started);
+        const state = reduceChatRuntime(activeState, [...ignoredRunlessStart, ...final]);
+
+        expect(activeState.sessions[SESSION]?.runs["run-1"]?.phase).toBe("active");
+        expect(started).toEqual([
+            expect.objectContaining({ kind: "status", text: "Thinking" }),
+        ]);
+        expect(ignoredRunlessStart).toEqual([]);
+        expect(Object.keys(state.sessions[SESSION]?.runs || {})).toEqual(["run-1"]);
+        expect(state.sessions[SESSION]?.runs["run-1"]?.phase).toBe("completed");
+    });
+
     it("ignores non-chat envelopes and delivery-noise tools", () => {
         const adapter = new OpenClawChatAdapter();
         expect(adapter.event({ type: "sessions" })).toEqual([]);
@@ -207,6 +235,20 @@ describe("OpenClaw chat adapter", () => {
         expect(messages[0]?.toolCalls?.[0]?.toolResult?.id).toBe("call-1");
         expect(messages[0]?.attachments?.[0]?.fileName).toBe("report.txt");
         expect(messages[1]?.attachments?.[0]?.fileName).toBe("orphan.txt");
+    });
+
+    it("recovers a Dashboard user run id from its history idempotency key", () => {
+        const adapter = new OpenClawChatAdapter();
+        const messages = adapter.history([
+            {
+                content: "steer",
+                idempotencyKey: "dashboard-chat-123:user",
+                role: "user",
+                runId: " ".repeat(3),
+            },
+        ]);
+
+        expect(messages[0]?.runId).toBe("dashboard-chat-123");
     });
 
     it("retains attachment-only runtime tool results", () => {
@@ -327,7 +369,7 @@ describe("OpenClaw chat adapter", () => {
         expect(messages[1]?.toolResult?.content).toBe("delayed duplicate");
     });
 
-    it("suppresses only terminal errors proven to repeat a surfaced tool failure", () => {
+    it("keeps tool-terminal failures in diagnostic rows instead of global errors", () => {
         const adapter = new OpenClawChatAdapter();
         const failedTool = adapter.event(
             envelope(
@@ -397,6 +439,26 @@ describe("OpenClaw chat adapter", () => {
             runtimeSequence: 14,
             type: "event",
         });
+        const duplicateToolMessage = adapter.event(
+            envelope(
+                "chat",
+                {
+                    message: "tool execution failed: database is locked",
+                    state: "error",
+                },
+                15
+            )
+        );
+        const legitimateFinal = adapter.event(
+            envelope(
+                "chat",
+                {
+                    message: "⚠️ 🛠️ warnings can also be ordinary final text",
+                    state: "final",
+                },
+                16
+            )
+        );
         const failedToolEvent = failedTool.find((event) => event.kind === "tool");
 
         expect(
@@ -414,19 +476,30 @@ describe("OpenClaw chat adapter", () => {
             "⚠️ 🛠️ `run lint` failed"
         );
         expect(
-            repeatedToolError[0]?.kind === "finish" &&
-                repeatedToolError[0].suppressIfToolFailure
+            repeatedToolError[0]?.kind === "finish" && repeatedToolError[0].error
+        ).toBe("tool execution failed: database is locked");
+        expect(
+            repeatedToolError[0]?.kind === "finish" && repeatedToolError[0].toolFailure
         ).toBe(true);
+        expect(
+            duplicateToolMessage[0]?.kind === "finish" && duplicateToolMessage[0].message
+        ).toBeUndefined();
+        expect(
+            duplicateToolMessage[0]?.kind === "finish" && duplicateToolMessage[0].error
+        ).toBe("tool execution failed: database is locked");
+        expect(
+            legitimateFinal[0]?.kind === "finish" && legitimateFinal[0].message?.text
+        ).toBe("⚠️ 🛠️ warnings can also be ordinary final text");
     });
 
-    it("retains an empty error-only tool result as a failure", () => {
+    it("retains an error-only tool result as a failure", () => {
         const adapter = new OpenClawChatAdapter();
         const events = adapter.event(
             envelope(
                 "session.tool",
                 {
                     data: {
-                        error: "",
+                        error: "tool failed",
                         name: "functions.exec_command",
                         phase: "end",
                     },
@@ -438,9 +511,31 @@ describe("OpenClaw chat adapter", () => {
         const tool = events.find((event) => event.kind === "tool");
 
         expect(tool?.kind === "tool" && tool.message.toolResult).toMatchObject({
-            content: "",
+            content: "tool failed",
             isError: true,
         });
+    });
+
+    it("does not classify a nullable empty tool error as a failure", () => {
+        const adapter = new OpenClawChatAdapter();
+        const nullableError: unknown = JSON.parse("null");
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        error: nullableError,
+                        name: "functions.exec_command",
+                        phase: "end",
+                    },
+                    stream: "tool",
+                },
+                16
+            )
+        );
+        const tool = events.find((event) => event.kind === "tool");
+
+        expect(tool?.kind === "tool" && tool.message.toolResult).toBeUndefined();
     });
 
     it("normalizes malformed raw history metadata without throwing", () => {

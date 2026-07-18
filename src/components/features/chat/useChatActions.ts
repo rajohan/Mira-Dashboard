@@ -1,6 +1,6 @@
 import {
     type Dispatch,
-    type MutableRefObject,
+    type RefObject,
     type SetStateAction,
     useEffect,
     useRef,
@@ -30,7 +30,7 @@ import { useChatSlashCommands } from "./useChatSlashCommands";
 interface ChatActionsOptions {
     activeRunCount: number;
     attachments: ChatSendAttachment[];
-    attachmentsReference: MutableRefObject<ChatSendAttachment[]>;
+    attachmentsReference: RefObject<ChatSendAttachment[]>;
     clearAttachments(): void;
     confirmResetSession(): Promise<boolean>;
     draft: string;
@@ -42,13 +42,32 @@ interface ChatActionsOptions {
     scheduleBottomFollow(): void;
     selectedSession?: Session;
     selectedSessionKey: string;
-    selectedSessionKeyReference: MutableRefObject<string>;
+    selectedSessionKeyReference: RefObject<string>;
     setDraft: Dispatch<SetStateAction<string>>;
     setIsAtBottom: Dispatch<SetStateAction<boolean>>;
     setMessages: Dispatch<SetStateAction<ChatHistoryMessage[]>>;
     setSendError: Dispatch<SetStateAction<string | undefined>>;
-    shouldStickToBottomReference: MutableRefObject<boolean>;
+    shouldStickToBottomReference: RefObject<boolean>;
     transport: ChatTransport;
+}
+
+function dashboardChatRunId(): string {
+    let uniqueId: string;
+    if (typeof crypto.randomUUID === "function") {
+        uniqueId = crypto.randomUUID();
+    } else {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        bytes[6] = ((bytes[6] ?? 0) % 16) + 64;
+        bytes[8] = ((bytes[8] ?? 0) % 64) + 128;
+        const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+            ""
+        );
+        uniqueId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(
+            12,
+            16
+        )}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+    return `dashboard-chat-${uniqueId}`;
 }
 
 /** Owns stateful chat commands while the page remains a view composition. */
@@ -77,15 +96,33 @@ export function useChatActions({
 }: ChatActionsOptions) {
     const sendCountReference = useRef(0);
     const sendEpochReference = useRef(0);
+    const inFlightInputRevisionsReference = useRef(new Set<number>());
+    const inputRevisionReference = useRef({ attachments, draft, revision: 0 });
     const pendingPatchesReference = useRef(new Map<string, Set<Promise<boolean>>>());
     const draftReference = useRef(draft);
+    const isCompactingReference = useRef(isCompacting);
+    const compactingSessionKeysReference = useRef(new Set<string>());
+    const [compactingSessionKeys, setCompactingSessionKeys] = useState(
+        () => new Set<string>()
+    );
     const [isSending, setIsSending] = useState(false);
     const [stoppingSessionKey, setStoppingSessionKey] = useState("");
     const [pendingPatchCounts, setPendingPatchCounts] = useState<Record<string, number>>(
         {}
     );
 
+    if (
+        inputRevisionReference.current.attachments !== attachments ||
+        inputRevisionReference.current.draft !== draft
+    ) {
+        inputRevisionReference.current = {
+            attachments,
+            draft,
+            revision: inputRevisionReference.current.revision + 1,
+        };
+    }
     draftReference.current = draft;
+    isCompactingReference.current = isCompacting;
 
     useEffect(() => {
         if (isConnected) {
@@ -94,6 +131,9 @@ export function useChatActions({
 
         sendEpochReference.current += 1;
         sendCountReference.current = 0;
+        inFlightInputRevisionsReference.current.clear();
+        compactingSessionKeysReference.current = new Set();
+        setCompactingSessionKeys(new Set());
         setIsSending(false);
     }, [isConnected]);
 
@@ -109,13 +149,15 @@ export function useChatActions({
         confirmResetSession,
     });
 
-    const beginSend = () => {
+    const beginSend = (inputRevision: number) => {
         sendCountReference.current += 1;
+        inFlightInputRevisionsReference.current.add(inputRevision);
         setIsSending(true);
         return sendEpochReference.current;
     };
 
-    const endSend = (sendEpoch: number) => {
+    const endSend = (sendEpoch: number, inputRevision: number) => {
+        inFlightInputRevisionsReference.current.delete(inputRevision);
         if (sendEpoch !== sendEpochReference.current) {
             return;
         }
@@ -123,13 +165,18 @@ export function useChatActions({
         setIsSending(sendCountReference.current > 0);
     };
 
-    const isBlockedByInFlightSend = (
-        text: string,
-        attachmentCount = attachments.length
-    ) => {
-        const slashCommand = text.startsWith("/") && attachmentCount === 0;
-        return sendCountReference.current > 0 && !(slashCommand && activeRunCount > 0);
-    };
+    const isBlockedByInFlightSend = () =>
+        sendCountReference.current > 0 &&
+        (activeRunCount === 0 ||
+            inFlightInputRevisionsReference.current.has(
+                inputRevisionReference.current.revision
+            ));
+
+    const isSessionCompacting = (sessionKey: string) =>
+        isCompactingReference.current ||
+        compactingSessionKeysReference.current
+            .values()
+            .some((candidate) => isSameChatSession(candidate, sessionKey));
 
     const handleSend = async () => {
         if (!selectedSessionKey) {
@@ -138,7 +185,8 @@ export function useChatActions({
         const pendingSessionKey = selectedSessionKey;
         let text = draft.trim();
         if (
-            isBlockedByInFlightSend(text, attachments.length) ||
+            isSessionCompacting(pendingSessionKey) ||
+            isBlockedByInFlightSend() ||
             (!text && attachments.length === 0)
         ) {
             return;
@@ -157,34 +205,38 @@ export function useChatActions({
         text = draftReference.current.trim();
         const currentAttachments = attachmentsReference.current;
         if (
-            isBlockedByInFlightSend(text, currentAttachments.length) ||
+            isSessionCompacting(pendingSessionKey) ||
+            isBlockedByInFlightSend() ||
             (!text && currentAttachments.length === 0)
         ) {
             return;
         }
 
-        const sendEpoch = beginSend();
+        const inputRevision = inputRevisionReference.current.revision;
+        const sendEpoch = beginSend(inputRevision);
         if (text.startsWith("/")) {
             try {
                 const wasHandled = await handleSlashCommand(text, currentAttachments);
                 if (selectedSessionKeyReference.current !== pendingSessionKey) {
-                    endSend(sendEpoch);
+                    endSend(sendEpoch, inputRevision);
                     return;
                 }
                 if (wasHandled) {
-                    endSend(sendEpoch);
+                    endSend(sendEpoch, inputRevision);
                     return;
                 }
             } catch (error) {
                 if (selectedSessionKeyReference.current === pendingSessionKey) {
                     setSendError(chatErrorMessage(error, "Failed to run slash command"));
                 }
-                endSend(sendEpoch);
+                endSend(sendEpoch, inputRevision);
                 return;
             }
         }
 
         const resetCommand = isResetSlashCommand(text);
+        const idempotencyKey = resetCommand ? undefined : dashboardChatRunId();
+        const isLiveSteer = activeRunCount > 0 || isSessionActive(selectedSession);
         const userMessage: ChatHistoryMessage = {
             role: "user",
             content: text,
@@ -192,6 +244,7 @@ export function useChatActions({
             images: [],
             attachments: optimisticAttachmentDisplay(currentAttachments),
             local: true,
+            runId: idempotencyKey,
             timestamp: currentIsoString(),
         };
         const optimisticIdentity = messageIdentity(userMessage);
@@ -216,11 +269,10 @@ export function useChatActions({
         setIsAtBottom(true);
         scheduleBottomFollow();
 
-        const idempotencyKey = resetCommand
-            ? undefined
-            : `dashboard-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         if (idempotencyKey) {
-            runtime.beginRun(pendingSessionKey, idempotencyKey);
+            runtime.beginRun(pendingSessionKey, idempotencyKey, {
+                replaceStatusOnlyRuns: !isLiveSteer,
+            });
         }
 
         try {
@@ -246,11 +298,24 @@ export function useChatActions({
                     setMessages([]);
                 }
             } else if (idempotencyKey) {
-                runtime.acknowledgeRun(pendingSessionKey, idempotencyKey, result.runId);
+                if (result.runId) {
+                    runtime.acknowledgeRun(
+                        pendingSessionKey,
+                        idempotencyKey,
+                        result.runId
+                    );
+                } else if (isLiveSteer) {
+                    // OpenClaw resolves its configured queue mode inside chat.send.
+                    // A runless acknowledgement therefore belongs to the active run.
+                    runtime.clearRun(pendingSessionKey, idempotencyKey);
+                } else {
+                    // The provider may keep the idempotency key as the run identity.
+                    runtime.acknowledgeRun(pendingSessionKey, idempotencyKey);
+                }
             }
         } catch (error) {
             if (idempotencyKey) {
-                runtime.clearRun(pendingSessionKey, idempotencyKey);
+                runtime.failRun(pendingSessionKey, idempotencyKey);
             }
             if (selectedSessionKeyReference.current === pendingSessionKey) {
                 setSendError(chatErrorMessage(error, "Failed to send message"));
@@ -268,22 +333,28 @@ export function useChatActions({
                 );
             }
         } finally {
-            endSend(sendEpoch);
+            endSend(sendEpoch, inputRevision);
         }
     };
 
     const draftText = draft.trim();
     const isStopping = isSameChatSession(stoppingSessionKey, selectedSessionKey);
     const isPatchingSession = (pendingPatchCounts[selectedSessionKey] || 0) > 0;
+    const isCompactingSession = Boolean(
+        isCompacting ||
+        compactingSessionKeys
+            .values()
+            .some((candidate) => isSameChatSession(candidate, selectedSessionKey))
+    );
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
         !isRecording &&
         !isTranscribing &&
+        !isCompactingSession &&
         !isPatchingSession &&
-        !isCompacting &&
         !isStopping &&
-        !isBlockedByInFlightSend(draftText) &&
+        !isBlockedByInFlightSend() &&
         (draftText || attachments.length > 0)
     );
     const canStop = Boolean(
@@ -292,9 +363,11 @@ export function useChatActions({
         !isStopping &&
         (activeRunCount > 0 || isSessionActive(selectedSession))
     );
-    const isSessionControlsDisabled = Boolean(
+    const arePreferenceControlsDisabled = !isConnected || isPatchingSession;
+    const isCompactDisabled = Boolean(
         !isConnected ||
         isSending ||
+        isCompactingSession ||
         isPatchingSession ||
         activeRunCount > 0 ||
         isSessionActive(selectedSession)
@@ -316,7 +389,7 @@ export function useChatActions({
     };
 
     const patchSelectedSession = async (patch: ChatSessionPreferences) => {
-        if (!selectedSessionKey || isSessionControlsDisabled) {
+        if (!selectedSessionKey || arePreferenceControlsDisabled) {
             return;
         }
         const patchSessionKey = selectedSessionKey;
@@ -354,40 +427,51 @@ export function useChatActions({
     };
 
     const compactSelectedSession = async () => {
-        if (!selectedSessionKey || isSessionControlsDisabled) {
+        if (
+            !selectedSessionKey ||
+            isCompactDisabled ||
+            isSessionCompacting(selectedSessionKey)
+        ) {
             return;
         }
         const compactSessionKey = selectedSessionKey;
-        const idempotencyKey = `dashboard-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        runtime.beginRun(compactSessionKey, idempotencyKey, "compact");
+        const pendingCompactions = new Set(compactingSessionKeysReference.current).add(
+            compactSessionKey
+        );
+        compactingSessionKeysReference.current = pendingCompactions;
+        setCompactingSessionKeys(pendingCompactions);
         setSendError(undefined);
         try {
-            const result = await transport.send({
-                sessionKey: compactSessionKey,
-                sessionId: providerSessionId(selectedSession, compactSessionKey),
-                message: "/compact",
-                idempotencyKey,
-            });
-            runtime.acknowledgeRun(compactSessionKey, idempotencyKey, result.runId);
+            await transport.compact(compactSessionKey);
         } catch (error) {
-            runtime.clearRun(compactSessionKey, idempotencyKey);
             if (selectedSessionKeyReference.current === compactSessionKey) {
                 setSendError(chatErrorMessage(error, "Failed to compact context"));
             }
+        } finally {
+            const remainingCompactions = new Set(
+                compactingSessionKeysReference.current
+                    .values()
+                    .filter(
+                        (candidate) => !isSameChatSession(candidate, compactSessionKey)
+                    )
+            );
+            compactingSessionKeysReference.current = remainingCompactions;
+            setCompactingSessionKeys(remainingCompactions);
         }
     };
 
     return {
         canSend,
         canStop,
+        compactDisabled: isCompactDisabled,
         compactSelectedSession,
         handleSend,
         handleStop,
-        isCompactingSession: isCompacting,
+        isCompactingSession,
         isSending,
         isStopping,
         patchSelectedSession,
-        sessionControlsDisabled: isSessionControlsDisabled,
+        preferenceControlsDisabled: arePreferenceControlsDisabled,
     };
 }
 

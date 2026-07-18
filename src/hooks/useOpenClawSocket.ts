@@ -9,7 +9,11 @@ import {
     useState,
 } from "react";
 
-import { createSocketClient, type SocketClient } from "../lib/socket/socketClient";
+import {
+    createSocketClient,
+    type SocketClient,
+    type SocketRequestOptions,
+} from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import { authStore } from "../stores/authStore";
 import { getWebSocketUrl } from "../utils/websocket";
@@ -23,7 +27,8 @@ interface OpenClawSocketContextValue {
     disconnect: () => void;
     request: <T = unknown>(
         method: string,
-        parameters?: Record<string, unknown>
+        parameters?: Record<string, unknown>,
+        options?: SocketRequestOptions
     ) => Promise<T>;
     subscribe: (listener: (data: unknown) => void) => () => void;
 }
@@ -99,13 +104,14 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     /** Performs request. */
     const request = <T = unknown>(
         method: string,
-        parameters?: Record<string, unknown>
+        parameters?: Record<string, unknown>,
+        options?: SocketRequestOptions
     ): Promise<T> => {
         if (!clientReference.current) {
             return Promise.reject(new Error("WebSocket not connected"));
         }
 
-        return clientReference.current.request<T>(method, parameters);
+        return clientReference.current.request<T>(method, parameters, options);
     };
 
     useEffect(() => {

@@ -4,10 +4,12 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, jest } from "bun:test";
 
+import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import type {
     OpenClawGatewayClientInstance,
     OpenClawGatewayClientOptions,
+    OpenClawGatewayRequestOptions,
 } from "../src/lib/openclawGatewayClient.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
@@ -54,8 +56,11 @@ function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<vo
 }
 
 class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
-    readonly requests: Array<{ method: string; parameters: Record<string, unknown> }> =
-        [];
+    readonly requests: Array<{
+        method: string;
+        options?: OpenClawGatewayRequestOptions;
+        parameters: Record<string, unknown>;
+    }> = [];
     isStarted = false;
     isStopped = false;
 
@@ -71,12 +76,16 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
         this.isStopped = true;
     }
 
-    async request(method: string, parameters?: unknown): Promise<unknown> {
+    async request(
+        method: string,
+        parameters?: unknown,
+        options?: OpenClawGatewayRequestOptions
+    ): Promise<unknown> {
         const requestParameters =
             parameters && typeof parameters === "object"
                 ? (parameters as Record<string, unknown>)
                 : {};
-        this.requests.push({ method, parameters: requestParameters });
+        this.requests.push({ method, options, parameters: requestParameters });
         if (method === "sessions.list") {
             return {
                 defaults: {
@@ -333,6 +342,228 @@ describe("gateway behavior", () => {
         expect(gateway.isConnected()).toBe(false);
     });
 
+    it("captures replay request boundaries only for chat sends", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const root = createTemporaryRoot("mira-gateway-request-boundary-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+        const captureBoundary = jest
+            .spyOn(OpenClawChatBridge.prototype, "captureRequestBoundary")
+            .mockImplementation(() => {
+                throw new Error("unexpected replay boundary capture");
+            });
+        cleanupCallbacks.push(() => captureBoundary.mockRestore());
+
+        gateway.init("request-boundary-token");
+        const client = fakeClients.at(-1);
+        client?.options.onHelloOk?.({ type: "hello-ok" });
+        await waitFor(() => gateway.isConnected());
+
+        await expect(
+            gateway.request("models.list", { sessionKey: "agent:main:main" })
+        ).resolves.toBeDefined();
+
+        const socket = new FakeDashboardSocket();
+        gateway.handleDashboardClient(socket);
+        socket.emitMessage({
+            id: "models-with-response",
+            method: "models.list",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some(
+                (raw) =>
+                    raw.includes('"id":"models-with-response"') &&
+                    raw.includes('"isOk":true')
+            )
+        );
+
+        const requestCount = client?.requests.length ?? 0;
+        socket.emitMessage({
+            method: "models.list",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() => (client?.requests.length ?? 0) > requestCount);
+
+        expect(captureBoundary).not.toHaveBeenCalled();
+        captureBoundary.mockReturnValue(0);
+        await expect(
+            gateway.request("chat.send", {
+                message: "hello",
+                sessionKey: "agent:main:main",
+            })
+        ).resolves.toBeDefined();
+        expect(captureBoundary).toHaveBeenCalledTimes(1);
+        socket.close();
+    });
+
+    it("rehydrates run associations before reconnect events resume", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("OPENCLAW_GATEWAY_URL");
+        const root = createTemporaryRoot("mira-gateway-reconnect-replay-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+        process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-reconnect.test";
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+        const socket = new FakeDashboardSocket();
+        gateway.handleDashboardClient(socket);
+
+        gateway.init("reconnect-replay-token");
+        const firstClient = fakeClients.at(-1);
+        firstClient?.options.onHelloOk?.({ type: "hello-ok" });
+        firstClient?.options.onEvent?.({
+            event: "session.tool",
+            payload: {
+                name: "before-reconnect",
+                runId: "reconnect-run",
+                sessionKey: "agent:main:main",
+            },
+        });
+        gateway.shutdown();
+
+        socket.sent.length = 0;
+        gateway.init("reconnect-replay-token");
+        const reconnectedClient = fakeClients.at(-1);
+        expect(reconnectedClient).not.toBe(firstClient);
+        reconnectedClient?.options.onHelloOk?.({ type: "hello-ok" });
+        reconnectedClient?.options.onEvent?.({
+            event: "session.tool",
+            payload: { name: "after-reconnect", runId: "reconnect-run" },
+        });
+
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"name":"after-reconnect"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            event?: string;
+                            payload?: { name?: string; sessionKey?: string };
+                        }
+                )
+                .find((message) => message.payload?.name === "after-reconnect")
+        ).toMatchObject({
+            event: "session.tool",
+            payload: {
+                name: "after-reconnect",
+                sessionKey: "agent:main:main",
+            },
+        });
+    });
+
+    it("rotates the chat replay identity when Gateway credentials change", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("OPENCLAW_GATEWAY_URL");
+        const root = createTemporaryRoot("mira-gateway-runtime-generation-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+        process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-generation.test";
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+        const socket = new FakeDashboardSocket();
+        gateway.handleDashboardClient(socket);
+        const requestIdentity = async (
+            id: string
+        ): Promise<{ replayScope?: string; runtimeGeneration?: string } | undefined> => {
+            socket.emitMessage({
+                id,
+                method: "chat.runtimeSnapshot",
+                params: { sessionKey: "agent:main:main" },
+                type: "request",
+            });
+            await waitFor(() => socket.sent.some((raw) => raw.includes(`"id":"${id}"`)));
+            return socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            payload?: {
+                                replayScope?: string;
+                                runtimeGeneration?: string;
+                            };
+                        }
+                )
+                .find((message) => message.id === id)?.payload;
+        };
+
+        gateway.init("token-one");
+        const firstIdentity = await requestIdentity("generation-one");
+        gateway.init("token-two");
+        const secondIdentity = await requestIdentity("generation-two");
+        gateway.init("token-two");
+        const unchangedIdentity = await requestIdentity("generation-unchanged");
+
+        expect(firstIdentity).toMatchObject({
+            replayScope: expect.any(String),
+            runtimeGeneration: expect.any(String),
+        });
+        expect(secondIdentity).toMatchObject({
+            replayScope: expect.any(String),
+            runtimeGeneration: expect.any(String),
+        });
+        expect(secondIdentity?.runtimeGeneration).not.toBe(
+            firstIdentity?.runtimeGeneration
+        );
+        expect(secondIdentity?.replayScope).not.toBe(firstIdentity?.replayScope);
+        expect(unchangedIdentity).toMatchObject({
+            replayScope: secondIdentity?.replayScope,
+            runtimeGeneration: secondIdentity?.runtimeGeneration,
+        });
+        socket.close();
+    });
+
     it("normalizes sessions, enriches events, and hydrates omitted chat images without a real gateway", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
@@ -449,6 +680,22 @@ describe("gateway behavior", () => {
                 }),
             ])
         );
+
+        socket.emitMessage({
+            id: "compact-session",
+            method: "sessions.compact",
+            params: { key: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            Boolean(client?.requests.some(({ method }) => method === "sessions.compact"))
+        );
+        expect(
+            client?.requests.find(({ method }) => method === "sessions.compact")
+        ).toMatchObject({
+            options: { shouldWaitIndefinitely: true },
+            parameters: { key: "agent:main:main" },
+        });
         const researcherSession = sessionsMessage?.sessions?.find(
             (session) =>
                 (session as { key?: string }).key === "agent:researcher:subagent:abc"
@@ -509,6 +756,8 @@ describe("gateway behavior", () => {
                         id?: string;
                         payload?: {
                             events?: Array<Record<string, unknown>>;
+                            replayScope?: string;
+                            runtimeGeneration?: string;
                             throughSequence?: number;
                         };
                     }
@@ -527,6 +776,8 @@ describe("gateway behavior", () => {
                     type: "event",
                 },
             ],
+            replayScope: expect.any(String),
+            runtimeGeneration: expect.any(String),
             throughSequence: expect.any(Number),
         });
         expect(
@@ -1203,12 +1454,26 @@ describe("gateway behavior", () => {
                         (raw) =>
                             JSON.parse(raw) as {
                                 id?: string;
-                                payload?: { events?: unknown[] };
+                                payload?: {
+                                    completed?: boolean;
+                                    events?: Array<{ payload?: unknown }>;
+                                };
                             }
                     )
                     .find((message) => message.id === "runtime-snapshot-after-close")
-                    ?.payload?.events
-            ).toEqual([]);
+                    ?.payload
+            ).toMatchObject({
+                completed: true,
+                events: [
+                    {
+                        payload: {
+                            runId: "oversized-run",
+                            sessionKey: "agent:oversized:main",
+                            state: "final",
+                        },
+                    },
+                ],
+            });
         } finally {
             errorSpy.mockRestore();
             warnSpy.mockRestore();

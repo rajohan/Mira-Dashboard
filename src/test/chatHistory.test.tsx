@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, jest } from "bun:test";
-import type { MutableRefObject } from "react";
+import type { RefObject } from "react";
 
 import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
 import type { ChatTransport } from "../components/features/chat/transport/chatTransport";
@@ -22,6 +22,7 @@ function subscribeToNothing(): () => void {
 function transportWithHistory(history: ChatTransport["history"]): ChatTransport {
     return {
         abort: jest.fn(async () => {}),
+        compact: jest.fn(async () => {}),
         connectionGeneration: 1,
         history,
         isConnected: true,
@@ -45,10 +46,10 @@ describe("chat history controller", () => {
             .mockImplementationOnce(() => initialLoad.promise);
         const selectedSessionKeyReference = {
             current: SESSION,
-        } as MutableRefObject<string>;
+        } as RefObject<string>;
         const stickToBottomReference = {
             current: true,
-        } as MutableRefObject<boolean>;
+        } as RefObject<boolean>;
         const { result } = renderHook(() =>
             useChatHistory({
                 isConnected: true,
@@ -94,10 +95,10 @@ describe("chat history controller", () => {
             .mockImplementationOnce(() => backgroundRefresh.promise);
         const selectedSessionKeyReference = {
             current: SESSION,
-        } as MutableRefObject<string>;
+        } as RefObject<string>;
         const stickToBottomReference = {
             current: true,
-        } as MutableRefObject<boolean>;
+        } as RefObject<boolean>;
         const onError = jest.fn();
         const { result } = renderHook(() =>
             useChatHistory({
@@ -146,10 +147,10 @@ describe("chat history controller", () => {
         const transport = transportWithHistory(history);
         const selectedSessionKeyReference = {
             current: SESSION,
-        } as MutableRefObject<string>;
+        } as RefObject<string>;
         const stickToBottomReference = {
             current: true,
-        } as MutableRefObject<boolean>;
+        } as RefObject<boolean>;
         const { result, rerender } = renderHook(
             ({ updatedAt }: { updatedAt?: number }) =>
                 useChatHistory({
@@ -194,10 +195,10 @@ describe("chat history controller", () => {
             .mockImplementationOnce(() => otherRefresh.promise);
         const selectedSessionKeyReference = {
             current: SESSION,
-        } as MutableRefObject<string>;
+        } as RefObject<string>;
         const stickToBottomReference = {
             current: true,
-        } as MutableRefObject<boolean>;
+        } as RefObject<boolean>;
         const { result, rerender } = renderHook(
             ({ sessionKey }: { sessionKey: string }) =>
                 useChatHistory({
@@ -250,10 +251,10 @@ describe("chat history controller", () => {
         const setIsAtBottom = jest.fn();
         const selectedSessionKeyReference = {
             current: SESSION,
-        } as MutableRefObject<string>;
+        } as RefObject<string>;
         const stickToBottomReference = {
             current: false,
-        } as MutableRefObject<boolean>;
+        } as RefObject<boolean>;
         const { result } = renderHook(() =>
             useChatHistory({
                 isConnected: true,

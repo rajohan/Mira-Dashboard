@@ -2352,12 +2352,69 @@ fi
         );
         await expect(failure).rejects.toThrow("gateway rejected");
 
+        const extendedRequest = client.request("demo.extended", {}, { timeoutMs: 500 });
+        await waitFor(() => socket!.sent.length === 4);
+        const extendedFrame = JSON.parse(socket!.sent[3]!) as { id: string };
+        await Bun.sleep(150);
+        socket?.message(
+            JSON.stringify({
+                id: extendedFrame.id,
+                isOk: true,
+                payload: { extended: true },
+                type: "response",
+            })
+        );
+        await expect(extendedRequest).resolves.toEqual({ extended: true });
+
+        const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+        try {
+            const fractionalRequest = client.request(
+                "demo.fractional",
+                {},
+                {
+                    timeoutMs: 0.5,
+                }
+            );
+            expect(timeoutSpy.mock.calls.at(-1)?.[1]).toBe(1);
+            await waitFor(() => socket!.sent.length === 5);
+            const fractionalFrame = JSON.parse(socket!.sent[4]!) as { id: string };
+            socket?.message(
+                JSON.stringify({
+                    id: fractionalFrame.id,
+                    ok: true,
+                    payload: { fractional: true },
+                    type: "res",
+                })
+            );
+            await expect(fractionalRequest).resolves.toEqual({ fractional: true });
+
+            const timeoutCallCount = timeoutSpy.mock.calls.length;
+            const noDeadlineRequest = client.request(
+                "demo.no-deadline",
+                {},
+                { shouldWaitIndefinitely: true }
+            );
+            expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCallCount);
+            const noDeadlineFrame = JSON.parse(socket!.sent[5]!) as { id: string };
+            socket?.message(
+                JSON.stringify({
+                    id: noDeadlineFrame.id,
+                    ok: true,
+                    payload: { completed: true },
+                    type: "res",
+                })
+            );
+            await expect(noDeadlineRequest).resolves.toEqual({ completed: true });
+        } finally {
+            timeoutSpy.mockRestore();
+        }
+
         socket!.sendError = new Error("send failed");
         await expect(client.request("demo.send-fail")).rejects.toThrow("send failed");
         socket!.sendError = undefined;
 
         const closedRequest = client.request("demo.closed");
-        await waitFor(() => socket!.sent.length === 4);
+        await waitFor(() => socket!.sent.length === 7);
         socket?.close(4001, "gone");
         await expect(closedRequest).rejects.toThrow("gateway closed (4001): gone");
         expect(closeEvents).toContainEqual({ code: 4001, reason: "gone" });

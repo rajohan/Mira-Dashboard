@@ -1,6 +1,9 @@
 import { type ChatHistoryMessage, extractImages, mergeChatImages } from "../chatTypes";
+import { stableChatStringify } from "../chatUtilities";
+import type { ChatOperationPhase } from "../domain/chatState";
 import {
     argumentDetail,
+    asRecord,
     compactStatus,
     formatToolName,
     isNonWorkTool,
@@ -41,13 +44,33 @@ export function openClawToolMessage(
         stringValue(data.callId);
     const arguments_ = data.args ?? data.arguments ?? data.input;
     const result = data.result ?? data.output ?? data.content ?? data.text ?? data.error;
+    const resultRecord = asRecord(result);
     const phase = stringValue(data.phase) || "";
-    const hasErrorResult = data.error !== undefined && result === data.error;
+    const status = (
+        stringValue(data.status) ||
+        stringValue(resultRecord?.status) ||
+        ""
+    ).toLowerCase();
+    const exitCode =
+        typeof data.exitCode === "number"
+            ? data.exitCode
+            : typeof resultRecord?.exitCode === "number"
+              ? resultRecord.exitCode
+              : undefined;
+    const hasErrorResult =
+        result === data.error &&
+        (typeof data.error === "string"
+            ? data.error.trim().length > 0
+            : Boolean(data.error));
+    const isFailedResult =
+        ["error", "failed", "failure"].includes(status) ||
+        (exitCode !== undefined && exitCode !== 0);
     const hasResult =
         phase === "result" ||
         phase === "end" ||
         phase === "error" ||
-        result !== undefined;
+        result !== undefined ||
+        isFailedResult;
     const resultMessage = normalizeOpenClawHistoryMessage({
         MediaPath: data.MediaPath,
         MediaPaths: data.MediaPaths,
@@ -70,7 +93,8 @@ export function openClawToolMessage(
             resultImages.length > 0 ||
             resultMessage.attachments?.length ||
             data.isError === true ||
-            hasErrorResult)
+            hasErrorResult ||
+            isFailedResult)
     );
     const toolResult = shouldCreateResult
         ? {
@@ -78,7 +102,11 @@ export function openClawToolMessage(
               name,
               content: resultContent,
               images: resultImages,
-              isError: phase === "error" || data.isError === true || hasErrorResult,
+              isError:
+                  phase === "error" ||
+                  data.isError === true ||
+                  hasErrorResult ||
+                  isFailedResult,
           }
         : undefined;
     const toolCall =
@@ -105,7 +133,7 @@ export function openClawToolMessage(
               local: true,
               runId,
           };
-    const argumentIdentity = JSON.stringify(arguments_ ?? undefined);
+    const argumentIdentity = stableChatStringify(arguments_ ?? undefined);
     return {
         key: id ? `tool:${id}` : `tool:${name}:${argumentIdentity}`,
         message,
@@ -134,7 +162,10 @@ export function openClawProgress(
     stream: string,
     phase: string,
     data: Record<string, unknown>
-): { operation?: "compact"; text?: string } {
+): { operation?: "compact"; operationPhase?: ChatOperationPhase; text?: string } {
+    if (eventName === "session.started") {
+        return { text: "Thinking" };
+    }
     if (stream === "lifecycle") {
         return { text: phase === "start" ? "Thinking" : undefined };
     }
@@ -205,9 +236,48 @@ export function openClawProgress(
         };
     }
     if (stream === "compaction") {
+        if (
+            eventName === "session.compaction" &&
+            (stringValue(data.operation) || "").toLowerCase() !== "compact"
+        ) {
+            return {};
+        }
+        const normalizedPhase = phase.toLowerCase();
+        const status = (stringValue(data.status) || "").toLowerCase();
+        const isFailure =
+            data.aborted === true ||
+            ["aborted", "error", "failed", "failure"].includes(normalizedPhase) ||
+            ["aborted", "error", "failed", "failure"].includes(status);
+        const isSessionEnd =
+            eventName === "session.compaction" &&
+            (normalizedPhase === "end" || status === "end");
+        const isTerminal =
+            isFailure ||
+            ["complete", "completed", "end", "finished"].includes(normalizedPhase) ||
+            ["complete", "completed", "end", "finished"].includes(status);
+        const isSuccessful =
+            !isFailure &&
+            (data.completed === true ||
+                isSessionEnd ||
+                ["complete", "completed", "finished"].includes(normalizedPhase) ||
+                ["complete", "completed", "finished"].includes(status));
+        const isRetrying = isTerminal && data.willRetry === true;
+        const operationPhase: ChatOperationPhase = isRetrying
+            ? "retrying"
+            : isTerminal
+              ? isSuccessful
+                  ? "complete"
+                  : "inactive"
+              : "active";
         return {
             operation: "compact",
-            text: phase === "end" ? undefined : "Compacting context",
+            operationPhase,
+            text:
+                operationPhase === "complete"
+                    ? "Context compacted"
+                    : operationPhase === "active" || operationPhase === "retrying"
+                      ? "Compacting context"
+                      : undefined,
         };
     }
     if (stream === "command-output" && (!phase || phase === "end")) {

@@ -6,7 +6,9 @@ import {
     itemStrings,
     itemTexts,
     normalizeAssistant,
+    openClawCompactionRunId,
     openClawEventContext,
+    openClawPayloadView,
     openClawSequence,
     rawString,
     stringValue,
@@ -20,6 +22,15 @@ import {
 
 type WithoutSequence<Event> = Event extends unknown ? Omit<Event, "sequence"> : never;
 type ChatRuntimeEventDraft = WithoutSequence<ChatRuntimeEvent>;
+
+function isToolFailureError(value: string | undefined): boolean {
+    const normalized = value?.trim() || "";
+    return (
+        normalized.startsWith("⚠️ 🛠️") ||
+        /^tool (?:call|execution) failed\b/iu.test(normalized) ||
+        /\bcodex native tool failed\b/iu.test(normalized)
+    );
+}
 
 export interface OpenClawRuntimeEnvelope {
     event?: unknown;
@@ -72,51 +83,60 @@ function chatEventDrafts(
             ? undefined
             : normalizeAssistant(rawMessage, common.runId);
     const isCommand = asRecord(payload.message)?.command === true;
+    const explicitError = stringValue(payload.errorMessage) || stringValue(payload.error);
+    const isMessageToolFailure = state === "error" && isToolFailureError(message?.text);
     const error =
-        stringValue(payload.errorMessage) ||
-        stringValue(payload.error) ||
-        (state === "error" ? "Chat run failed" : undefined);
+        explicitError ||
+        (isMessageToolFailure
+            ? message?.text
+            : state === "error"
+              ? "Chat run failed"
+              : undefined);
+    const isToolFailure = isToolFailureError(explicitError) || isMessageToolFailure;
+    const isDuplicateToolFailureMessage = Boolean(
+        isToolFailure &&
+        message &&
+        (message.text.trim() === error?.trim() || isToolFailureError(message.text))
+    );
     return [
         {
             ...common,
             authoritative: true,
             kind: "finish",
             error,
-            message: message
-                ? {
-                      ...message,
-                      role: isCommand ? "system" : message.role,
-                      local: isCommand || undefined,
-                      timestamp: common.timestamp,
-                  }
-                : undefined,
+            message:
+                message && !isDuplicateToolFailureMessage
+                    ? {
+                          ...message,
+                          role: isCommand ? "system" : message.role,
+                          local: isCommand || undefined,
+                          timestamp: common.timestamp,
+                      }
+                    : undefined,
             outcome:
                 state === "final"
                     ? "completed"
                     : state === "aborted"
                       ? "aborted"
                       : "error",
-            suppressIfToolFailure: Boolean(
-                error &&
-                (error.startsWith("⚠️ 🛠️") ||
-                    /^tool (?:call|execution) failed\b/iu.test(error))
-            ),
+            toolFailure: isToolFailure || undefined,
         },
     ];
 }
 
 function runtimeStreamDrafts(
     eventName: string,
-    payload: Record<string, unknown>,
+    data: Record<string, unknown>,
     common: {
         runId?: string;
         sessionKey: string;
         timestamp: string;
     }
 ): ChatRuntimeEventDraft[] {
-    const streamRaw = stringValue(payload.stream) || "";
+    const streamRaw =
+        stringValue(data.stream) ||
+        (eventName === "session.compaction" ? "compaction" : "");
     const stream = streamRaw === "command_output" ? "command-output" : streamRaw;
-    const data = asRecord(payload.data) || {};
     const phase = stringValue(data.phase) || "";
     if (
         (stream === "tool" || eventName === "session.tool") &&
@@ -127,11 +147,12 @@ function runtimeStreamDrafts(
 
     const drafts: ChatRuntimeEventDraft[] = [];
     const progress = openClawProgress(eventName, stream, phase, data);
-    if (progress.text || progress.operation) {
+    if (progress.text || progress.operation || progress.operationPhase) {
         drafts.push({
             ...common,
             kind: "status",
             operation: progress.operation,
+            operationPhase: progress.operationPhase,
             text: progress.text,
         });
     }
@@ -185,23 +206,27 @@ function runtimeStreamDrafts(
         const explicitError =
             stringValue(data.errorMessage) ||
             stringValue(data.promptError) ||
-            stringValue(data.error) ||
-            stringValue(payload.errorMessage) ||
-            stringValue(payload.error);
-        const status = stringValue(data.status) || stringValue(payload.status);
-        const isAborted =
-            data.aborted === true || payload.aborted === true || status === "aborted";
+            stringValue(data.error);
+        const status = stringValue(data.status);
+        const isAborted = data.aborted === true || status === "aborted";
         const isError =
             Boolean(explicitError) ||
             phase === "error" ||
             status === "error" ||
             status === "failed";
         const outcome = isAborted ? "aborted" : isError ? "error" : "completed";
+        const terminalError =
+            explicitError || (outcome === "error" ? "Chat run failed" : undefined);
         drafts.push({
             ...common,
             kind: "finish",
-            error: explicitError || (outcome === "error" ? "Chat run failed" : undefined),
+            error: terminalError,
             outcome,
+            settlesCompactionRunId:
+                stream === "lifecycle" && (phase === "end" || phase === "error")
+                    ? openClawCompactionRunId(common.sessionKey, common.runId)
+                    : undefined,
+            toolFailure: isToolFailureError(terminalError) || undefined,
         });
     } else if (!progress.text && OPENCLAW_WORK_STREAMS.has(stream) && phase === "start") {
         drafts.push({ ...common, kind: "status", text: "Thinking" });
@@ -281,13 +306,17 @@ export function adaptOpenClawRuntimeEvent(
         return [];
     }
     const { eventName, payload, runId, sessionKey, timestamp } = context;
+    if (eventName === "session.started" && !runId) {
+        return [];
+    }
     const common = { runId, sessionKey, timestamp };
+    const eventPayload = openClawPayloadView(payload);
     const drafts =
         eventName === "chat"
-            ? chatEventDrafts(stringValue(payload.state), payload, common)
+            ? chatEventDrafts(stringValue(eventPayload.state), eventPayload, common)
             : eventName === "session.message"
-              ? sessionMessageDrafts(payload, common)
-              : runtimeStreamDrafts(eventName, payload, common);
+              ? sessionMessageDrafts(eventPayload, common)
+              : runtimeStreamDrafts(eventName, eventPayload, common);
     const sequence = openClawSequence(raw, fallbackSequence) * 16;
     return drafts.slice(0, 15).map((draft, index) => ({
         ...draft,
@@ -296,11 +325,11 @@ export function adaptOpenClawRuntimeEvent(
 }
 
 function sessionMessageDrafts(
-    payload: Record<string, unknown>,
+    data: Record<string, unknown>,
     common: { runId?: string; sessionKey: string; timestamp: string }
 ): ChatRuntimeEventDraft[] {
-    const nestedMessage = asRecord(payload.message);
-    const topLevelRole = stringValue(payload.role);
+    const nestedMessage = asRecord(data.message);
+    const topLevelRole = stringValue(data.role);
     const rawMessage = topLevelRole
         ? {
               ...nestedMessage,
@@ -308,23 +337,31 @@ function sessionMessageDrafts(
                   nestedMessage?.content ??
                   (nestedMessage
                       ? undefined
-                      : (payload.message ??
-                        payload.content ??
-                        payload.deltaText ??
-                        payload.text)),
+                      : (data.message ?? data.content ?? data.deltaText ?? data.text)),
               role: topLevelRole,
           }
-        : (payload.message ?? payload.content ?? payload.deltaText ?? payload.text);
+        : (data.message ?? data.content ?? data.deltaText ?? data.text);
     const message = normalizeAssistant(rawMessage, common.runId);
-    return message.role.toLowerCase() === "assistant"
-        ? [
-              {
-                  ...common,
-                  kind: "assistant",
-                  message: { ...message, timestamp: common.timestamp },
-                  mode: "merge",
-                  source: "session",
-              },
-          ]
-        : [];
+    const role = message.role.toLowerCase();
+    if (role === "assistant") {
+        return [
+            {
+                ...common,
+                kind: "assistant",
+                message: { ...message, timestamp: common.timestamp },
+                mode: "merge",
+                source: "session",
+            },
+        ];
+    }
+    if (role === "user") {
+        return [
+            {
+                ...common,
+                kind: "user",
+                message: { ...message, timestamp: common.timestamp },
+            },
+        ];
+    }
+    return [];
 }

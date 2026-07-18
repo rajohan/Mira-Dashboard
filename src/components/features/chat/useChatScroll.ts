@@ -1,32 +1,48 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
     type Dispatch,
-    type MutableRefObject,
+    type RefObject,
     type SetStateAction,
+    useCallback,
     useLayoutEffect,
     useRef,
 } from "react";
 
-import { didScheduleBottomFollow } from "./chatPageUtilities";
 import type { ChatRow } from "./chatTypes";
 
 const BOTTOM_THRESHOLD_PX = 32;
+const ESTIMATED_MESSAGE_ROW_HEIGHT_PX = 160;
+const ESTIMATED_TYPING_ROW_HEIGHT_PX = 76;
 const NO_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
 
-/** Owns virtualized chat scrolling independently from transport/runtime state. */
+/** Owns sticky-bottom state and delegates viewport anchoring to the virtualizer. */
 export function useChatScroll(
     rows: ChatRow[],
-    activityFingerprint: string,
     selectedSessionKey: string,
     setIsAtBottom: Dispatch<SetStateAction<boolean>>,
-    shouldStickToBottomReference: MutableRefObject<boolean>
+    shouldStickToBottomReference: RefObject<boolean>
 ) {
     const messagesContainerReference = useRef<HTMLDivElement | undefined>(undefined);
-    const messagesBottomReference = useRef<HTMLDivElement | undefined>(undefined);
-    const previousRowsLengthReference = useRef(0);
-    const previousSessionKeyReference = useRef("");
-    const previousActivityReference = useRef("");
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
+    const structuralBottomFollowReference = useRef(false);
+    const previousRowKeysReference = useRef<string[]>([]);
+    const previousScrollTopReference = useRef(0);
+    const previousSessionKeyReference = useRef("");
+
+    const virtualizer = useVirtualizer({
+        anchorTo: "end",
+        count: rows.length,
+        estimateSize: (index) =>
+            rows[index]?.kind === "typing" || rows[index]?.kind === "status"
+                ? ESTIMATED_TYPING_ROW_HEIGHT_PX
+                : ESTIMATED_MESSAGE_ROW_HEIGHT_PX,
+        followOnAppend: "auto",
+        getItemKey: (index) => rows[index]?.key ?? `row-${index}`,
+        getScrollElement: () => messagesContainerReference.current ?? NO_SCROLL_ELEMENT,
+        overscan: 12,
+        scrollEndThreshold: BOTTOM_THRESHOLD_PX,
+        useAnimationFrameWithResizeObserver: true,
+    });
 
     const checkIsAtBottom = () => {
         const container = messagesContainerReference.current;
@@ -39,106 +55,121 @@ export function useChatScroll(
         );
     };
 
+    const cancelBottomFollow = useCallback(() => {
+        structuralBottomFollowReference.current = false;
+        if (bottomFollowFrameReference.current === undefined) {
+            return;
+        }
+        cancelAnimationFrame(bottomFollowFrameReference.current);
+        bottomFollowFrameReference.current = undefined;
+    }, []);
+
     const handleScroll = () => {
+        const container = messagesContainerReference.current;
+        const scrollTop = container?.scrollTop ?? 0;
+        const didScrollUp = scrollTop + 1 < previousScrollTopReference.current;
+        const isStructuralCorrectionPending = Boolean(
+            didScrollUp &&
+            structuralBottomFollowReference.current &&
+            bottomFollowFrameReference.current !== undefined
+        );
+        if (
+            didScrollUp &&
+            !isStructuralCorrectionPending &&
+            bottomFollowFrameReference.current !== undefined
+        ) {
+            cancelBottomFollow();
+        }
         const atBottom = checkIsAtBottom();
-        shouldStickToBottomReference.current = atBottom;
-        setIsAtBottom((previous) => (previous === atBottom ? previous : atBottom));
+        const shouldStaySticky = Boolean(
+            atBottom ||
+            (shouldStickToBottomReference.current &&
+                (!didScrollUp || isStructuralCorrectionPending))
+        );
+        previousScrollTopReference.current = scrollTop;
+        shouldStickToBottomReference.current = shouldStaySticky;
+        setIsAtBottom((previous) =>
+            previous === shouldStaySticky ? previous : shouldStaySticky
+        );
     };
 
     const scrollToBottom = () => {
         const container = messagesContainerReference.current;
-        if (!container || rows.length === 0) {
+        if (!container) {
             return;
         }
-        messagesBottomReference.current?.scrollIntoView({ block: "end" });
         container.scrollTop = container.scrollHeight;
+        previousScrollTopReference.current = container.scrollTop;
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
     };
 
-    const scheduleBottomFollow = () => {
+    const scheduleBottomFollow = (isStructuralCorrection = false) => {
+        structuralBottomFollowReference.current ||= isStructuralCorrection;
         if (bottomFollowFrameReference.current !== undefined) {
             return;
         }
         bottomFollowFrameReference.current = requestAnimationFrame(() => {
             bottomFollowFrameReference.current = undefined;
+            structuralBottomFollowReference.current = false;
             if (shouldStickToBottomReference.current) {
                 scrollToBottom();
             }
         });
     };
 
-    const virtualizer = useVirtualizer({
-        count: rows.length,
-        getItemKey: (index) => rows[index]?.key ?? `row-${index}`,
-        getScrollElement: () => messagesContainerReference.current ?? NO_SCROLL_ELEMENT,
-        estimateSize: (index) => (rows[index]?.kind === "typing" ? 76 : 160),
-        overscan: 12,
-        useAnimationFrameWithResizeObserver: true,
-        onChange: (_instance, sync) => {
-            if (!sync && shouldStickToBottomReference.current) {
-                scheduleBottomFollow();
-            }
-        },
-    });
+    const handleUserScrollIntent = () => {
+        cancelBottomFollow();
+    };
 
     const handleDynamicContentLoad = () => {
-        didScheduleBottomFollow(
-            shouldStickToBottomReference.current,
-            scheduleBottomFollow
-        );
+        if (shouldStickToBottomReference.current) {
+            scheduleBottomFollow();
+        }
     };
 
     useLayoutEffect(() => {
         const isSessionChanged =
             previousSessionKeyReference.current !== selectedSessionKey;
-        const isRowsAdded = rows.length > previousRowsLengthReference.current;
-        const isActivityChanged =
-            previousActivityReference.current !== activityFingerprint;
-
+        const previousRowKeys = previousRowKeysReference.current;
+        const rowKeys = rows.map((row) => row.key);
+        const isInitialHistoryLoad = previousRowKeys.length === 0 && rowKeys.length > 0;
+        const didRowKeysChange =
+            previousRowKeys.length !== rowKeys.length ||
+            previousRowKeys.some((key, index) => key !== rowKeys[index]);
+        const isPureTailAppend =
+            rowKeys.length > previousRowKeys.length &&
+            previousRowKeys.every((key, index) => rowKeys[index] === key);
+        const needsStructuralBottomFollow =
+            previousRowKeys.length > 0 && didRowKeysChange && !isPureTailAppend;
         previousSessionKeyReference.current = selectedSessionKey;
-        previousRowsLengthReference.current = rows.length;
-        previousActivityReference.current = activityFingerprint;
+        previousRowKeysReference.current = rowKeys;
 
-        if (rows.length === 0) {
-            return;
-        }
         if (isSessionChanged) {
+            previousScrollTopReference.current = 0;
             shouldStickToBottomReference.current = true;
-            scrollToBottom();
-            return;
+            setIsAtBottom(true);
         }
         if (
-            !shouldStickToBottomReference.current ||
-            (!isRowsAdded && !isActivityChanged)
+            rows.length > 0 &&
+            shouldStickToBottomReference.current &&
+            (isSessionChanged || isInitialHistoryLoad || needsStructuralBottomFollow)
         ) {
-            return;
+            scheduleBottomFollow(true);
         }
-
-        scrollToBottom();
-        const frame = requestAnimationFrame(() => {
-            if (shouldStickToBottomReference.current) {
-                scrollToBottom();
-            }
-        });
-        return () => cancelAnimationFrame(frame);
-    }, [activityFingerprint, rows.length, selectedSessionKey]);
+    }, [rows, selectedSessionKey]);
 
     useLayoutEffect(
         () => () => {
-            if (bottomFollowFrameReference.current === undefined) {
-                return;
-            }
-            cancelAnimationFrame(bottomFollowFrameReference.current);
-            bottomFollowFrameReference.current = undefined;
+            cancelBottomFollow();
         },
-        []
+        [cancelBottomFollow]
     );
 
     return {
         handleDynamicContentLoad,
         handleScroll,
-        messagesBottomReference,
+        handleUserScrollIntent,
         messagesContainerReference,
         scheduleBottomFollow,
         scrollToBottom,

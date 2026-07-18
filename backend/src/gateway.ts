@@ -1,8 +1,10 @@
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
 import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
+import { SqliteOpenClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import { errorMessage } from "./lib/errors.ts";
 import {
@@ -188,7 +190,15 @@ const gatewayState: {
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
-const openClawChatBridge = new OpenClawChatBridge();
+const chatReplayState: {
+    bridge: OpenClawChatBridge;
+    generation: string;
+    scope: string | undefined;
+} = {
+    bridge: new OpenClawChatBridge(),
+    generation: randomUUID(),
+    scope: undefined,
+};
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
 ) => OpenClawGatewayClientInstance;
@@ -206,6 +216,34 @@ const gatewayRuntime = {
         "OPENCLAW_HOME"
     ),
 };
+
+function chatReplayGatewayScope(endpoint: string, token: string): string {
+    const credentialFingerprint = createHash("sha256").update(token).digest("hex");
+    return createHash("sha256")
+        .update("mira-dashboard:openclaw-chat-replay:v1\0")
+        .update(endpoint.trim())
+        .update("\0")
+        .update(credentialFingerprint)
+        .digest("hex");
+}
+
+function didSelectChatReplayScope(endpoint: string, token: string): boolean {
+    const gatewayScope = chatReplayGatewayScope(endpoint, token);
+    if (gatewayScope === chatReplayState.scope) {
+        chatReplayState.bridge.hydratePersistedSessions();
+        return true;
+    }
+    if (!chatReplayState.bridge.flush()) {
+        return false;
+    }
+    chatReplayState.bridge = new OpenClawChatBridge(
+        new SqliteOpenClawChatSnapshotStore(gatewayScope)
+    );
+    chatReplayState.scope = gatewayScope;
+    chatReplayState.generation = randomUUID();
+    chatReplayState.bridge.hydratePersistedSessions();
+    return true;
+}
 
 export function setGatewayClientConstructorForTests(
     constructor: GatewayClientConstructor
@@ -758,7 +796,7 @@ async function refreshSessions(
                             : undefined,
                 });
             });
-        openClawChatBridge.reconcileSessions(gatewayState.sessions);
+        chatReplayState.bridge.reconcileSessions(gatewayState.sessions);
         broadcast({ type: "sessions", sessions: gatewayState.sessions });
     }
 }
@@ -782,10 +820,13 @@ function init(token: string): void {
     if (gatewayState.currentToken === token && gatewayState.client) {
         return;
     }
-    const previousGatewayClient = gatewayState.client;
-    if (gatewayState.currentToken && gatewayState.currentToken !== token) {
-        openClawChatBridge.clear();
+    const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
+    if (!didSelectChatReplayScope(gatewayUrl, token)) {
+        throw new Error(
+            "Gateway credentials were not changed because pending chat replay could not be persisted"
+        );
     }
+    const previousGatewayClient = gatewayState.client;
     try {
         previousGatewayClient?.stop();
     } catch (error) {
@@ -815,7 +856,6 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        openClawChatBridge.clear();
         gatewayState.isConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         /** Subscribes to Gateway session index events for live session updates. */
@@ -851,7 +891,7 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        const envelope = openClawChatBridge.recordEvent(
+        const envelope = chatReplayState.bridge.recordEvent(
             event.event,
             event.payload,
             gatewayState.sessions
@@ -876,12 +916,12 @@ function init(token: string): void {
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
-        openClawChatBridge.clear();
+        chatReplayState.bridge.flush();
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }
     const thisGatewayClient = new gatewayRuntime.clientConstructor({
-        url: process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789",
+        url: gatewayUrl,
         token,
         role: "operator",
         scopes: ["operator.read", "operator.write", "operator.admin"],
@@ -961,26 +1001,43 @@ async function initAndWait(token: string): Promise<void> {
     await waitForConnection(token);
 }
 
+function captureChatSendRequestBoundary(
+    method: string,
+    parameters: Record<string, unknown>
+): number | undefined {
+    if (method !== "chat.send") {
+        return undefined;
+    }
+    return chatReplayState.bridge.captureRequestBoundary(
+        typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
+    );
+}
+
 /** Performs forward request. */
 async function forwardRequest(
     method: string,
     parameters: Record<string, unknown>,
     clientWs?: DashboardSocket,
-    clientId?: string
+    clientId?: string,
+    timeoutMs?: number
 ): Promise<boolean> {
     if (!gatewayState.client || !gatewayState.isConnected) {
         return false;
     }
     const activeGateway = gatewayState.client;
+    const requestOptions = {
+        timeoutMs,
+        shouldWaitIndefinitely: method === "sessions.compact",
+    };
 
     if (clientWs && clientId) {
         const id = String(++gatewayState.requestId);
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
-            const requestBoundary = openClawChatBridge.captureRequestBoundary();
-            let payload = await activeGateway.request(method, parameters);
-            openClawChatBridge.handleSuccessfulRequest(
+            const requestBoundary = captureChatSendRequestBoundary(method, parameters);
+            let payload = await activeGateway.request(method, parameters, requestOptions);
+            chatReplayState.bridge.handleSuccessfulRequest(
                 method,
                 parameters,
                 payload,
@@ -1024,9 +1081,9 @@ async function forwardRequest(
     }
 
     try {
-        const requestBoundary = openClawChatBridge.captureRequestBoundary();
-        const payload = await activeGateway.request(method, parameters);
-        openClawChatBridge.handleSuccessfulRequest(
+        const requestBoundary = captureChatSendRequestBoundary(method, parameters);
+        const payload = await activeGateway.request(method, parameters, requestOptions);
+        chatReplayState.bridge.handleSuccessfulRequest(
             method,
             parameters,
             payload,
@@ -1089,6 +1146,7 @@ function handleDashboardClient(ws: DashboardSocket): void {
                     method?: string;
                     params?: Record<string, unknown>;
                     id?: string;
+                    timeoutMs?: number;
                 };
                 if (message.type === "subscribe" && message.channel === "logs") {
                     logsSubscribe(ws);
@@ -1149,7 +1207,11 @@ function handleDashboardClient(ws: DashboardSocket): void {
                                     type: "response",
                                     id: message.id,
                                     isOk: true,
-                                    payload: openClawChatBridge.snapshot(sessionKey),
+                                    payload: {
+                                        ...chatReplayState.bridge.snapshot(sessionKey),
+                                        replayScope: chatReplayState.scope,
+                                        runtimeGeneration: chatReplayState.generation,
+                                    },
                                 })
                             );
                         }
@@ -1159,7 +1221,8 @@ function handleDashboardClient(ws: DashboardSocket): void {
                         message.method,
                         message.params || {},
                         ws,
-                        message.id
+                        message.id,
+                        message.timeoutMs
                     );
                     if (!isOk && message.id && ws.isOpen()) {
                         ws.send(
@@ -1218,9 +1281,9 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
-    const requestBoundary = openClawChatBridge.captureRequestBoundary();
+    const requestBoundary = captureChatSendRequestBoundary(method, parameters);
     const payload = await gatewayState.client.request(method, parameters);
-    openClawChatBridge.handleSuccessfulRequest(
+    chatReplayState.bridge.handleSuccessfulRequest(
         method,
         parameters,
         payload,
@@ -1290,7 +1353,7 @@ function shutdown(): void {
     gatewayState.isConnected = false;
     gatewayState.sessions = [];
     gatewayState.currentToken = undefined;
-    openClawChatBridge.clear();
+    chatReplayState.bridge.clearMemory();
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
 }

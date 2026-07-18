@@ -1,6 +1,14 @@
 import { describe, expect, it } from "bun:test";
 
 import {
+    createChatVisibility,
+    presentChatMessages,
+} from "../components/features/chat/domain/chatPresentation";
+import {
+    createChatRuntimeState,
+    reduceChatRuntime,
+} from "../components/features/chat/domain/chatState";
+import {
     argumentDetail,
     asRecord,
     compactStatus,
@@ -36,6 +44,81 @@ function envelope(
 }
 
 describe("OpenClaw adapter variants", () => {
+    it("groups heartbeat-style thinking around preamble tool steps", () => {
+        const adapter = new OpenClawChatAdapter();
+        const history = adapter.history([
+            { content: "heartbeat", role: "user" },
+            {
+                content: [
+                    { thinking: "inspect services", type: "thinking" },
+                    { text: "Checking services", type: "text" },
+                    {
+                        arguments: { command: "systemctl --failed" },
+                        id: "functions.exec:0",
+                        name: "exec",
+                        type: "toolCall",
+                    },
+                ],
+                role: "assistant",
+            },
+            {
+                content: [{ text: "all units healthy", type: "text" }],
+                role: "toolResult",
+                toolCallId: "functions.exec:0",
+                toolName: "exec",
+            },
+            {
+                content: [
+                    { thinking: "inspect disk", type: "thinking" },
+                    {
+                        arguments: { command: "df -h" },
+                        id: "functions.exec:1",
+                        name: "exec",
+                        type: "toolCall",
+                    },
+                ],
+                role: "assistant",
+            },
+            {
+                content: [{ text: "disk healthy", type: "text" }],
+                role: "toolResult",
+                toolCallId: "functions.exec:1",
+                toolName: "exec",
+            },
+            {
+                content: [
+                    { thinking: "report result", type: "thinking" },
+                    { text: "HEARTBEAT_OK", type: "text" },
+                ],
+                role: "assistant",
+            },
+        ]);
+        const visible = presentChatMessages(
+            history,
+            createChatVisibility(true, true),
+            true
+        );
+        const thinkingRows = visible.filter((message) => message.thinking?.length);
+        const thinkingIndex = visible.findIndex((message) => message.thinking?.length);
+        const lastToolIndex = visible.findLastIndex(
+            (message) => message.toolCalls?.length || message.toolResult
+        );
+        const finalIndex = visible.findIndex(
+            (message) => message.text === "HEARTBEAT_OK"
+        );
+
+        expect(thinkingRows).toHaveLength(1);
+        expect(thinkingRows[0]?.thinking?.map((block) => block.text)).toEqual([
+            "inspect services",
+            "inspect disk",
+            "report result",
+        ]);
+        expect(lastToolIndex).toBeGreaterThanOrEqual(0);
+        expect(thinkingIndex).toBeGreaterThan(lastToolIndex);
+        expect(thinkingIndex).toBeLessThan(finalIndex);
+        expect(visible[finalIndex]?.thinking).toBeUndefined();
+    });
+
     it("normalizes session, assistant, thinking and item streams", () => {
         const adapter = new OpenClawChatAdapter();
         const sessionMessage = adapter.event(
@@ -45,11 +128,21 @@ describe("OpenClaw adapter variants", () => {
                 20
             )
         );
-        const ignoredUser = adapter.event(
+        const userMessage = adapter.event(
             envelope(
                 "session.message",
                 { message: { content: "prompt", role: "user" } },
                 21
+            )
+        );
+        const runlessUserMessage = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: { content: "provider echo", role: "user" },
+                    runId: undefined,
+                },
+                22
             )
         );
         const topLevelAssistant = adapter.event(
@@ -59,10 +152,10 @@ describe("OpenClaw adapter variants", () => {
                 22
             )
         );
-        const ignoredTopLevelUser = adapter.event(
+        const topLevelUser = adapter.event(
             envelope("session.message", { content: "top-level prompt", role: "user" }, 23)
         );
-        const ignoredNestedTopLevelUser = adapter.event(
+        const nestedTopLevelUser = adapter.event(
             envelope(
                 "session.message",
                 { message: "nested top-level prompt", role: "user" },
@@ -74,6 +167,21 @@ describe("OpenClaw adapter variants", () => {
                 "session.message",
                 { message: "nested top-level answer", role: "assistant" },
                 25
+            )
+        );
+        const nestedDataUser = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    data: {
+                        message: "nested data prompt",
+                        role: "user",
+                        sessionKey: SESSION,
+                    },
+                    runId: undefined,
+                    sessionKey: undefined,
+                },
+                30
             )
         );
         const assistant = adapter.event(
@@ -106,17 +214,37 @@ describe("OpenClaw adapter variants", () => {
             kind: "assistant",
             source: "session",
         });
-        expect(ignoredUser).toEqual([]);
+        expect(userMessage[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "prompt" },
+        });
+        expect(runlessUserMessage[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "provider echo" },
+            runId: undefined,
+        });
         expect(topLevelAssistant[0]).toMatchObject({
             kind: "assistant",
             message: { role: "assistant", text: "top-level preamble" },
             source: "session",
         });
-        expect(ignoredTopLevelUser).toEqual([]);
-        expect(ignoredNestedTopLevelUser).toEqual([]);
+        expect(topLevelUser[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "top-level prompt" },
+        });
+        expect(nestedTopLevelUser[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "nested top-level prompt" },
+        });
         expect(nestedTopLevelAssistant[0]).toMatchObject({
             kind: "assistant",
             message: { role: "assistant", text: "nested top-level answer" },
+        });
+        expect(nestedDataUser[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "nested data prompt" },
+            runId: undefined,
+            sessionKey: SESSION,
         });
         expect(assistant.map((event) => event.kind)).toEqual(["assistant"]);
         expect(assistant[0]?.kind === "assistant" && assistant[0].message.text).toBe(
@@ -247,10 +375,14 @@ describe("OpenClaw adapter variants", () => {
         const lifecycleStatusOnlyError = adapter.event(
             envelope("agent", { data: { phase: "error" }, stream: "lifecycle" }, 52)
         );
+        const nestedLifecycleEnd = adapter.event(
+            envelope("agent", { data: { phase: "end", stream: "lifecycle" } }, 53)
+        );
 
         expect(compactionEnd[0]).toMatchObject({
             kind: "status",
             operation: "compact",
+            operationPhase: "inactive",
             text: undefined,
         });
         expect(lifecycleStart[0]).toMatchObject({ kind: "status", text: "Thinking" });
@@ -258,6 +390,7 @@ describe("OpenClaw adapter variants", () => {
             error: "model failed",
             kind: "finish",
             outcome: "error",
+            settlesCompactionRunId: "compaction:run-variants",
         });
         expect(modelAborted[0]).toMatchObject({
             error: undefined,
@@ -278,6 +411,323 @@ describe("OpenClaw adapter variants", () => {
             error: "Chat run failed",
             kind: "finish",
             outcome: "error",
+        });
+        expect(nestedLifecycleEnd.at(-1)).toMatchObject({
+            kind: "finish",
+            outcome: "completed",
+        });
+    });
+
+    it("tracks both OpenClaw compaction lifecycle signal shapes", () => {
+        const adapter = new OpenClawChatAdapter();
+        const parentStart = adapter.event(
+            envelope(
+                "agent",
+                {
+                    phase: "start",
+                    runId: "parent-chat-run",
+                    stream: "lifecycle",
+                },
+                52
+            )
+        );
+        const sessionStart = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    operation: "compact",
+                    operationId: "compact-operation",
+                    phase: "start",
+                    runId: undefined,
+                },
+                53
+            )
+        );
+        const sessionEnd = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    operation: "compact",
+                    operationId: "compact-operation",
+                    phase: "end",
+                    runId: undefined,
+                },
+                54
+            )
+        );
+        const sessionStatusEnd = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    operation: "compact",
+                    operationId: "status-compact-operation",
+                    phase: undefined,
+                    runId: undefined,
+                    status: "end",
+                },
+                62
+            )
+        );
+        const retrying = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: { completed: true, phase: "end", willRetry: true },
+                    stream: "compaction",
+                },
+                55
+            )
+        );
+        const unidentifiedStart = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    operation: "compact",
+                    operationId: undefined,
+                    phase: "start",
+                    runId: undefined,
+                },
+                56
+            )
+        );
+        const failedAgentCompaction = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: { phase: "error", status: "failed" },
+                    stream: "compaction",
+                },
+                57
+            )
+        );
+        const failedSessionCompaction = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    operation: "compact",
+                    phase: "failed",
+                    runId: undefined,
+                    status: "failed",
+                },
+                58
+            )
+        );
+        const nestedAgentStart = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: {
+                        operationId: "nested-compact-operation",
+                        phase: "start",
+                        stream: "compaction",
+                    },
+                    runId: "parent-chat-run",
+                    stream: undefined,
+                },
+                59
+            )
+        );
+        const nestedAgentEnd = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: {
+                        completed: true,
+                        operationId: "nested-compact-operation",
+                        phase: "end",
+                        stream: "compaction",
+                    },
+                    runId: "parent-chat-run",
+                    stream: undefined,
+                },
+                60
+            )
+        );
+        const failedRetrying = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: { phase: "error", status: "failed", willRetry: true },
+                    stream: "compaction",
+                },
+                61
+            )
+        );
+        const agentStatusEnd = adapter.event(
+            envelope("agent", { data: { status: "end" }, stream: "compaction" }, 63)
+        );
+
+        expect(sessionStart[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "active",
+            runId: "compaction:compact-operation",
+        });
+        expect(sessionEnd[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "complete",
+            runId: "compaction:compact-operation",
+        });
+        expect(sessionStatusEnd[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "complete",
+            runId: "compaction:status-compact-operation",
+            text: "Context compacted",
+        });
+        expect(retrying[0]).toMatchObject({
+            kind: "status",
+            operationPhase: "retrying",
+            runId: "compaction:run-variants",
+            text: "Compacting context",
+        });
+        expect(failedRetrying[0]).toMatchObject({
+            kind: "status",
+            operationPhase: "retrying",
+            runId: "compaction:run-variants",
+            text: "Compacting context",
+        });
+        expect(agentStatusEnd[0]).toMatchObject({
+            kind: "status",
+            operationPhase: "inactive",
+            runId: "compaction:run-variants",
+            text: undefined,
+        });
+        expect(unidentifiedStart[0]).toMatchObject({
+            kind: "status",
+            operationPhase: "active",
+            runId: `compaction:${SESSION}`,
+        });
+        expect(failedAgentCompaction[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "inactive",
+            text: undefined,
+        });
+        expect(failedSessionCompaction[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "inactive",
+            text: undefined,
+        });
+        expect(nestedAgentStart[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "active",
+            runId: "compaction:nested-compact-operation",
+        });
+        expect(nestedAgentEnd[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "complete",
+            runId: "compaction:nested-compact-operation",
+        });
+        const nestedCompactionRuntime = reduceChatRuntime(createChatRuntimeState(), [
+            ...parentStart,
+            ...nestedAgentStart,
+            ...nestedAgentEnd,
+        ]);
+        expect(
+            nestedCompactionRuntime.sessions[SESSION]?.runs["parent-chat-run"]
+        ).toMatchObject({ phase: "active" });
+        expect(
+            nestedCompactionRuntime.sessions[SESSION]?.runs[
+                "compaction:nested-compact-operation"
+            ]
+        ).toMatchObject({ phase: "completed" });
+    });
+
+    it("marks failed structured tool results as errors", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        id: "failed-call",
+                        name: "exec",
+                        phase: "result",
+                        result: { exitCode: 1, status: "failed" },
+                    },
+                    stream: "tool",
+                },
+                56
+            )
+        );
+        const toolEvent = events.find((event) => event.kind === "tool");
+
+        expect(toolEvent?.kind === "tool" && toolEvent.message.toolResult?.isError).toBe(
+            true
+        );
+    });
+
+    it("marks status-only tool failures as completed error results", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        id: "status-failed-call",
+                        name: "exec",
+                        status: "failed",
+                    },
+                    stream: "tool",
+                },
+                57
+            )
+        );
+        const toolEvent = events.find((event) => event.kind === "tool");
+
+        expect(toolEvent).toMatchObject({
+            kind: "tool",
+            message: {
+                toolResult: {
+                    id: "status-failed-call",
+                    isError: true,
+                    name: "exec",
+                },
+            },
+        });
+    });
+
+    it("renders a coalesced replay tool with the same input and result", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        args: { command: "printf ready" },
+                        itemId: "coalesced-call",
+                        name: "bash",
+                        phase: "result",
+                        result: { exitCode: 0, status: "completed" },
+                        toolCallId: "coalesced-call",
+                    },
+                    stream: "tool",
+                },
+                57
+            )
+        );
+        const toolEvent = events.find((event) => event.kind === "tool");
+
+        expect(toolEvent).toMatchObject({
+            kind: "tool",
+            message: {
+                toolCalls: [
+                    {
+                        arguments: { command: "printf ready" },
+                        id: "coalesced-call",
+                        name: "bash",
+                        toolResult: {
+                            content: expect.stringContaining('"exitCode": 0'),
+                            isError: false,
+                        },
+                    },
+                ],
+            },
         });
     });
 

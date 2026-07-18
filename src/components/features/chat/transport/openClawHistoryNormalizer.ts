@@ -26,7 +26,24 @@ export interface RawOpenClawHistoryMessage {
     MediaPaths?: unknown;
     MediaType?: unknown;
     MediaTypes?: unknown;
+    idempotencyKey?: unknown;
     runId?: unknown;
+}
+
+function normalizedRunId(message: RawOpenClawHistoryMessage): string | undefined {
+    const runId = typeof message.runId === "string" ? message.runId.trim() : "";
+    if (runId) {
+        return runId;
+    }
+    if (
+        typeof message.role !== "string" ||
+        message.role.toLowerCase() !== "user" ||
+        typeof message.idempotencyKey !== "string"
+    ) {
+        return undefined;
+    }
+    const match = message.idempotencyKey.match(/^(dashboard-chat-.+):user$/u);
+    return match?.[1];
 }
 
 function fileNameFromPath(path: string): string {
@@ -236,7 +253,7 @@ export function normalizeOpenClawHistoryMessage(
         thinking: extractThinkingBlocks(content),
         toolCalls: extractToolCalls(content),
         toolResult: toolResult(message, content),
-        runId: typeof message.runId === "string" ? message.runId : undefined,
+        runId: normalizedRunId(message),
         timestamp: normalizedTimestamp(message.timestamp),
     };
 }

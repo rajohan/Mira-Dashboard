@@ -7,9 +7,12 @@ import {
     mergeChatAttachments,
     mergeChatImages,
 } from "../chatTypes";
+import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
 
 export type ChatRunPhase = "active" | "completed" | "aborted" | "error";
 export type ChatTextSource = "chat" | "runtime" | "session";
+export type ChatOperationPhase = "active" | "complete" | "inactive" | "retrying";
+type ChatRunContentKind = "assistant" | "thinking" | "tool" | "user";
 
 const SESSION_ECHO_WINDOW_MILLISECONDS = 60_000;
 
@@ -25,15 +28,22 @@ export interface ChatRunState {
     assistantSource?: ChatTextSource;
     diagnostics: ChatDiagnosticEntry[];
     error?: string;
+    lastContentKind?: ChatRunContentKind;
+    lastContentSequence?: number;
     lastSequence: number;
     operation?: "compact";
+    operationPhase?: ChatOperationPhase;
+    operationUpdatedAt?: string;
     phase: ChatRunPhase;
     runId: string;
     sessionKey: string;
     startedAt: string;
     statusText?: string;
+    terminalAt?: string;
     terminalSequence?: number;
+    toolFailure?: boolean;
     updatedAt: string;
+    userMessages: ChatDiagnosticEntry[];
 }
 
 export interface ChatSessionRuntimeState {
@@ -56,6 +66,10 @@ interface RuntimeEventBase {
 
 export type ChatRuntimeEvent =
     | (RuntimeEventBase & {
+          kind: "user";
+          message: ChatHistoryMessage;
+      })
+    | (RuntimeEventBase & {
           kind: "assistant";
           message: ChatHistoryMessage;
           mode: "append" | "merge" | "replace";
@@ -73,6 +87,7 @@ export type ChatRuntimeEvent =
     | (RuntimeEventBase & {
           kind: "status";
           operation?: "compact";
+          operationPhase?: ChatOperationPhase;
           text?: string;
       })
     | (RuntimeEventBase & {
@@ -81,8 +96,26 @@ export type ChatRuntimeEvent =
           error?: string;
           message?: ChatHistoryMessage;
           outcome: Exclude<ChatRunPhase, "active">;
-          suppressIfToolFailure?: boolean;
+          settlesCompactionRunId?: string;
+          toolFailure?: boolean;
       });
+
+function runContentKind(event: ChatRuntimeEvent): ChatRunContentKind | undefined {
+    switch (event.kind) {
+        case "assistant":
+        case "thinking":
+        case "tool":
+        case "user": {
+            return event.kind;
+        }
+        case "finish": {
+            return event.message ? "assistant" : undefined;
+        }
+        case "status": {
+            return undefined;
+        }
+    }
+}
 
 export function createChatRuntimeState(generation = 0): ChatRuntimeState {
     return { generation, sessions: {} };
@@ -175,12 +208,14 @@ function emptyRun(
         sessionKey,
         startedAt: timestamp,
         updatedAt: timestamp,
+        userMessages: [],
     };
 }
 
 function matchingRunKey(
     session: ChatSessionRuntimeState,
-    runId: string | undefined
+    runId: string | undefined,
+    target: "any" | "chat" | "compaction" = "any"
 ): string | undefined {
     if (runId) {
         return Object.entries(session.runs).find(
@@ -189,10 +224,28 @@ function matchingRunKey(
     }
 
     const activeRuns = Object.entries(session.runs).filter(
-        ([, run]) => run.phase === "active"
+        ([, run]) =>
+            run.phase === "active" &&
+            (target === "any" ||
+                (target === "compaction"
+                    ? run.operation === "compact"
+                    : run.operation !== "compact"))
     );
     if (activeRuns.length === 1) {
         return activeRuns[0]?.[0];
+    }
+    const establishedRuns = activeRuns.filter(
+        ([, run]) =>
+            !(
+                (run.runId.startsWith("dashboard-chat-") ||
+                    run.runId.startsWith("dashboard-compact-")) &&
+                !run.assistant &&
+                run.diagnostics.length === 0 &&
+                run.userMessages.length === 0
+            )
+    );
+    if (establishedRuns.length === 1) {
+        return establishedRuns[0]?.[0];
     }
     const runlessRuns = activeRuns.filter(([, run]) =>
         run.runId.startsWith("runtime-runless-")
@@ -212,6 +265,23 @@ function latestCompletedRunEntry(
         )[0];
 }
 
+function pendingRunlessUserEntry(
+    session: ChatSessionRuntimeState
+): [string, ChatRunState] | undefined {
+    const candidates = Object.entries(session.runs).filter(
+        ([, run]) =>
+            run.phase === "active" &&
+            run.runId.startsWith("runtime-runless-") &&
+            run.userMessages.length > 0 &&
+            run.userMessages[0]?.message.timestamp === run.startedAt
+    );
+    return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+function isDedicatedCompactionStatus(event: ChatRuntimeEvent): boolean {
+    return event.kind === "status" && event.operation === "compact";
+}
+
 function resolveRun(
     session: ChatSessionRuntimeState,
     event: ChatRuntimeEvent
@@ -229,7 +299,11 @@ function resolveRun(
     }
 
     if (!run) {
-        runKey = matchingRunKey(session, event.runId);
+        runKey = matchingRunKey(
+            session,
+            event.runId,
+            isDedicatedCompactionStatus(event) ? "compaction" : "chat"
+        );
         run = runKey ? session.runs[runKey] : undefined;
     }
 
@@ -245,6 +319,13 @@ function resolveRun(
         const completedEntry = latestCompletedRunEntry(session);
         if (completedEntry) {
             [runKey, run] = completedEntry;
+        }
+    }
+
+    if (!run && event.runId && !isDedicatedCompactionStatus(event)) {
+        const pendingUserEntry = pendingRunlessUserEntry(session);
+        if (pendingUserEntry) {
+            [runKey, run] = pendingUserEntry;
         }
     }
 
@@ -344,7 +425,7 @@ function isCompatibleSessionEcho(
         return false;
     }
     const details = (message: ChatHistoryMessage) =>
-        JSON.stringify({
+        stableChatStringify({
             attachments: message.attachments || [],
             images: message.images || [],
             thinking: message.thinking || [],
@@ -418,8 +499,8 @@ function isSameToolCall(left: ChatToolCallDisplay, right: ChatToolCallDisplay): 
     }
     return (
         left.name === right.name &&
-        JSON.stringify(left.arguments ?? undefined) ===
-            JSON.stringify(right.arguments ?? undefined)
+        stableChatStringify(left.arguments ?? undefined) ===
+            stableChatStringify(right.arguments ?? undefined)
     );
 }
 
@@ -444,8 +525,8 @@ function mergeToolDiagnostic(
             }
             return (
                 incomingCall.name === candidate.name &&
-                JSON.stringify(incomingCall.arguments ?? undefined) ===
-                    JSON.stringify(candidate.arguments ?? undefined)
+                stableChatStringify(incomingCall.arguments ?? undefined) ===
+                    stableChatStringify(candidate.arguments ?? undefined)
             );
         });
         if (callIndex === -1) {
@@ -546,19 +627,43 @@ function applyDiagnosticEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "thinking" | "tool" }>
 ): ChatRunState {
-    const key =
-        event.kind === "tool"
-            ? event.toolKey
-            : `thinking:${event.message.thinking?.[0]?.id || "primary"}`;
+    const key = event.kind === "tool" ? event.toolKey : "thinking:primary";
     return {
         ...run,
         diagnostics: mergeDiagnosticEntry(
             run.diagnostics,
             key,
             event.kind,
-            event.message,
+            {
+                ...event.message,
+                timestamp: event.message.timestamp || event.timestamp,
+            },
             event.sequence
         ),
+    };
+}
+
+function applyUserEvent(
+    run: ChatRunState,
+    event: Extract<ChatRuntimeEvent, { kind: "user" }>
+): ChatRunState {
+    const message = {
+        ...event.message,
+        timestamp: event.message.timestamp || event.timestamp,
+    };
+    const key = `user:${messageDeleteKey(message)}`;
+    if (run.userMessages.some((entry) => entry.key === key)) {
+        return run;
+    }
+    return {
+        ...run,
+        userMessages: [
+            ...run.userMessages,
+            {
+                key,
+                message,
+            },
+        ],
     };
 }
 
@@ -575,7 +680,7 @@ function mergeRunDiagnostics(
                     : "thinking";
             diagnostics = mergeDiagnosticEntry(
                 diagnostics,
-                entry.key,
+                kind === "thinking" ? "thinking:primary" : entry.key,
                 kind,
                 entry.message,
                 `merge-${runIndex}-${entryIndex}-${run.lastSequence}`
@@ -583,6 +688,27 @@ function mergeRunDiagnostics(
         }
     }
     return diagnostics;
+}
+
+function mergeRunUserMessages(
+    older: ChatRunState,
+    newer: ChatRunState
+): ChatDiagnosticEntry[] {
+    const entries = new Map<string, ChatDiagnosticEntry>();
+    for (const entry of [...older.userMessages, ...newer.userMessages]) {
+        entries.set(entry.key, entry);
+    }
+    return entries
+        .values()
+        .toArray()
+        .toSorted((left, right) => {
+            const leftTimestamp = Date.parse(left.message.timestamp || "");
+            const rightTimestamp = Date.parse(right.message.timestamp || "");
+            if (Number.isNaN(leftTimestamp) || Number.isNaN(rightTimestamp)) {
+                return left.key.localeCompare(right.key);
+            }
+            return leftTimestamp - rightTimestamp;
+        });
 }
 
 function mergeAcknowledgedRuns(
@@ -620,6 +746,12 @@ function mergeAcknowledgedRuns(
                 (left.terminalSequence ?? left.lastSequence)
         )[0];
     const phase = terminalRun?.phase ?? newer.phase;
+    const latestContentRun = [existing, optimistic]
+        .filter((run) => run.lastContentSequence !== undefined)
+        .toSorted(
+            (left, right) =>
+                (right.lastContentSequence ?? -1) - (left.lastContentSequence ?? -1)
+        )[0];
 
     return {
         ...newer,
@@ -633,13 +765,20 @@ function mergeAcknowledgedRuns(
         assistantSource: newer.assistantSource || older.assistantSource,
         diagnostics: mergeRunDiagnostics(older, newer),
         error: (terminalRun ?? newer).error,
+        lastContentKind: latestContentRun?.lastContentKind,
+        lastContentSequence: latestContentRun?.lastContentSequence,
         lastSequence: Math.max(existing.lastSequence, optimistic.lastSequence),
         operation: newer.operation ?? older.operation,
+        operationPhase: newer.operationPhase ?? older.operationPhase,
+        operationUpdatedAt: newer.operationUpdatedAt ?? older.operationUpdatedAt,
         phase,
         runId: providerRunId,
         startedAt,
         statusText: phase === "active" ? newer.statusText || older.statusText : undefined,
+        terminalAt: terminalRun?.terminalAt ?? newer.terminalAt ?? older.terminalAt,
         terminalSequence,
+        toolFailure: newer.toolFailure || older.toolFailure || undefined,
+        userMessages: mergeRunUserMessages(older, newer),
     };
 }
 
@@ -663,7 +802,8 @@ function applyFinishEvent(
             ...(entry.message.toolCalls || []).map((call) => call.toolResult),
         ].some((result) => result?.isError === true)
     );
-    const error = event.suppressIfToolFailure && hasFailedTool ? undefined : event.error;
+    const isToolFailure = Boolean(run.toolFailure || event.toolFailure);
+    const error = isToolFailure && hasFailedTool ? undefined : event.error;
 
     const withMessage = event.message
         ? applyAssistantEvent(
@@ -677,12 +817,57 @@ function applyFinishEvent(
               }
           )
         : run;
+    const isPendingCompaction =
+        run.operation === "compact" &&
+        (run.operationPhase === "active" || run.operationPhase === "retrying");
     return {
         ...withMessage,
+        assistant: withMessage.assistant
+            ? {
+                  ...withMessage.assistant,
+                  isFinal: event.outcome === "completed",
+              }
+            : undefined,
         error,
+        operationPhase: isPendingCompaction
+            ? event.outcome === "completed"
+                ? "complete"
+                : "inactive"
+            : run.operationPhase,
+        operationUpdatedAt: isPendingCompaction
+            ? event.timestamp
+            : run.operationUpdatedAt,
         phase: event.outcome,
         statusText: undefined,
+        terminalAt: event.timestamp,
         terminalSequence: event.sequence,
+        toolFailure: isToolFailure || undefined,
+    };
+}
+
+function settleRetryingCompactionRun(
+    session: ChatSessionRuntimeState,
+    event: ChatRuntimeEvent
+): void {
+    if (event.kind !== "finish" || !event.settlesCompactionRunId) {
+        return;
+    }
+    const runKey = matchingRunKey(session, event.settlesCompactionRunId);
+    const run = runKey ? session.runs[runKey] : undefined;
+    if (!runKey || run?.operation !== "compact" || run.operationPhase !== "retrying") {
+        return;
+    }
+    session.runs[runKey] = {
+        ...run,
+        error: event.error,
+        lastSequence: event.sequence,
+        operationPhase: event.outcome === "completed" ? "complete" : "inactive",
+        operationUpdatedAt: event.timestamp,
+        phase: event.outcome,
+        statusText: undefined,
+        terminalAt: event.timestamp,
+        terminalSequence: event.sequence,
+        updatedAt: event.timestamp,
     };
 }
 
@@ -719,11 +904,13 @@ export function reduceChatRuntime(
                               ...run,
                               diagnostics: [...run.diagnostics],
                               sessionKey,
+                              userMessages: [...run.userMessages],
                           },
                       ])
                   ),
               }
             : { lastSequence: -1, runs: {}, sessionKey };
+        settleRetryingCompactionRun(session, normalizedEvent);
         const resolved = resolveRun(session, normalizedEvent);
         session.lastSequence = normalizedEvent.sequence;
         const sessions = { ...nextState.sessions };
@@ -739,10 +926,15 @@ export function reduceChatRuntime(
         }
 
         const run = applyRunEvent(resolved.run, normalizedEvent);
+        const contentKind = runContentKind(normalizedEvent);
 
         session.runs[resolved.runKey] = {
             ...run,
             aliases: uniqueChatRunIds([...run.aliases, normalizedEvent.runId]),
+            lastContentKind: contentKind ?? run.lastContentKind,
+            lastContentSequence: contentKind
+                ? normalizedEvent.sequence
+                : run.lastContentSequence,
             lastSequence: normalizedEvent.sequence,
             updatedAt: normalizedEvent.timestamp,
         };
@@ -756,6 +948,9 @@ export function reduceChatRuntime(
 
 function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState {
     switch (event.kind) {
+        case "user": {
+            return applyUserEvent(run, event);
+        }
         case "assistant": {
             return applyAssistantEvent(run, event);
         }
@@ -764,10 +959,40 @@ function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState
             return applyDiagnosticEvent(run, event);
         }
         case "status": {
+            const operationPhase = event.operation
+                ? (event.operationPhase ?? "active")
+                : run.operationPhase;
+            const isPendingOperation =
+                operationPhase === "active" || operationPhase === "retrying";
+            const operationOutcome = event.operation
+                ? isPendingOperation
+                    ? "active"
+                    : operationPhase === "complete"
+                      ? "completed"
+                      : "aborted"
+                : run.phase;
             return {
                 ...run,
                 operation: event.operation ?? run.operation,
+                error: event.operation && isPendingOperation ? undefined : run.error,
+                operationPhase,
+                operationUpdatedAt: event.operation
+                    ? event.timestamp
+                    : run.operationUpdatedAt,
+                phase: operationOutcome,
                 statusText: event.text,
+                terminalAt:
+                    event.operation && !isPendingOperation
+                        ? event.timestamp
+                        : event.operation
+                          ? undefined
+                          : run.terminalAt,
+                terminalSequence:
+                    event.operation && !isPendingOperation
+                        ? event.sequence
+                        : event.operation
+                          ? undefined
+                          : run.terminalSequence,
             };
         }
         default: {
@@ -810,6 +1035,10 @@ export function addOptimisticChatRun(
         session.runs[existingKey] = {
             ...existingRun,
             operation: operation ?? existingRun.operation,
+            operationPhase:
+                operation === "compact" ? "active" : existingRun.operationPhase,
+            operationUpdatedAt:
+                operation === "compact" ? timestamp : existingRun.operationUpdatedAt,
             statusText:
                 existingRun.phase === "active"
                     ? operation === "compact"
@@ -821,6 +1050,8 @@ export function addOptimisticChatRun(
         session.runs[runId] = {
             ...emptyRun(canonicalSessionKey, runId, session.lastSequence, timestamp),
             operation,
+            operationPhase: operation === "compact" ? "active" : undefined,
+            operationUpdatedAt: operation === "compact" ? timestamp : undefined,
             statusText: operation === "compact" ? "Compacting context" : "Thinking",
         };
     }
@@ -901,6 +1132,99 @@ export function clearChatRun(
             ([key, run]) => key !== runId && !run.aliases.includes(runId)
         )
     );
+    return {
+        ...state,
+        sessions: {
+            ...state.sessions,
+            [previousSessionKey]: { ...previousSession, runs },
+        },
+    };
+}
+
+/** Removes the previous completed replay when a new local run starts. */
+export function clearCompletedChatRuns(
+    state: ChatRuntimeState,
+    sessionKey: string
+): ChatRuntimeState {
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    if (!previousEntry) {
+        return state;
+    }
+    const [previousSessionKey, previousSession] = previousEntry;
+    const runs = Object.fromEntries(
+        Object.entries(previousSession.runs).filter(([, run]) => run.phase === "active")
+    );
+    if (Object.keys(runs).length === Object.keys(previousSession.runs).length) {
+        return state;
+    }
+    return {
+        ...state,
+        sessions: {
+            ...state.sessions,
+            [previousSessionKey]: { ...previousSession, runs },
+        },
+    };
+}
+
+/** Returns the immutable completed replay displaced by a new optimistic send. */
+export function completedChatRuns(
+    state: ChatRuntimeState,
+    sessionKey: string
+): Record<string, ChatRunState> {
+    const session = matchingSessionEntry(state, sessionKey)?.[1];
+    return Object.fromEntries(
+        Object.entries(session?.runs || {}).filter(([, run]) => run.phase !== "active")
+    );
+}
+
+/** Restores a displaced replay without replacing newer live runtime state. */
+export function restoreChatRuns(
+    state: ChatRuntimeState,
+    sessionKey: string,
+    restoredRuns: Readonly<Record<string, ChatRunState>>
+): ChatRuntimeState {
+    if (Object.keys(restoredRuns).length === 0) {
+        return state;
+    }
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    const previousSessionKey = previousEntry?.[0] ?? sessionKey;
+    const previousSession = previousEntry?.[1] ?? {
+        lastSequence: -1,
+        runs: {},
+        sessionKey,
+    };
+    const runs = { ...restoredRuns, ...previousSession.runs };
+    return {
+        ...state,
+        sessions: {
+            ...state.sessions,
+            [previousSessionKey]: { ...previousSession, runs },
+        },
+    };
+}
+
+/** Removes status-only runs that projection has already classified as stale. */
+export function clearStatusOnlyChatRuns(
+    state: ChatRuntimeState,
+    sessionKey: string
+): ChatRuntimeState {
+    const previousEntry = matchingSessionEntry(state, sessionKey);
+    if (!previousEntry) {
+        return state;
+    }
+    const [previousSessionKey, previousSession] = previousEntry;
+    const runs = Object.fromEntries(
+        Object.entries(previousSession.runs).filter(
+            ([, run]) =>
+                run.phase !== "active" ||
+                Boolean(run.assistant) ||
+                run.diagnostics.length > 0 ||
+                run.userMessages.length > 0
+        )
+    );
+    if (Object.keys(runs).length === Object.keys(previousSession.runs).length) {
+        return state;
+    }
     return {
         ...state,
         sessions: {

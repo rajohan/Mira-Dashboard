@@ -1,5 +1,6 @@
 import type { Virtualizer } from "@tanstack/react-virtual";
 import {
+    CircleCheck,
     FileText,
     Image as ImageIcon,
     Loader2,
@@ -8,7 +9,14 @@ import {
     Trash2,
     Volume2,
 } from "lucide-react";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import {
+    type KeyboardEvent,
+    type PointerEvent,
+    type RefObject,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
 
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
@@ -23,12 +31,38 @@ import type {
 import { TOOL_ROLE_VARIANTS } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
 
+const SCROLL_KEYS = new Set([
+    " ",
+    "ArrowDown",
+    "ArrowUp",
+    "End",
+    "Home",
+    "PageDown",
+    "PageUp",
+]);
+
+function isScrollbarPointer(event: PointerEvent<HTMLDivElement>): boolean {
+    const container = event.currentTarget;
+    const scrollbarWidth = container.offsetWidth - container.clientWidth;
+    return (
+        scrollbarWidth > 0 &&
+        event.target === container &&
+        event.clientX >= container.getBoundingClientRect().right - scrollbarWidth
+    );
+}
+
+function isKeyboardScroll(event: KeyboardEvent<HTMLDivElement>): boolean {
+    return (
+        SCROLL_KEYS.has(event.key) &&
+        (event.target === event.currentTarget || event.key !== " ")
+    );
+}
+
 /** Provides props for chat messages list. */
 interface ChatMessagesListProperties {
     isLoadingHistory: boolean;
     isAtBottom: boolean;
     chatRows: ChatRow[];
-    messagesBottomReference: RefObject<HTMLDivElement | undefined>;
     messagesContainerReference: RefObject<HTMLDivElement | undefined>;
     messagesVirtualizer: Virtualizer<HTMLDivElement, Element>;
     onDynamicContentLoad: () => void;
@@ -36,6 +70,7 @@ interface ChatMessagesListProperties {
     onPreview: (isPreview: ChatPreviewItem) => void;
     visibility: ChatVisibilitySettings;
     onScroll: () => void;
+    onUserScrollIntent: () => void;
     onTtsError: (error: string) => void;
     onDeleteMessage: (messageKey: string) => void;
 }
@@ -208,7 +243,13 @@ function TtsButton({
 }
 
 /** Renders the typing indicator UI. */
-function TypingIndicator({ text = "Thinking" }: { text?: string }) {
+function ActivityIndicator({
+    active = true,
+    text = "Thinking",
+}: {
+    active?: boolean;
+    text?: string;
+}) {
     return (
         <div className="flex justify-start pb-3">
             <div className="rounded-2xl border border-primary-700 bg-primary-800 px-3 py-2 text-sm text-primary-100 shadow-sm">
@@ -217,14 +258,21 @@ function TypingIndicator({ text = "Thinking" }: { text?: string }) {
                 </div>
                 <div className="flex items-center gap-2 text-primary-300">
                     <span className="min-w-0 wrap-break-word">{text || "Thinking"}</span>
-                    <span
-                        className="flex shrink-0 gap-1"
-                        aria-label="Assistant is working"
-                    >
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.24s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.12s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary-300" />
-                    </span>
+                    {active ? (
+                        <span
+                            className="flex shrink-0 gap-1"
+                            aria-label="Assistant is working"
+                        >
+                            <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.24s]" />
+                            <span className="size-1.5 animate-bounce rounded-full bg-primary-300 [animation-delay:-0.12s]" />
+                            <span className="size-1.5 animate-bounce rounded-full bg-primary-300" />
+                        </span>
+                    ) : (
+                        <CircleCheck
+                            className="size-4 shrink-0 text-emerald-400"
+                            aria-label="Operation complete"
+                        />
+                    )}
                 </div>
             </div>
         </div>
@@ -253,7 +301,6 @@ export function ChatMessagesList({
     isLoadingHistory,
     isAtBottom,
     chatRows,
-    messagesBottomReference,
     messagesContainerReference,
     messagesVirtualizer,
     onDynamicContentLoad,
@@ -261,6 +308,7 @@ export function ChatMessagesList({
     onPreview,
     visibility,
     onScroll,
+    onUserScrollIntent,
     onTtsError,
     onDeleteMessage,
 }: ChatMessagesListProperties) {
@@ -384,7 +432,19 @@ export function ChatMessagesList({
             ref={(element) => {
                 messagesContainerReference.current = element ?? undefined;
             }}
+            onKeyDownCapture={(event) => {
+                if (isKeyboardScroll(event)) {
+                    onUserScrollIntent();
+                }
+            }}
+            onPointerDownCapture={(event) => {
+                if (isScrollbarPointer(event)) {
+                    onUserScrollIntent();
+                }
+            }}
             onScroll={onScroll}
+            onTouchMoveCapture={onUserScrollIntent}
+            onWheelCapture={onUserScrollIntent}
             className="mt-3 min-h-0 flex-1 overflow-y-auto pr-0 sm:mt-4 sm:pr-1"
             style={{ overflowAnchor: "none" }}
         >
@@ -423,15 +483,19 @@ export function ChatMessagesList({
                             );
                         }
 
-                        if (row.kind === "typing") {
+                        if (row.kind === "typing" || row.kind === "status") {
                             return (
                                 <div
                                     key={virtualItem.key}
+                                    data-chat-row-key={row.key}
                                     data-index={virtualItem.index}
                                     ref={messagesVirtualizer.measureElement}
                                     className="w-full pb-3"
                                 >
-                                    <TypingIndicator text={row.message.text} />
+                                    <ActivityIndicator
+                                        active={row.kind === "typing"}
+                                        text={row.message.text}
+                                    />
                                 </div>
                             );
                         }
@@ -457,6 +521,7 @@ export function ChatMessagesList({
                         return (
                             <div
                                 key={virtualItem.key}
+                                data-chat-row-key={row.key}
                                 data-index={virtualItem.index}
                                 ref={messagesVirtualizer.measureElement}
                                 className="w-full pb-3"
@@ -630,12 +695,6 @@ export function ChatMessagesList({
                     {paddingBottom > 0 ? (
                         <div style={{ height: paddingBottom }} />
                     ) : undefined}
-                    <div
-                        ref={(element) => {
-                            messagesBottomReference.current = element ?? undefined;
-                        }}
-                        aria-hidden="true"
-                    />
                 </div>
             )}
         </div>

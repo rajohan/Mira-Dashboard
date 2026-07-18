@@ -63,6 +63,7 @@ import {
     slashCommandCanonicalName,
 } from "../components/features/chat/slashCommands";
 import { normalizeOpenClawHistoryMessage } from "../components/features/chat/transport/openClawHistoryNormalizer";
+import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
 import {
     formatBytes as formatDatabaseBytes,
     formatNumber as formatDatabaseNumber,
@@ -577,6 +578,17 @@ class FakeWebSocket {
     error() {
         this.dispatch("error");
     }
+}
+
+function latestSocketRequest(socket: FakeWebSocket): {
+    id: string;
+    timeoutMs?: number;
+} {
+    const serializedRequest = socket.sent.at(-1);
+    if (!serializedRequest) {
+        throw new Error("Expected a WebSocket request");
+    }
+    return JSON.parse(serializedRequest) as { id: string; timeoutMs?: number };
 }
 
 describe("Mira Dashboard frontend behavior", () => {
@@ -1132,6 +1144,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 id: "1",
                 method: "answer",
                 params: { question: true },
+                timeoutMs: 30_000,
             });
             socket.message({
                 type: "response",
@@ -1177,6 +1190,107 @@ describe("Mira Dashboard frontend behavior", () => {
             });
             await expect(replacementPromise).resolves.toEqual({ current: true });
             expect(events.filter((event) => event === "error")).toHaveLength(1);
+
+            const timeoutPromise = client.request(
+                "custom-timeout",
+                {},
+                { timeoutMs: 20 }
+            );
+            expect(JSON.parse(replacementSocket.sent.at(-1)!)).toMatchObject({
+                method: "custom-timeout",
+                timeoutMs: 20,
+            });
+            await expect(timeoutPromise).rejects.toThrow("Request timeout");
+
+            const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+            try {
+                const invalidTimeoutPromise = client.request<{ normalized: boolean }>(
+                    "invalid-timeout",
+                    {},
+                    { timeoutMs: NaN }
+                );
+                const invalidTimeoutRequest = latestSocketRequest(replacementSocket);
+                expect(invalidTimeoutRequest.timeoutMs).toBe(30_000);
+                expect(timeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 30_000);
+                replacementSocket.message({
+                    type: "response",
+                    id: invalidTimeoutRequest.id,
+                    isOk: true,
+                    payload: { normalized: true },
+                });
+                await expect(invalidTimeoutPromise).resolves.toEqual({
+                    normalized: true,
+                });
+
+                const clampedTimeoutPromise = client.request<{ clamped: boolean }>(
+                    "clamped-timeout",
+                    {},
+                    { timeoutMs: Number.MAX_SAFE_INTEGER }
+                );
+                const clampedTimeoutRequest = latestSocketRequest(replacementSocket);
+                expect(clampedTimeoutRequest.timeoutMs).toBe(2_147_483_647);
+                expect(timeoutSpy).toHaveBeenLastCalledWith(
+                    expect.any(Function),
+                    2_147_483_647
+                );
+                replacementSocket.message({
+                    type: "response",
+                    id: clampedTimeoutRequest.id,
+                    isOk: true,
+                    payload: { clamped: true },
+                });
+                await expect(clampedTimeoutPromise).resolves.toEqual({
+                    clamped: true,
+                });
+
+                const timeoutCallCount = timeoutSpy.mock.calls.length;
+                const noDeadlinePromise = client.request<{ completed: boolean }>(
+                    "no-deadline",
+                    {},
+                    { shouldWaitIndefinitely: true, timeoutMs: 20 }
+                );
+                expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCallCount);
+                const noDeadlineRequest = JSON.parse(replacementSocket.sent.at(-1)!) as {
+                    id: string;
+                    shouldWaitIndefinitely?: boolean;
+                };
+                expect(noDeadlineRequest).not.toHaveProperty("shouldWaitIndefinitely");
+                expect(noDeadlineRequest).not.toHaveProperty("timeoutMs");
+                replacementSocket.message({
+                    type: "response",
+                    id: noDeadlineRequest.id,
+                    isOk: true,
+                    payload: { completed: true },
+                });
+                await expect(noDeadlinePromise).resolves.toEqual({ completed: true });
+            } finally {
+                timeoutSpy.mockRestore();
+            }
+
+            const clearTimeoutSpy = jest.spyOn(globalThis, "clearTimeout");
+            try {
+                const cyclicParameters: Record<string, unknown> = {};
+                cyclicParameters.self = cyclicParameters;
+                await expect(
+                    client.request("cyclic-parameters", cyclicParameters)
+                ).rejects.toBeInstanceOf(TypeError);
+                expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+
+                const sendError = new Error("WebSocket send failed");
+                const sendSpy = jest
+                    .spyOn(replacementSocket, "send")
+                    .mockImplementationOnce(() => {
+                        throw sendError;
+                    });
+                try {
+                    await expect(client.request("send-failure")).rejects.toBe(sendError);
+                } finally {
+                    sendSpy.mockRestore();
+                }
+                expect(clearTimeoutSpy).toHaveBeenCalledTimes(2);
+            } finally {
+                clearTimeoutSpy.mockRestore();
+            }
 
             const disconnectedPromise = client.request("disconnect");
             client.disconnect();
@@ -1245,6 +1359,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 id: "2",
                 method: "ping",
                 params: { value: 1 },
+                timeoutMs: 30_000,
             });
             act(() => {
                 socket.message({
@@ -1270,6 +1385,108 @@ describe("Mira Dashboard frontend behavior", () => {
                 result.current.disconnect();
             });
             expect(result.current.isConnected).toBe(false);
+            unmount();
+        } finally {
+            authActions.clearSession();
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("uses the socket response contracts for snapshots and compaction", async () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            user: { id: 1, username: "raymond" },
+        });
+
+        try {
+            const { result, unmount } = renderHook(() => useOpenClawChatTransport(), {
+                wrapper: openClawSocketWrapper,
+            });
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+            const socket = FakeWebSocket.instances[0]!;
+
+            act(() => {
+                socket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+            act(() => {
+                socket.message({ type: "response", id: "1", isOk: true, payload: [] });
+            });
+
+            const snapshotPromise = result.current.snapshot("agent:main:main");
+            const snapshotRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            expect(snapshotRequest).toMatchObject({
+                method: "chat.runtimeSnapshot",
+                params: { sessionKey: "agent:main:main" },
+            });
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: snapshotRequest.id,
+                    isOk: true,
+                    payload: {
+                        completed: false,
+                        events: [],
+                        replayScope: "gateway-scope",
+                        runtimeGeneration: "backend-generation",
+                        throughSequence: 7,
+                    },
+                });
+            });
+            await expect(snapshotPromise).resolves.toEqual({
+                completed: false,
+                events: [],
+                replayScope: "gateway-scope",
+                runtimeGeneration: "backend-generation",
+                throughSequence: 127,
+            });
+
+            const compactPromise = result.current.compact("agent:main:main");
+            const compactRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            expect(compactRequest).toMatchObject({
+                method: "sessions.compact",
+                params: { key: "agent:main:main" },
+            });
+            expect(compactRequest).not.toHaveProperty("timeoutMs");
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: compactRequest.id,
+                    isOk: true,
+                    payload: {},
+                });
+            });
+            await expect(compactPromise).resolves.toBeUndefined();
+
+            const rejectedCompactPromise = result.current.compact("agent:main:main");
+            const rejectedRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: rejectedRequest.id,
+                    isOk: false,
+                    error: "compaction unavailable",
+                });
+            });
+            await expect(rejectedCompactPromise).rejects.toBe("compaction unavailable");
             unmount();
         } finally {
             authActions.clearSession();

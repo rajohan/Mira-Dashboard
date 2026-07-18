@@ -5,6 +5,7 @@ import {
     addOptimisticChatRun,
     type ChatRuntimeEvent,
     clearChatRun,
+    clearCompletedChatRuns,
     createChatRuntimeState,
     reduceChatRuntime,
 } from "../components/features/chat/domain/chatState";
@@ -271,6 +272,8 @@ describe("chat runtime state", () => {
         expect(run).toMatchObject({
             assistant: { text: "Hello" },
             error: "late failure",
+            lastContentKind: "thinking",
+            lastContentSequence: 48,
             lastSequence: 64,
             phase: "error",
         });
@@ -327,6 +330,8 @@ describe("chat runtime state", () => {
         expect(acknowledged.sessions[SESSION]?.runs["provider-1"]).toMatchObject({
             assistant: { text: "done" },
             error: undefined,
+            lastContentKind: "assistant",
+            lastContentSequence: 48,
             lastSequence: 48,
             phase: "completed",
             statusText: undefined,
@@ -531,6 +536,7 @@ describe("chat runtime state", () => {
 
         const run = state.sessions[SESSION]?.runs["run-1"];
         expect(run?.assistant?.text).toBe("canonical final");
+        expect(run?.assistant?.isFinal).toBe(true);
         expect(run?.assistantSource).toBe("chat");
         expect(run?.phase).toBe("completed");
 
@@ -550,6 +556,9 @@ describe("chat runtime state", () => {
         expect(lateSessionUpdate.sessions[SESSION]?.runs["run-1"]?.assistant?.text).toBe(
             "canonical final"
         );
+        expect(
+            lateSessionUpdate.sessions[SESSION]?.runs["run-1"]?.assistant?.isFinal
+        ).toBe(true);
     });
 
     it("merges a no-id tool result into its latest matching call", () => {
@@ -599,7 +608,7 @@ describe("chat runtime state", () => {
         expect(new Set(diagnostics?.map((entry) => entry.key)).size).toBe(2);
     });
 
-    it("retains a completed turn while the next run starts", () => {
+    it("keeps concurrent runtime evidence but clears completed replay for a local run", () => {
         const completed = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
                 kind: "finish",
@@ -619,11 +628,11 @@ describe("chat runtime state", () => {
         expect(next.sessions[SESSION]?.runs["new-run"]?.phase).toBe("active");
 
         const optimistic = addOptimisticChatRun(
-            completed,
+            clearCompletedChatRuns(completed, SESSION),
             SESSION,
             "dashboard-chat-next"
         );
-        expect(optimistic.sessions[SESSION]?.runs["old-run"]?.phase).toBe("completed");
+        expect(optimistic.sessions[SESSION]?.runs["old-run"]).toBeUndefined();
         expect(optimistic.sessions[SESSION]?.runs["dashboard-chat-next"]?.phase).toBe(
             "active"
         );
@@ -769,6 +778,257 @@ describe("chat runtime state", () => {
             runId: "runtime-runless-16",
         });
         expect(runs[0]?.diagnostics[0]?.message.thinking?.[0]?.text).toBe("working");
+    });
+
+    it("attaches an unscoped user steer to the single active run", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "run-1",
+            }),
+            event(32, {
+                kind: "user",
+                message: { content: "steer", role: "user", text: "steer" },
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["run-1"]?.userMessages).toEqual([
+            expect.objectContaining({
+                message: expect.objectContaining({ role: "user", text: "steer" }),
+            }),
+        ]);
+        expect(state.sessions[SESSION]?.runs["runtime-runless-32"]).toBeUndefined();
+    });
+
+    it("keeps a pre-ack steer on the established run beside an optimistic alias", () => {
+        const active = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "status",
+                runId: "provider-run",
+                text: "Thinking",
+            }),
+        ]);
+        const optimistic = addOptimisticChatRun(active, SESSION, "dashboard-chat-steer");
+        const steered = reduceChatRuntime(optimistic, [
+            event(32, {
+                kind: "user",
+                message: { content: "steer", role: "user", text: "steer" },
+            }),
+        ]);
+
+        expect(
+            steered.sessions[SESSION]?.runs["provider-run"]?.userMessages[0]?.message.text
+        ).toBe("steer");
+        expect(
+            steered.sessions[SESSION]?.runs["dashboard-chat-steer"]?.userMessages
+        ).toEqual([]);
+        expect(steered.sessions[SESSION]?.runs["runtime-runless-32"]).toBeUndefined();
+
+        const acknowledged = acknowledgeChatRun(
+            steered,
+            SESSION,
+            "dashboard-chat-steer",
+            "provider-run"
+        );
+        expect(
+            acknowledged.sessions[SESSION]?.runs["provider-run"]?.userMessages
+        ).toHaveLength(1);
+    });
+
+    it("attaches an explicit provider final to a pending runless user echo", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: {
+                    content: "message from another client",
+                    role: "user",
+                    text: "message from another client",
+                },
+            }),
+            event(32, {
+                kind: "finish",
+                message: {
+                    content: "provider answer",
+                    role: "assistant",
+                    text: "provider answer",
+                },
+                outcome: "completed",
+                runId: "provider-run",
+            }),
+        ]);
+
+        const runs = Object.values(state.sessions[SESSION]?.runs || {});
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            aliases: expect.arrayContaining(["provider-run"]),
+            assistant: { text: "provider answer" },
+            phase: "completed",
+            userMessages: [
+                expect.objectContaining({
+                    message: expect.objectContaining({
+                        text: "message from another client",
+                    }),
+                }),
+            ],
+        });
+    });
+
+    it("keeps a dedicated compaction run separate from a runless user echo", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: {
+                    content: "message from another client",
+                    role: "user",
+                    text: "message from another client",
+                },
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "active",
+                runId: "compaction:automatic",
+                text: "Compacting context",
+            }),
+            event(48, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "complete",
+                runId: "compaction:automatic",
+            }),
+            event(64, {
+                kind: "finish",
+                message: {
+                    content: "provider answer",
+                    role: "assistant",
+                    text: "provider answer",
+                },
+                outcome: "completed",
+                runId: "provider-run",
+            }),
+        ]);
+
+        const runs = Object.values(state.sessions[SESSION]?.runs || {});
+        const chatRun = runs.find((run) => run.aliases.includes("provider-run"));
+        const compactionRun = runs.find((run) => run.operation === "compact");
+        expect(runs).toHaveLength(2);
+        expect(chatRun).toMatchObject({
+            assistant: { text: "provider answer" },
+            phase: "completed",
+            userMessages: [
+                expect.objectContaining({
+                    message: expect.objectContaining({
+                        text: "message from another client",
+                    }),
+                }),
+            ],
+        });
+        expect(compactionRun).toMatchObject({
+            operationPhase: "complete",
+            phase: "completed",
+            userMessages: [],
+        });
+    });
+
+    it("ignores an active compaction when assigning an unscoped final", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "chat-run",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "active",
+                runId: "compaction:automatic",
+                text: "Compacting context",
+            }),
+            event(48, {
+                kind: "finish",
+                message: {
+                    content: "provider answer",
+                    role: "assistant",
+                    text: "provider answer",
+                },
+                outcome: "completed",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            assistant: { text: "provider answer" },
+            phase: "completed",
+        });
+        expect(state.sessions[SESSION]?.runs["compaction:automatic"]).toMatchObject({
+            operation: "compact",
+            operationPhase: "active",
+            phase: "active",
+        });
+        expect(state.sessions[SESSION]?.runs["runtime-runless-48"]).toBeUndefined();
+    });
+
+    it("keeps runless work with its user echo when the provider id arrives", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: {
+                    content: "message from another client",
+                    role: "user",
+                    text: "message from another client",
+                },
+            }),
+            event(24, {
+                kind: "thinking",
+                message: {
+                    content: "working before provider id",
+                    role: "assistant",
+                    text: "working before provider id",
+                },
+            }),
+            event(32, {
+                kind: "finish",
+                message: {
+                    content: "provider answer",
+                    role: "assistant",
+                    text: "provider answer",
+                },
+                outcome: "completed",
+                runId: "provider-run",
+            }),
+        ]);
+
+        const runs = Object.values(state.sessions[SESSION]?.runs || {});
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            aliases: expect.arrayContaining(["provider-run"]),
+            assistant: { text: "provider answer" },
+            diagnostics: [
+                expect.objectContaining({
+                    message: expect.objectContaining({
+                        text: "working before provider id",
+                    }),
+                }),
+            ],
+            phase: "completed",
+            userMessages: [
+                expect.objectContaining({
+                    message: expect.objectContaining({
+                        text: "message from another client",
+                    }),
+                }),
+            ],
+        });
     });
 
     it("keeps a concrete final when a runless terminal event follows it", () => {
@@ -1054,6 +1314,45 @@ describe("chat runtime state", () => {
             error: "model failed",
             lastSequence: 32,
             phase: "error",
+        });
+    });
+
+    it("keeps later terminal errors suppressed after a failed tool is recorded", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "tool",
+                message: {
+                    content: "command failed",
+                    role: "tool",
+                    text: "command failed",
+                    toolResult: {
+                        content: "command failed",
+                        isError: true,
+                        name: "Bash",
+                    },
+                },
+                runId: "run-tool-failure",
+                toolKey: "tool:bash:failed",
+            }),
+            event(32, {
+                error: "Bash failed",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-tool-failure",
+                toolFailure: true,
+            }),
+            event(48, {
+                error: "generic terminal error",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-tool-failure",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["run-tool-failure"]).toMatchObject({
+            error: undefined,
+            phase: "error",
+            toolFailure: true,
         });
     });
 
