@@ -146,18 +146,21 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
 
             const id = String(++requestId);
-            const requestTimeoutMs = requestOptions?.timeoutMs;
-            const timeout =
-                requestOptions?.shouldWaitIndefinitely === true
-                    ? undefined
-                    : setTimeout(() => {
-                          if (!pendingRequests.has(id)) {
-                              return;
-                          }
+            const shouldWaitIndefinitely =
+                requestOptions?.shouldWaitIndefinitely === true;
+            const requestTimeoutMs = shouldWaitIndefinitely
+                ? undefined
+                : requestOptions?.timeoutMs;
+            const timeout = shouldWaitIndefinitely
+                ? undefined
+                : setTimeout(() => {
+                      if (!pendingRequests.has(id)) {
+                          return;
+                      }
 
-                          pendingRequests.delete(id);
-                          reject(new Error("Request timeout"));
-                      }, requestTimeoutMs ?? 30_000);
+                      pendingRequests.delete(id);
+                      reject(new Error("Request timeout"));
+                  }, requestTimeoutMs ?? 30_000);
             pendingRequests.set(id, {
                 resolve: resolve as (value: unknown) => void,
                 reject,
@@ -171,7 +174,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                     id,
                     method,
                     params: parameters,
-                    timeoutMs: requestOptions?.timeoutMs,
+                    timeoutMs: requestTimeoutMs,
                 })
             );
         });

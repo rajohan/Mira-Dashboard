@@ -1183,24 +1183,11 @@ describe("Mira Dashboard frontend behavior", () => {
                 {},
                 { timeoutMs: 20 }
             );
-            const timeoutResult = (async () => {
-                try {
-                    await timeoutPromise;
-                    return;
-                } catch (error) {
-                    return error;
-                }
-            })();
             expect(JSON.parse(replacementSocket.sent.at(-1)!)).toMatchObject({
                 method: "custom-timeout",
                 timeoutMs: 20,
             });
-            await Bun.sleep(30);
-            expect(await timeoutResult).toEqual(
-                expect.objectContaining({
-                    message: "Request timeout",
-                })
-            );
+            await expect(timeoutPromise).rejects.toThrow("Request timeout");
 
             const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
             try {
@@ -1208,7 +1195,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 const noDeadlinePromise = client.request<{ completed: boolean }>(
                     "no-deadline",
                     {},
-                    { shouldWaitIndefinitely: true }
+                    { shouldWaitIndefinitely: true, timeoutMs: 20 }
                 );
                 expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCallCount);
                 const noDeadlineRequest = JSON.parse(replacementSocket.sent.at(-1)!) as {
@@ -1216,6 +1203,7 @@ describe("Mira Dashboard frontend behavior", () => {
                     shouldWaitIndefinitely?: boolean;
                 };
                 expect(noDeadlineRequest).not.toHaveProperty("shouldWaitIndefinitely");
+                expect(noDeadlineRequest).not.toHaveProperty("timeoutMs");
                 replacementSocket.message({
                     type: "response",
                     id: noDeadlineRequest.id,
