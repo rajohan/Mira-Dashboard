@@ -10,6 +10,11 @@ interface SnapshotRow {
     snapshot_json: string;
 }
 
+interface SnapshotEventRow {
+    envelope_json: string;
+    runtime_sequence: number;
+}
+
 interface SnapshotKeyRow {
     session_key: string;
 }
@@ -17,6 +22,14 @@ interface SnapshotKeyRow {
 interface SnapshotMaximumSequenceRow {
     maximum_sequence: unknown;
 }
+
+interface ParsedStoredSnapshot {
+    runSignature: string[];
+    snapshot: OpenClawRuntimeSnapshot;
+    usesEventRows: boolean;
+}
+
+const EVENT_ROW_STORAGE = "rows-v1";
 
 function hasReplay(snapshot: OpenClawRuntimeSnapshot): boolean {
     return snapshot.events.length > 0;
@@ -31,6 +44,15 @@ const SAVE_SNAPSHOT_SQL = `
     ) VALUES (?, ?, ?, ?)
 `;
 
+const SAVE_SNAPSHOT_EVENT_SQL = `
+    INSERT OR REPLACE INTO chat_runtime_snapshot_events (
+        gateway_scope,
+        session_key,
+        runtime_sequence,
+        envelope_json
+    ) VALUES (?, ?, ?, ?)
+`;
+
 const PRUNE_SNAPSHOTS_SQL = `
     DELETE FROM chat_runtime_snapshots
     WHERE gateway_scope = ?
@@ -40,6 +62,17 @@ const PRUNE_SNAPSHOTS_SQL = `
           WHERE gateway_scope = ?
           ORDER BY updated_at DESC, rowid DESC
           LIMIT ?
+      )
+`;
+
+const PRUNE_SNAPSHOT_EVENTS_SQL = `
+    DELETE FROM chat_runtime_snapshot_events AS events
+    WHERE events.gateway_scope = ?
+      AND NOT EXISTS (
+          SELECT 1
+          FROM chat_runtime_snapshots AS snapshots
+          WHERE snapshots.gateway_scope = events.gateway_scope
+            AND lower(trim(snapshots.session_key)) = lower(trim(events.session_key))
       )
 `;
 
@@ -64,7 +97,7 @@ function isRuntimeEnvelope(value: unknown): value is OpenClawRuntimeEnvelope {
     );
 }
 
-function parseSnapshot(serialized: string): OpenClawRuntimeSnapshot | undefined {
+function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefined {
     try {
         const value = JSON.parse(serialized) as Record<string, unknown>;
         const events = Array.isArray(value.events) ? value.events : [];
@@ -78,6 +111,7 @@ function parseSnapshot(serialized: string): OpenClawRuntimeSnapshot | undefined 
             !events.every(isRuntimeEnvelope) ||
             !Number.isSafeInteger(throughSequence) ||
             (throughSequence as number) < 0 ||
+            value.eventStorage !== EVENT_ROW_STORAGE ||
             events.some(
                 (event) =>
                     (event as OpenClawRuntimeEnvelope).runtimeSequence >
@@ -86,13 +120,99 @@ function parseSnapshot(serialized: string): OpenClawRuntimeSnapshot | undefined 
         ) {
             return undefined;
         }
-        return value as unknown as OpenClawRuntimeSnapshot;
+        const runSignature = Array.isArray(value.runSignature)
+            ? value.runSignature.filter(
+                  (runId): runId is string =>
+                      typeof runId === "string" && runId.length > 0
+              )
+            : [];
+        if (
+            !Array.isArray(value.runSignature) ||
+            runSignature.length !== value.runSignature.length
+        ) {
+            return undefined;
+        }
+        return {
+            runSignature,
+            snapshot: value as unknown as OpenClawRuntimeSnapshot,
+            usesEventRows: true,
+        };
     } catch {
         return undefined;
     }
 }
 
-/** Persists the bounded bridge replay without exposing its payload as a new API. */
+function parseStoredEvent(
+    row: SnapshotEventRow,
+    throughSequence: number
+): OpenClawRuntimeEnvelope | undefined {
+    try {
+        const envelope = JSON.parse(row.envelope_json) as unknown;
+        return isRuntimeEnvelope(envelope) &&
+            envelope.runtimeSequence === row.runtime_sequence &&
+            envelope.runtimeSequence <= throughSequence
+            ? envelope
+            : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+}
+
+function stringField(
+    record: Record<string, unknown> | undefined,
+    key: string
+): string | undefined {
+    const value = record?.[key];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function snapshotRunSignature(snapshot: OpenClawRuntimeSnapshot): string[] {
+    const runIds = new Set<string>();
+    for (const envelope of snapshot.events) {
+        const payload = asRecord(envelope.payload);
+        const data = asRecord(payload?.data);
+        const runId = stringField(data, "runId") || stringField(payload, "runId");
+        if (runId) {
+            runIds.add(runId);
+        }
+    }
+    if (runIds.size > 0) {
+        return runIds
+            .values()
+            .toArray()
+            .toSorted((left, right) => left.localeCompare(right));
+    }
+    const firstSequence = snapshot.events[0]?.runtimeSequence;
+    return firstSequence === undefined ? [] : [`sequence:${firstSequence}`];
+}
+
+function hasSameRunSignature(left: string[], right: string[]): boolean {
+    return (
+        left.length === right.length &&
+        left.every((runId, index) => runId === right[index])
+    );
+}
+
+function snapshotMetadata(
+    snapshot: OpenClawRuntimeSnapshot,
+    runSignature: string[]
+): Record<string, unknown> {
+    return {
+        completed: snapshot.completed,
+        eventStorage: EVENT_ROW_STORAGE,
+        events: [],
+        runSignature,
+        throughSequence: snapshot.throughSequence,
+    };
+}
+
+/** Persists runtime replay incrementally without exposing its payload as a new API. */
 export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStore {
     readonly #gatewayScope: string;
     readonly #now: () => string;
@@ -109,34 +229,121 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
         this.#now = now;
     }
 
-    #insertSnapshot(
+    #insertSnapshotMetadata(
         sessionKey: string,
         snapshot: OpenClawRuntimeSnapshot,
+        runSignature: string[],
         updatedAt: string
     ): void {
         database
             .prepare(SAVE_SNAPSHOT_SQL)
-            .run(this.#gatewayScope, sessionKey, JSON.stringify(snapshot), updatedAt);
+            .run(
+                this.#gatewayScope,
+                sessionKey,
+                JSON.stringify(snapshotMetadata(snapshot, runSignature)),
+                updatedAt
+            );
+    }
+
+    #deleteEventRows(sessionKey: string): void {
+        database
+            .prepare(
+                `DELETE FROM chat_runtime_snapshot_events
+                 WHERE gateway_scope = ? AND session_key = ?`
+            )
+            .run(this.#gatewayScope, sessionKey);
+    }
+
+    #insertEventRows(
+        sessionKey: string,
+        events: readonly OpenClawRuntimeEnvelope[]
+    ): void {
+        const insert = database.prepare(SAVE_SNAPSHOT_EVENT_SQL);
+        for (const event of events) {
+            insert.run(
+                this.#gatewayScope,
+                sessionKey,
+                event.runtimeSequence,
+                JSON.stringify(event)
+            );
+        }
+    }
+
+    #persistSnapshot(
+        sessionKey: string,
+        snapshot: OpenClawRuntimeSnapshot,
+        updatedAt: string,
+        shouldReplace = false
+    ): void {
+        const existingRow = database
+            .prepare(
+                `SELECT snapshot_json
+                 FROM chat_runtime_snapshots
+                 WHERE gateway_scope = ? AND session_key = ?`
+            )
+            .get(this.#gatewayScope, sessionKey) as SnapshotRow | undefined;
+        const existing = existingRow
+            ? parseStoredSnapshot(existingRow.snapshot_json)
+            : undefined;
+        const runSignature = snapshotRunSignature(snapshot);
+        const canAppend = Boolean(
+            !shouldReplace &&
+            existing?.usesEventRows &&
+            existing.snapshot.completed === snapshot.completed &&
+            existing.snapshot.throughSequence <= snapshot.throughSequence &&
+            hasSameRunSignature(existing.runSignature, runSignature)
+        );
+        if (!canAppend) {
+            this.#deleteEventRows(sessionKey);
+        }
+        const afterSequence = canAppend ? existing!.snapshot.throughSequence : -1;
+        this.#insertEventRows(
+            sessionKey,
+            snapshot.events.filter((event) => event.runtimeSequence > afterSequence)
+        );
+        database
+            .prepare(
+                `DELETE FROM chat_runtime_snapshots
+                 WHERE gateway_scope = ? AND session_key = ?`
+            )
+            .run(this.#gatewayScope, sessionKey);
+        this.#insertSnapshotMetadata(sessionKey, snapshot, runSignature, updatedAt);
     }
 
     #pruneSnapshots(): void {
-        database
+        const pruneResult = database
             .prepare(PRUNE_SNAPSHOTS_SQL)
             .run(this.#gatewayScope, this.#gatewayScope, MAX_CHAT_RUNTIME_SESSIONS);
+        if (pruneResult.changes > 0) {
+            database.prepare(PRUNE_SNAPSHOT_EVENTS_SQL).run(this.#gatewayScope);
+        }
     }
 
     clear(): void {
-        database
-            .prepare("DELETE FROM chat_runtime_snapshots WHERE gateway_scope = ?")
-            .run(this.#gatewayScope);
+        const clearScope = database.transaction(() => {
+            database
+                .prepare(
+                    "DELETE FROM chat_runtime_snapshot_events WHERE gateway_scope = ?"
+                )
+                .run(this.#gatewayScope);
+            database
+                .prepare("DELETE FROM chat_runtime_snapshots WHERE gateway_scope = ?")
+                .run(this.#gatewayScope);
+        });
+        clearScope();
     }
 
     delete(sessionKey: string): void {
-        database
-            .prepare(
-                "DELETE FROM chat_runtime_snapshots WHERE gateway_scope = ? AND session_key = ?"
-            )
-            .run(this.#gatewayScope, normalizedSessionKey(sessionKey));
+        const normalizedKey = normalizedSessionKey(sessionKey);
+        const deleteSnapshot = database.transaction(() => {
+            this.#deleteEventRows(normalizedKey);
+            database
+                .prepare(
+                    "DELETE FROM chat_runtime_snapshots WHERE gateway_scope = ? AND session_key = ?"
+                )
+                .run(this.#gatewayScope, normalizedKey);
+        });
+        deleteSnapshot();
     }
 
     keys(): string[] {
@@ -158,11 +365,33 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                  WHERE gateway_scope = ? AND session_key = ?`
             )
             .get(this.#gatewayScope, normalizedKey) as SnapshotRow | undefined;
-        const snapshot = row ? parseSnapshot(row.snapshot_json) : undefined;
-        if (row && !snapshot) {
-            this.delete(normalizedKey);
+        const stored = row ? parseStoredSnapshot(row.snapshot_json) : undefined;
+        if (!stored) {
+            if (row) {
+                this.delete(normalizedKey);
+            }
+            return undefined;
         }
-        return snapshot;
+        const eventRows = database
+            .prepare(
+                `SELECT runtime_sequence, envelope_json
+                 FROM chat_runtime_snapshot_events
+                 WHERE gateway_scope = ? AND session_key = ?
+                 ORDER BY runtime_sequence ASC`
+            )
+            .all(this.#gatewayScope, normalizedKey) as SnapshotEventRow[];
+        const events = eventRows.map((eventRow) =>
+            parseStoredEvent(eventRow, stored.snapshot.throughSequence)
+        );
+        if (events.includes(undefined)) {
+            this.delete(normalizedKey);
+            return undefined;
+        }
+        return {
+            completed: stored.snapshot.completed,
+            events: events as OpenClawRuntimeEnvelope[],
+            throughSequence: stored.snapshot.throughSequence,
+        };
     }
 
     maximumSequence(): number {
@@ -202,16 +431,22 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
         const persist = database.transaction(() => {
             database
                 .prepare(
+                    `DELETE FROM chat_runtime_snapshot_events
+                     WHERE gateway_scope = ? AND session_key IN (?, ?)`
+                )
+                .run(this.#gatewayScope, sourceKey, canonicalKey);
+            database
+                .prepare(
                     `DELETE FROM chat_runtime_snapshots
                      WHERE gateway_scope = ? AND session_key IN (?, ?)`
                 )
                 .run(this.#gatewayScope, sourceKey, canonicalKey);
             const updatedAt = this.#now();
             if (hasReplay(sourceSnapshot)) {
-                this.#insertSnapshot(sourceKey, sourceSnapshot, updatedAt);
+                this.#persistSnapshot(sourceKey, sourceSnapshot, updatedAt, true);
             }
             if (hasReplay(canonicalSnapshot)) {
-                this.#insertSnapshot(canonicalKey, canonicalSnapshot, updatedAt);
+                this.#persistSnapshot(canonicalKey, canonicalSnapshot, updatedAt, true);
             }
             this.#pruneSnapshots();
         });
@@ -223,8 +458,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
         const persist = database.transaction(() => {
             // Reinsert so a refresh always receives a newer rowid tie-breaker,
             // even when multiple writes share the same millisecond timestamp.
-            this.delete(normalizedKey);
-            this.#insertSnapshot(normalizedKey, snapshot, this.#now());
+            this.#persistSnapshot(normalizedKey, snapshot, this.#now());
             this.#pruneSnapshots();
         });
         persist();

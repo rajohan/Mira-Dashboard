@@ -1453,6 +1453,76 @@ describe("chat projection", () => {
         expect(projection.activeRuns).toEqual([]);
     });
 
+    it("reconciles a late runtime copy of a history tool before the final answer", () => {
+        const history: ChatHistoryMessage[] = [
+            { ...message("user", "question"), timestamp: "2026-07-18T16:35:30.000Z" },
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-18T16:35:31.998Z",
+                toolCalls: [
+                    {
+                        arguments: { command: "gh api graphql" },
+                        id: "call-1",
+                        name: "bash",
+                        toolResult: {
+                            content: "completed",
+                            id: "call-1",
+                            name: "bash",
+                        },
+                    },
+                ],
+            },
+            {
+                ...message("assistant", "answer"),
+                timestamp: "2026-07-18T16:35:32.000Z",
+            },
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-18T16:35:32.002Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: { cmd: "gh api graphql" },
+                            id: "call-1",
+                            name: "Bash",
+                            toolResult: {
+                                content: "completed",
+                                id: "call-1",
+                                name: "Bash",
+                            },
+                        },
+                    ],
+                },
+                runId: "late-runtime-run",
+                toolKey: "tool:call-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            projection.rows.filter((row) => row.message.toolCalls?.length)
+        ).toHaveLength(1);
+        expect(projection.rows.at(-1)).toMatchObject({
+            kind: "message",
+            message: { text: "answer" },
+        });
+        expect(projection.activeRuns).toEqual([]);
+    });
+
     it("does not append stale activity after a status-only run final", () => {
         const history = [
             { ...message("user", "question"), timestamp: "2026-07-16T12:00:00.000Z" },

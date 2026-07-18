@@ -65,6 +65,75 @@ describe("OpenClaw chat snapshot store", () => {
         }
     });
 
+    it("appends new event rows without rewriting earlier runtime payloads", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        const firstSnapshot = snapshotFor(sessionKey, 1);
+        const secondEvent = {
+            ...firstSnapshot.events[0]!,
+            payload: {
+                runId: "run-1",
+                sessionKey,
+                stream: "thinking",
+                text: "second update",
+            },
+            runtimeSequence: 2,
+        };
+        const expandedSnapshot: OpenClawRuntimeSnapshot = {
+            completed: false,
+            events: [...firstSnapshot.events, secondEvent],
+            throughSequence: 2,
+        };
+
+        try {
+            store.save(sessionKey, firstSnapshot);
+            const firstEventRow = database
+                .prepare(
+                    `SELECT rowid
+                     FROM chat_runtime_snapshot_events
+                     WHERE gateway_scope = ? AND session_key = ? AND runtime_sequence = 1`
+                )
+                .get(gatewayScope, sessionKey) as { rowid: number };
+
+            store.save(sessionKey, expandedSnapshot);
+
+            const retainedEventRow = database
+                .prepare(
+                    `SELECT rowid
+                     FROM chat_runtime_snapshot_events
+                     WHERE gateway_scope = ? AND session_key = ? AND runtime_sequence = 1`
+                )
+                .get(gatewayScope, sessionKey) as { rowid: number };
+            const eventCount = database
+                .prepare(
+                    `SELECT count(*) AS count
+                     FROM chat_runtime_snapshot_events
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKey) as { count: number };
+            const metadata = database
+                .prepare(
+                    `SELECT length(snapshot_json) AS bytes,
+                            json_extract(snapshot_json, '$.eventStorage') AS storage
+                     FROM chat_runtime_snapshots
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKey) as {
+                bytes: number;
+                storage: string;
+            };
+
+            expect(retainedEventRow.rowid).toBe(firstEventRow.rowid);
+            expect(eventCount.count).toBe(2);
+            expect(metadata).toEqual({ bytes: expect.any(Number), storage: "rows-v1" });
+            expect(metadata.bytes).toBeLessThan(300);
+            expect(store.load(sessionKey)).toEqual(expandedSnapshot);
+        } finally {
+            store.clear();
+        }
+    });
+
     it("normalizes session keys across snapshot CRUD operations", () => {
         const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
         const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
@@ -156,9 +225,8 @@ describe("OpenClaw chat snapshot store", () => {
     });
 
     it("bounds persisted sessions per gateway scope across process lifetimes", () => {
-        const store = new SqliteOpenClawChatSnapshotStore(
-            `gateway-scope-${crypto.randomUUID()}`
-        );
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
         const sessionKeys = Array.from(
             { length: MAX_CHAT_RUNTIME_SESSIONS + 1 },
             (_, index) => `agent:test:bounded-${index}`
@@ -188,6 +256,14 @@ describe("OpenClaw chat snapshot store", () => {
             expect(store.keys()).toHaveLength(MAX_CHAT_RUNTIME_SESSIONS);
             expect(store.load(sessionKeys[0]!)).toBeUndefined();
             expect(store.load(sessionKeys.at(-1)!)).toBeDefined();
+            const prunedEventCount = database
+                .prepare(
+                    `SELECT count(*) AS count
+                     FROM chat_runtime_snapshot_events
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKeys[0]!) as { count: number };
+            expect(prunedEventCount.count).toBe(0);
         } finally {
             store.clear();
         }

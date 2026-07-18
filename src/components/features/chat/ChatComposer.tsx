@@ -14,6 +14,7 @@ import {
     Paperclip,
     Pin,
     Settings2,
+    SlidersHorizontal,
     Smile,
     Square,
     Wrench,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import {
     type KeyboardEvent as ReactKeyboardEvent,
+    type ReactNode,
     type RefObject,
     useEffect,
     useRef,
@@ -103,6 +105,47 @@ function PanelHeader({
     );
 }
 
+/** Renders one accessible toggle inside the chat display drawer. */
+function DisplayToggle({
+    label,
+    description,
+    isPressed,
+    isDisabled = false,
+    icon,
+    onToggle,
+}: {
+    label: string;
+    description: string;
+    isPressed: boolean;
+    isDisabled?: boolean;
+    icon: ReactNode;
+    onToggle: () => void;
+}) {
+    return (
+        <button
+            type="button"
+            aria-label={label}
+            aria-pressed={isPressed}
+            disabled={isDisabled}
+            onClick={onToggle}
+            className="flex w-full items-center gap-2 rounded-md border border-primary-700 bg-primary-900/50 px-2.5 py-2 text-left transition hover:border-primary-600 hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+            <span className={isPressed ? "text-accent-300" : "text-primary-500"}>
+                {icon}
+            </span>
+            <span className="min-w-0 flex-1">
+                <span className="block text-xs font-medium text-primary-100">
+                    {label}
+                </span>
+                <span className="block text-[11px] text-primary-400">{description}</span>
+            </span>
+            <span className="shrink-0 text-[10px] tracking-wide text-primary-400 uppercase">
+                {isPressed ? "On" : "Off"}
+            </span>
+        </button>
+    );
+}
+
 /**
  * Returns whether Enter should submit instead of inserting a newline.
  *
@@ -135,6 +178,7 @@ interface ChatComposerProperties {
     modelOptions?: ChatModelOption[];
     shouldShowThinking?: boolean;
     shouldShowTools?: boolean;
+    shouldExpandToolDetails?: boolean;
     shouldKeepThinkingAfterFinal?: boolean;
     compactDisabled?: boolean;
     preferenceControlsDisabled?: boolean;
@@ -150,6 +194,7 @@ interface ChatComposerProperties {
     onToggleRecording: () => void;
     onToggleThinking?: () => void;
     onToggleTools?: () => void;
+    onToggleToolDetailsExpansion?: () => void;
     onToggleKeepThinkingAfterFinal?: () => void;
     onSelectThinkingLevel?: (value: string) => void;
     onSelectSpeed?: (value: string) => void;
@@ -174,6 +219,7 @@ export function ChatComposer({
     modelOptions = [],
     shouldShowThinking,
     shouldShowTools,
+    shouldExpandToolDetails = false,
     shouldKeepThinkingAfterFinal = false,
     compactDisabled,
     preferenceControlsDisabled,
@@ -189,6 +235,7 @@ export function ChatComposer({
     onToggleRecording,
     onToggleThinking,
     onToggleTools,
+    onToggleToolDetailsExpansion,
     onToggleKeepThinkingAfterFinal,
     onSelectThinkingLevel,
     onSelectSpeed,
@@ -616,55 +663,64 @@ export function ChatComposer({
                                     </>
                                 )}
                             </Popover>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                aria-pressed={shouldShowThinking}
-                                onClick={() => onToggleThinking?.()}
-                                disabled={!selectedSessionKey}
-                                className={
-                                    shouldShowThinking
-                                        ? "p-1.5 text-accent-300 hover:bg-primary-600 hover:text-primary-100"
-                                        : "p-1.5 text-primary-500 hover:bg-primary-600 hover:text-primary-100"
-                                }
-                                title="Show thinking"
-                            >
-                                <Brain className="size-4" />
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                aria-pressed={shouldShowTools}
-                                onClick={() => onToggleTools?.()}
-                                disabled={!selectedSessionKey}
-                                className={
-                                    shouldShowTools
-                                        ? "p-1.5 text-accent-300 hover:bg-primary-600 hover:text-primary-100"
-                                        : "p-1.5 text-primary-500 hover:bg-primary-600 hover:text-primary-100"
-                                }
-                                title="Show tools"
-                            >
-                                <Wrench className="size-4" />
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                aria-pressed={shouldKeepThinkingAfterFinal}
-                                aria-label="Keep thinking after final answer"
-                                onClick={() => onToggleKeepThinkingAfterFinal?.()}
-                                disabled={!selectedSessionKey || !shouldShowThinking}
-                                className={
-                                    shouldKeepThinkingAfterFinal
-                                        ? "p-1.5 text-accent-300 hover:bg-primary-600 hover:text-primary-100"
-                                        : "p-1.5 text-primary-500 hover:bg-primary-600 hover:text-primary-100"
-                                }
-                                title="Keep thinking after final answer"
-                            >
-                                <Pin className="size-4" />
-                            </Button>
+                            <Popover className="relative">
+                                {({ close }) => (
+                                    <>
+                                        <PopoverButton
+                                            aria-label="Chat display settings"
+                                            disabled={!selectedSessionKey}
+                                            className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 disabled:cursor-not-allowed disabled:opacity-40 data-focus:bg-primary-700 data-focus:text-primary-100"
+                                        >
+                                            <SlidersHorizontal className="size-4" />
+                                        </PopoverButton>
+                                        <PopoverPanel
+                                            anchor={{ to: "top start", gap: 11 }}
+                                            className="z-50 w-80 space-y-2 rounded-lg border border-primary-600 bg-primary-800 p-3 text-sm shadow-xl outline-none"
+                                        >
+                                            <PanelHeader
+                                                title="Chat display"
+                                                closeLabel="Close chat display settings"
+                                                onClose={() => close()}
+                                            />
+                                            <DisplayToggle
+                                                label="Show thinking"
+                                                description="Show thinking and working updates"
+                                                isPressed={Boolean(shouldShowThinking)}
+                                                icon={<Brain className="size-4" />}
+                                                onToggle={() => onToggleThinking?.()}
+                                            />
+                                            <DisplayToggle
+                                                label="Show tools"
+                                                description="Show tool calls and results"
+                                                isPressed={Boolean(shouldShowTools)}
+                                                icon={<Wrench className="size-4" />}
+                                                onToggle={() => onToggleTools?.()}
+                                            />
+                                            <DisplayToggle
+                                                label="Keep thinking after final answer"
+                                                description="Retain thinking after a run completes"
+                                                isPressed={shouldKeepThinkingAfterFinal}
+                                                isDisabled={!shouldShowThinking}
+                                                icon={<Pin className="size-4" />}
+                                                onToggle={() =>
+                                                    onToggleKeepThinkingAfterFinal?.()
+                                                }
+                                            />
+                                            <DisplayToggle
+                                                label="Expand tool call details"
+                                                description="Apply to current and future tool bubbles"
+                                                isPressed={shouldExpandToolDetails}
+                                                icon={
+                                                    <SlidersHorizontal className="size-4" />
+                                                }
+                                                onToggle={() =>
+                                                    onToggleToolDetailsExpansion?.()
+                                                }
+                                            />
+                                        </PopoverPanel>
+                                    </>
+                                )}
+                            </Popover>
                         </div>
                         <div className="flex items-center gap-1">
                             <Popover className="relative">

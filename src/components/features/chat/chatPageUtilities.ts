@@ -9,8 +9,16 @@ const CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY =
 export interface StoredChatDiagnosticVisibility {
     keepThinkingAfterFinal: boolean;
     thinking: boolean;
+    toolDetailsExpanded: boolean;
     tools: boolean;
 }
+
+const DEFAULT_CHAT_DIAGNOSTIC_VISIBILITY: StoredChatDiagnosticVisibility = {
+    keepThinkingAfterFinal: false,
+    thinking: false,
+    toolDetailsExpanded: false,
+    tools: false,
+};
 
 function deletedMessagesStorageKey(sessionKey: string): string {
     return `openclaw:deleted:${sessionKey}`;
@@ -56,21 +64,22 @@ export function writeDeletedMessageKeys(
 
 export function readStoredChatDiagnosticVisibility(): StoredChatDiagnosticVisibility {
     if (typeof window === "undefined") {
-        return { keepThinkingAfterFinal: false, thinking: false, tools: false };
+        return DEFAULT_CHAT_DIAGNOSTIC_VISIBILITY;
     }
     try {
         const raw = localStorage.getItem(CHAT_DIAGNOSTIC_VISIBILITY_STORAGE_KEY);
         if (!raw) {
-            return { keepThinkingAfterFinal: false, thinking: false, tools: false };
+            return DEFAULT_CHAT_DIAGNOSTIC_VISIBILITY;
         }
         const parsed = JSON.parse(raw) as Partial<StoredChatDiagnosticVisibility>;
         return {
             keepThinkingAfterFinal: parsed.keepThinkingAfterFinal === true,
             thinking: parsed.thinking === true,
+            toolDetailsExpanded: parsed.toolDetailsExpanded === true,
             tools: parsed.tools === true,
         };
     } catch {
-        return { keepThinkingAfterFinal: false, thinking: false, tools: false };
+        return DEFAULT_CHAT_DIAGNOSTIC_VISIBILITY;
     }
 }
 

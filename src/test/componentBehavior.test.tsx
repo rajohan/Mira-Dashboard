@@ -601,6 +601,7 @@ describe("shared component helpers", () => {
                     onSelectSession={onSelectSession}
                 />
                 <ChatMessageDetails
+                    shouldExpandToolDetails={true}
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
                     message={{
                         attachments: [],
@@ -630,6 +631,7 @@ describe("shared component helpers", () => {
                     }}
                 />
                 <ChatMessageDetails
+                    shouldExpandToolDetails={true}
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
                     message={{
                         attachments: [],
@@ -676,6 +678,92 @@ describe("shared component helpers", () => {
         expect(screen.getByText("Tool result · Bash")).toBeInTheDocument();
         expect(screen.getByText("late id output")).toBeInTheDocument();
         expect(screen.getByText("No arguments")).toBeInTheDocument();
+    });
+
+    it("collapses individual tool bubbles and applies the global default to new tools", async () => {
+        const user = userEvent.setup();
+        const onToggleToolDetails = jest.fn();
+        const firstMessage = {
+            content: "",
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                {
+                    arguments: { command: "echo one" },
+                    id: "call-1",
+                    name: "bash",
+                    toolResult: {
+                        content: "first output",
+                        id: "call-1",
+                        name: "bash",
+                    },
+                },
+            ],
+        };
+        const properties = {
+            messageKey: "message-1",
+            onToggleToolDetails,
+            visibility: { shouldShowThinking: true, shouldShowTools: true },
+        };
+        const { rerender } = render(
+            <ChatMessageDetails
+                {...properties}
+                message={firstMessage}
+                shouldExpandToolDetails={true}
+            />
+        );
+
+        expect(screen.getByText("first output")).toBeInTheDocument();
+        await user.click(
+            screen.getByRole("button", { name: "Collapse Bash tool details" })
+        );
+        expect(onToggleToolDetails).toHaveBeenCalledWith("message-1:call:call-1");
+
+        rerender(
+            <ChatMessageDetails
+                {...properties}
+                message={firstMessage}
+                shouldExpandToolDetails={true}
+                toolDetailExpansionOverrides={new Map([["message-1:call:call-1", false]])}
+            />
+        );
+        expect(
+            screen.getByRole("button", { name: "Expand Bash tool details" })
+        ).toHaveAttribute("aria-expanded", "false");
+        expect(screen.queryByText("first output")).toBeNull();
+        expect(screen.queryByText("Tool input")).toBeNull();
+
+        const messageWithNewTool = {
+            ...firstMessage,
+            toolCalls: [
+                ...firstMessage.toolCalls,
+                {
+                    arguments: { command: "echo two" },
+                    id: "call-2",
+                    name: "exec",
+                },
+            ],
+        };
+        rerender(
+            <ChatMessageDetails
+                {...properties}
+                message={messageWithNewTool}
+                shouldExpandToolDetails={false}
+            />
+        );
+        expect(
+            screen.getAllByRole("button", { name: /expand .* tool details/i })
+        ).toHaveLength(2);
+        expect(screen.queryByText("Tool input")).toBeNull();
+
+        rerender(
+            <ChatMessageDetails
+                {...properties}
+                message={messageWithNewTool}
+                shouldExpandToolDetails={true}
+            />
+        );
+        expect(screen.getAllByText("Tool input")).toHaveLength(2);
     });
 
     it("drives chat composer attachments, slash suggestions, emoji, and submit controls", async () => {
@@ -873,6 +961,7 @@ describe("shared component helpers", () => {
         const { rerender } = render(
             <ChatComposer {...properties} shouldShowThinking={false} />
         );
+        await user.click(screen.getByRole("button", { name: "Chat display settings" }));
         const toggle = screen.getByRole("button", {
             name: "Keep thinking after final answer",
         });

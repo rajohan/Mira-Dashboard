@@ -107,6 +107,12 @@ export function Chat() {
     const [showToolOutput, setShowToolOutput] = useState(
         () => readStoredChatDiagnosticVisibility().tools
     );
+    const [shouldExpandToolDetails, setShouldExpandToolDetails] = useState(
+        () => readStoredChatDiagnosticVisibility().toolDetailsExpanded
+    );
+    const [toolDetailExpansionOverrides, setToolDetailExpansionOverrides] = useState<
+        Map<string, boolean>
+    >(() => new Map());
     const [keepThinkingAfterFinal, setKeepThinkingAfterFinal] = useState(
         () => readStoredChatDiagnosticVisibility().keepThinkingAfterFinal
     );
@@ -221,15 +227,36 @@ export function Chat() {
             selectedSessionKey ? readDeletedMessageKeys(selectedSessionKey) : new Set()
         );
         setPendingDeleteMessageKey(undefined);
+        setToolDetailExpansionOverrides(new Map());
     }, [selectedSessionKey]);
 
     useEffect(() => {
         writeStoredChatDiagnosticVisibility({
             keepThinkingAfterFinal,
             thinking: showThinkingOutput,
+            toolDetailsExpanded: shouldExpandToolDetails,
             tools: showToolOutput,
         });
-    }, [keepThinkingAfterFinal, showThinkingOutput, showToolOutput]);
+    }, [
+        keepThinkingAfterFinal,
+        shouldExpandToolDetails,
+        showThinkingOutput,
+        showToolOutput,
+    ]);
+
+    const handleToggleToolDetails = (toolKey: string) => {
+        setToolDetailExpansionOverrides((current) => {
+            const next = new Map(current);
+            const isExpanded = current.get(toolKey) ?? shouldExpandToolDetails;
+            next.set(toolKey, !isExpanded);
+            return next;
+        });
+    };
+
+    const handleToggleAllToolDetails = () => {
+        setShouldExpandToolDetails((current) => !current);
+        setToolDetailExpansionOverrides(new Map());
+    };
 
     const sessionOptions = sessionsForSelectedAgent
         .filter((session) => hasSessionKey(session))
@@ -398,6 +425,9 @@ export function Chat() {
                         onUserScrollIntent={handleUserScrollIntent}
                         onTtsError={setSendError}
                         onDeleteMessage={handleDeleteMessage}
+                        shouldExpandToolDetails={shouldExpandToolDetails}
+                        toolDetailExpansionOverrides={toolDetailExpansionOverrides}
+                        onToggleToolDetails={handleToggleToolDetails}
                     />
 
                     {(sendError || error) && (
@@ -438,6 +468,7 @@ export function Chat() {
                         selectedSession={selectedSession}
                         shouldShowThinking={showThinkingOutput}
                         shouldShowTools={showToolOutput}
+                        shouldExpandToolDetails={shouldExpandToolDetails}
                         shouldKeepThinkingAfterFinal={keepThinkingAfterFinal}
                         compactDisabled={compactDisabled}
                         preferenceControlsDisabled={preferenceControlsDisabled}
@@ -453,6 +484,7 @@ export function Chat() {
                         onToggleRecording={() => void handleToggleRecording()}
                         onToggleThinking={() => setShowThinkingOutput((value) => !value)}
                         onToggleTools={() => setShowToolOutput((value) => !value)}
+                        onToggleToolDetailsExpansion={handleToggleAllToolDetails}
                         onToggleKeepThinkingAfterFinal={() => {
                             if (!showThinkingOutput) {
                                 return;

@@ -23,6 +23,7 @@ import type {
 import { findChatSessionRuntimeState } from "./chatState";
 
 const RUN_START_USER_SKEW_MS = 1000;
+const RUNTIME_FINAL_SKEW_MS = 5000;
 const RUNTIME_USER_ECHO_WINDOW_MS = 5000;
 
 export interface ChatProjection {
@@ -303,7 +304,7 @@ function canonicalFinalIndex(
             if (
                 finalTimestamp !== undefined &&
                 Number.isFinite(latestEvidenceTimestamp) &&
-                finalTimestamp >= latestEvidenceTimestamp
+                finalTimestamp + RUNTIME_FINAL_SKEW_MS >= latestEvidenceTimestamp
             ) {
                 return index;
             }
@@ -320,22 +321,24 @@ function toolSignatures(message: ChatHistoryMessage): string[] {
     const nestedResultSignatures: string[] = [];
     const toolCalls = message.toolCalls || [];
     const resultSignature = (result: NonNullable<ChatHistoryMessage["toolResult"]>) =>
-        stableChatStringify({
-            result: {
-                content: result.content,
-                error: result.isError || false,
-                id: result.id || "",
-                images: result.images || [],
-                name: result.name || "",
-            },
-        });
+        result.id
+            ? `result-id:${result.id}`
+            : stableChatStringify({
+                  result: {
+                      content: result.content,
+                      error: result.isError || false,
+                      images: result.images || [],
+                      name: result.name || "",
+                  },
+              });
     for (const call of toolCalls) {
         signatures.push(
-            stableChatStringify({
-                arguments: call.arguments ?? undefined,
-                id: call.id || "",
-                name: call.name,
-            })
+            call.id
+                ? `call-id:${call.id}`
+                : stableChatStringify({
+                      arguments: call.arguments ?? undefined,
+                      name: call.name,
+                  })
         );
         if (call.toolResult) {
             const signature = resultSignature(call.toolResult);
