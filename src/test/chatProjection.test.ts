@@ -1131,6 +1131,9 @@ describe("chat projection", () => {
 
         expect(stableChatStringify(1n)).not.toBe(stableChatStringify("1"));
         expect(stableChatStringify(circular)).not.toBe(stableChatStringify("[Circular]"));
+        expect(stableChatStringify({ ä: 1, z: 2 })).toBe(
+            '["object","Object",[["z",["number",2]],["ä",["number",1]]]]'
+        );
     });
 
     it("keeps text-bearing tool work separate from the final answer", () => {

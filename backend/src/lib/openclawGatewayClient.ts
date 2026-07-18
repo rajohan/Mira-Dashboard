@@ -653,7 +653,10 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             typeof requestedTimeoutMs === "number" &&
             Number.isFinite(requestedTimeoutMs) &&
             requestedTimeoutMs > 0
-                ? Math.min(Math.trunc(requestedTimeoutMs), MAX_TIMER_DELAY_MS)
+                ? Math.min(
+                      Math.max(Math.trunc(requestedTimeoutMs), 1),
+                      MAX_TIMER_DELAY_MS
+                  )
                 : configuredTimeoutMs;
 
         return new Promise((resolve, reject) => {

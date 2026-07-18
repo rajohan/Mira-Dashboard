@@ -55,7 +55,15 @@ function canonicalChatValue(value: unknown, ancestors: Set<object>): unknown {
         "object",
         constructorName,
         Object.entries(value as Record<string, unknown>)
-            .toSorted(([left], [right]) => left.localeCompare(right))
+            .toSorted(([left], [right]) => {
+                if (left < right) {
+                    return -1;
+                }
+                if (left > right) {
+                    return 1;
+                }
+                return 0;
+            })
             .map(([key, item]) => [key, canonicalChatValue(item, nestedAncestors)]),
     ];
 }

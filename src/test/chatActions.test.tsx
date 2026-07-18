@@ -416,7 +416,7 @@ describe("chat actions", () => {
 
     it("generates a send id when randomUUID is unavailable", async () => {
         const crypto = globalThis.crypto;
-        const originalRandomUuid = crypto.randomUUID;
+        const originalDescriptor = Object.getOwnPropertyDescriptor(crypto, "randomUUID");
         Object.defineProperty(crypto, "randomUUID", {
             configurable: true,
             value: undefined,
@@ -457,10 +457,11 @@ describe("chat actions", () => {
                 })
             );
         } finally {
-            Object.defineProperty(crypto, "randomUUID", {
-                configurable: true,
-                value: originalRandomUuid,
-            });
+            if (originalDescriptor) {
+                Object.defineProperty(crypto, "randomUUID", originalDescriptor);
+            } else {
+                Reflect.deleteProperty(crypto, "randomUUID");
+            }
         }
     });
 
