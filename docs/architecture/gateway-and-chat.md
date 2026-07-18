@@ -125,7 +125,9 @@ walk backward only until they overlap the cached sequence watermark. The browser
 keeps an LRU cache of two complete session transcripts. Incremental reuse
 requires complete `__openclaw.seq` metadata; if any loaded message lacks a
 sequence, Dashboard performs a full uncached load and does not advance the
-watermark.
+watermark. Every refresh still revalidates the newest page by sequence, even
+when the total row count is unchanged, so same-sequence image hydration or
+tool-result rewrites replace stale cached rows without reloading older pages.
 
 ### Runtime Replay Cache
 
@@ -171,7 +173,9 @@ off-screen terminal events continue to clean up their own runs while a snapshot
 is in flight. Canonical history wins reconciliation after a terminal refresh;
 transient diagnostics are inserted before the matching final answer. Exact tool
 call IDs may match results across a later user boundary, while name-only fallback
-matching remains bounded to the current user turn.
+matching remains bounded to the current user turn. Transcript order and runtime
+sequence take precedence over message timestamps when a queued user message and
+compaction final carry inverted wall-clock times.
 
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
@@ -197,8 +201,8 @@ in-progress thinking row until a primary assistant answer supersedes it.
 
 Tool-call failures should render as tool diagnostics, not as the global chat
 error banner. The global error banner is reserved for send failures, Gateway
-disconnects, and terminal chat/runtime failures that are not already represented
-by a visible failed tool result.
+disconnects, and non-tool terminal chat/runtime failures. A tool terminal error
+stays out of the global banner even when it arrives before its diagnostic row.
 
 When changing chat event handling, test these cases:
 
@@ -217,11 +221,16 @@ When changing chat event handling, test these cases:
 - main and ops sessions never share runtime replay state;
 - an initial history load follows all pages, while incomplete sequence metadata
   cannot advance an incremental cache watermark;
+- same-count first-page rewrites refresh cached tool output without reloading
+  older pages;
 - coalescing or trimming persisted replay removes stale event rows;
 - tool trimming above the per-run byte limit preserves thinking;
+- item-stream tool call/output variants are trimmed as transcript-backed tools;
 - aggregate memory eviction can rehydrate the evicted session from SQLite;
 - exact tool-call IDs can match across user boundaries, while name-only matches
   cannot;
+- compaction diagnostics remain before their final when the next queued user
+  message has an earlier timestamp;
 - hiding diagnostics does not remove them from cached client state;
 - the global tool-detail setting updates existing bubbles and the default for
   new bubbles;

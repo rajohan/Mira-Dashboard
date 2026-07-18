@@ -96,6 +96,10 @@ export function openClawToolMessage(
             hasErrorResult ||
             isFailedResult)
     );
+    const resultKeys = resultRecord ? Object.keys(resultRecord) : [];
+    const isPlaceholderResult =
+        resultKeys.length > 0 &&
+        resultKeys.every((key) => ["durationMs", "exitCode", "status"].includes(key));
     const toolResult = shouldCreateResult
         ? {
               id,
@@ -107,6 +111,7 @@ export function openClawToolMessage(
                   data.isError === true ||
                   hasErrorResult ||
                   isFailedResult,
+              isPlaceholder: isPlaceholderResult || undefined,
           }
         : undefined;
     const toolCall =

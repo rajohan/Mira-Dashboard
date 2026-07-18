@@ -903,7 +903,7 @@ describe("chat runtime controller", () => {
         ).toBe("working");
     });
 
-    it("uses tool rows before falling back to the global error surface", async () => {
+    it("keeps tool failures out of the global error surface in either event order", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
         const onError = jest.fn();
@@ -961,15 +961,33 @@ describe("chat runtime controller", () => {
                 ...finish(SELECTED, 48, "tool execution failed: missing diagnostic"),
                 toolFailure: true,
             });
+            fake.emit({
+                kind: "tool",
+                message: {
+                    content: "late failure details",
+                    role: "tool",
+                    text: "late failure details",
+                    toolResult: {
+                        content: "late failure details",
+                        id: "tool-late",
+                        isError: true,
+                        name: "exec",
+                    },
+                },
+                runId: "run-1",
+                sequence: 56,
+                sessionKey: SELECTED,
+                timestamp: "2026-07-16T12:00:00.500Z",
+                toolKey: "tool:tool-late",
+            });
         });
-        expect(onError).toHaveBeenCalledTimes(1);
-        expect(onError).toHaveBeenCalledWith("tool execution failed: missing diagnostic");
+        expect(onError).not.toHaveBeenCalled();
         expect(result.current.state.sessions[SELECTED]?.runs["run-1"]?.error).toBe(
-            "tool execution failed: missing diagnostic"
+            undefined
         );
 
         act(() => fake.emit(finish(SELECTED, 64)));
-        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).not.toHaveBeenCalled();
 
         act(() => {
             result.current.clearSession(SELECTED);
@@ -998,7 +1016,7 @@ describe("chat runtime controller", () => {
             });
         });
         expect(onError).toHaveBeenCalledWith("model crashed");
-        expect(onError).toHaveBeenCalledTimes(2);
+        expect(onError).toHaveBeenCalledTimes(1);
     });
 
     it("retains an old completed snapshot until a new run begins", async () => {

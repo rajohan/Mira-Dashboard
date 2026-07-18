@@ -118,6 +118,54 @@ describe("OpenClaw history loader", () => {
         expect(second).toBe(first);
     });
 
+    it("revalidates rewritten first-page rows without reloading older pages", async () => {
+        let output = "stale output";
+        const requests: number[] = [];
+        const loader = new OpenClawHistoryLoader(
+            new OpenClawChatAdapter(),
+            async (request) => {
+                requests.push(request.offset);
+                return request.offset === 0
+                    ? {
+                          hasMore: true,
+                          messages: [
+                              rawMessage(2, "tool", output, {
+                                  toolCallId: "call-1",
+                                  toolName: "bash",
+                              }),
+                          ],
+                          nextOffset: 1,
+                          offset: 0,
+                          sessionId: "session-1",
+                          totalMessages: 2,
+                      }
+                    : {
+                          hasMore: false,
+                          messages: [
+                              rawMessage(1, "assistant", [
+                                  {
+                                      id: "call-1",
+                                      name: "bash",
+                                      type: "toolCall",
+                                  },
+                              ]),
+                          ],
+                          offset: 1,
+                          sessionId: "session-1",
+                          totalMessages: 2,
+                      };
+            }
+        );
+
+        const initial = await loader.history(SESSION, 1);
+        output = "current output";
+        const refreshed = await loader.history(SESSION, 1);
+
+        expect(requests).toEqual([0, 1, 0]);
+        expect(initial[0]?.toolCalls?.[0]?.toolResult?.content).toBe("stale output");
+        expect(refreshed[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current output");
+    });
+
     it("appends newly persisted messages without reloading older cached pages", async () => {
         let totalMessages = 4;
         const requests: number[] = [];

@@ -273,6 +273,20 @@ function coalesceReplayEnvelope(
     };
 }
 
+const TRANSCRIPT_BACKED_ITEM_KINDS = new Set([
+    "command",
+    "custom_tool_call",
+    "custom_tool_call_output",
+    "function_call",
+    "function_call_output",
+    "tool_call",
+    "tool_call_output",
+    "tool_result",
+    "tool_use",
+    "toolcall",
+    "toolresult",
+]);
+
 function isTranscriptBackedToolEnvelope(envelope: OpenClawRuntimeEnvelope): boolean {
     if (replayToolData(envelope)) {
         return true;
@@ -291,7 +305,7 @@ function isTranscriptBackedToolEnvelope(envelope: OpenClawRuntimeEnvelope): bool
         stringField(data, "kind") ||
         ""
     ).toLowerCase();
-    return kind === "command" || kind === "toolcall";
+    return TRANSCRIPT_BACKED_ITEM_KINDS.has(kind);
 }
 
 function trimRetainedRun(run: RetainedRun): void {

@@ -92,6 +92,55 @@ describe("OpenClaw chat adapter", () => {
         expect(tool[1]?.kind === "tool" && tool[1].toolKey).toBe("tool:call-1");
     });
 
+    it("marks status-only runtime tool results as transcript placeholders", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        args: { cmd: "date" },
+                        name: "bash",
+                        phase: "result",
+                        result: { durationMs: 12, exitCode: 0, status: "completed" },
+                        toolCallId: "call-1",
+                    },
+                    stream: "tool",
+                },
+                7
+            )
+        );
+        const tool = events.find((event) => event.kind === "tool");
+
+        expect(tool?.kind === "tool" && tool.message.toolResult).toMatchObject({
+            id: "call-1",
+            isPlaceholder: true,
+        });
+    });
+
+    it("keeps empty object tool output as a substantive transcript result", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        name: "bash",
+                        phase: "result",
+                        result: {},
+                        toolCallId: "call-1",
+                    },
+                    stream: "tool",
+                },
+                7
+            )
+        );
+        const tool = events.find((event) => event.kind === "tool");
+        const result = tool?.kind === "tool" ? tool.message.toolResult : undefined;
+
+        expect(result?.isPlaceholder).toBeUndefined();
+    });
+
     it("restores active-run status from a replayed session start", () => {
         const adapter = new OpenClawChatAdapter();
         const started = adapter.event(envelope("session.started", {}, 8));

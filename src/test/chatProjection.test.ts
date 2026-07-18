@@ -174,6 +174,43 @@ describe("chat projection", () => {
         ).toEqual(["first", "OK", "second", "OK"]);
     });
 
+    it("anchors repeated unscoped final text to the matching terminal timestamp", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:01.000Z", {
+                kind: "finish",
+                message: {
+                    ...message("assistant", "same", "run-1"),
+                    thinking: [{ text: "terminal detail" }],
+                },
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const history = [
+            {
+                ...message("user", "first"),
+                timestamp: "2026-07-16T12:00:00.000Z",
+            },
+            {
+                ...message("assistant", "same"),
+                timestamp: "2026-07-16T12:00:01.000Z",
+            },
+            {
+                ...message("user", "second"),
+                timestamp: "2026-07-16T12:00:02.000Z",
+            },
+            {
+                ...message("assistant", "same"),
+                timestamp: "2026-07-16T12:00:10.000Z",
+            },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+
+        expect(reconciled[1]?.thinking?.[0]?.text).toBe("terminal detail");
+        expect(reconciled[3]?.thinking).toBeUndefined();
+    });
+
     it("keeps identical answers from distinct overlapping runs", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -1125,6 +1162,51 @@ describe("chat projection", () => {
         expect(reconciled[2]?.thinking?.[0]?.text).toBe("compacting");
     });
 
+    it("keeps completed compaction diagnostics before its final when the next user has an earlier timestamp", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-18T22:00:02.477Z", {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "compacting", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "compacting" }],
+                },
+                runId: "compact-run",
+            }),
+            eventAt(32, "2026-07-18T22:00:15.076Z", {
+                kind: "finish",
+                message: message("assistant", "NO_REPLY\n\nNO_FLUSH", "compact-run"),
+                outcome: "completed",
+                runId: "compact-run",
+            }),
+        ]);
+        const history = [
+            {
+                ...message("user", "Extract key decisions"),
+                timestamp: "2026-07-18T21:59:41.034Z",
+            },
+            {
+                ...message("assistant", "NO_REPLY\n\nNO_FLUSH"),
+                timestamp: "2026-07-18T22:00:15.076Z",
+            },
+            {
+                ...message("user", "The order looks wrong"),
+                timestamp: "2026-07-18T21:59:39.874Z",
+            },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+
+        expect(reconciled.map((item) => item.text)).toEqual([
+            "Extract key decisions",
+            "",
+            "NO_REPLY\n\nNO_FLUSH",
+            "The order looks wrong",
+        ]);
+        expect(reconciled[1]?.thinking?.[0]?.text).toBe("compacting");
+    });
+
     it("keeps completed runs in terminal order after a delayed diagnostic", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -1523,6 +1605,77 @@ describe("chat projection", () => {
         expect(projection.activeRuns).toEqual([]);
     });
 
+    it("reconciles an exact-id tool across a later user boundary", () => {
+        const history: ChatHistoryMessage[] = [
+            { ...message("user", "question"), timestamp: "2026-07-18T16:35:30.000Z" },
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-18T16:35:31.000Z",
+                toolCalls: [
+                    {
+                        arguments: { command: "date" },
+                        id: "call-1",
+                        name: "bash",
+                        toolResult: {
+                            content: "completed",
+                            id: "call-1",
+                            name: "bash",
+                        },
+                    },
+                ],
+            },
+            {
+                ...message("assistant", "answer"),
+                timestamp: "2026-07-18T16:35:32.000Z",
+            },
+            {
+                ...message("user", "next question"),
+                timestamp: "2026-07-18T16:35:33.000Z",
+            },
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-18T16:36:00.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: { cmd: "date" },
+                            id: "call-1",
+                            name: "Bash",
+                        },
+                    ],
+                },
+                runId: "late-runtime-run",
+                toolKey: "tool:call-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            projection.rows.filter((row) => row.message.toolCalls?.length)
+        ).toHaveLength(1);
+        expect(projection.rows.map((row) => row.message.text)).toEqual([
+            "question",
+            "",
+            "answer",
+            "next question",
+        ]);
+        expect(projection.activeRuns).toEqual([]);
+    });
+
     it("does not append stale activity after a status-only run final", () => {
         const history = [
             { ...message("user", "question"), timestamp: "2026-07-16T12:00:00.000Z" },
@@ -1760,6 +1913,126 @@ describe("chat projection", () => {
         expect(
             reconciled.filter((item) => item.toolCalls?.[0]?.id === "call-1")
         ).toHaveLength(1);
+    });
+
+    it("replaces stale exact-id history output with the current runtime result", () => {
+        const historyTool: ChatHistoryMessage = {
+            content: "",
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                {
+                    id: "call-1",
+                    name: "exec",
+                    toolResult: {
+                        content: "stale",
+                        id: "call-1",
+                        name: "exec",
+                    },
+                },
+            ],
+            toolResult: { content: "stale", id: "call-1", name: "exec" },
+        };
+        const runtimeTool: ChatHistoryMessage = {
+            ...historyTool,
+            toolCalls: [
+                {
+                    id: "call-1",
+                    name: "exec",
+                    toolResult: {
+                        content: "current",
+                        id: "call-1",
+                        name: "exec",
+                    },
+                },
+            ],
+            toolResult: { content: "current", id: "call-1", name: "exec" },
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "tool",
+                message: runtimeTool,
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+
+        const reconciled = reconcileChatMessages(
+            [message("user", "question"), historyTool, message("assistant", "answer")],
+            runtime.sessions[SESSION]
+        );
+        const tools = reconciled.filter((item) => item.toolCalls?.[0]?.id === "call-1");
+
+        expect(tools).toHaveLength(1);
+        expect(tools[0]?.toolCalls?.[0]?.toolResult?.content).toBe("current");
+        expect(tools[0]?.toolResult?.content).toBe("current");
+    });
+
+    it("keeps canonical output when runtime has only completion metadata", () => {
+        const historyTool: ChatHistoryMessage = {
+            content: "",
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                {
+                    id: "call-1",
+                    name: "bash",
+                    toolResult: {
+                        content: "actual command output",
+                        id: "call-1",
+                        name: "bash",
+                    },
+                },
+            ],
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            id: "call-1",
+                            name: "bash",
+                            toolResult: {
+                                content:
+                                    '{"durationMs":12,"exitCode":0,"status":"completed"}',
+                                id: "call-1",
+                                isPlaceholder: true,
+                                name: "bash",
+                            },
+                        },
+                    ],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+
+        const reconciled = reconcileChatMessages(
+            [message("user", "question"), historyTool, message("assistant", "answer")],
+            runtime.sessions[SESSION]
+        );
+        const tools = reconciled.filter((item) => item.toolCalls?.[0]?.id === "call-1");
+
+        expect(tools).toHaveLength(1);
+        expect(tools[0]?.toolCalls?.[0]?.toolResult?.content).toBe(
+            "actual command output"
+        );
     });
 
     it("recognizes a merged runtime tool when history stores call and result separately", () => {

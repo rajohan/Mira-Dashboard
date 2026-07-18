@@ -177,20 +177,111 @@ function canUseDashboardTurn(
     );
 }
 
+function exactToolIds(message: ChatHistoryMessage): Set<string> {
+    return new Set(
+        [
+            message.toolResult?.id,
+            ...(message.toolCalls || []).flatMap((call) => [
+                call.id,
+                call.toolResult?.id,
+            ]),
+        ].filter((id): id is string => Boolean(id))
+    );
+}
+
+function runFinalAnchorIndex(messages: ChatHistoryMessage[], run: ChatRunState): number {
+    const explicitMatch = messages.findLastIndex((message) => {
+        const role = message.role.toLowerCase();
+        return Boolean(
+            (role === "assistant" || role === "system") &&
+            !isStandaloneDiagnostic(message) &&
+            isRunMatchingMessage(run, message)
+        );
+    });
+    if (explicitMatch !== -1) {
+        return explicitMatch;
+    }
+
+    const assistantText = run.assistant?.text;
+    const terminalTimestamp = Date.parse(run.terminalAt ?? run.updatedAt);
+    if (assistantText && !Number.isNaN(terminalTimestamp)) {
+        let closestIndex = -1;
+        let closestDistance = Infinity;
+        for (const [index, message] of messages.entries()) {
+            const role = message.role.toLowerCase();
+            const timestamp = messageTimestamp(message);
+            if (
+                message.runId ||
+                (role !== "assistant" && role !== "system") ||
+                isStandaloneDiagnostic(message) ||
+                timestamp === undefined ||
+                !isRecoveredAssistantText(message.text, assistantText)
+            ) {
+                continue;
+            }
+            const distance = Math.abs(timestamp - terminalTimestamp);
+            if (
+                distance <= RUNTIME_FINAL_SKEW_MS &&
+                (distance < closestDistance ||
+                    (distance === closestDistance && index > closestIndex))
+            ) {
+                closestDistance = distance;
+                closestIndex = index;
+            }
+        }
+        if (closestIndex !== -1) {
+            return closestIndex;
+        }
+    }
+
+    const diagnosticIds = new Set(
+        run.diagnostics.flatMap((entry) => [...exactToolIds(entry.message)])
+    );
+    if (diagnosticIds.size === 0) {
+        return -1;
+    }
+    const evidenceIndex = messages.findLastIndex((message) =>
+        exactToolIds(message)
+            .values()
+            .some((id) => diagnosticIds.has(id))
+    );
+    if (evidenceIndex === -1) {
+        return -1;
+    }
+    const nextUserIndex = messages.findIndex(
+        (message, index) => index > evidenceIndex && isUserMessage(message)
+    );
+    const end = nextUserIndex === -1 ? messages.length : nextUserIndex;
+    return messages.findIndex(
+        (message, index) =>
+            index > evidenceIndex &&
+            index < end &&
+            !isStandaloneDiagnostic(message) &&
+            hasPrimaryAnswerContent(message)
+    );
+}
+
 function userBoundaryIndex(
     messages: ChatHistoryMessage[],
     run: ChatRunState,
     runs: ChatRunState[]
 ): number {
+    const finalAnchorIndex = runFinalAnchorIndex(messages, run);
+    const isBeforeFinalAnchor = (_message: ChatHistoryMessage, index: number) =>
+        finalAnchorIndex === -1 || index < finalAnchorIndex;
     let userIndex = messages.findLastIndex(
-        (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
+        (message, index) =>
+            isBeforeFinalAnchor(message, index) &&
+            isUserMessage(message) &&
+            isRunMatchingMessage(run, message)
     );
     const startedAt = Date.parse(run.startedAt);
 
     if (!Number.isNaN(startedAt)) {
-        const startBoundary = messages.findLastIndex((message) => {
+        const startBoundary = messages.findLastIndex((message, index) => {
             const timestamp = messageTimestamp(message);
             return (
+                isBeforeFinalAnchor(message, index) &&
                 isUserMessage(message) &&
                 (!message.runId || canUseDashboardTurn(message, run, runs)) &&
                 timestamp !== undefined &&
@@ -210,9 +301,10 @@ function userBoundaryIndex(
     }
 
     const terminalAt = Date.parse(run.terminalAt ?? run.updatedAt);
-    const dashboardBoundary = messages.findLastIndex((message) => {
+    const dashboardBoundary = messages.findLastIndex((message, index) => {
         const timestamp = messageTimestamp(message);
         return (
+            isBeforeFinalAnchor(message, index) &&
             isUserMessage(message) &&
             canUseDashboardTurn(message, run, runs) &&
             timestamp !== undefined &&
@@ -271,6 +363,7 @@ function canonicalFinalIndex(
 ): number {
     const assistantText = run.assistant?.text || "";
     const hasOverlappingUserTurn = hasUnansweredUserBeforeSegment(messages, segment);
+    const anchoredFinalIndex = runFinalAnchorIndex(messages, run);
     for (let index = segment.end - 1; index >= segment.start; index -= 1) {
         const message = messages[index]!;
         const role = message.role.toLowerCase();
@@ -279,6 +372,9 @@ function canonicalFinalIndex(
         }
         if (isStandaloneDiagnostic(message)) {
             continue;
+        }
+        if (index === anchoredFinalIndex) {
+            return index;
         }
         if (isRunMatchingMessage(run, message)) {
             return index;
@@ -316,21 +412,82 @@ function canonicalFinalIndex(
     return -1;
 }
 
+function exactToolResultIds(message: ChatHistoryMessage): Set<string> {
+    return new Set(
+        [
+            message.toolResult?.id,
+            ...(message.toolCalls || []).map((call) => call.toolResult?.id),
+        ].filter((id): id is string => Boolean(id))
+    );
+}
+
+function hasExactToolIdentity(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        message.toolResult?.id ||
+        message.toolCalls?.some((call) => call.id || call.toolResult?.id)
+    );
+}
+
+function refreshExactToolResult(
+    current: NonNullable<ChatHistoryMessage["toolResult"]>,
+    messages: ChatHistoryMessage[]
+): void {
+    for (const [index, candidate] of messages.entries()) {
+        const hasMatchingCall = candidate.toolCalls?.some(
+            (call) => call.id === current.id || call.toolResult?.id === current.id
+        );
+        const hasMatchingResult = candidate.toolResult?.id === current.id;
+        if (hasMatchingCall || hasMatchingResult) {
+            const toolCalls = candidate.toolCalls?.map((call) =>
+                call.id === current.id || call.toolResult?.id === current.id
+                    ? { ...call, toolResult: current }
+                    : call
+            );
+            messages[index] = {
+                ...candidate,
+                toolCalls,
+                toolResult: hasMatchingResult ? current : candidate.toolResult,
+            };
+        }
+    }
+}
+
+function refreshExactToolResults(
+    diagnostic: ChatHistoryMessage,
+    messages: ChatHistoryMessage[]
+): void {
+    const currentResults = [
+        diagnostic.toolResult,
+        ...(diagnostic.toolCalls || []).map((call) => call.toolResult),
+    ].filter((result): result is NonNullable<ChatHistoryMessage["toolResult"]> =>
+        Boolean(result?.id && !result.isPlaceholder)
+    );
+    for (const current of currentResults) {
+        refreshExactToolResult(current, messages);
+    }
+}
+
 function toolSignatures(message: ChatHistoryMessage): string[] {
     const signatures: string[] = [];
     const nestedResultSignatures: string[] = [];
     const toolCalls = message.toolCalls || [];
-    const resultSignature = (result: NonNullable<ChatHistoryMessage["toolResult"]>) =>
-        result.id
-            ? `result-id:${result.id}`
-            : stableChatStringify({
-                  result: {
-                      content: result.content,
-                      error: result.isError || false,
-                      images: result.images || [],
-                      name: result.name || "",
-                  },
-              });
+    const resultSignatures = (result: NonNullable<ChatHistoryMessage["toolResult"]>) => {
+        const payload = stableChatStringify({
+            result: {
+                content: result.content,
+                error: result.isError || false,
+                id: result.id || "",
+                images: result.images || [],
+                name: result.name || "",
+            },
+        });
+        return result.id
+            ? [
+                  `result-id:${result.id}`,
+                  ...(result.isPlaceholder ? [] : [`result-payload:${payload}`]),
+              ]
+            : [`result-payload:${payload}`];
+    };
     for (const call of toolCalls) {
         signatures.push(
             call.id
@@ -341,15 +498,16 @@ function toolSignatures(message: ChatHistoryMessage): string[] {
                   })
         );
         if (call.toolResult) {
-            const signature = resultSignature(call.toolResult);
-            signatures.push(signature);
-            nestedResultSignatures.push(signature);
+            const result = resultSignatures(call.toolResult);
+            signatures.push(...result);
+            nestedResultSignatures.push(...result);
         }
     }
     if (message.toolResult) {
-        const signature = resultSignature(message.toolResult);
-        if (!nestedResultSignatures.includes(signature)) {
-            signatures.push(signature);
+        for (const signature of resultSignatures(message.toolResult)) {
+            if (!nestedResultSignatures.includes(signature)) {
+                signatures.push(signature);
+            }
         }
     }
     return signatures;
@@ -400,13 +558,20 @@ function recoveredDiagnosticIndexes(
     run: ChatRunState,
     claimedSignatures: Map<number, Map<string, number>>
 ): number[] | undefined {
-    const candidates = messages
-        .slice(segment.start, segment.end)
-        .map((message, offset) => ({ index: segment.start + offset, message }))
-        .filter(
-            (candidate) =>
-                !candidate.message.runId || isRunMatchingMessage(run, candidate.message)
-        );
+    const hasExactIdentity = hasExactToolIdentity(diagnostic);
+    const candidates = (
+        hasExactIdentity
+            ? messages.map((message, index) => ({ index, message }))
+            : messages.slice(segment.start, segment.end).map((message, offset) => ({
+                  index: segment.start + offset,
+                  message,
+              }))
+    ).filter(
+        (candidate) =>
+            hasExactIdentity ||
+            !candidate.message.runId ||
+            isRunMatchingMessage(run, candidate.message)
+    );
     const expected = diagnosticSignatures(diagnostic);
     if (expected.length === 0) {
         return undefined;
@@ -433,7 +598,20 @@ function recoveredDiagnosticIndexes(
         }
         claimedSignatures.set(index, claimed);
     }
-    return consumedByIndex.keys().toArray();
+    const recoveredIndexes = new Set(consumedByIndex.keys());
+    if (hasExactIdentity) {
+        const diagnosticIds = exactToolIds(diagnostic);
+        for (const candidate of candidates) {
+            if (
+                exactToolIds(candidate.message)
+                    .values()
+                    .some((id) => diagnosticIds.has(id))
+            ) {
+                recoveredIndexes.add(candidate.index);
+            }
+        }
+    }
+    return [...recoveredIndexes];
 }
 
 function transientMessage(
@@ -569,6 +747,9 @@ export function reconcileChatMessages(
         const claimedRecoveredSignatures = new Map<number, Map<string, number>>();
         for (const entry of run.diagnostics) {
             const diagnostic = transientMessage(entry.message, run, entry.key);
+            if (exactToolResultIds(diagnostic).size > 0) {
+                refreshExactToolResults(diagnostic, messages);
+            }
             const recoveredIndexes = recoveredDiagnosticIndexes(
                 diagnostic,
                 messages,

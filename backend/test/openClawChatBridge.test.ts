@@ -291,7 +291,7 @@ describe("OpenClaw chat bridge", () => {
         }
     });
 
-    it("evicts transcript-backed tools after an active run crosses 64 MB", () => {
+    it("evicts item-stream tool variants before thinking after an active run crosses 64 MB", () => {
         const bridge = new OpenClawChatBridge();
         const sessionKey = `agent:test:${crypto.randomUUID()}`;
         const runId = "bounded-long-run";
@@ -309,15 +309,29 @@ describe("OpenClaw chat bridge", () => {
             );
         }
         const largeOutput = "x".repeat(975_000);
+        const itemTypes = [
+            "custom_tool_call",
+            "custom_tool_call_output",
+            "function_call",
+            "function_call_output",
+            "tool_call",
+            "tool_call_output",
+            "tool_result",
+            "tool_use",
+        ];
         for (let index = 0; index < 66; index += 1) {
+            const type = itemTypes[index % itemTypes.length];
             bridge.recordEvent(
                 "agent",
                 {
                     data: {
-                        phase: "result",
-                        result: { output: largeOutput },
-                        stream: "tool",
-                        toolCallId: `large-call-${index}`,
+                        item: {
+                            content: largeOutput,
+                            id: `large-call-${index}`,
+                            name: "exec",
+                            type,
+                        },
+                        stream: "item",
                     },
                     runId,
                     sessionKey,
@@ -331,15 +345,15 @@ describe("OpenClaw chat bridge", () => {
             const payload = event.payload as { data?: { delta?: string } };
             return payload.data?.delta ? [payload.data.delta] : [];
         });
-        const toolCount = snapshot.events.filter((event) => {
+        const itemToolCount = snapshot.events.filter((event) => {
             const payload = event.payload as { data?: { stream?: string } };
-            return payload.data?.stream === "tool";
+            return payload.data?.stream === "item";
         }).length;
 
         expect(snapshot.completed).toBe(false);
         expect(thinking).toEqual(thinkingTexts);
-        expect(toolCount).toBeGreaterThan(0);
-        expect(toolCount).toBeLessThan(66);
+        expect(itemToolCount).toBeGreaterThan(0);
+        expect(itemToolCount).toBeLessThan(66);
     });
 
     it("bounds aggregate replay memory across independent sessions", () => {
