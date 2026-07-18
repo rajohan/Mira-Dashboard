@@ -230,16 +230,21 @@ export function openClawEventContext(raw: unknown): OpenClawEventContext | undef
     }
     const eventName = stringValue(envelope.event);
     const payload = asRecord(envelope.payload);
-    const sessionKey = stringValue(payload?.sessionKey);
-    if (!eventName || !payload || !sessionKey) {
+    if (!eventName || !payload) {
         return undefined;
     }
-    const sourceRunId = stringValue(
-        eventName === "session.compaction" ? payload.operationId : payload.runId
-    );
+    const nestedData = asRecord(payload.data);
+    const data = nestedData ? { ...payload, ...nestedData } : payload;
+    const sessionKey = stringValue(data.sessionKey);
+    if (!sessionKey) {
+        return undefined;
+    }
     const isCompactionEvent =
-        eventName === "session.compaction" ||
-        stringValue(payload.stream) === "compaction";
+        eventName === "session.compaction" || stringValue(data.stream) === "compaction";
+    const providerRunId = stringValue(data.runId);
+    const sourceRunId = isCompactionEvent
+        ? stringValue(data.operationId) || providerRunId
+        : providerRunId;
     return {
         eventName,
         payload,
@@ -247,7 +252,7 @@ export function openClawEventContext(raw: unknown): OpenClawEventContext | undef
             ? `compaction:${sourceRunId || sessionKey}`
             : sourceRunId,
         sessionKey,
-        timestamp: timestampFor(envelope, payload),
+        timestamp: timestampFor(envelope, data),
     };
 }
 

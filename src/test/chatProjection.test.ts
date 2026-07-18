@@ -1657,7 +1657,6 @@ describe("chat projection", () => {
             new Set()
         );
 
-        expect(projection.isCompacting).toBe(true);
         expect(projection.compactionStatus).toMatchObject({
             phase: "active",
             text: "Compacting context",

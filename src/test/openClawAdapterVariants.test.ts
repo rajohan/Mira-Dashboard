@@ -5,6 +5,10 @@ import {
     presentChatMessages,
 } from "../components/features/chat/domain/chatPresentation";
 import {
+    createChatRuntimeState,
+    reduceChatRuntime,
+} from "../components/features/chat/domain/chatState";
+import {
     argumentDetail,
     asRecord,
     compactStatus,
@@ -394,6 +398,17 @@ describe("OpenClaw adapter variants", () => {
 
     it("tracks both OpenClaw compaction lifecycle signal shapes", () => {
         const adapter = new OpenClawChatAdapter();
+        const parentStart = adapter.event(
+            envelope(
+                "agent",
+                {
+                    phase: "start",
+                    runId: "parent-chat-run",
+                    stream: "lifecycle",
+                },
+                52
+            )
+        );
         const sessionStart = adapter.event(
             envelope(
                 "session.compaction",
@@ -463,6 +478,37 @@ describe("OpenClaw adapter variants", () => {
                 58
             )
         );
+        const nestedAgentStart = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: {
+                        operationId: "nested-compact-operation",
+                        phase: "start",
+                        stream: "compaction",
+                    },
+                    runId: "parent-chat-run",
+                    stream: undefined,
+                },
+                59
+            )
+        );
+        const nestedAgentEnd = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: {
+                        completed: true,
+                        operationId: "nested-compact-operation",
+                        phase: "end",
+                        stream: "compaction",
+                    },
+                    runId: "parent-chat-run",
+                    stream: undefined,
+                },
+                60
+            )
+        );
 
         expect(sessionStart[0]).toMatchObject({
             kind: "status",
@@ -499,6 +545,31 @@ describe("OpenClaw adapter variants", () => {
             operationPhase: "inactive",
             text: undefined,
         });
+        expect(nestedAgentStart[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "active",
+            runId: "compaction:nested-compact-operation",
+        });
+        expect(nestedAgentEnd[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "complete",
+            runId: "compaction:nested-compact-operation",
+        });
+        const nestedCompactionRuntime = reduceChatRuntime(createChatRuntimeState(), [
+            ...parentStart,
+            ...nestedAgentStart,
+            ...nestedAgentEnd,
+        ]);
+        expect(
+            nestedCompactionRuntime.sessions[SESSION]?.runs["parent-chat-run"]
+        ).toMatchObject({ phase: "active" });
+        expect(
+            nestedCompactionRuntime.sessions[SESSION]?.runs[
+                "compaction:nested-compact-operation"
+            ]
+        ).toMatchObject({ phase: "completed" });
     });
 
     it("marks failed structured tool results as errors", () => {

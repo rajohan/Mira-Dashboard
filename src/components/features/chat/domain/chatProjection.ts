@@ -26,7 +26,6 @@ const RUNTIME_USER_ECHO_WINDOW_MS = 5000;
 export interface ChatProjection {
     activeRuns: ChatRunState[];
     compactionStatus?: ChatCompactionStatus;
-    isCompacting: boolean;
     rows: ChatRow[];
 }
 
@@ -662,7 +661,6 @@ export function projectChat(
     return {
         activeRuns,
         compactionStatus,
-        isCompacting: compactionStatus?.phase === "active",
         rows,
     };
 }

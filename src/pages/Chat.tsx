@@ -334,7 +334,7 @@ export function Chat() {
         clearAttachments,
         confirmResetSession,
         draft,
-        isCompacting: projection.isCompacting,
+        isCompacting: compactionIndicator?.phase === "active",
         isConnected,
         isRecording,
         isTranscribing,
