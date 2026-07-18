@@ -994,6 +994,79 @@ describe("chat runtime controller", () => {
         expect(runs["provider-second"]?.phase).toBe("active");
     });
 
+    it("does not restore displaced replay when a concurrent send succeeds later", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [
+                    assistant(SELECTED, 16, "previous answer", "replace"),
+                    finish(SELECTED, 32),
+                ],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-chat-first");
+            result.current.beginRun(SELECTED, "dashboard-chat-second");
+            result.current.failRun(SELECTED, "dashboard-chat-first");
+        });
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]).toBeUndefined();
+
+        act(() => {
+            result.current.acknowledgeRun(
+                SELECTED,
+                "dashboard-chat-second",
+                "provider-second"
+            );
+        });
+
+        const runs = result.current.state.sessions[SELECTED]?.runs || {};
+        expect(runs["run-1"]).toBeUndefined();
+        expect(runs["dashboard-chat-first"]).toBeUndefined();
+        expect(runs["provider-second"]?.phase).toBe("active");
+    });
+
+    it("restores displaced replay only after every concurrent send fails", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [
+                    assistant(SELECTED, 16, "previous answer", "replace"),
+                    finish(SELECTED, 32),
+                ],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-chat-first");
+            result.current.beginRun(SELECTED, "dashboard-chat-second");
+            result.current.failRun(SELECTED, "dashboard-chat-first");
+        });
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]).toBeUndefined();
+
+        act(() => result.current.failRun(SELECTED, "dashboard-chat-second"));
+        expect(result.current.state.sessions[SELECTED]?.runs["run-1"]).toMatchObject({
+            assistant: { text: "previous answer" },
+            phase: "completed",
+        });
+    });
+
     it("replaces projection-hidden status runs before routing a new unscoped reply", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);

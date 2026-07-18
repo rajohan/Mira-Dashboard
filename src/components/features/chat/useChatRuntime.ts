@@ -40,6 +40,24 @@ interface SnapshotGate {
     token: number;
 }
 
+interface DisplacedReplayGroup {
+    pendingRunIds: Set<string>;
+    runs: ReturnType<typeof completedChatRuns>;
+    sessionKey: string;
+}
+
+function displacedReplayGroupForSession(
+    groups: Map<string, DisplacedReplayGroup>,
+    sessionKey: string
+): [string, DisplacedReplayGroup] | undefined {
+    for (const entry of groups) {
+        if (isSameChatSession(entry[1].sessionKey, sessionKey)) {
+            return entry;
+        }
+    }
+    return undefined;
+}
+
 type FinishEvent = Extract<ChatRuntimeEvent, { kind: "finish" }>;
 
 interface RuntimeReduction {
@@ -147,13 +165,7 @@ export function useChatRuntime({
     const transportReference = useRef(transport);
     const handledFinishSequencesReference = useRef(new Set<string>());
     const displacedCompletedRunsReference = useRef(
-        new Map<
-            string,
-            {
-                runs: ReturnType<typeof completedChatRuns>;
-                sessionKey: string;
-            }
-        >()
+        new Map<string, DisplacedReplayGroup>()
     );
 
     selectedSessionReference.current = selectedSessionKey;
@@ -484,13 +496,24 @@ export function useChatRuntime({
             });
         }
         updateState((current) => {
+            const existingGroup = displacedReplayGroupForSession(
+                displacedCompletedRunsReference.current,
+                sessionKey
+            )?.[1];
             const displacedRuns = completedChatRuns(current, sessionKey);
-            if (Object.keys(displacedRuns).length > 0) {
-                displacedCompletedRunsReference.current.set(runId, {
-                    runs: displacedRuns,
-                    sessionKey,
-                });
+            const group =
+                existingGroup ||
+                (Object.keys(displacedRuns).length > 0
+                    ? {
+                          pendingRunIds: new Set<string>(),
+                          runs: displacedRuns,
+                          sessionKey,
+                      }
+                    : undefined);
+            if (group && !existingGroup) {
+                displacedCompletedRunsReference.current.set(sessionKey, group);
             }
+            group?.pendingRunIds.add(runId);
             const withoutStaleStatus = options.replaceStatusOnlyRuns
                 ? clearStatusOnlyChatRuns(current, sessionKey)
                 : current;
@@ -507,10 +530,12 @@ export function useChatRuntime({
         optimisticRunId: string,
         providerRunId?: string
     ) => {
-        for (const [runId, displaced] of displacedCompletedRunsReference.current) {
-            if (isSameChatSession(displaced.sessionKey, sessionKey)) {
-                displacedCompletedRunsReference.current.delete(runId);
-            }
+        const displacedGroup = displacedReplayGroupForSession(
+            displacedCompletedRunsReference.current,
+            sessionKey
+        );
+        if (displacedGroup?.[1].pendingRunIds.has(optimisticRunId)) {
+            displacedCompletedRunsReference.current.delete(displacedGroup[0]);
         }
         const gate = gateReference.current;
         const pendingRun =
@@ -536,17 +561,31 @@ export function useChatRuntime({
         }
     };
     const clearRun = (sessionKey: string, runId: string) => {
-        displacedCompletedRunsReference.current.delete(runId);
+        const displacedGroup = displacedReplayGroupForSession(
+            displacedCompletedRunsReference.current,
+            sessionKey
+        );
+        if (displacedGroup?.[1].pendingRunIds.has(runId)) {
+            displacedCompletedRunsReference.current.delete(displacedGroup[0]);
+        }
         removeRunFromSnapshotGate(sessionKey, runId);
         updateState((current) => clearChatRun(current, sessionKey, runId));
     };
     const failRun = (sessionKey: string, runId: string) => {
         removeRunFromSnapshotGate(sessionKey, runId);
-        const displaced = displacedCompletedRunsReference.current.get(runId);
-        displacedCompletedRunsReference.current.delete(runId);
+        const displacedGroup = displacedReplayGroupForSession(
+            displacedCompletedRunsReference.current,
+            sessionKey
+        );
+        const displaced = displacedGroup?.[1];
+        const didRemovePendingRun = displaced?.pendingRunIds.delete(runId) === true;
+        const shouldRestore = didRemovePendingRun && displaced?.pendingRunIds.size === 0;
+        if (displacedGroup && shouldRestore) {
+            displacedCompletedRunsReference.current.delete(displacedGroup[0]);
+        }
         updateState((current) => {
             const withoutFailedRun = clearChatRun(current, sessionKey, runId);
-            return displaced && isSameChatSession(displaced.sessionKey, sessionKey)
+            return shouldRestore && displaced
                 ? restoreChatRuns(withoutFailedRun, sessionKey, displaced.runs)
                 : withoutFailedRun;
         });
@@ -557,9 +596,9 @@ export function useChatRuntime({
             // the runtime state that this explicit clear just removed.
             gateReference.current = undefined;
         }
-        for (const [runId, displaced] of displacedCompletedRunsReference.current) {
+        for (const [groupKey, displaced] of displacedCompletedRunsReference.current) {
             if (isSameChatSession(displaced.sessionKey, sessionKey)) {
-                displacedCompletedRunsReference.current.delete(runId);
+                displacedCompletedRunsReference.current.delete(groupKey);
             }
         }
         updateState((current) => clearChatSessionRuntime(current, sessionKey));

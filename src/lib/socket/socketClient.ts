@@ -1,5 +1,16 @@
 import type { SocketEnvelope } from "../../types/socket";
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+function normalizedRequestTimeoutMs(requestedTimeoutMs: number | undefined): number {
+    return typeof requestedTimeoutMs === "number" &&
+        Number.isFinite(requestedTimeoutMs) &&
+        requestedTimeoutMs > 0
+        ? Math.min(Math.max(Math.trunc(requestedTimeoutMs), 1), MAX_TIMER_DELAY_MS)
+        : DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
 /** Represents pending request. */
 interface PendingRequest {
     resolve: (value: unknown) => void;
@@ -150,17 +161,18 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                 requestOptions?.shouldWaitIndefinitely === true;
             const requestTimeoutMs = shouldWaitIndefinitely
                 ? undefined
-                : requestOptions?.timeoutMs;
-            const timeout = shouldWaitIndefinitely
-                ? undefined
-                : setTimeout(() => {
-                      if (!pendingRequests.has(id)) {
-                          return;
-                      }
+                : normalizedRequestTimeoutMs(requestOptions?.timeoutMs);
+            const timeout =
+                requestTimeoutMs === undefined
+                    ? undefined
+                    : setTimeout(() => {
+                          if (!pendingRequests.has(id)) {
+                              return;
+                          }
 
-                      pendingRequests.delete(id);
-                      reject(new Error("Request timeout"));
-                  }, requestTimeoutMs ?? 30_000);
+                          pendingRequests.delete(id);
+                          reject(new Error("Request timeout"));
+                      }, requestTimeoutMs);
             pendingRequests.set(id, {
                 resolve: resolve as (value: unknown) => void,
                 reject,

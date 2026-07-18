@@ -1133,6 +1133,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 id: "1",
                 method: "answer",
                 params: { question: true },
+                timeoutMs: 30_000,
             });
             socket.message({
                 type: "response",
@@ -1192,6 +1193,49 @@ describe("Mira Dashboard frontend behavior", () => {
 
             const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
             try {
+                const invalidTimeoutPromise = client.request<{ normalized: boolean }>(
+                    "invalid-timeout",
+                    {},
+                    { timeoutMs: NaN }
+                );
+                const invalidTimeoutRequest = JSON.parse(
+                    replacementSocket.sent.at(-1)!
+                ) as { id: string; timeoutMs?: number };
+                expect(invalidTimeoutRequest.timeoutMs).toBe(30_000);
+                expect(timeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 30_000);
+                replacementSocket.message({
+                    type: "response",
+                    id: invalidTimeoutRequest.id,
+                    isOk: true,
+                    payload: { normalized: true },
+                });
+                await expect(invalidTimeoutPromise).resolves.toEqual({
+                    normalized: true,
+                });
+
+                const clampedTimeoutPromise = client.request<{ clamped: boolean }>(
+                    "clamped-timeout",
+                    {},
+                    { timeoutMs: Number.MAX_SAFE_INTEGER }
+                );
+                const clampedTimeoutRequest = JSON.parse(
+                    replacementSocket.sent.at(-1)!
+                ) as { id: string; timeoutMs?: number };
+                expect(clampedTimeoutRequest.timeoutMs).toBe(2_147_483_647);
+                expect(timeoutSpy).toHaveBeenLastCalledWith(
+                    expect.any(Function),
+                    2_147_483_647
+                );
+                replacementSocket.message({
+                    type: "response",
+                    id: clampedTimeoutRequest.id,
+                    isOk: true,
+                    payload: { clamped: true },
+                });
+                await expect(clampedTimeoutPromise).resolves.toEqual({
+                    clamped: true,
+                });
+
                 const timeoutCallCount = timeoutSpy.mock.calls.length;
                 const noDeadlinePromise = client.request<{ completed: boolean }>(
                     "no-deadline",
@@ -1283,6 +1327,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 id: "2",
                 method: "ping",
                 params: { value: 1 },
+                timeoutMs: 30_000,
             });
             act(() => {
                 socket.message({

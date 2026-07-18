@@ -5,6 +5,7 @@ import {
     type OpenClawChatSnapshotStore,
     type OpenClawRuntimeSnapshot,
 } from "../src/chat/openClawChatBridge.ts";
+import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
 
 const MAIN = "agent:main:main";
 
@@ -715,6 +716,24 @@ describe("OpenClaw chat bridge", () => {
             runId: "run-1",
             sessionKey: MAIN,
         });
+    });
+
+    it("preserves normalized persistence during case-only canonical promotion", () => {
+        const store = new SqliteOpenClawChatSnapshotStore(
+            `bridge-scope-${crypto.randomUUID()}`
+        );
+        const canonicalSessionKey = MAIN.toUpperCase();
+        store.save(MAIN, persistedSnapshot(MAIN, "run-1"));
+
+        try {
+            const bridge = new OpenClawChatBridge(store);
+            expect(bridge.snapshot(canonicalSessionKey).events).toHaveLength(1);
+
+            const restoredBridge = new OpenClawChatBridge(store);
+            expect(restoredBridge.snapshot(canonicalSessionKey).events).toHaveLength(1);
+        } finally {
+            store.clear();
+        }
     });
 
     it("retries canonical alias promotion after persistence fails", () => {

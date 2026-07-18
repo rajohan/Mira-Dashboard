@@ -1192,7 +1192,14 @@ export class OpenClawChatBridge {
             this.#forgetRunSession(runId, canonicalSessionKey);
         }
         this.#enforceSessionLimit(protectedSessionKey);
-        this.#flushSessionPersistence(sourceSessionKey);
+        if (isExactSessionKey(sourceSessionKey, canonicalSessionKey)) {
+            this.#pendingPersistence.delete(sourceSessionKey);
+            if (this.#pendingPersistence.size === 0) {
+                this.#cancelPersistenceTimer();
+            }
+        } else {
+            this.#flushSessionPersistence(sourceSessionKey);
+        }
         return true;
     }
 

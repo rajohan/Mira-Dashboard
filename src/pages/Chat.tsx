@@ -335,6 +335,8 @@ export function Chat() {
         clearAttachments,
         confirmResetSession,
         draft,
+        // Mirrors Control UI's five-minute stale-status failsafe. Locally
+        // initiated compaction RPCs stay locked independently in useChatActions.
         isCompacting: compactionIndicator?.phase === "active",
         isConnected,
         isRecording,

@@ -29,7 +29,9 @@ function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnaps
 
 describe("OpenClaw chat snapshot store", () => {
     it("round-trips and deletes a bounded runtime snapshot", () => {
-        const store = new SqliteOpenClawChatSnapshotStore("gateway-scope-a");
+        const store = new SqliteOpenClawChatSnapshotStore(
+            `gateway-scope-${crypto.randomUUID()}`
+        );
         const sessionKey = `agent:test:${crypto.randomUUID()}`;
         const snapshot: OpenClawRuntimeSnapshot = {
             completed: false,
@@ -114,8 +116,12 @@ describe("OpenClaw chat snapshot store", () => {
     });
 
     it("isolates identical session keys between gateway credentials", () => {
-        const firstStore = new SqliteOpenClawChatSnapshotStore("gateway-scope-a");
-        const secondStore = new SqliteOpenClawChatSnapshotStore("gateway-scope-b");
+        const firstStore = new SqliteOpenClawChatSnapshotStore(
+            `gateway-scope-${crypto.randomUUID()}`
+        );
+        const secondStore = new SqliteOpenClawChatSnapshotStore(
+            `gateway-scope-${crypto.randomUUID()}`
+        );
         const sessionKey = `agent:test:${crypto.randomUUID()}`;
         const snapshot = (runId: string): OpenClawRuntimeSnapshot => ({
             completed: false,
