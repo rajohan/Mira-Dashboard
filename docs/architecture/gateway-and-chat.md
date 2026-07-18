@@ -175,7 +175,9 @@ transient diagnostics are inserted before the matching final answer. Exact tool
 call IDs may match results across a later user boundary, while name-only fallback
 matching remains bounded to the current user turn. Transcript order and runtime
 sequence take precedence over message timestamps when a queued user message and
-compaction final carry inverted wall-clock times.
+compaction final carry inverted wall-clock times. Projection indexes exact tool
+IDs once per pass and caches fallback signatures so long runs do not rescan or
+reserialize the complete transcript for every runtime diagnostic.
 
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 

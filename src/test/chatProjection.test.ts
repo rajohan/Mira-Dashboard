@@ -17,6 +17,7 @@ import {
     acknowledgeChatRun,
     addOptimisticChatRun,
     type ChatRuntimeEvent,
+    type ChatSessionRuntimeState,
     createChatRuntimeState,
     reduceChatRuntime,
 } from "../components/features/chat/domain/chatState";
@@ -1676,6 +1677,58 @@ describe("chat projection", () => {
         expect(projection.activeRuns).toEqual([]);
     });
 
+    it("reconciles a large exact-id run without reserializing every tool payload", () => {
+        const toolCount = 250;
+        const payload = "x".repeat(20_000);
+        const diagnostics: ChatSessionRuntimeState["runs"][string]["diagnostics"] = [];
+        const history: ChatHistoryMessage[] = [message("user", "question")];
+        for (let index = 0; index < toolCount; index += 1) {
+            const id = `large-call-${index}`;
+            const toolMessage: ChatHistoryMessage = {
+                content: "",
+                role: "assistant",
+                text: "",
+                toolCalls: [
+                    {
+                        id,
+                        name: "bash",
+                        toolResult: { content: payload, id, name: "bash" },
+                    },
+                ],
+            };
+            history.push(toolMessage);
+            diagnostics.push({ key: `tool:${id}`, message: toolMessage });
+        }
+        history.push(message("assistant", "answer"));
+        const session: ChatSessionRuntimeState = {
+            lastSequence: toolCount + 1,
+            runs: {
+                "run-long": {
+                    aliases: [],
+                    assistant: message("assistant", "answer", "run-long"),
+                    diagnostics,
+                    lastSequence: toolCount + 1,
+                    phase: "completed",
+                    runId: "run-long",
+                    sessionKey: SESSION,
+                    startedAt: NOW,
+                    terminalAt: NOW,
+                    terminalSequence: toolCount + 1,
+                    updatedAt: NOW,
+                    userMessages: [],
+                },
+            },
+            sessionKey: SESSION,
+        };
+
+        const reconciled = reconcileChatMessages(history, session);
+
+        expect(reconciled.filter((item) => item.toolCalls?.length)).toHaveLength(
+            toolCount
+        );
+        expect(reconciled.at(-1)?.text).toBe("answer");
+    });
+
     it("does not append stale activity after a status-only run final", () => {
         const history = [
             { ...message("user", "question"), timestamp: "2026-07-16T12:00:00.000Z" },
@@ -2033,6 +2086,72 @@ describe("chat projection", () => {
         expect(tools[0]?.toolCalls?.[0]?.toolResult?.content).toBe(
             "actual command output"
         );
+    });
+
+    it("merges failed placeholder state without replacing canonical output", () => {
+        const historyTool: ChatHistoryMessage = {
+            content: "",
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                {
+                    id: "call-1",
+                    name: "bash",
+                    toolResult: {
+                        content: "actual command output",
+                        id: "call-1",
+                        name: "bash",
+                    },
+                },
+            ],
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            id: "call-1",
+                            name: "bash",
+                            toolResult: {
+                                content:
+                                    '{"durationMs":12,"exitCode":1,"status":"failed"}',
+                                id: "call-1",
+                                isError: true,
+                                isPlaceholder: true,
+                                name: "bash",
+                            },
+                        },
+                    ],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                error: "Bash failed",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-1",
+                toolFailure: true,
+            }),
+        ]);
+
+        const reconciled = reconcileChatMessages(
+            [message("user", "question"), historyTool],
+            runtime.sessions[SESSION]
+        );
+        const toolResult = reconciled.find((item) => item.toolCalls?.[0]?.id === "call-1")
+            ?.toolCalls?.[0]?.toolResult;
+
+        expect(toolResult).toMatchObject({
+            content: "actual command output",
+            isError: true,
+        });
+        expect(toolResult?.isPlaceholder).toBeUndefined();
+        expect(runtime.sessions[SESSION]?.runs["run-1"]?.error).toBeUndefined();
     });
 
     it("recognizes a merged runtime tool when history stores call and result separately", () => {
