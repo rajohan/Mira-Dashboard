@@ -23,6 +23,14 @@ export function asRecord(value: unknown): Record<string, unknown> | undefined {
         : undefined;
 }
 
+/** Applies OpenClaw's nested event-data precedence without dropping envelope fields. */
+export function openClawPayloadView(
+    payload: Record<string, unknown>
+): Record<string, unknown> {
+    const data = asRecord(payload.data);
+    return data ? { ...payload, ...data } : payload;
+}
+
 export function stringValue(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -233,8 +241,7 @@ export function openClawEventContext(raw: unknown): OpenClawEventContext | undef
     if (!eventName || !payload) {
         return undefined;
     }
-    const nestedData = asRecord(payload.data);
-    const data = nestedData ? { ...payload, ...nestedData } : payload;
+    const data = openClawPayloadView(payload);
     const sessionKey = stringValue(data.sessionKey);
     if (!sessionKey) {
         return undefined;

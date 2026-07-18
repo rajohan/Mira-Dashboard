@@ -540,6 +540,39 @@ describe("chat runtime controller", () => {
         ).toBe("active");
     });
 
+    it("does not restore an old completed replay beside a run started during the request", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        expect(fake.transport.snapshot).toHaveBeenCalledWith(SELECTED);
+        act(() => result.current.beginRun(SELECTED, "dashboard-chat-new"));
+        await act(async () => {
+            snapshot.resolve({
+                completed: true,
+                events: [
+                    assistant(SELECTED, 16, "previous answer", "replace"),
+                    finish(SELECTED, 32),
+                ],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "dashboard-chat-new",
+        ]);
+
+        act(() =>
+            result.current.acknowledgeRun(SELECTED, "dashboard-chat-new", "provider-new")
+        );
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "provider-new",
+        ]);
+    });
+
     it("reconciles a snapshot run whose send acknowledgement arrives later", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);

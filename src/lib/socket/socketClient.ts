@@ -54,16 +54,26 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     let requestId = 0;
     const pendingRequests = new Map<string, PendingRequest>();
 
+    /** Removes one pending request and releases its local deadline. */
+    const takePendingRequest = (id: string): PendingRequest | undefined => {
+        const pending = pendingRequests.get(id);
+        if (!pending) {
+            return undefined;
+        }
+        pendingRequests.delete(id);
+        if (pending.timeout !== undefined) {
+            clearTimeout(pending.timeout);
+        }
+        return pending;
+    };
+
     /** Rejects requests that cannot complete after the active socket closes. */
     const rejectPendingRequests = (socket?: WebSocket) => {
         for (const [id, pending] of pendingRequests) {
             if (socket && pending.socket !== socket) {
                 continue;
             }
-            pendingRequests.delete(id);
-            if (pending.timeout !== undefined) {
-                clearTimeout(pending.timeout);
-            }
+            takePendingRequest(id);
             pending.reject(new Error("WebSocket disconnected"));
         }
     };
@@ -90,12 +100,8 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                 const data = JSON.parse(event.data) as SocketEnvelope;
 
                 if (data.type === "response" && data.id) {
-                    const pending = pendingRequests.get(data.id);
+                    const pending = takePendingRequest(data.id);
                     if (pending) {
-                        pendingRequests.delete(data.id);
-                        if (pending.timeout !== undefined) {
-                            clearTimeout(pending.timeout);
-                        }
                         if (data.isOk) {
                             pending.resolve(data.payload);
                         } else {
@@ -166,12 +172,11 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                 requestTimeoutMs === undefined
                     ? undefined
                     : setTimeout(() => {
-                          if (!pendingRequests.has(id)) {
+                          const pending = takePendingRequest(id);
+                          if (!pending) {
                               return;
                           }
-
-                          pendingRequests.delete(id);
-                          reject(new Error("Request timeout"));
+                          pending.reject(new Error("Request timeout"));
                       }, requestTimeoutMs);
             pendingRequests.set(id, {
                 resolve: resolve as (value: unknown) => void,
@@ -180,15 +185,19 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                 timeout,
             });
 
-            socket.send(
-                JSON.stringify({
-                    type: "req",
-                    id,
-                    method,
-                    params: parameters,
-                    timeoutMs: requestTimeoutMs,
-                })
-            );
+            try {
+                socket.send(
+                    JSON.stringify({
+                        type: "req",
+                        id,
+                        method,
+                        params: parameters,
+                        timeoutMs: requestTimeoutMs,
+                    })
+                );
+            } catch (error) {
+                takePendingRequest(id)?.reject(error);
+            }
         });
     };
 

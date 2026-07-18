@@ -1260,6 +1260,31 @@ describe("Mira Dashboard frontend behavior", () => {
                 timeoutSpy.mockRestore();
             }
 
+            const clearTimeoutSpy = jest.spyOn(globalThis, "clearTimeout");
+            try {
+                const cyclicParameters: Record<string, unknown> = {};
+                cyclicParameters.self = cyclicParameters;
+                await expect(
+                    client.request("cyclic-parameters", cyclicParameters)
+                ).rejects.toBeInstanceOf(TypeError);
+                expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+
+                const sendError = new Error("WebSocket send failed");
+                const sendSpy = jest
+                    .spyOn(replacementSocket, "send")
+                    .mockImplementationOnce(() => {
+                        throw sendError;
+                    });
+                try {
+                    await expect(client.request("send-failure")).rejects.toBe(sendError);
+                } finally {
+                    sendSpy.mockRestore();
+                }
+                expect(clearTimeoutSpy).toHaveBeenCalledTimes(2);
+            } finally {
+                clearTimeoutSpy.mockRestore();
+            }
+
             const disconnectedPromise = client.request("disconnect");
             client.disconnect();
             await expect(disconnectedPromise).rejects.toThrow("WebSocket disconnected");

@@ -244,14 +244,17 @@ export function openClawProgress(
             data.aborted === true ||
             ["aborted", "error", "failed", "failure"].includes(normalizedPhase) ||
             ["aborted", "error", "failed", "failure"].includes(status);
+        const isSessionEnd =
+            eventName === "session.compaction" &&
+            (normalizedPhase === "end" || status === "end");
         const isTerminal =
             isFailure ||
             ["complete", "completed", "end", "finished"].includes(normalizedPhase) ||
-            ["complete", "completed", "finished"].includes(status);
+            ["complete", "completed", "end", "finished"].includes(status);
         const isSuccessful =
             !isFailure &&
             (data.completed === true ||
-                (eventName === "session.compaction" && normalizedPhase === "end") ||
+                isSessionEnd ||
                 ["complete", "completed", "finished"].includes(normalizedPhase) ||
                 ["complete", "completed", "finished"].includes(status));
         const isRetrying = isTerminal && data.willRetry === true;

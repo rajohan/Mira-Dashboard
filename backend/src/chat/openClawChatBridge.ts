@@ -495,7 +495,7 @@ function normalizedMessageText(value: unknown): string {
 }
 
 function messageSignature(payload: unknown): string | undefined {
-    const record = asRecord(payload);
+    const record = runtimePayloadView(payload);
     if (!record) {
         return undefined;
     }
@@ -538,7 +538,7 @@ function hasChatFinal(run: RetainedRun): boolean {
 }
 
 function sessionMessageRole(payload: unknown): string | undefined {
-    const record = asRecord(payload);
+    const record = runtimePayloadView(payload);
     return (
         stringField(record, "role") || stringField(asRecord(record?.message), "role")
     )?.toLowerCase();

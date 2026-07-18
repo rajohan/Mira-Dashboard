@@ -7,6 +7,7 @@ import {
     itemTexts,
     normalizeAssistant,
     openClawEventContext,
+    openClawPayloadView,
     openClawSequence,
     rawString,
     stringValue,
@@ -124,15 +125,13 @@ function chatEventDrafts(
 
 function runtimeStreamDrafts(
     eventName: string,
-    payload: Record<string, unknown>,
+    data: Record<string, unknown>,
     common: {
         runId?: string;
         sessionKey: string;
         timestamp: string;
     }
 ): ChatRuntimeEventDraft[] {
-    const nestedData = asRecord(payload.data);
-    const data = nestedData ? { ...payload, ...nestedData } : payload;
     const streamRaw =
         stringValue(data.stream) ||
         (eventName === "session.compaction" ? "compaction" : "");
@@ -206,12 +205,9 @@ function runtimeStreamDrafts(
         const explicitError =
             stringValue(data.errorMessage) ||
             stringValue(data.promptError) ||
-            stringValue(data.error) ||
-            stringValue(payload.errorMessage) ||
-            stringValue(payload.error);
-        const status = stringValue(data.status) || stringValue(payload.status);
-        const isAborted =
-            data.aborted === true || payload.aborted === true || status === "aborted";
+            stringValue(data.error);
+        const status = stringValue(data.status);
+        const isAborted = data.aborted === true || status === "aborted";
         const isError =
             Boolean(explicitError) ||
             phase === "error" ||
@@ -311,12 +307,13 @@ export function adaptOpenClawRuntimeEvent(
         return [];
     }
     const common = { runId, sessionKey, timestamp };
+    const eventPayload = openClawPayloadView(payload);
     const drafts =
         eventName === "chat"
-            ? chatEventDrafts(stringValue(payload.state), payload, common)
+            ? chatEventDrafts(stringValue(eventPayload.state), eventPayload, common)
             : eventName === "session.message"
-              ? sessionMessageDrafts(payload, common)
-              : runtimeStreamDrafts(eventName, payload, common);
+              ? sessionMessageDrafts(eventPayload, common)
+              : runtimeStreamDrafts(eventName, eventPayload, common);
     const sequence = openClawSequence(raw, fallbackSequence) * 16;
     return drafts.slice(0, 15).map((draft, index) => ({
         ...draft,
@@ -325,11 +322,11 @@ export function adaptOpenClawRuntimeEvent(
 }
 
 function sessionMessageDrafts(
-    payload: Record<string, unknown>,
+    data: Record<string, unknown>,
     common: { runId?: string; sessionKey: string; timestamp: string }
 ): ChatRuntimeEventDraft[] {
-    const nestedMessage = asRecord(payload.message);
-    const topLevelRole = stringValue(payload.role);
+    const nestedMessage = asRecord(data.message);
+    const topLevelRole = stringValue(data.role);
     const rawMessage = topLevelRole
         ? {
               ...nestedMessage,
@@ -337,13 +334,10 @@ function sessionMessageDrafts(
                   nestedMessage?.content ??
                   (nestedMessage
                       ? undefined
-                      : (payload.message ??
-                        payload.content ??
-                        payload.deltaText ??
-                        payload.text)),
+                      : (data.message ?? data.content ?? data.deltaText ?? data.text)),
               role: topLevelRole,
           }
-        : (payload.message ?? payload.content ?? payload.deltaText ?? payload.text);
+        : (data.message ?? data.content ?? data.deltaText ?? data.text);
     const message = normalizeAssistant(rawMessage, common.runId);
     const role = message.role.toLowerCase();
     if (role === "assistant") {

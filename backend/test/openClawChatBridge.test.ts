@@ -2540,7 +2540,7 @@ describe("OpenClaw chat bridge", () => {
         ]);
     });
 
-    it("retains an unscoped assistant session echo with its completed final", () => {
+    it("retains a nested unscoped assistant session echo with its completed final", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(
             "chat",
@@ -2558,9 +2558,11 @@ describe("OpenClaw chat bridge", () => {
         bridge.recordEvent(
             "session.message",
             {
-                content: "done",
-                role: "assistant",
-                sessionKey: MAIN,
+                data: {
+                    content: "done",
+                    role: "assistant",
+                    sessionKey: MAIN,
+                },
             },
             []
         );
@@ -2606,6 +2608,43 @@ describe("OpenClaw chat bridge", () => {
         expect(snapshot.events[1]).toMatchObject({
             event: "chat",
             payload: { runId: "provider-run" },
+        });
+    });
+
+    it("promotes a nested runless user session message when provider work starts", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.message",
+            {
+                data: {
+                    message: "nested message from another client",
+                    role: "user",
+                    sessionKey: MAIN,
+                },
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "provider answer",
+                runId: "nested-provider-run",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(true);
+        expect(snapshot.events).toHaveLength(2);
+        expect(snapshot.events[0]).toMatchObject({
+            event: "session.message",
+            payload: { runId: "nested-provider-run" },
+        });
+        expect(snapshot.events[1]).toMatchObject({
+            event: "chat",
+            payload: { runId: "nested-provider-run" },
         });
     });
 

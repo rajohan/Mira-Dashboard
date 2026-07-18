@@ -169,6 +169,21 @@ describe("OpenClaw adapter variants", () => {
                 25
             )
         );
+        const nestedDataUser = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    data: {
+                        message: "nested data prompt",
+                        role: "user",
+                        sessionKey: SESSION,
+                    },
+                    runId: undefined,
+                    sessionKey: undefined,
+                },
+                30
+            )
+        );
         const assistant = adapter.event(
             envelope("agent", { data: { delta: "answer" }, stream: "assistant" }, 26)
         );
@@ -224,6 +239,12 @@ describe("OpenClaw adapter variants", () => {
         expect(nestedTopLevelAssistant[0]).toMatchObject({
             kind: "assistant",
             message: { role: "assistant", text: "nested top-level answer" },
+        });
+        expect(nestedDataUser[0]).toMatchObject({
+            kind: "user",
+            message: { role: "user", text: "nested data prompt" },
+            runId: undefined,
+            sessionKey: SESSION,
         });
         expect(assistant.map((event) => event.kind)).toEqual(["assistant"]);
         expect(assistant[0]?.kind === "assistant" && assistant[0].message.text).toBe(
@@ -434,6 +455,19 @@ describe("OpenClaw adapter variants", () => {
                 54
             )
         );
+        const sessionStatusEnd = adapter.event(
+            envelope(
+                "session.compaction",
+                {
+                    operation: "compact",
+                    operationId: "status-compact-operation",
+                    phase: undefined,
+                    runId: undefined,
+                    status: "end",
+                },
+                62
+            )
+        );
         const retrying = adapter.event(
             envelope(
                 "agent",
@@ -519,6 +553,9 @@ describe("OpenClaw adapter variants", () => {
                 61
             )
         );
+        const agentStatusEnd = adapter.event(
+            envelope("agent", { data: { status: "end" }, stream: "compaction" }, 63)
+        );
 
         expect(sessionStart[0]).toMatchObject({
             kind: "status",
@@ -532,6 +569,13 @@ describe("OpenClaw adapter variants", () => {
             operationPhase: "complete",
             runId: "compaction:compact-operation",
         });
+        expect(sessionStatusEnd[0]).toMatchObject({
+            kind: "status",
+            operation: "compact",
+            operationPhase: "complete",
+            runId: "compaction:status-compact-operation",
+            text: "Context compacted",
+        });
         expect(retrying[0]).toMatchObject({
             kind: "status",
             operationPhase: "retrying",
@@ -543,6 +587,12 @@ describe("OpenClaw adapter variants", () => {
             operationPhase: "retrying",
             runId: "compaction:run-variants",
             text: "Compacting context",
+        });
+        expect(agentStatusEnd[0]).toMatchObject({
+            kind: "status",
+            operationPhase: "inactive",
+            runId: "compaction:run-variants",
+            text: undefined,
         });
         expect(unidentifiedStart[0]).toMatchObject({
             kind: "status",

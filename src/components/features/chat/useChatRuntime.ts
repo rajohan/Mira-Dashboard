@@ -419,8 +419,11 @@ export function useChatRuntime({
                         );
                         continue;
                     }
-                    if (snapshot.completed && !pendingRun.observedAfterSnapshotRequest) {
-                        continue;
+                    if (snapshot.completed) {
+                        if (!pendingRun.observedAfterSnapshotRequest) {
+                            continue;
+                        }
+                        next = clearCompletedChatRuns(next, selectedSessionKey);
                     }
                     next = addOptimisticChatRun(
                         next,
