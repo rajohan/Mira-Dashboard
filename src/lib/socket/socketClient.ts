@@ -5,7 +5,7 @@ interface PendingRequest {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
     socket: WebSocket;
-    timeout: ReturnType<typeof setTimeout>;
+    timeout?: ReturnType<typeof setTimeout>;
 }
 
 /** Represents socket client options. */
@@ -20,6 +20,8 @@ interface SocketClientOptions {
 /** Configures one socket request without changing the client-wide defaults. */
 export interface SocketRequestOptions {
     timeoutMs?: number;
+    /** Leaves completion timing to the remote operation lifecycle. */
+    shouldWaitIndefinitely?: boolean;
 }
 
 /** Represents socket client. */
@@ -48,7 +50,9 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                 continue;
             }
             pendingRequests.delete(id);
-            clearTimeout(pending.timeout);
+            if (pending.timeout !== undefined) {
+                clearTimeout(pending.timeout);
+            }
             pending.reject(new Error("WebSocket disconnected"));
         }
     };
@@ -78,7 +82,9 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                     const pending = pendingRequests.get(data.id);
                     if (pending) {
                         pendingRequests.delete(data.id);
-                        clearTimeout(pending.timeout);
+                        if (pending.timeout !== undefined) {
+                            clearTimeout(pending.timeout);
+                        }
                         if (data.isOk) {
                             pending.resolve(data.payload);
                         } else {
@@ -140,14 +146,18 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
 
             const id = String(++requestId);
-            const timeout = setTimeout(() => {
-                if (!pendingRequests.has(id)) {
-                    return;
-                }
+            const requestTimeoutMs = requestOptions?.timeoutMs;
+            const timeout =
+                requestOptions?.shouldWaitIndefinitely === true
+                    ? undefined
+                    : setTimeout(() => {
+                          if (!pendingRequests.has(id)) {
+                              return;
+                          }
 
-                pendingRequests.delete(id);
-                reject(new Error("Request timeout"));
-            }, requestOptions?.timeoutMs ?? 30_000);
+                          pendingRequests.delete(id);
+                          reject(new Error("Request timeout"));
+                      }, requestTimeoutMs ?? 30_000);
             pendingRequests.set(id, {
                 resolve: resolve as (value: unknown) => void,
                 reject,

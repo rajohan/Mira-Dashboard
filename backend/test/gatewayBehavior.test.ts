@@ -462,7 +462,6 @@ describe("gateway behavior", () => {
             id: "compact-session",
             method: "sessions.compact",
             params: { key: "agent:main:main" },
-            timeoutMs: 600_000,
             type: "request",
         });
         await waitFor(() =>
@@ -471,7 +470,7 @@ describe("gateway behavior", () => {
         expect(
             client?.requests.find(({ method }) => method === "sessions.compact")
         ).toMatchObject({
-            options: { timeoutMs: 600_000 },
+            options: { shouldWaitIndefinitely: true },
             parameters: { key: "agent:main:main" },
         });
         const researcherSession = sessionsMessage?.sessions?.find(

@@ -2387,6 +2387,24 @@ fi
                 })
             );
             await expect(fractionalRequest).resolves.toEqual({ fractional: true });
+
+            const timeoutCallCount = timeoutSpy.mock.calls.length;
+            const noDeadlineRequest = client.request(
+                "demo.no-deadline",
+                {},
+                { shouldWaitIndefinitely: true }
+            );
+            expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCallCount);
+            const noDeadlineFrame = JSON.parse(socket!.sent[5]!) as { id: string };
+            socket?.message(
+                JSON.stringify({
+                    id: noDeadlineFrame.id,
+                    ok: true,
+                    payload: { completed: true },
+                    type: "res",
+                })
+            );
+            await expect(noDeadlineRequest).resolves.toEqual({ completed: true });
         } finally {
             timeoutSpy.mockRestore();
         }
@@ -2396,7 +2414,7 @@ fi
         socket!.sendError = undefined;
 
         const closedRequest = client.request("demo.closed");
-        await waitFor(() => socket!.sent.length === 6);
+        await waitFor(() => socket!.sent.length === 7);
         socket?.close(4001, "gone");
         await expect(closedRequest).rejects.toThrow("gateway closed (4001): gone");
         expect(closeEvents).toContainEqual({ code: 4001, reason: "gone" });

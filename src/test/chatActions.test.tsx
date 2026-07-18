@@ -125,6 +125,9 @@ describe("chat actions", () => {
             secondSend = result.current.handleSend();
         });
         await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(2));
+        expect(
+            (transport.send as ReturnType<typeof jest.fn>).mock.calls[1]?.[0]
+        ).not.toHaveProperty("queueMode");
         expect(messages.map((message) => message.text)).toEqual(["first", "steer"]);
         expect(messages.map((message) => message.runId)).toEqual([
             expect.stringMatching(DASHBOARD_CHAT_RUN_ID),

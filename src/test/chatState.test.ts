@@ -532,6 +532,7 @@ describe("chat runtime state", () => {
 
         const run = state.sessions[SESSION]?.runs["run-1"];
         expect(run?.assistant?.text).toBe("canonical final");
+        expect(run?.assistant?.isFinal).toBe(true);
         expect(run?.assistantSource).toBe("chat");
         expect(run?.phase).toBe("completed");
 
@@ -551,6 +552,9 @@ describe("chat runtime state", () => {
         expect(lateSessionUpdate.sessions[SESSION]?.runs["run-1"]?.assistant?.text).toBe(
             "canonical final"
         );
+        expect(
+            lateSessionUpdate.sessions[SESSION]?.runs["run-1"]?.assistant?.isFinal
+        ).toBe(true);
     });
 
     it("merges a no-id tool result into its latest matching call", () => {

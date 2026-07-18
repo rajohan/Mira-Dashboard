@@ -944,6 +944,41 @@ describe("OpenClaw chat bridge", () => {
         expect(store.snapshots.has(MAIN)).toBe(false);
     });
 
+    it("retains an old completed replay until a new send replaces it", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(
+                MAIN,
+                "completed-run",
+                Date.now() - 7 * 24 * 60 * 60_000,
+                "final"
+            )
+        );
+        const bridge = new OpenClawChatBridge(store);
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [
+                expect.objectContaining({
+                    payload: expect.objectContaining({ runId: "completed-run" }),
+                }),
+            ],
+        });
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-next",
+                message: "next",
+                sessionKey: MAIN,
+            },
+            { runId: "next-run" },
+            bridge.captureRequestBoundary(MAIN)
+        );
+        expect(bridge.snapshot(MAIN).events).toEqual([]);
+    });
+
     it("retains run activity while coalescing full item progress snapshots", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

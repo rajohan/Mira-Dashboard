@@ -814,6 +814,9 @@ export class OpenClawChatBridge {
         }
         let hasChanged = false;
         for (const [runId, run] of runs) {
+            // Completed replay is the durable "last run" view and is intentionally
+            // retained until a successful new send replaces it. The TTL only
+            // recovers abandoned active runs after a missing lifecycle end.
             if (run.completed || now - run.updatedAt <= ACTIVE_RUN_TTL_MS) {
                 continue;
             }

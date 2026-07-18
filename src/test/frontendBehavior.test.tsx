@@ -1202,6 +1202,31 @@ describe("Mira Dashboard frontend behavior", () => {
                 })
             );
 
+            const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+            try {
+                const timeoutCallCount = timeoutSpy.mock.calls.length;
+                const noDeadlinePromise = client.request<{ completed: boolean }>(
+                    "no-deadline",
+                    {},
+                    { shouldWaitIndefinitely: true }
+                );
+                expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCallCount);
+                const noDeadlineRequest = JSON.parse(replacementSocket.sent.at(-1)!) as {
+                    id: string;
+                    shouldWaitIndefinitely?: boolean;
+                };
+                expect(noDeadlineRequest).not.toHaveProperty("shouldWaitIndefinitely");
+                replacementSocket.message({
+                    type: "response",
+                    id: noDeadlineRequest.id,
+                    isOk: true,
+                    payload: { completed: true },
+                });
+                await expect(noDeadlinePromise).resolves.toEqual({ completed: true });
+            } finally {
+                timeoutSpy.mockRestore();
+            }
+
             const disconnectedPromise = client.request("disconnect");
             client.disconnect();
             await expect(disconnectedPromise).rejects.toThrow("WebSocket disconnected");

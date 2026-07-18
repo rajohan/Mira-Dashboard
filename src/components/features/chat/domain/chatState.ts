@@ -780,6 +780,12 @@ function applyFinishEvent(
         (run.operationPhase === "active" || run.operationPhase === "retrying");
     return {
         ...withMessage,
+        assistant: withMessage.assistant
+            ? {
+                  ...withMessage.assistant,
+                  isFinal: event.outcome === "completed",
+              }
+            : undefined,
         error,
         operationPhase: isPendingCompaction
             ? event.outcome === "completed"

@@ -86,7 +86,7 @@ function isDashboardRunId(runId?: string): boolean {
 function isStandaloneDiagnostic(message: ChatHistoryMessage): boolean {
     const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
     return Boolean(
-        hasToolDetails ||
+        (hasToolDetails && message.isFinal !== true) ||
         (message.thinking?.length &&
             (!message.text.trim() ||
                 TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase())))
@@ -120,6 +120,18 @@ function projectedMessageRowKey(message: ChatHistoryMessage): string {
             ? `stream-${message.runId}-${message.runtimeKey || messageDeleteKey(message)}`
             : messageDeleteKey(message))
     );
+}
+
+/** Keeps persisted delete keys valid when runtime reconciliation adds a run id. */
+function projectedMessageDeleteKeys(message: ChatHistoryMessage): string[] {
+    const currentKey = projectedMessageRowKey(message);
+    if (message.role.toLowerCase() !== "user" || !message.runId) {
+        return [currentKey];
+    }
+    const persistedHistoryKey = messageDeleteKey({ ...message, runId: undefined });
+    return currentKey === persistedHistoryKey
+        ? [currentKey]
+        : [currentKey, persistedHistoryKey];
 }
 
 function isMatchedToAnotherRun(
@@ -635,7 +647,9 @@ export function projectChat(
         reconciled,
         visibility,
         shouldKeepThinkingAfterFinal
-    ).filter((message) => !deletedMessageKeys.has(projectedMessageRowKey(message)));
+    ).filter((message) =>
+        projectedMessageDeleteKeys(message).every((key) => !deletedMessageKeys.has(key))
+    );
     const rows: ChatRow[] = presented.map((message) => {
         return {
             key: projectedMessageRowKey(message),

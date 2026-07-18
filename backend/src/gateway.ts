@@ -1010,6 +1010,10 @@ async function forwardRequest(
         return false;
     }
     const activeGateway = gatewayState.client;
+    const requestOptions = {
+        timeoutMs,
+        shouldWaitIndefinitely: method === "sessions.compact",
+    };
 
     if (clientWs && clientId) {
         const id = String(++gatewayState.requestId);
@@ -1021,7 +1025,7 @@ async function forwardRequest(
                     ? parameters.sessionKey
                     : undefined
             );
-            let payload = await activeGateway.request(method, parameters, { timeoutMs });
+            let payload = await activeGateway.request(method, parameters, requestOptions);
             chatReplayState.bridge.handleSuccessfulRequest(
                 method,
                 parameters,
@@ -1069,7 +1073,7 @@ async function forwardRequest(
         const requestBoundary = chatReplayState.bridge.captureRequestBoundary(
             typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
         );
-        const payload = await activeGateway.request(method, parameters, { timeoutMs });
+        const payload = await activeGateway.request(method, parameters, requestOptions);
         chatReplayState.bridge.handleSuccessfulRequest(
             method,
             parameters,

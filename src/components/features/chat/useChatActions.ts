@@ -216,7 +216,7 @@ export function useChatActions({
 
         const resetCommand = isResetSlashCommand(text);
         const idempotencyKey = resetCommand ? undefined : dashboardChatRunId();
-        const isLiveSteer = activeRunCount > 0;
+        const hasActiveRun = activeRunCount > 0;
         const userMessage: ChatHistoryMessage = {
             role: "user",
             content: text,
@@ -284,8 +284,9 @@ export function useChatActions({
                         idempotencyKey,
                         result.runId
                     );
-                } else if (isLiveSteer) {
-                    // A runless steer continues on the already-active provider run.
+                } else if (hasActiveRun) {
+                    // OpenClaw resolves its configured queue mode inside chat.send.
+                    // A runless acknowledgement therefore belongs to the active run.
                     runtime.clearRun(pendingSessionKey, idempotencyKey);
                 } else {
                     // The provider may keep the idempotency key as the run identity.

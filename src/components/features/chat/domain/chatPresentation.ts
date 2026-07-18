@@ -106,7 +106,7 @@ function applyFinalThinkingPreference(
         const isPrimaryAnswer = Boolean(
             message.role.toLowerCase() === "assistant" &&
             hasPrimaryContent &&
-            !hasToolOutput &&
+            (!hasToolOutput || message.isFinal === true) &&
             isRenderableChatHistoryMessage(withoutThinking, visibility)
         );
         response.push({
@@ -176,7 +176,7 @@ function isPrimaryAssistantMessage(message: ChatHistoryMessage): boolean {
     const withoutThinking = stripThinkingFromMessage(message);
     return Boolean(
         message.role.toLowerCase() === "assistant" &&
-        !hasToolDetails(withoutThinking) &&
+        (!hasToolDetails(withoutThinking) || message.isFinal === true) &&
         (withoutThinking.text.trim() ||
             withoutThinking.images?.length ||
             withoutThinking.attachments?.length)

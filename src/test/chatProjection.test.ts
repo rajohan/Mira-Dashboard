@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
 import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
-import { stableChatStringify } from "../components/features/chat/chatUtilities";
+import {
+    messageDeleteKey,
+    stableChatStringify,
+} from "../components/features/chat/chatUtilities";
 import {
     createChatVisibility,
     presentChatMessages,
@@ -1462,6 +1465,33 @@ describe("chat projection", () => {
         ).toBe(true);
     });
 
+    it("keeps a persisted user deletion hidden after runtime adds its run id", () => {
+        const historyPrompt: ChatHistoryMessage = {
+            ...message("user", "question"),
+            timestamp: NOW,
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: historyPrompt,
+                runId: "run-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [historyPrompt],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set([messageDeleteKey(historyPrompt)])
+        );
+
+        expect(projection.rows.some((row) => row.message.text === "question")).toBe(
+            false
+        );
+    });
+
     it("keeps a deleted runtime diagnostic hidden by its stable row key", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -1643,6 +1673,47 @@ describe("chat projection", () => {
                 (item) => item.thinking?.length
             )
         ).toBe(false);
+    });
+
+    it("recognizes a final tool-bearing assistant row without reclassifying tool work", () => {
+        const toolWork: ChatHistoryMessage = {
+            content: "Checking",
+            role: "assistant",
+            runId: "run-1",
+            text: "Checking",
+            thinking: [{ text: "work reasoning" }],
+            toolCalls: [
+                {
+                    id: "call-1",
+                    name: "read",
+                    toolResult: { content: "done", id: "call-1", name: "read" },
+                },
+            ],
+        };
+        const finalWithTool: ChatHistoryMessage = {
+            ...toolWork,
+            content: "All healthy",
+            isFinal: true,
+            text: "All healthy",
+            thinking: [{ text: "final reasoning" }],
+        };
+
+        const unfinished = presentChatMessages(
+            [message("user", "check"), toolWork],
+            createChatVisibility(true, true),
+            false
+        );
+        expect(unfinished.some((item) => item.thinking?.length)).toBe(true);
+
+        const completed = presentChatMessages(
+            [message("user", "check"), finalWithTool],
+            createChatVisibility(true, true),
+            false
+        );
+        expect(completed.some((item) => item.thinking?.length)).toBe(false);
+        expect(completed.find((item) => item.text === "All healthy")?.toolCalls).toEqual(
+            finalWithTool.toolCalls
+        );
     });
 
     it("extracts mixed unscoped thinking into one bubble before the final answer", () => {

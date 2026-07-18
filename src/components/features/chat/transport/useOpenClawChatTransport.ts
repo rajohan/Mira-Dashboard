@@ -11,8 +11,6 @@ import type {
 import { asRecord, openClawThroughSequence, stringValue } from "./openClawAdapterValues";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
 
-const COMPACTION_REQUEST_TIMEOUT_MS = 10 * 60_000;
-
 /** Connects the provider-independent chat contract to OpenClaw's Gateway RPCs. */
 export function useOpenClawChatTransport(): ChatTransport {
     const socket = useOpenClawSocket();
@@ -56,6 +54,9 @@ export function useOpenClawChatTransport(): ChatTransport {
     };
 
     const send = async (request: ChatSendRequest) => {
+        // OpenClaw's chat.send RPC owns configured/default queue behavior and does
+        // not accept a per-request queueMode. sessions.steer is intentionally not
+        // used here because that RPC aborts the active run before sending.
         const result = asRecord(await socket.request("chat.send", { ...request }));
         return { runId: stringValue(result?.runId) };
     };
@@ -69,7 +70,8 @@ export function useOpenClawChatTransport(): ChatTransport {
             await socket.request(
                 "sessions.compact",
                 { key: sessionKey },
-                { timeoutMs: COMPACTION_REQUEST_TIMEOUT_MS }
+                // LLM compaction duration is owned by the Gateway lifecycle.
+                { shouldWaitIndefinitely: true }
             )
         );
         if (result?.ok !== true) {

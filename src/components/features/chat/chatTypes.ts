@@ -160,6 +160,8 @@ export interface ChatHistoryMessage {
     timestamp?: string;
     local?: boolean;
     runId?: string;
+    /** True only when the runtime has identified this row as the final answer. */
+    isFinal?: boolean;
     /** Stable identity for one transient runtime row inside a run. */
     runtimeKey?: string;
 }
