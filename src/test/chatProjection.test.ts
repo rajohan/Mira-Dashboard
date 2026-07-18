@@ -288,6 +288,103 @@ describe("chat projection", () => {
         });
     });
 
+    it("hides activity when the same run already has visible assistant text", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, { kind: "status", runId: "run-1", text: "Working" }),
+            event(16, {
+                kind: "assistant",
+                message: message("assistant", "Streaming answer", "run-1"),
+                mode: "merge",
+                runId: "run-1",
+                source: "chat",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [message("user", "question")],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projection.rows).toContainEqual(
+            expect.objectContaining({
+                kind: "stream",
+                message: expect.objectContaining({ text: "Streaming answer" }),
+            })
+        );
+        expect(projection.rows.some((row) => row.kind === "typing")).toBe(false);
+    });
+
+    it("restores activity when tool work follows visible assistant text", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, { kind: "status", runId: "run-1", text: "Working" }),
+            event(16, {
+                kind: "assistant",
+                message: message("assistant", "I will inspect it.", "run-1"),
+                mode: "merge",
+                runId: "run-1",
+                source: "chat",
+            }),
+            event(24, {
+                kind: "tool",
+                message: {
+                    content: "I will inspect the repository.",
+                    role: "assistant",
+                    text: "I will inspect the repository.",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [message("user", "question")],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projection.rows.at(-1)).toMatchObject({
+            kind: "typing",
+            message: { text: "Working" },
+        });
+    });
+
+    it("keeps optimistic user rows as deletable messages", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: message("user", "steer", "dashboard-chat-steer"),
+                runId: "dashboard-chat-steer",
+            }),
+            event(32, {
+                kind: "assistant",
+                message: message("assistant", "Working", "run-1"),
+                mode: "merge",
+                runId: "run-1",
+                source: "chat",
+            }),
+        ]);
+
+        const rows = projectChat(
+            [],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).rows;
+
+        expect(rows.find((row) => row.message.role === "user")?.kind).toBe("message");
+        expect(rows.find((row) => row.message.role === "assistant")?.kind).toBe("stream");
+    });
+
     it("keeps a thinking row anchored while runtime output recovers into history", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

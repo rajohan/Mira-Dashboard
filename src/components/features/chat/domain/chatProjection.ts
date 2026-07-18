@@ -584,10 +584,48 @@ export function reconcileChatMessages(
     return dedupeMessages(messages);
 }
 
-function statusRow(runs: ChatRunState[]): ChatRow | undefined {
+function isAssistantTextStream(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        message.role.toLowerCase() === "assistant" &&
+        message.text.trim() &&
+        !message.thinking?.length &&
+        !message.toolCalls?.length &&
+        !message.toolResult
+    );
+}
+
+function visibleAssistantStreamRunIds(
+    presented: ChatHistoryMessage[],
+    runs: ChatRunState[]
+): ReadonlySet<string> {
+    return new Set(
+        runs.flatMap((run) => {
+            const latestVisibleTurnMessage = presented.findLast(
+                (message) =>
+                    isRunMatchingMessage(run, message) &&
+                    (isUserMessage(message) || isAssistantTextStream(message))
+            );
+            return run.lastContentKind === "assistant" &&
+                latestVisibleTurnMessage &&
+                isAssistantTextStream(latestVisibleTurnMessage)
+                ? [run.runId, ...run.aliases]
+                : [];
+        })
+    );
+}
+
+function statusRow(
+    runs: ChatRunState[],
+    visibleStreamRunIds: ReadonlySet<string>
+): ChatRow | undefined {
     const run = runs
         .toSorted((left, right) => right.lastSequence - left.lastSequence)
-        .find((candidate) => candidate.operation !== "compact");
+        .find(
+            (candidate) =>
+                candidate.operation !== "compact" &&
+                !visibleStreamRunIds.has(candidate.runId) &&
+                candidate.aliases.every((alias) => !visibleStreamRunIds.has(alias))
+        );
     if (!run) {
         return undefined;
     }
@@ -653,7 +691,10 @@ export function projectChat(
     const rows: ChatRow[] = presented.map((message) => {
         return {
             key: projectedMessageRowKey(message),
-            kind: message.local === true && message.runId ? "stream" : "message",
+            kind:
+                message.local === true && message.runId && !isUserMessage(message)
+                    ? "stream"
+                    : "message",
             message,
         };
     });
@@ -667,7 +708,10 @@ export function projectChat(
                 responseSegment(boundaryMessages, run, runs)
             ) === -1
     );
-    const typing = statusRow(activeRuns);
+    const typing = statusRow(
+        activeRuns,
+        visibleAssistantStreamRunIds(presented, activeRuns)
+    );
     if (typing) {
         rows.push(typing);
     }

@@ -272,6 +272,8 @@ describe("chat runtime state", () => {
         expect(run).toMatchObject({
             assistant: { text: "Hello" },
             error: "late failure",
+            lastContentKind: "thinking",
+            lastContentSequence: 48,
             lastSequence: 64,
             phase: "error",
         });
@@ -328,6 +330,8 @@ describe("chat runtime state", () => {
         expect(acknowledged.sessions[SESSION]?.runs["provider-1"]).toMatchObject({
             assistant: { text: "done" },
             error: undefined,
+            lastContentKind: "assistant",
+            lastContentSequence: 48,
             lastSequence: 48,
             phase: "completed",
             statusText: undefined,

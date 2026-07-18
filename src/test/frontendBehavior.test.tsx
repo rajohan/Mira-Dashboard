@@ -63,6 +63,7 @@ import {
     slashCommandCanonicalName,
 } from "../components/features/chat/slashCommands";
 import { normalizeOpenClawHistoryMessage } from "../components/features/chat/transport/openClawHistoryNormalizer";
+import { useOpenClawChatTransport } from "../components/features/chat/transport/useOpenClawChatTransport";
 import {
     formatBytes as formatDatabaseBytes,
     formatNumber as formatDatabaseNumber,
@@ -1307,6 +1308,78 @@ describe("Mira Dashboard frontend behavior", () => {
                 result.current.disconnect();
             });
             expect(result.current.isConnected).toBe(false);
+            unmount();
+        } finally {
+            authActions.clearSession();
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("uses the socket response status for context compaction", async () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            user: { id: 1, username: "raymond" },
+        });
+
+        try {
+            const { result, unmount } = renderHook(() => useOpenClawChatTransport(), {
+                wrapper: openClawSocketWrapper,
+            });
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+            const socket = FakeWebSocket.instances[0]!;
+
+            act(() => {
+                socket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+            act(() => {
+                socket.message({ type: "response", id: "1", isOk: true, payload: [] });
+            });
+
+            const compactPromise = result.current.compact("agent:main:main");
+            const compactRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            expect(compactRequest).toMatchObject({
+                method: "sessions.compact",
+                params: { key: "agent:main:main" },
+            });
+            expect(compactRequest).not.toHaveProperty("timeoutMs");
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: compactRequest.id,
+                    isOk: true,
+                    payload: {},
+                });
+            });
+            await expect(compactPromise).resolves.toBeUndefined();
+
+            const rejectedCompactPromise = result.current.compact("agent:main:main");
+            const rejectedRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: rejectedRequest.id,
+                    isOk: false,
+                    error: "compaction unavailable",
+                });
+            });
+            await expect(rejectedCompactPromise).rejects.toBe("compaction unavailable");
             unmount();
         } finally {
             authActions.clearSession();

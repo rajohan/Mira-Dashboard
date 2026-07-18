@@ -12,6 +12,7 @@ import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
 export type ChatRunPhase = "active" | "completed" | "aborted" | "error";
 export type ChatTextSource = "chat" | "runtime" | "session";
 export type ChatOperationPhase = "active" | "complete" | "inactive" | "retrying";
+type ChatRunContentKind = "assistant" | "thinking" | "tool" | "user";
 
 const SESSION_ECHO_WINDOW_MILLISECONDS = 60_000;
 
@@ -27,6 +28,8 @@ export interface ChatRunState {
     assistantSource?: ChatTextSource;
     diagnostics: ChatDiagnosticEntry[];
     error?: string;
+    lastContentKind?: ChatRunContentKind;
+    lastContentSequence?: number;
     lastSequence: number;
     operation?: "compact";
     operationPhase?: ChatOperationPhase;
@@ -96,6 +99,23 @@ export type ChatRuntimeEvent =
           settlesCompaction?: boolean;
           toolFailure?: boolean;
       });
+
+function runContentKind(event: ChatRuntimeEvent): ChatRunContentKind | undefined {
+    switch (event.kind) {
+        case "assistant":
+        case "thinking":
+        case "tool":
+        case "user": {
+            return event.kind;
+        }
+        case "finish": {
+            return event.message ? "assistant" : undefined;
+        }
+        case "status": {
+            return undefined;
+        }
+    }
+}
 
 export function createChatRuntimeState(generation = 0): ChatRuntimeState {
     return { generation, sessions: {} };
@@ -712,6 +732,12 @@ function mergeAcknowledgedRuns(
                 (left.terminalSequence ?? left.lastSequence)
         )[0];
     const phase = terminalRun?.phase ?? newer.phase;
+    const latestContentRun = [existing, optimistic]
+        .filter((run) => run.lastContentSequence !== undefined)
+        .toSorted(
+            (left, right) =>
+                (right.lastContentSequence ?? -1) - (left.lastContentSequence ?? -1)
+        )[0];
 
     return {
         ...newer,
@@ -725,6 +751,8 @@ function mergeAcknowledgedRuns(
         assistantSource: newer.assistantSource || older.assistantSource,
         diagnostics: mergeRunDiagnostics(older, newer),
         error: (terminalRun ?? newer).error,
+        lastContentKind: latestContentRun?.lastContentKind,
+        lastContentSequence: latestContentRun?.lastContentSequence,
         lastSequence: Math.max(existing.lastSequence, optimistic.lastSequence),
         operation: newer.operation ?? older.operation,
         operationPhase: newer.operationPhase ?? older.operationPhase,
@@ -884,10 +912,15 @@ export function reduceChatRuntime(
         }
 
         const run = applyRunEvent(resolved.run, normalizedEvent);
+        const contentKind = runContentKind(normalizedEvent);
 
         session.runs[resolved.runKey] = {
             ...run,
             aliases: uniqueChatRunIds([...run.aliases, normalizedEvent.runId]),
+            lastContentKind: contentKind ?? run.lastContentKind,
+            lastContentSequence: contentKind
+                ? normalizedEvent.sequence
+                : run.lastContentSequence,
             lastSequence: normalizedEvent.sequence,
             updatedAt: normalizedEvent.timestamp,
         };

@@ -66,17 +66,12 @@ export function useOpenClawChatTransport(): ChatTransport {
     };
 
     const compact = async (sessionKey: string) => {
-        const result = asRecord(
-            await socket.request(
-                "sessions.compact",
-                { key: sessionKey },
-                // LLM compaction duration is owned by the Gateway lifecycle.
-                { shouldWaitIndefinitely: true }
-            )
+        await socket.request(
+            "sessions.compact",
+            { key: sessionKey },
+            // LLM compaction duration is owned by the Gateway lifecycle.
+            { shouldWaitIndefinitely: true }
         );
-        if (result?.ok !== true) {
-            throw new Error(stringValue(result?.reason) || "Context compaction failed");
-        }
     };
 
     const patchSession = async (
