@@ -7,6 +7,7 @@ import {
     mergeChatAttachments,
     mergeChatImages,
 } from "../chatTypes";
+import { messageDeleteKey, stableChatStringify } from "../chatUtilities";
 
 export type ChatRunPhase = "active" | "completed" | "aborted" | "error";
 export type ChatTextSource = "chat" | "runtime" | "session";
@@ -390,7 +391,7 @@ function isCompatibleSessionEcho(
         return false;
     }
     const details = (message: ChatHistoryMessage) =>
-        JSON.stringify({
+        stableChatStringify({
             attachments: message.attachments || [],
             images: message.images || [],
             thinking: message.thinking || [],
@@ -464,8 +465,8 @@ function isSameToolCall(left: ChatToolCallDisplay, right: ChatToolCallDisplay): 
     }
     return (
         left.name === right.name &&
-        JSON.stringify(left.arguments ?? undefined) ===
-            JSON.stringify(right.arguments ?? undefined)
+        stableChatStringify(left.arguments ?? undefined) ===
+            stableChatStringify(right.arguments ?? undefined)
     );
 }
 
@@ -490,8 +491,8 @@ function mergeToolDiagnostic(
             }
             return (
                 incomingCall.name === candidate.name &&
-                JSON.stringify(incomingCall.arguments ?? undefined) ===
-                    JSON.stringify(candidate.arguments ?? undefined)
+                stableChatStringify(incomingCall.arguments ?? undefined) ===
+                    stableChatStringify(candidate.arguments ?? undefined)
             );
         });
         if (callIndex === -1) {
@@ -612,7 +613,11 @@ function applyUserEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "user" }>
 ): ChatRunState {
-    const key = `user:${event.sequence}`;
+    const message = {
+        ...event.message,
+        timestamp: event.message.timestamp || event.timestamp,
+    };
+    const key = `user:${messageDeleteKey(message)}`;
     if (run.userMessages.some((entry) => entry.key === key)) {
         return run;
     }
@@ -622,10 +627,7 @@ function applyUserEvent(
             ...run.userMessages,
             {
                 key,
-                message: {
-                    ...event.message,
-                    timestamp: event.message.timestamp || event.timestamp,
-                },
+                message,
             },
         ],
     };
@@ -808,11 +810,11 @@ function settleRetryingCompactionRuns(
         }
         session.runs[runKey] = {
             ...run,
-            error: undefined,
+            error: event.error,
             lastSequence: event.sequence,
-            operationPhase: "complete",
+            operationPhase: event.outcome === "completed" ? "complete" : "inactive",
             operationUpdatedAt: event.timestamp,
-            phase: "completed",
+            phase: event.outcome,
             statusText: undefined,
             terminalAt: event.timestamp,
             terminalSequence: event.sequence,

@@ -18,6 +18,53 @@ export const CHAT_HISTORY_LIMIT = 1000;
 /** Defines optimistic message retention milliseconds. */
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
 
+function canonicalChatValue(value: unknown, ancestors: Set<object>): unknown {
+    if (value === null) {
+        return ["null"];
+    }
+    if (value === undefined) {
+        return ["undefined"];
+    }
+    if (typeof value === "bigint") {
+        return ["bigint", value.toString()];
+    }
+    if (typeof value === "number") {
+        const encoded = Number.isFinite(value)
+            ? Object.is(value, -0)
+                ? "-0"
+                : value
+            : String(value);
+        return ["number", encoded];
+    }
+    if (typeof value === "string" || typeof value === "boolean") {
+        return [typeof value, value];
+    }
+    if (typeof value !== "object") {
+        return [typeof value, String(value)];
+    }
+    if (ancestors.has(value)) {
+        return ["circular"];
+    }
+
+    const nestedAncestors = new Set(ancestors).add(value);
+    if (Array.isArray(value)) {
+        return ["array", value.map((item) => canonicalChatValue(item, nestedAncestors))];
+    }
+    const constructorName = value.constructor?.name || "Object";
+    return [
+        "object",
+        constructorName,
+        Object.entries(value as Record<string, unknown>)
+            .toSorted(([left], [right]) => left.localeCompare(right))
+            .map(([key, item]) => [key, canonicalChatValue(item, nestedAncestors)]),
+    ];
+}
+
+/** Serializes JSON-like chat payloads independently of object key order. */
+export function stableChatStringify(value: unknown): string {
+    return JSON.stringify(canonicalChatValue(value, new Set())) ?? "undefined";
+}
+
 /** Returns a displayable error message with a stable fallback. */
 export function chatErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error) {
@@ -185,7 +232,7 @@ function diagnosticMessageIdentity(message: ChatHistoryMessage): string | undefi
                 [
                     toolCall.id || "no-id-" + fallbackScope + "-" + index,
                     toolCall.name,
-                    JSON.stringify(toolCall.arguments ?? undefined),
+                    stableChatStringify(toolCall.arguments ?? undefined),
                 ].join("::")
             ),
         ].join("::");
@@ -223,7 +270,7 @@ function toolCallRowIdentity(message: ChatHistoryMessage): string | undefined {
             [
                 toolCall.id || `no-id-${index}`,
                 toolCall.name,
-                JSON.stringify(toolCall.arguments ?? undefined),
+                stableChatStringify(toolCall.arguments ?? undefined),
             ].join("::")
         ),
     ].join("::");
@@ -309,8 +356,8 @@ function mergeToolCallsWithResults(
 
             return (
                 toolCall.name === candidate.name &&
-                JSON.stringify(toolCall.arguments ?? undefined) ===
-                    JSON.stringify(candidate.arguments ?? undefined)
+                stableChatStringify(toolCall.arguments ?? undefined) ===
+                    stableChatStringify(candidate.arguments ?? undefined)
             );
         });
 

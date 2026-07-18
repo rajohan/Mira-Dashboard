@@ -509,6 +509,16 @@ describe("OpenClaw adapter variants", () => {
                 60
             )
         );
+        const failedRetrying = adapter.event(
+            envelope(
+                "agent",
+                {
+                    data: { phase: "error", status: "failed", willRetry: true },
+                    stream: "compaction",
+                },
+                61
+            )
+        );
 
         expect(sessionStart[0]).toMatchObject({
             kind: "status",
@@ -523,6 +533,12 @@ describe("OpenClaw adapter variants", () => {
             runId: "compaction:compact-operation",
         });
         expect(retrying[0]).toMatchObject({
+            kind: "status",
+            operationPhase: "retrying",
+            runId: "compaction:run-variants",
+            text: "Compacting context",
+        });
+        expect(failedRetrying[0]).toMatchObject({
             kind: "status",
             operationPhase: "retrying",
             runId: "compaction:run-variants",

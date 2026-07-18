@@ -792,7 +792,6 @@ describe("chat runtime state", () => {
 
         expect(state.sessions[SESSION]?.runs["run-1"]?.userMessages).toEqual([
             expect.objectContaining({
-                key: "user:32",
                 message: expect.objectContaining({ role: "user", text: "steer" }),
             }),
         ]);

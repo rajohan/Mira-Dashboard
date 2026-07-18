@@ -11,6 +11,7 @@ import {
     mergeChatMessageDetails,
     messageDeleteKey,
     messageIdentity,
+    stableChatStringify,
 } from "../chatUtilities";
 import { presentChatMessages } from "./chatPresentation";
 import type {
@@ -83,12 +84,12 @@ function isDashboardRunId(runId?: string): boolean {
 }
 
 function isStandaloneDiagnostic(message: ChatHistoryMessage): boolean {
-    const hasDetails = Boolean(
-        message.thinking?.length || message.toolCalls?.length || message.toolResult
-    );
+    const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
     return Boolean(
-        hasDetails &&
-        (!message.text.trim() || TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase()))
+        hasToolDetails ||
+        (message.thinking?.length &&
+            (!message.text.trim() ||
+                TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase())))
     );
 }
 
@@ -297,7 +298,7 @@ function toolSignatures(message: ChatHistoryMessage): string[] {
     const nestedResultSignatures: string[] = [];
     const toolCalls = message.toolCalls || [];
     const resultSignature = (result: NonNullable<ChatHistoryMessage["toolResult"]>) =>
-        JSON.stringify({
+        stableChatStringify({
             result: {
                 content: result.content,
                 error: result.isError || false,
@@ -308,7 +309,7 @@ function toolSignatures(message: ChatHistoryMessage): string[] {
         });
     for (const call of toolCalls) {
         signatures.push(
-            JSON.stringify({
+            stableChatStringify({
                 arguments: call.arguments ?? undefined,
                 id: call.id || "",
                 name: call.name,

@@ -39,6 +39,14 @@ const PRUNE_SNAPSHOTS_SQL = `
       )
 `;
 
+function normalizedSessionKey(sessionKey: string): string {
+    const normalized = sessionKey.trim().toLowerCase();
+    if (!normalized) {
+        throw new Error("Session key is required for chat runtime persistence");
+    }
+    return normalized;
+}
+
 function isRuntimeEnvelope(value: unknown): value is OpenClawRuntimeEnvelope {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return false;
@@ -108,7 +116,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             .prepare(
                 "DELETE FROM chat_runtime_snapshots WHERE gateway_scope = ? AND session_key = ?"
             )
-            .run(this.#gatewayScope, sessionKey);
+            .run(this.#gatewayScope, normalizedSessionKey(sessionKey));
     }
 
     keys(): string[] {
@@ -118,20 +126,21 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                     "SELECT session_key FROM chat_runtime_snapshots WHERE gateway_scope = ?"
                 )
                 .all(this.#gatewayScope) as SnapshotKeyRow[]
-        ).map((row) => row.session_key);
+        ).map((row) => normalizedSessionKey(row.session_key));
     }
 
     load(sessionKey: string): OpenClawRuntimeSnapshot | undefined {
+        const normalizedKey = normalizedSessionKey(sessionKey);
         const row = database
             .prepare(
                 `SELECT snapshot_json
                  FROM chat_runtime_snapshots
                  WHERE gateway_scope = ? AND session_key = ?`
             )
-            .get(this.#gatewayScope, sessionKey) as SnapshotRow | undefined;
+            .get(this.#gatewayScope, normalizedKey) as SnapshotRow | undefined;
         const snapshot = row ? parseSnapshot(row.snapshot_json) : undefined;
         if (row && !snapshot) {
-            this.delete(sessionKey);
+            this.delete(normalizedKey);
         }
         return snapshot;
     }
@@ -163,15 +172,16 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
     }
 
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {
+        const normalizedKey = normalizedSessionKey(sessionKey);
         const persist = database.transaction(() => {
             // Reinsert so a refresh always receives a newer rowid tie-breaker,
             // even when multiple writes share the same millisecond timestamp.
-            this.delete(sessionKey);
+            this.delete(normalizedKey);
             database
                 .prepare(SAVE_SNAPSHOT_SQL)
                 .run(
                     this.#gatewayScope,
-                    sessionKey,
+                    normalizedKey,
                     JSON.stringify(snapshot),
                     this.#now()
                 );

@@ -203,7 +203,17 @@ function thinkingAnchorIndex(
             isInGroup(message, index) &&
             isPrimaryAssistantMessage(message)
     );
-    const rangeEnd = finalIndex === -1 ? messages.length : finalIndex;
+    const nextSegmentIndex = group.runId
+        ? -1
+        : segments.findIndex(
+              (segment, index) => index > group.firstIndex && segment !== group.segment
+          );
+    const rangeEnd =
+        finalIndex === -1
+            ? nextSegmentIndex === -1
+                ? messages.length
+                : nextSegmentIndex
+            : finalIndex;
     let latestPrerequisiteIndex = -1;
 
     for (const [index, message] of messages.entries()) {

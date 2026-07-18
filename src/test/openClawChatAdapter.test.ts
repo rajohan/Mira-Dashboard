@@ -95,7 +95,8 @@ describe("OpenClaw chat adapter", () => {
     it("restores active-run status from a replayed session start", () => {
         const adapter = new OpenClawChatAdapter();
         const started = adapter.event(envelope("session.started", {}, 8));
-        const runlessStart = envelope("session.started", { runId: undefined }, 9);
+        const runlessStart = envelope("session.started", {}, 9);
+        Reflect.deleteProperty(runlessStart.payload, "runId");
         const ignoredRunlessStart = adapter.event(runlessStart);
         const final = adapter.event(
             envelope(
@@ -107,11 +108,10 @@ describe("OpenClaw chat adapter", () => {
                 10
             )
         );
-        const state = reduceChatRuntime(createChatRuntimeState(), [
-            ...ignoredRunlessStart,
-            ...final,
-        ]);
+        const activeState = reduceChatRuntime(createChatRuntimeState(), started);
+        const state = reduceChatRuntime(activeState, [...ignoredRunlessStart, ...final]);
 
+        expect(activeState.sessions[SESSION]?.runs["run-1"]?.phase).toBe("active");
         expect(started).toEqual([
             expect.objectContaining({ kind: "status", text: "Thinking" }),
         ]);

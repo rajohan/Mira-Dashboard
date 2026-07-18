@@ -29,6 +29,22 @@ function assistant(
     };
 }
 
+function user(
+    sessionKey: string,
+    sequence: number,
+    text: string,
+    timestamp: string
+): ChatRuntimeEvent {
+    return {
+        kind: "user",
+        message: { content: text, role: "user", text, timestamp },
+        runId: "run-1",
+        sequence,
+        sessionKey,
+        timestamp,
+    };
+}
+
 function finish(
     sessionKey: string,
     sequence: number,
@@ -268,6 +284,50 @@ describe("chat runtime controller", () => {
             assistant: { text: "working" },
             phase: "completed",
         });
+    });
+
+    it("accepts a reused user-event sequence after a backend restart", async () => {
+        const firstTimestamp = "2026-07-16T12:00:00.000Z";
+        const secondTimestamp = "2026-07-16T12:01:00.000Z";
+        const first = fakeTransport(
+            Promise.resolve({
+                completed: false,
+                events: [user(SELECTED, 16, "first steer", firstTimestamp)],
+                runtimeGeneration: "backend-1",
+                throughSequence: 16,
+            }),
+            1
+        );
+        const restartSnapshot = deferred<ChatRuntimeSnapshot>();
+        const second = fakeTransport(restartSnapshot.promise, 2);
+        const { result, rerender } = renderHook(
+            ({ transport }) =>
+                useChatRuntime({ selectedSessionKey: SELECTED, transport }),
+            { initialProps: { transport: first.transport } }
+        );
+
+        await waitFor(() =>
+            expect(
+                result.current.state.sessions[SELECTED]?.runs["run-1"]?.userMessages
+            ).toHaveLength(1)
+        );
+        rerender({ transport: second.transport });
+        await act(async () => {
+            restartSnapshot.resolve({
+                completed: false,
+                events: [],
+                runtimeGeneration: "backend-2",
+                throughSequence: 0,
+            });
+            await restartSnapshot.promise;
+        });
+        act(() => second.emit(user(SELECTED, 16, "second steer", secondTimestamp)));
+
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["run-1"]?.userMessages.map(
+                (entry) => entry.message.text
+            )
+        ).toEqual(["first steer", "second steer"]);
     });
 
     it("rebuilds replayed deltas when reconnecting to the same backend", async () => {
@@ -632,6 +692,33 @@ describe("chat runtime controller", () => {
         expect(onSettled).toHaveBeenCalledTimes(2);
     });
 
+    it("does not let an offscreen finish consume the selected sequence", async () => {
+        const fake = fakeTransport(
+            Promise.resolve({ completed: false, events: [], throughSequence: 0 })
+        );
+        const onError = jest.fn();
+        const onSettled = jest.fn();
+        renderHook(() =>
+            useChatRuntime({
+                onError,
+                onSettled,
+                selectedSessionKey: SELECTED,
+                transport: fake.transport,
+            })
+        );
+        await waitFor(() => expect(fake.transport.snapshot).toHaveBeenCalled());
+
+        act(() => {
+            fake.emit(finish(OFFSCREEN, 16, "offscreen failure"));
+            fake.emit(finish(SELECTED, 16, "selected failure"));
+        });
+
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledWith("selected failure");
+        expect(onSettled).toHaveBeenCalledTimes(1);
+        expect(onSettled).toHaveBeenCalledWith(SELECTED);
+    });
+
     it("gates aliased selected-session events and settles the canonical session", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);
@@ -846,6 +933,27 @@ describe("chat runtime controller", () => {
             assistant: { text: "previous answer" },
             phase: "completed",
         });
+    });
+
+    it("does not restore a failed optimistic run from an in-flight snapshot", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+
+        act(() => {
+            result.current.beginRun(SELECTED, "dashboard-chat-failed");
+            result.current.failRun(SELECTED, "dashboard-chat-failed");
+        });
+        await act(async () => {
+            snapshot.resolve({ completed: false, events: [], throughSequence: 0 });
+            await snapshot.promise;
+        });
+
+        expect(
+            result.current.state.sessions[SELECTED]?.runs["dashboard-chat-failed"]
+        ).toBeUndefined();
     });
 
     it("does not restore displaced replay after a concurrent send is acknowledged", async () => {

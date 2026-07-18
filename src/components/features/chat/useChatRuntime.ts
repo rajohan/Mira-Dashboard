@@ -145,7 +145,7 @@ export function useChatRuntime({
     const selectedSessionReference = useRef(selectedSessionKey);
     const callbacksReference = useRef({ onError, onSettled });
     const transportReference = useRef(transport);
-    const handledFinishSequencesReference = useRef(new Set<number>());
+    const handledFinishSequencesReference = useRef(new Set<string>());
     const displacedCompletedRunsReference = useRef(
         new Map<
             string,
@@ -185,40 +185,42 @@ export function useChatRuntime({
         event: FinishEvent,
         stateAfterEvent: ChatRuntimeState
     ) => {
-        if (handledFinishSequencesReference.current.has(event.sequence)) {
+        if (!isSameChatSession(event.sessionKey, selectedSessionReference.current)) {
             return;
         }
-        handledFinishSequencesReference.current.add(event.sequence);
+        const finishKey = `${selectedSessionReference.current.trim().toLowerCase()}:${event.sequence}`;
+        if (handledFinishSequencesReference.current.has(finishKey)) {
+            return;
+        }
+        handledFinishSequencesReference.current.add(finishKey);
         while (
             handledFinishSequencesReference.current.size > MAX_HANDLED_FINISH_SEQUENCES
         ) {
-            const oldestSequence = handledFinishSequencesReference.current
+            const oldestFinishKey = handledFinishSequencesReference.current
                 .values()
                 .next().value;
-            if (oldestSequence === undefined) {
+            if (oldestFinishKey === undefined) {
                 break;
             }
-            handledFinishSequencesReference.current.delete(oldestSequence);
+            handledFinishSequencesReference.current.delete(oldestFinishKey);
         }
 
         const runtimeSession = findChatSessionRuntimeState(
             stateAfterEvent,
             event.sessionKey
         );
-        if (isSameChatSession(event.sessionKey, selectedSessionReference.current)) {
-            const completedRun = Object.values(runtimeSession?.runs || {}).find(
-                (run) =>
-                    run.phase !== "active" &&
-                    (run.terminalSequence === event.sequence ||
-                        run.lastSequence === event.sequence)
-            );
-            const { error: visibleError } = completedRun || event;
-            const isToolFailure = Boolean(completedRun?.toolFailure || event.toolFailure);
-            if (visibleError && !isToolFailure) {
-                callbacksReference.current.onError?.(visibleError);
-            }
-            callbacksReference.current.onSettled?.(selectedSessionReference.current);
+        const completedRun = Object.values(runtimeSession?.runs || {}).find(
+            (run) =>
+                run.phase !== "active" &&
+                (run.terminalSequence === event.sequence ||
+                    run.lastSequence === event.sequence)
+        );
+        const { error: visibleError } = completedRun || event;
+        const isToolFailure = Boolean(completedRun?.toolFailure || event.toolFailure);
+        if (visibleError && !isToolFailure) {
+            callbacksReference.current.onError?.(visibleError);
         }
+        callbacksReference.current.onSettled?.(selectedSessionReference.current);
     };
 
     useEffect(() => {
@@ -521,8 +523,7 @@ export function useChatRuntime({
             acknowledgeChatRun(current, sessionKey, optimisticRunId, providerRunId)
         );
     };
-    const clearRun = (sessionKey: string, runId: string) => {
-        displacedCompletedRunsReference.current.delete(runId);
+    const removeRunFromSnapshotGate = (sessionKey: string, runId: string) => {
         const gate = gateReference.current;
         if (gate && isSameChatSession(gate.sessionKey, sessionKey)) {
             for (const [optimisticRunId, pendingRun] of gate.optimisticRuns) {
@@ -531,9 +532,14 @@ export function useChatRuntime({
                 }
             }
         }
+    };
+    const clearRun = (sessionKey: string, runId: string) => {
+        displacedCompletedRunsReference.current.delete(runId);
+        removeRunFromSnapshotGate(sessionKey, runId);
         updateState((current) => clearChatRun(current, sessionKey, runId));
     };
     const failRun = (sessionKey: string, runId: string) => {
+        removeRunFromSnapshotGate(sessionKey, runId);
         const displaced = displacedCompletedRunsReference.current.get(runId);
         displacedCompletedRunsReference.current.delete(runId);
         updateState((current) => {

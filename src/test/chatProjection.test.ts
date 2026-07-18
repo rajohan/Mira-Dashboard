@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
+import { stableChatStringify } from "../components/features/chat/chatUtilities";
 import {
     createChatVisibility,
     presentChatMessages,
@@ -1080,6 +1081,100 @@ describe("chat projection", () => {
         expect(tools[0]?.toolCalls?.map((call) => call.id)).toEqual(["call-1", "call-2"]);
     });
 
+    it("matches nested tool arguments independently of object key order", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: { options: { alpha: 1, beta: 2 } },
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    ],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+        ]);
+        const reconciled = reconcileChatMessages(
+            [
+                message("user", "run tool"),
+                {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: { options: { beta: 2, alpha: 1 } },
+                            id: "call-1",
+                            name: "exec",
+                        },
+                    ],
+                },
+            ],
+            runtime.sessions[SESSION]
+        );
+
+        expect(
+            reconciled.filter((item) => item.toolCalls?.[0]?.id === "call-1")
+        ).toHaveLength(1);
+    });
+
+    it("keeps non-JSON diagnostic identities type-safe", () => {
+        const circular: Record<string, unknown> = {};
+        circular.self = circular;
+
+        expect(stableChatStringify(1n)).not.toBe(stableChatStringify("1"));
+        expect(stableChatStringify(circular)).not.toBe(stableChatStringify("[Circular]"));
+    });
+
+    it("keeps text-bearing tool work separate from the final answer", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "tool",
+                message: {
+                    content: "working",
+                    role: "assistant",
+                    text: "working",
+                    toolCalls: [{ id: "call-1", name: "exec" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const reconciled = reconcileChatMessages(
+            [
+                message("user", "question"),
+                {
+                    content: "working",
+                    role: "assistant",
+                    runId: "run-1",
+                    text: "working",
+                    toolCalls: [{ id: "call-1", name: "exec" }],
+                },
+            ],
+            runtime.sessions[SESSION]
+        );
+
+        expect(reconciled.filter((item) => item.toolCalls?.length)).toHaveLength(1);
+        expect(
+            reconciled.filter(
+                (item) => item.role === "assistant" && item.text === "answer"
+            )
+        ).toHaveLength(1);
+    });
+
     it("inserts unrecovered diagnostics immediately before a canonical final", () => {
         const history = [
             message("user", "question"),
@@ -1607,6 +1702,30 @@ describe("chat projection", () => {
         expect(visible[finalIndex]?.thinking).toBeUndefined();
     });
 
+    it("keeps unfinished unscoped thinking inside its response segment", () => {
+        const visible = presentChatMessages(
+            [
+                message("user", "first turn"),
+                {
+                    content: [{ text: "first thought", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "first thought" }],
+                },
+                message("user", "second turn"),
+            ],
+            createChatVisibility(true, true),
+            true
+        );
+
+        expect(visible.map((item) => item.text)).toEqual([
+            "first turn",
+            "",
+            "second turn",
+        ]);
+        expect(visible[1]?.thinking?.[0]?.text).toBe("first thought");
+    });
+
     it("moves thinking below an optimistic steer before provider acknowledgement", () => {
         const visible = presentChatMessages(
             [
@@ -1736,6 +1855,40 @@ describe("chat projection", () => {
         expect(runtime.sessions[SESSION]?.runs["compaction:run-1"]).toMatchObject({
             operationPhase: "complete",
             phase: "completed",
+        });
+    });
+
+    it("keeps a failed retrying compaction out of completed feedback", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "retrying",
+                runId: "compaction:run-1",
+                text: "Compacting context",
+            }),
+            event(16, {
+                error: "Compaction failed",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-1",
+                settlesCompaction: true,
+            }),
+        ]);
+        const projection = projectChat(
+            [],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(projection.compactionStatus).toBeUndefined();
+        expect(runtime.sessions[SESSION]?.runs["compaction:run-1"]).toMatchObject({
+            error: "Compaction failed",
+            operationPhase: "inactive",
+            phase: "error",
         });
     });
 

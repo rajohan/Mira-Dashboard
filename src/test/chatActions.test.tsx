@@ -206,6 +206,76 @@ describe("chat actions", () => {
         expect(result.current.canSend).toBe(true);
     });
 
+    it("tracks concurrent compaction requests per session", async () => {
+        const compactA = Promise.withResolvers<void>();
+        const compactB = Promise.withResolvers<void>();
+        const transport = fakeTransport();
+        transport.compact = jest.fn(
+            (sessionKey) => (sessionKey === SESSION_A ? compactA : compactB).promise
+        );
+        const selectedSessionKeyReference = { current: SESSION_A };
+        const { result, rerender } = renderHook(
+            ({ sessionKey }) =>
+                useChatActions({
+                    activeRunCount: 0,
+                    attachments: [],
+                    attachmentsReference: { current: [] },
+                    clearAttachments: jest.fn(),
+                    confirmResetSession: jest.fn(async () => true),
+                    draft: "queued message",
+                    isCompacting: false,
+                    isConnected: true,
+                    isRecording: false,
+                    isTranscribing: false,
+                    runtime: fakeRuntime(),
+                    scheduleBottomFollow: jest.fn(),
+                    selectedSession: { ...selectedSession(), key: sessionKey },
+                    selectedSessionKey: sessionKey,
+                    selectedSessionKeyReference,
+                    setDraft: jest.fn(),
+                    setIsAtBottom: jest.fn(),
+                    setMessages: jest.fn(),
+                    setSendError: jest.fn(),
+                    shouldStickToBottomReference: { current: true },
+                    transport,
+                }),
+            { initialProps: { sessionKey: SESSION_A } }
+        );
+
+        let firstRequest: Promise<void> | undefined;
+        act(() => {
+            firstRequest = result.current.compactSelectedSession();
+        });
+        await waitFor(() => expect(transport.compact).toHaveBeenCalledWith(SESSION_A));
+
+        selectedSessionKeyReference.current = SESSION_B;
+        rerender({ sessionKey: SESSION_B });
+        expect(result.current.isCompactingSession).toBe(false);
+        let secondRequest: Promise<void> | undefined;
+        act(() => {
+            secondRequest = result.current.compactSelectedSession();
+        });
+        await waitFor(() => expect(transport.compact).toHaveBeenCalledWith(SESSION_B));
+
+        selectedSessionKeyReference.current = SESSION_A;
+        rerender({ sessionKey: SESSION_A });
+        expect(result.current.isCompactingSession).toBe(true);
+        expect(result.current.canSend).toBe(false);
+
+        await act(async () => {
+            compactB.resolve();
+            await secondRequest;
+        });
+        expect(result.current.isCompactingSession).toBe(true);
+
+        await act(async () => {
+            compactA.resolve();
+            await firstRequest;
+        });
+        expect(result.current.isCompactingSession).toBe(false);
+        expect(result.current.canSend).toBe(true);
+    });
+
     it("clears a steer placeholder when the provider omits its run id", async () => {
         const transport = fakeTransport(jest.fn(async () => ({})));
         const runtime = fakeRuntime();
@@ -242,6 +312,43 @@ describe("chat actions", () => {
         expect(optimisticRunId).toMatch(DASHBOARD_CHAT_RUN_ID);
         expect(runtime.clearRun).toHaveBeenCalledWith(SESSION_A, optimisticRunId);
         expect(runtime.acknowledgeRun).not.toHaveBeenCalled();
+    });
+
+    it("keeps a new-turn placeholder when the provider omits its run id", async () => {
+        const transport = fakeTransport(jest.fn(async () => ({})));
+        const runtime = fakeRuntime();
+        const { result } = renderHook(() =>
+            useChatActions({
+                activeRunCount: 0,
+                attachments: [],
+                attachmentsReference: { current: [] },
+                clearAttachments: jest.fn(),
+                confirmResetSession: jest.fn(async () => true),
+                draft: "new turn",
+                isCompacting: false,
+                isConnected: true,
+                isRecording: false,
+                isTranscribing: false,
+                runtime,
+                scheduleBottomFollow: jest.fn(),
+                selectedSession: selectedSession(),
+                selectedSessionKey: SESSION_A,
+                selectedSessionKeyReference: { current: SESSION_A },
+                setDraft: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                transport,
+            })
+        );
+
+        await act(async () => result.current.handleSend());
+
+        const optimisticRunId = (runtime.beginRun as ReturnType<typeof jest.fn>).mock
+            .calls[0]?.[1] as string;
+        expect(runtime.acknowledgeRun).toHaveBeenCalledWith(SESSION_A, optimisticRunId);
+        expect(runtime.clearRun).not.toHaveBeenCalled();
     });
 
     it("keeps failed sends scoped to their initiating session", async () => {
@@ -346,7 +453,7 @@ describe("chat actions", () => {
 
             expect(transport.send).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    idempotencyKey: expect.stringMatching(/^dashboard-chat-[\da-z-]+$/u),
+                    idempotencyKey: expect.stringMatching(DASHBOARD_CHAT_RUN_ID),
                 })
             );
         } finally {

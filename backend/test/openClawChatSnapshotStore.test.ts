@@ -63,6 +63,25 @@ describe("OpenClaw chat snapshot store", () => {
         }
     });
 
+    it("normalizes session keys across snapshot CRUD operations", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const canonicalKey = `agent:test:${crypto.randomUUID()}`;
+        const mixedKey = `  ${canonicalKey.toUpperCase()}  `;
+        const snapshot = snapshotFor(canonicalKey, 17);
+
+        try {
+            store.save(mixedKey, snapshot);
+
+            expect(store.keys()).toEqual([canonicalKey]);
+            expect(store.load(canonicalKey.toUpperCase())).toEqual(snapshot);
+            store.delete(` ${canonicalKey.toUpperCase()} `);
+            expect(store.load(canonicalKey)).toBeUndefined();
+        } finally {
+            store.clear();
+        }
+    });
+
     it("ignores unsafe watermarks when calculating the maximum sequence", () => {
         const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
         const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);

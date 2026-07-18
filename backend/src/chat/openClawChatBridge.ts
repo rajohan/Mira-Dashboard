@@ -281,9 +281,15 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
         stringField(record, "status") ||
         ""
     ).toLowerCase();
+    const isRetryingCompaction =
+        data?.willRetry === true ||
+        record?.willRetry === true ||
+        eventPhase === "retrying" ||
+        eventStatus === "retrying";
     const isTerminalCompaction =
         ((event === "session.compaction" && compactionOperation === "compact") ||
             isAgentCompactionEvent(event, payload)) &&
+        !isRetryingCompaction &&
         (COMPACTION_TERMINAL_STATES.has(eventPhase) ||
             COMPACTION_TERMINAL_STATES.has(eventStatus));
     return (
@@ -379,6 +385,36 @@ function isAuxiliaryOnlyCompletion(run: RetainedRun): boolean {
 
 function lastSequence(run: RetainedRun): number {
     return run.events.at(-1)?.runtimeSequence ?? -1;
+}
+
+function latestRunUpdatedAt(runs: Iterable<RetainedRun>): number {
+    let latest = -Infinity;
+    for (const run of runs) {
+        latest = Math.max(latest, run.updatedAt);
+    }
+    return latest;
+}
+
+function oldestEvictableSessionKey(
+    sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
+    protectedSessionKey?: string
+): string | undefined {
+    let oldestSessionKey: string | undefined;
+    let oldestUpdatedAt = Infinity;
+    for (const [candidateSessionKey, runs] of sessions) {
+        if (
+            protectedSessionKey &&
+            isSameSessionKey(candidateSessionKey, protectedSessionKey)
+        ) {
+            continue;
+        }
+        const updatedAt = latestRunUpdatedAt(runs.values());
+        if (updatedAt < oldestUpdatedAt) {
+            oldestSessionKey = candidateSessionKey;
+            oldestUpdatedAt = updatedAt;
+        }
+    }
+    return oldestSessionKey;
 }
 
 function normalizedMessageText(value: unknown): string {
@@ -504,23 +540,46 @@ export class OpenClawChatBridge {
     readonly #store: OpenClawChatSnapshotStore | undefined;
     #persistenceTimer: ReturnType<typeof setTimeout> | undefined;
     #sequence = 0;
+    #sequenceHydrated = false;
+    #sessionLimitDeferrals = 0;
     #storeClearPending = false;
     #storeFailureReported = false;
 
     constructor(store?: OpenClawChatSnapshotStore) {
         this.#store = store;
         if (!store) {
+            this.#sequenceHydrated = true;
             return;
         }
+        this.#tryHydrateSequence();
+    }
+
+    #tryHydrateSequence(): boolean {
+        if (this.#sequenceHydrated) {
+            return true;
+        }
+        if (!this.#store) {
+            this.#sequenceHydrated = true;
+            return true;
+        }
         try {
-            const maximumSequence = store.maximumSequence();
+            const maximumSequence = this.#store.maximumSequence();
             if (!Number.isSafeInteger(maximumSequence) || maximumSequence < 0) {
                 throw new Error("Runtime snapshot sequence watermark is invalid");
             }
             this.#sequence = maximumSequence;
+            this.#sequenceHydrated = true;
             this.#storeFailureReported = false;
+            return true;
         } catch (error) {
             this.#reportStoreFailure(error);
+            return false;
+        }
+    }
+
+    #requireSequenceHydrated(): void {
+        if (!this.#tryHydrateSequence()) {
+            throw new Error("Runtime snapshot sequence watermark is unavailable");
         }
     }
 
@@ -533,6 +592,15 @@ export class OpenClawChatBridge {
             "[OpenClawChatBridge] Runtime snapshot persistence failed:",
             error instanceof Error ? error.message : String(error)
         );
+    }
+
+    #withDeferredSessionLimit<T>(operation: () => T): T {
+        this.#sessionLimitDeferrals += 1;
+        try {
+            return operation();
+        } finally {
+            this.#sessionLimitDeferrals -= 1;
+        }
     }
 
     #cancelPersistenceTimer(): void {
@@ -697,7 +765,7 @@ export class OpenClawChatBridge {
         this.#hydratedSessionLookups.add(normalizedLookup);
         if (this.#loadedStoreKeys.has(storedKey)) {
             if (storedKey !== sessionKey && isAgentSessionKey(sessionKey)) {
-                this.#promoteSessionEntry(storedKey, sessionKey);
+                this.#promoteSessionEntry(storedKey, sessionKey, undefined, sessionKey);
             }
             return;
         }
@@ -718,14 +786,23 @@ export class OpenClawChatBridge {
         const sortedEvents = snapshot.events.toSorted(
             (left, right) => left.runtimeSequence - right.runtimeSequence
         );
-        for (const envelope of sortedEvents) {
-            this.#sequence = Math.max(this.#sequence, envelope.runtimeSequence);
-            this.#retain(envelope, false);
-        }
+        this.#withDeferredSessionLimit(() => {
+            for (const envelope of sortedEvents) {
+                this.#sequence = Math.max(this.#sequence, envelope.runtimeSequence);
+                this.#retain(envelope, false);
+            }
+        });
         const prunedStaleRun = this.#pruneStaleActiveRuns(storedKey);
         if (storedKey !== sessionKey && isAgentSessionKey(sessionKey)) {
-            this.#promoteSessionEntry(storedKey, sessionKey);
-        } else if (prunedStaleRun) {
+            if (
+                !this.#promoteSessionEntry(storedKey, sessionKey, undefined, sessionKey)
+            ) {
+                this.#enforceSessionLimit(storedKey);
+            }
+            return;
+        }
+        this.#enforceSessionLimit(storedKey);
+        if (prunedStaleRun) {
             this.#flushSessionPersistence(storedKey);
         }
     }
@@ -893,25 +970,67 @@ export class OpenClawChatBridge {
         this.#flushSessionPersistence(sessionKey);
     }
 
+    #cloneRetainedRun(run: RetainedRun): RetainedRun {
+        return {
+            ...run,
+            eventBytes: [...run.eventBytes],
+            events: [...run.events],
+        };
+    }
+
+    #ensureCanonicalDestinationLoaded(canonicalSessionKey: string): boolean {
+        if (!this.#store) {
+            return true;
+        }
+        const storedKeys = this.#storedSessionKeys();
+        if (!storedKeys) {
+            return false;
+        }
+        const storedCanonicalKey = storedKeys.find((candidate) =>
+            isExactSessionKey(candidate, canonicalSessionKey)
+        );
+        if (!storedCanonicalKey || this.#loadedStoreKeys.has(storedCanonicalKey)) {
+            return true;
+        }
+        this.#withDeferredSessionLimit(() =>
+            this.#ensureSessionLoaded(storedCanonicalKey)
+        );
+        return this.#loadedStoreKeys.has(storedCanonicalKey);
+    }
+
     #promoteSessionEntry(
         sourceSessionKey: string,
         canonicalSessionKey: string,
-        preferredRunId?: string
-    ): void {
+        preferredRunId?: string,
+        protectedSessionKey?: string
+    ): boolean {
         if (sourceSessionKey === canonicalSessionKey) {
-            return;
+            return true;
+        }
+        if (!this.#ensureCanonicalDestinationLoaded(canonicalSessionKey)) {
+            return false;
         }
         const sourceRuns = this.#runsBySession.get(sourceSessionKey);
         if (!sourceRuns || (preferredRunId && !sourceRuns.has(preferredRunId))) {
-            return;
+            return false;
         }
 
-        const canonicalRuns = this.#runsBySession.get(canonicalSessionKey) || new Map();
-        const runIds: Iterable<string> = preferredRunId
+        const previousCanonicalRuns = this.#runsBySession.get(canonicalSessionKey);
+        const nextSourceRuns = new Map(
+            [...sourceRuns].map(([runId, run]) => [runId, this.#cloneRetainedRun(run)])
+        );
+        const nextCanonicalRuns = new Map(
+            [...(previousCanonicalRuns || [])].map(([runId, run]) => [
+                runId,
+                this.#cloneRetainedRun(run),
+            ])
+        );
+        const movedRunIds = new Set<string>();
+        const runIds = preferredRunId
             ? [preferredRunId]
-            : sourceRuns.keys();
+            : nextSourceRuns.keys().toArray();
         for (const runId of runIds) {
-            const sourceRun = sourceRuns.get(runId);
+            const sourceRun = nextSourceRuns.get(runId);
             if (!sourceRun) {
                 continue;
             }
@@ -943,12 +1062,12 @@ export class OpenClawChatBridge {
                     : [];
             });
             this.#replaceRunEvents(sourceRun, rewrittenEvents);
+            movedRunIds.add(runId);
             if (sourceRun.events.length === 0) {
-                sourceRuns.delete(runId);
-                this.#forgetRunSession(runId, sourceSessionKey);
+                nextSourceRuns.delete(runId);
                 continue;
             }
-            const existing = canonicalRuns.get(runId);
+            const existing = nextCanonicalRuns.get(runId);
             if (existing) {
                 this.#replaceRunEvents(existing, [
                     ...existing.events,
@@ -961,52 +1080,66 @@ export class OpenClawChatBridge {
                 );
                 existing.updatedAt = Math.max(existing.updatedAt, sourceRun.updatedAt);
             } else {
-                canonicalRuns.set(runId, sourceRun);
+                nextCanonicalRuns.set(runId, sourceRun);
             }
-            sourceRuns.delete(runId);
-            this.#forgetRunSession(runId, sourceSessionKey);
-            this.#rememberRunSession(runId, canonicalSessionKey);
+            nextSourceRuns.delete(runId);
         }
 
-        if (sourceRuns.size === 0) {
-            this.#runsBySession.delete(sourceSessionKey);
-        }
-        while (canonicalRuns.size > MAX_RUNS_PER_SESSION) {
-            const oldestRunId = canonicalRuns
+        const evictedCanonicalRunIds = new Set<string>();
+        while (nextCanonicalRuns.size > MAX_RUNS_PER_SESSION) {
+            const oldestRunId = nextCanonicalRuns
                 .values()
                 .toArray()
                 .toSorted((left, right) => left.updatedAt - right.updatedAt)[0]?.runId;
             if (!oldestRunId) {
                 break;
             }
-            canonicalRuns.delete(oldestRunId);
-            this.#forgetRunSession(oldestRunId, canonicalSessionKey);
+            nextCanonicalRuns.delete(oldestRunId);
+            evictedCanonicalRunIds.add(oldestRunId);
         }
-        if (canonicalRuns.size === 0) {
+        if (nextCanonicalRuns.size === 0) {
             this.#runsBySession.delete(canonicalSessionKey);
         } else {
-            this.#runsBySession.set(canonicalSessionKey, canonicalRuns);
+            this.#runsBySession.set(canonicalSessionKey, nextCanonicalRuns);
         }
-        this.#enforceSessionLimit();
+        if (!this.#persistSession(canonicalSessionKey)) {
+            if (previousCanonicalRuns) {
+                this.#runsBySession.set(canonicalSessionKey, previousCanonicalRuns);
+            } else {
+                this.#runsBySession.delete(canonicalSessionKey);
+            }
+            return false;
+        }
+        this.#pendingPersistence.delete(canonicalSessionKey);
+
+        if (nextSourceRuns.size === 0) {
+            this.#runsBySession.delete(sourceSessionKey);
+        } else {
+            this.#runsBySession.set(sourceSessionKey, nextSourceRuns);
+        }
+        for (const runId of movedRunIds) {
+            this.#forgetRunSession(runId, sourceSessionKey);
+            if (nextCanonicalRuns.has(runId)) {
+                this.#rememberRunSession(runId, canonicalSessionKey);
+            }
+        }
+        for (const runId of evictedCanonicalRunIds) {
+            this.#forgetRunSession(runId, canonicalSessionKey);
+        }
+        this.#enforceSessionLimit(protectedSessionKey);
         this.#flushSessionPersistence(sourceSessionKey);
-        this.#flushSessionPersistence(canonicalSessionKey);
+        return true;
     }
 
-    #enforceSessionLimit(): void {
+    #enforceSessionLimit(protectedSessionKey?: string): void {
+        if (this.#sessionLimitDeferrals > 0) {
+            return;
+        }
         while (this.#runsBySession.size > MAX_CHAT_RUNTIME_SESSIONS) {
-            const oldestSessionKey = this.#runsBySession
-                .keys()
-                .map((key) => ({
-                    key,
-                    updatedAt: Math.max(
-                        ...this.#runsBySession
-                            .get(key)!
-                            .values()
-                            .map((entry) => entry.updatedAt)
-                    ),
-                }))
-                .toArray()
-                .toSorted((left, right) => left.updatedAt - right.updatedAt)[0]?.key;
+            const oldestSessionKey = oldestEvictableSessionKey(
+                this.#runsBySession,
+                protectedSessionKey
+            );
             if (!oldestSessionKey) {
                 break;
             }
@@ -1601,6 +1734,7 @@ export class OpenClawChatBridge {
 
     /** Hydrates the target before capturing the runtime cutoff for a request. */
     captureRequestBoundary(sessionKey?: string): number {
+        this.#requireSequenceHydrated();
         if (sessionKey) {
             this.#ensureSessionLoaded(sessionKey);
         }
@@ -1720,6 +1854,7 @@ export class OpenClawChatBridge {
         payload: unknown,
         sessions: readonly OpenClawChatSessionIdentity[]
     ): OpenClawRuntimeEnvelope {
+        this.#requireSequenceHydrated();
         const providedSessionKey = stringField(asRecord(payload), "sessionKey");
         if (providedSessionKey) {
             this.#ensureSessionLoaded(providedSessionKey);

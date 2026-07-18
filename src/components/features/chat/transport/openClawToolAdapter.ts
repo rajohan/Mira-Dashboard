@@ -1,4 +1,5 @@
 import { type ChatHistoryMessage, extractImages, mergeChatImages } from "../chatTypes";
+import { stableChatStringify } from "../chatUtilities";
 import type { ChatOperationPhase } from "../domain/chatState";
 import {
     argumentDetail,
@@ -127,7 +128,7 @@ export function openClawToolMessage(
               local: true,
               runId,
           };
-    const argumentIdentity = JSON.stringify(arguments_ ?? undefined);
+    const argumentIdentity = stableChatStringify(arguments_ ?? undefined);
     return {
         key: id ? `tool:${id}` : `tool:${name}:${argumentIdentity}`,
         message,
@@ -251,11 +252,7 @@ export function openClawProgress(
             (data.completed === true ||
                 ["complete", "completed", "finished"].includes(normalizedPhase) ||
                 ["complete", "completed", "finished"].includes(status));
-        const isRetrying =
-            !isFailure &&
-            isTerminal &&
-            data.willRetry === true &&
-            data.completed === true;
+        const isRetrying = isTerminal && data.willRetry === true;
         const operationPhase: ChatOperationPhase = isRetrying
             ? "retrying"
             : isTerminal

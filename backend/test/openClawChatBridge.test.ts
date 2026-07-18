@@ -15,6 +15,7 @@ class MemorySnapshotStore implements OpenClawChatSnapshotStore {
     deleteFailures = 0;
     keysCount = 0;
     keysFailures = 0;
+    maximumSequenceFailures = 0;
     saveCount = 0;
     saveFailures = 0;
 
@@ -50,6 +51,10 @@ class MemorySnapshotStore implements OpenClawChatSnapshotStore {
     }
 
     maximumSequence(): number {
+        if (this.maximumSequenceFailures > 0) {
+            this.maximumSequenceFailures -= 1;
+            throw new Error("maximum sequence failed");
+        }
         let maximumSequence = 0;
         for (const snapshot of this.snapshots.values()) {
             if (
@@ -167,6 +172,27 @@ describe("OpenClaw chat bridge", () => {
         );
         expect(nextEvent.runtimeSequence).toBe(201);
         expect(store.loadedKeys).not.toContain(otherSession);
+    });
+
+    it("retries a transient sequence-watermark failure before recording", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, "persisted-run", Date.now(), undefined, 73)
+        );
+        store.maximumSequenceFailures = 2;
+
+        const bridge = new OpenClawChatBridge(store);
+        expect(() => bridge.captureRequestBoundary(MAIN)).toThrow(
+            "Runtime snapshot sequence watermark is unavailable"
+        );
+        const nextEvent = bridge.recordEvent(
+            "agent",
+            { runId: "next-run", sessionKey: MAIN, stream: "thinking" },
+            []
+        );
+
+        expect(nextEvent.runtimeSequence).toBe(74);
     });
 
     it("persists manual compaction without displacing the latest completed run", () => {
@@ -361,6 +387,39 @@ describe("OpenClaw chat bridge", () => {
             []
         );
         expect(bridge.snapshot(MAIN)).toMatchObject({ completed: true });
+    });
+
+    it("keeps retrying compaction active until its settling lifecycle arrives", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    completed: true,
+                    phase: "end",
+                    stream: "compaction",
+                    willRetry: true,
+                },
+                runId: "retrying-compaction",
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({ completed: false });
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "end", stream: "lifecycle" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot).toMatchObject({ completed: true });
+        expect(snapshot.events).toHaveLength(2);
     });
 
     it("completes a standalone manual compaction replay", () => {
@@ -639,6 +698,73 @@ describe("OpenClaw chat bridge", () => {
         expect(store.snapshots.has(MAIN)).toBe(true);
     });
 
+    it("hydrates and merges an unloaded canonical replay before alias promotion", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, "shared-run", Date.now(), undefined, 1)
+        );
+        store.snapshots.set(
+            "main",
+            persistedSnapshot("main", "shared-run", Date.now() + 1, "final", 2)
+        );
+        const bridge = new OpenClawChatBridge(store);
+
+        expect(bridge.snapshot("main").events).toHaveLength(1);
+        bridge.reconcileSessions([{ id: "main", key: MAIN }]);
+
+        expect(bridge.snapshot(MAIN).events).toEqual([
+            expect.objectContaining({
+                payload: expect.objectContaining({
+                    runId: "shared-run",
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                }),
+            }),
+            expect.objectContaining({
+                payload: expect.objectContaining({
+                    message: "done",
+                    runId: "shared-run",
+                    sessionKey: MAIN,
+                    state: "final",
+                }),
+            }),
+        ]);
+        expect(store.snapshots.has("main")).toBe(false);
+        expect(store.snapshots.get(MAIN)?.events).toHaveLength(2);
+    });
+
+    it("keeps the source replay intact when canonical promotion cannot persist", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, "shared-run", Date.now(), undefined, 1)
+        );
+        store.snapshots.set(
+            "main",
+            persistedSnapshot("main", "shared-run", Date.now() + 1, "final", 2)
+        );
+        const bridge = new OpenClawChatBridge(store);
+        bridge.snapshot("main");
+        store.saveFailures = 1;
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            bridge.reconcileSessions([{ id: "main", key: MAIN }]);
+
+            expect(store.snapshots.get("main")?.events).toHaveLength(1);
+            expect(store.snapshots.get(MAIN)?.events).toHaveLength(1);
+            expect(bridge.snapshot("main").events).toHaveLength(1);
+
+            bridge.reconcileSessions([{ id: "main", key: MAIN }]);
+
+            expect(store.snapshots.has("main")).toBe(false);
+            expect(store.snapshots.get(MAIN)?.events).toHaveLength(2);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
     it("does not delete a promoted canonical replay while retrying its old alias", () => {
         const store = new MemorySnapshotStore();
         store.snapshots.set("main", persistedSnapshot("main", "run-1"));
@@ -774,6 +900,36 @@ describe("OpenClaw chat bridge", () => {
         expect(store.snapshots.size).toBe(50);
         expect(store.snapshots.has("agent:test:0")).toBe(false);
         expect(store.snapshots.has("agent:test:50")).toBe(true);
+    });
+
+    it("protects the requested persisted replay while hydrating at the session limit", () => {
+        const store = new MemorySnapshotStore();
+        const now = Date.now();
+        for (let index = 0; index <= 50; index += 1) {
+            const sessionKey = `agent:test:${index}`;
+            store.snapshots.set(
+                sessionKey,
+                persistedSnapshot(
+                    sessionKey,
+                    `run-${index}`,
+                    now + index,
+                    "final",
+                    index + 1
+                )
+            );
+        }
+        const bridge = new OpenClawChatBridge(store);
+        for (let index = 1; index <= 50; index += 1) {
+            expect(bridge.snapshot(`agent:test:${index}`).events).toHaveLength(1);
+        }
+
+        expect(bridge.snapshot("agent:test:0").events[0]?.payload).toMatchObject({
+            runId: "run-0",
+            sessionKey: "agent:test:0",
+        });
+        expect(store.snapshots.has("agent:test:0")).toBe(true);
+        expect(store.snapshots.has("agent:test:1")).toBe(false);
+        expect(store.snapshots.size).toBe(50);
     });
 
     it("expires an active persisted replay from more than six hours ago", () => {
