@@ -13,6 +13,7 @@ import {
     Minimize2,
     Paperclip,
     Pin,
+    Settings,
     Settings2,
     SlidersHorizontal,
     Smile,
@@ -567,6 +568,7 @@ export function ChatComposer({
                                     <>
                                         <PopoverButton
                                             aria-label="Model and response settings"
+                                            title="Response settings"
                                             className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100"
                                         >
                                             <Settings2 className="size-4" />
@@ -668,10 +670,11 @@ export function ChatComposer({
                                     <>
                                         <PopoverButton
                                             aria-label="Chat display settings"
+                                            title="Chat display settings"
                                             disabled={!selectedSessionKey}
                                             className="flex items-center rounded p-1.5 text-primary-400 outline-none hover:bg-primary-700 hover:text-primary-100 disabled:cursor-not-allowed disabled:opacity-40 data-focus:bg-primary-700 data-focus:text-primary-100"
                                         >
-                                            <SlidersHorizontal className="size-4" />
+                                            <Settings className="size-4" />
                                         </PopoverButton>
                                         <PopoverPanel
                                             anchor={{ to: "top start", gap: 11 }}

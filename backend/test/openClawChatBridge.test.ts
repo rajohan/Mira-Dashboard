@@ -385,6 +385,33 @@ describe("OpenClaw chat bridge", () => {
         expect(bridge.snapshot(currentSession).events).toHaveLength(1);
     });
 
+    it("rehydrates an oversized protected session without retaining it in memory", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store, {
+            maxReplayBytes: 500_000,
+        });
+        const sessionKey = "agent:main:oversized-protected-session";
+        const retained = bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "x".repeat(600_000) },
+                runId: "oversized-run",
+                sessionKey,
+                stream: "thinking",
+            },
+            []
+        );
+
+        expect(store.snapshots.get(sessionKey)?.events).toEqual([retained]);
+        expect(store.loadedKeys).toEqual([]);
+
+        expect(bridge.snapshot(sessionKey).events).toEqual([retained]);
+        expect(store.loadedKeys).toEqual([sessionKey]);
+
+        expect(bridge.snapshot(sessionKey).events).toEqual([retained]);
+        expect(store.loadedKeys).toEqual([sessionKey, sessionKey]);
+    });
+
     it("rehydrates an aggregate-budget eviction from the snapshot store", () => {
         const store = new MemorySnapshotStore();
         const bridge = new OpenClawChatBridge(store, {

@@ -104,21 +104,74 @@ The runtime combines several event sources into one visible conversation:
 - tool result diagnostics;
 - terminal chat state events.
 
-The Dashboard backend keeps a bounded, in-memory replay snapshot for active
-runs and the most recently completed run during a short grace period. A browser
-requests the selected session's snapshot after connecting and then continues
-with sequenced live events. This restores current thinking, tool diagnostics,
-and status after refresh or device changes without permanently storing
-reasoning. Snapshot payloads are session-scoped, size-limited, and cleared on
-Gateway credential changes or backend restart. They are also cleared after a
-successful reset/new send, abort, or session deletion. Completed data expires
-after 15 minutes; active data expires after six hours without an event.
+### Transcript And Runtime Authority
+
+Dashboard uses two complementary history sources:
+
+- while a run is active, the Dashboard runtime replay journal is authoritative
+  for thinking, tool diagnostics, and control events that may not exist in the
+  OpenClaw transcript yet;
+- after a final answer, OpenClaw `chat.history` is canonical for transcript-backed
+  user, assistant, and tool messages, while runtime replay continues to supply
+  runtime-only thinking and control data;
+- completed sessions that never entered Dashboard's runtime cache, including
+  heartbeat sessions, can still be loaded from OpenClaw by session key. Their
+  transcript is available, but thinking is not recoverable from
+  `chat.history`.
+
+The first history load for a selected session follows every OpenClaw offset page
+and builds the complete transcript. Later refreshes fetch the first page and
+walk backward only until they overlap the cached sequence watermark. The browser
+keeps an LRU cache of two complete session transcripts. Incremental reuse
+requires complete `__openclaw.seq` metadata; if any loaded message lacks a
+sequence, Dashboard performs a full uncached load and does not advance the
+watermark.
+
+### Runtime Replay Cache
+
+The backend bridge keeps bounded replay state in memory and mirrors it to
+SQLite so active and completed thinking can survive a backend or VPS restart.
+Replay is partitioned by Gateway credential scope, normalized session key, and
+then run ID. Main and ops sessions therefore have independent caches, and each
+session can retain up to four runs.
+
+SQLite uses two related tables:
+
+- `chat_runtime_snapshots` stores session-level replay metadata;
+- `chat_runtime_snapshot_events` stores one serialized replay event per runtime
+  sequence.
+
+The current `rows-v2` metadata stores a SHA-256 fingerprint for every retained
+event. An unchanged prefix only appends new event rows; coalescing, trimming, or
+a same-sequence content change replaces stale rows. Older inline and `rows-v1`
+cache layouts are intentionally unsupported and should be cleared or migrated
+when deploying the schema change.
+
+Replay limits are:
+
+- 1,000,000 serialized bytes per event;
+- 64,000,000 serialized bytes or 20,000 events per active run;
+- four runs per session;
+- 50 persisted sessions per Gateway scope;
+- 256,000,000 serialized bytes across in-process replay state.
+
+When the process-wide memory budget is exceeded, completed sessions are evicted
+before active sessions, oldest first. The current session is preferred while
+another candidate exists, but remains a last-resort eviction candidate so the
+limit stays hard. Its latest state is flushed to SQLite before memory eviction
+and can be rehydrated transiently on demand. The latest completed run remains
+available until the next successful send for that session. An abandoned active
+run expires after six hours without an event. Successful `/new` or `/reset`,
+abort, session deletion, and Gateway credential changes clear the applicable
+replay cache.
 
 The canonical reducer is ordered and idempotent. Run identifiers and aliases are
 always session-scoped. Snapshot gating applies only to the selected session, so
 off-screen terminal events continue to clean up their own runs while a snapshot
 is in flight. Canonical history wins reconciliation after a terminal refresh;
-transient diagnostics are inserted before the matching final answer.
+transient diagnostics are inserted before the matching final answer. Exact tool
+call IDs may match results across a later user boundary, while name-only fallback
+matching remains bounded to the current user turn.
 
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
@@ -129,11 +182,14 @@ Session controls are Gateway-backed rather than Dashboard-only preferences:
 - sparse session records inherit matching Gateway defaults instead of being
   treated as unsupported.
 
-Thinking/reasoning and tool diagnostics have separate visibility toggles stored
-in browser local storage. The composer owns these controls so the setting and
-the message it affects stay in one interaction surface. These settings are
-presentation-only: raw diagnostics remain in client state while toggles filter
-rendering, so hiding and showing them does not delete current-run data.
+Thinking/reasoning, tool diagnostics, keeping thinking after final, and the
+default tool-detail expansion state are grouped in the composer's Chat display
+drawer and stored in browser local storage. Tool bubbles can also be expanded or
+collapsed individually. Changing the global tool-detail setting immediately
+applies to every existing bubble and controls the initial state of new bubbles;
+the default is collapsed. These settings are presentation-only: raw diagnostics
+remain in client state while toggles filter rendering, so hiding and showing
+them does not delete current-run data.
 
 Keeping thinking after the final answer is a separate persisted preference. It
 is available only while thinking is visible, defaults off, and preserves an
@@ -153,11 +209,22 @@ When changing chat event handling, test these cases:
 - live tool result updates merge into the matching row;
 - failed tool results stay visible when tool output is enabled;
 - hiding tool output does not also hide a real terminal chat error;
-- run IDs are scoped by session, not treated as globally unique.
+- run IDs are scoped by session, not treated as globally unique;
 - snapshot replay and live delivery interleaving does not duplicate deltas;
 - snapshot gating never drops queued events for other sessions;
-- refresh/reconnect restores only the selected active or latest completed run;
+- restart and reconnect restore active and latest completed thinking from
+  SQLite;
+- main and ops sessions never share runtime replay state;
+- an initial history load follows all pages, while incomplete sequence metadata
+  cannot advance an incremental cache watermark;
+- coalescing or trimming persisted replay removes stale event rows;
+- tool trimming above the per-run byte limit preserves thinking;
+- aggregate memory eviction can rehydrate the evicted session from SQLite;
+- exact tool-call IDs can match across user boundaries, while name-only matches
+  cannot;
 - hiding diagnostics does not remove them from cached client state;
+- the global tool-detail setting updates existing bubbles and the default for
+  new bubbles;
 - repeated short final answers in different user turns remain distinct;
 - hidden tool attachments never cross a user or run boundary;
 - socket reconnects, compaction replacement runs, and selected-session changes

@@ -723,6 +723,7 @@ export class OpenClawChatBridge {
     readonly #store: OpenClawChatSnapshotStore | undefined;
     #enforcingReplayMemoryLimit = false;
     #persistenceTimer: ReturnType<typeof setTimeout> | undefined;
+    #replayMemoryLimitDeferrals = 0;
     #sequence = 0;
     #sequenceHydrated = false;
     #sessionLimitDeferrals = 0;
@@ -1481,7 +1482,7 @@ export class OpenClawChatBridge {
     }
 
     #enforceReplayMemoryLimit(protectedSessionKey?: string): void {
-        if (this.#enforcingReplayMemoryLimit) {
+        if (this.#enforcingReplayMemoryLimit || this.#replayMemoryLimitDeferrals > 0) {
             return;
         }
         const storageProtectedSessionKey = protectedSessionKey
@@ -1491,10 +1492,11 @@ export class OpenClawChatBridge {
         try {
             this.#refreshTotalReplayBytes();
             while (this.#totalReplayBytes > this.#maxReplayBytes) {
-                const oldestSessionKey = oldestReplayBudgetSessionKey(
-                    this.#runsBySession,
-                    storageProtectedSessionKey
-                );
+                const oldestSessionKey =
+                    oldestReplayBudgetSessionKey(
+                        this.#runsBySession,
+                        storageProtectedSessionKey
+                    ) ?? oldestReplayBudgetSessionKey(this.#runsBySession);
                 if (!oldestSessionKey) {
                     break;
                 }
@@ -2057,7 +2059,7 @@ export class OpenClawChatBridge {
         this.#runsBySession.set(storageSessionKey, runs);
         this.#enforceSessionLimit();
         this.#enforceReplayMemoryLimit(storageSessionKey);
-        if (shouldPersist) {
+        if (shouldPersist && this.#runsBySession.has(storageSessionKey)) {
             if (isTerminal) {
                 this.#flushSessionPersistence(storageSessionKey);
             } else {
@@ -2301,10 +2303,16 @@ export class OpenClawChatBridge {
 
     /** Returns active runs or the latest completed run for one session. */
     snapshot(sessionKey: string): OpenClawRuntimeSnapshot {
-        this.#ensureSessionLoaded(sessionKey);
-        if (this.#pruneStaleActiveRuns(sessionKey)) {
-            this.#flushSessionPersistence(sessionKey);
+        this.#replayMemoryLimitDeferrals += 1;
+        try {
+            this.#ensureSessionLoaded(sessionKey);
+            if (this.#pruneStaleActiveRuns(sessionKey)) {
+                this.#flushSessionPersistence(sessionKey);
+            }
+            return this.#snapshotFromMemory(sessionKey);
+        } finally {
+            this.#replayMemoryLimitDeferrals -= 1;
+            this.#enforceReplayMemoryLimit(sessionKey);
         }
-        return this.#snapshotFromMemory(sessionKey);
     }
 }

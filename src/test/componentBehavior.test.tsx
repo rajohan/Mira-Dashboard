@@ -911,7 +911,16 @@ describe("shared component helpers", () => {
             }
         }
 
-        await user.click(screen.getByRole("button", { name: /response settings/i }));
+        const responseSettingsButton = screen.getByRole("button", {
+            name: /response settings/i,
+        });
+        const chatDisplayButton = screen.getByRole("button", {
+            name: "Chat display settings",
+        });
+        expect(responseSettingsButton).toHaveAttribute("title", "Response settings");
+        expect(chatDisplayButton).toHaveAttribute("title", "Chat display settings");
+
+        await user.click(responseSettingsButton);
         await user.click(
             screen.getByRole("button", { name: /close response settings/i })
         );
