@@ -198,6 +198,7 @@ describe("chat runtime controller", () => {
             Promise.resolve({
                 completed: false,
                 events: [thinking, tool],
+                replayScope: "gateway-a",
                 runtimeGeneration: "backend-1",
                 throughSequence: 32,
             }),
@@ -224,6 +225,7 @@ describe("chat runtime controller", () => {
             reconnectSnapshot.resolve({
                 completed: false,
                 events: [],
+                replayScope: "gateway-a",
                 runtimeGeneration: "backend-2",
                 throughSequence: 0,
             });
@@ -238,6 +240,51 @@ describe("chat runtime controller", () => {
         expect(
             result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
         ).toBe("continued");
+    });
+
+    it("drops prior runs but preserves new work when reconnect switches scope", async () => {
+        const first = fakeTransport(
+            Promise.resolve({
+                completed: false,
+                events: [assistant(SELECTED, 16, "old gateway work", "replace")],
+                replayScope: "gateway-a",
+                runtimeGeneration: "backend-1",
+                throughSequence: 16,
+            }),
+            1
+        );
+        const reconnectSnapshot = deferred<ChatRuntimeSnapshot>();
+        const second = fakeTransport(reconnectSnapshot.promise, 2);
+        const { result, rerender } = renderHook(
+            ({ transport }) =>
+                useChatRuntime({ selectedSessionKey: SELECTED, transport }),
+            { initialProps: { transport: first.transport } }
+        );
+
+        await waitFor(() =>
+            expect(
+                result.current.state.sessions[SELECTED]?.runs["run-1"]?.assistant?.text
+            ).toBe("old gateway work")
+        );
+        act(() => result.current.beginRun(SELECTED, "dashboard-chat-old-gateway"));
+
+        rerender({ transport: second.transport });
+        await waitFor(() => expect(second.transport.snapshot).toHaveBeenCalled());
+        act(() => result.current.beginRun(SELECTED, "dashboard-chat-new-gateway"));
+        await act(async () => {
+            reconnectSnapshot.resolve({
+                completed: false,
+                events: [],
+                replayScope: "gateway-b",
+                runtimeGeneration: "backend-2",
+                throughSequence: 0,
+            });
+            await reconnectSnapshot.promise;
+        });
+
+        expect(Object.keys(result.current.state.sessions[SELECTED]?.runs || {})).toEqual([
+            "dashboard-chat-new-gateway",
+        ]);
     });
 
     it("rebuilds from a persisted completed snapshot after a backend restart", async () => {
@@ -293,6 +340,7 @@ describe("chat runtime controller", () => {
             Promise.resolve({
                 completed: false,
                 events: [user(SELECTED, 16, "first steer", firstTimestamp)],
+                replayScope: "gateway-a",
                 runtimeGeneration: "backend-1",
                 throughSequence: 16,
             }),
@@ -316,6 +364,7 @@ describe("chat runtime controller", () => {
             restartSnapshot.resolve({
                 completed: false,
                 events: [],
+                replayScope: "gateway-a",
                 runtimeGeneration: "backend-2",
                 throughSequence: 0,
             });

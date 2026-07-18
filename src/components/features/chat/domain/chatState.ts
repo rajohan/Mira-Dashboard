@@ -214,7 +214,8 @@ function emptyRun(
 
 function matchingRunKey(
     session: ChatSessionRuntimeState,
-    runId: string | undefined
+    runId: string | undefined,
+    target: "any" | "chat" | "compaction" = "any"
 ): string | undefined {
     if (runId) {
         return Object.entries(session.runs).find(
@@ -223,7 +224,12 @@ function matchingRunKey(
     }
 
     const activeRuns = Object.entries(session.runs).filter(
-        ([, run]) => run.phase === "active"
+        ([, run]) =>
+            run.phase === "active" &&
+            (target === "any" ||
+                (target === "compaction"
+                    ? run.operation === "compact"
+                    : run.operation !== "compact"))
     );
     if (activeRuns.length === 1) {
         return activeRuns[0]?.[0];
@@ -293,7 +299,11 @@ function resolveRun(
     }
 
     if (!run) {
-        runKey = matchingRunKey(session, event.runId);
+        runKey = matchingRunKey(
+            session,
+            event.runId,
+            isDedicatedCompactionStatus(event) ? "compaction" : "chat"
+        );
         run = runKey ? session.runs[runKey] : undefined;
     }
 

@@ -936,6 +936,48 @@ describe("chat runtime state", () => {
         });
     });
 
+    it("ignores an active compaction when assigning an unscoped final", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ text: "working" }],
+                },
+                runId: "chat-run",
+            }),
+            event(32, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "active",
+                runId: "compaction:automatic",
+                text: "Compacting context",
+            }),
+            event(48, {
+                kind: "finish",
+                message: {
+                    content: "provider answer",
+                    role: "assistant",
+                    text: "provider answer",
+                },
+                outcome: "completed",
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["chat-run"]).toMatchObject({
+            assistant: { text: "provider answer" },
+            phase: "completed",
+        });
+        expect(state.sessions[SESSION]?.runs["compaction:automatic"]).toMatchObject({
+            operation: "compact",
+            operationPhase: "active",
+            phase: "active",
+        });
+        expect(state.sessions[SESSION]?.runs["runtime-runless-48"]).toBeUndefined();
+    });
+
     it("keeps runless work with its user echo when the provider id arrives", () => {
         const state = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

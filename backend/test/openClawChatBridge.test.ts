@@ -468,6 +468,83 @@ describe("OpenClaw chat bridge", () => {
         expect(bridge.snapshot(MAIN)).toMatchObject({ completed: true });
     });
 
+    it("keeps an unscoped final visible while dedicated compaction settles", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "start",
+                runId: "compaction-run",
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                runId: "chat-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+                text: "working",
+            },
+            []
+        );
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: false,
+            events: [
+                expect.objectContaining({ event: "agent" }),
+                expect.objectContaining({ event: "agent" }),
+            ],
+        });
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "answer after compaction",
+                sessionKey: MAIN,
+                state: "final",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: false,
+            events: [
+                expect.objectContaining({ event: "agent" }),
+                expect.objectContaining({ event: "agent" }),
+                expect.objectContaining({
+                    event: "chat",
+                    payload: expect.objectContaining({
+                        message: "answer after compaction",
+                    }),
+                }),
+            ],
+        });
+
+        bridge.recordEvent(
+            "agent",
+            {
+                phase: "end",
+                runId: "compaction-run",
+                sessionKey: MAIN,
+                stream: "compaction",
+            },
+            []
+        );
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [
+                expect.objectContaining({ event: "agent" }),
+                expect.objectContaining({
+                    event: "chat",
+                    payload: expect.objectContaining({
+                        message: "answer after compaction",
+                    }),
+                }),
+            ],
+        });
+    });
+
     it("keeps retrying compaction active until its settling lifecycle arrives", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

@@ -488,7 +488,7 @@ describe("gateway behavior", () => {
         });
     });
 
-    it("rotates the chat runtime generation when Gateway credentials change", async () => {
+    it("rotates the chat replay identity when Gateway credentials change", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
         rememberEnvironment("OPENCLAW_GATEWAY_URL");
@@ -514,7 +514,9 @@ describe("gateway behavior", () => {
         );
         const socket = new FakeDashboardSocket();
         gateway.handleDashboardClient(socket);
-        const requestGeneration = async (id: string): Promise<string | undefined> => {
+        const requestIdentity = async (
+            id: string
+        ): Promise<{ replayScope?: string; runtimeGeneration?: string } | undefined> => {
             socket.emitMessage({
                 id,
                 method: "chat.runtimeSnapshot",
@@ -527,23 +529,38 @@ describe("gateway behavior", () => {
                     (raw) =>
                         JSON.parse(raw) as {
                             id?: string;
-                            payload?: { runtimeGeneration?: string };
+                            payload?: {
+                                replayScope?: string;
+                                runtimeGeneration?: string;
+                            };
                         }
                 )
-                .find((message) => message.id === id)?.payload?.runtimeGeneration;
+                .find((message) => message.id === id)?.payload;
         };
 
         gateway.init("token-one");
-        const firstGeneration = await requestGeneration("generation-one");
+        const firstIdentity = await requestIdentity("generation-one");
         gateway.init("token-two");
-        const secondGeneration = await requestGeneration("generation-two");
+        const secondIdentity = await requestIdentity("generation-two");
         gateway.init("token-two");
-        const unchangedGeneration = await requestGeneration("generation-unchanged");
+        const unchangedIdentity = await requestIdentity("generation-unchanged");
 
-        expect(firstGeneration).toEqual(expect.any(String));
-        expect(secondGeneration).toEqual(expect.any(String));
-        expect(secondGeneration).not.toBe(firstGeneration);
-        expect(unchangedGeneration).toBe(secondGeneration);
+        expect(firstIdentity).toMatchObject({
+            replayScope: expect.any(String),
+            runtimeGeneration: expect.any(String),
+        });
+        expect(secondIdentity).toMatchObject({
+            replayScope: expect.any(String),
+            runtimeGeneration: expect.any(String),
+        });
+        expect(secondIdentity?.runtimeGeneration).not.toBe(
+            firstIdentity?.runtimeGeneration
+        );
+        expect(secondIdentity?.replayScope).not.toBe(firstIdentity?.replayScope);
+        expect(unchangedIdentity).toMatchObject({
+            replayScope: secondIdentity?.replayScope,
+            runtimeGeneration: secondIdentity?.runtimeGeneration,
+        });
         socket.close();
     });
 
@@ -739,6 +756,7 @@ describe("gateway behavior", () => {
                         id?: string;
                         payload?: {
                             events?: Array<Record<string, unknown>>;
+                            replayScope?: string;
                             runtimeGeneration?: string;
                             throughSequence?: number;
                         };
@@ -758,6 +776,7 @@ describe("gateway behavior", () => {
                     type: "event",
                 },
             ],
+            replayScope: expect.any(String),
             runtimeGeneration: expect.any(String),
             throughSequence: expect.any(Number),
         });

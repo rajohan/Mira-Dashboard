@@ -20,6 +20,8 @@ export interface ChatSessionPreferences {
 export interface ChatRuntimeSnapshot {
     completed: boolean;
     events: ChatRuntimeEvent[];
+    /** Stable opaque identity for one Gateway endpoint/credential replay boundary. */
+    replayScope?: string;
     runtimeGeneration?: string;
     throughSequence: number;
 }

@@ -1209,6 +1209,7 @@ function handleDashboardClient(ws: DashboardSocket): void {
                                     isOk: true,
                                     payload: {
                                         ...chatReplayState.bridge.snapshot(sessionKey),
+                                        replayScope: chatReplayState.scope,
                                         runtimeGeneration: chatReplayState.generation,
                                     },
                                 })

@@ -90,6 +90,7 @@ export function useOpenClawChatTransport(): ChatTransport {
         return {
             completed: result?.completed === true,
             events: adapter.snapshot(rawResult),
+            replayScope: stringValue(result?.replayScope) || undefined,
             runtimeGeneration: stringValue(result?.runtimeGeneration) || undefined,
             throughSequence: openClawThroughSequence(result?.throughSequence),
         };

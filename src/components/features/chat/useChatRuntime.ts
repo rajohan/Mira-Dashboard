@@ -17,7 +17,7 @@ import {
     reduceChatRuntime,
     restoreChatRuns,
 } from "./domain/chatState";
-import type { ChatTransport } from "./transport/chatTransport";
+import type { ChatRuntimeSnapshot, ChatTransport } from "./transport/chatTransport";
 
 const MAX_HANDLED_FINISH_SEQUENCES = 500;
 
@@ -38,6 +38,39 @@ interface SnapshotGate {
     reconnecting: boolean;
     sessionKey: string;
     token: number;
+}
+
+interface RuntimeIdentity {
+    generation?: string;
+    replayScope?: string;
+}
+
+function replayIdentityTransition(
+    previous: RuntimeIdentity,
+    snapshot: Pick<ChatRuntimeSnapshot, "replayScope" | "runtimeGeneration">,
+    isReconnecting: boolean
+): { didLoseContinuity: boolean; isSameScopeRestart: boolean } {
+    const didGenerationChange = Boolean(
+        snapshot.runtimeGeneration &&
+        previous.generation &&
+        snapshot.runtimeGeneration !== previous.generation
+    );
+    const isKnownSameScope = Boolean(
+        snapshot.replayScope &&
+        previous.replayScope &&
+        snapshot.replayScope === previous.replayScope
+    );
+    const didKnownScopeChange = Boolean(
+        snapshot.replayScope &&
+        previous.replayScope &&
+        snapshot.replayScope !== previous.replayScope
+    );
+    return {
+        didLoseContinuity:
+            isReconnecting &&
+            (didKnownScopeChange || (didGenerationChange && !isKnownSameScope)),
+        isSameScopeRestart: isReconnecting && didGenerationChange && isKnownSameScope,
+    };
 }
 
 interface DisplacedReplayGroup {
@@ -159,7 +192,7 @@ export function useChatRuntime({
     const gateReference = useRef<SnapshotGate | undefined>(undefined);
     const gateTokenReference = useRef(0);
     const reconnectGenerationReference = useRef<number | undefined>(undefined);
-    const runtimeGenerationReference = useRef<string | undefined>(undefined);
+    const runtimeIdentityReference = useRef<RuntimeIdentity>({});
     const selectedSessionReference = useRef(selectedSessionKey);
     const callbacksReference = useRef({ onError, onSettled });
     const transportReference = useRef(transport);
@@ -317,20 +350,31 @@ export function useChatRuntime({
                 ) {
                     reconnectGenerationReference.current = undefined;
                 }
-                const previousRuntimeGeneration = runtimeGenerationReference.current;
-                const isBackendRestart = Boolean(
-                    gate.reconnecting &&
-                    snapshot.runtimeGeneration &&
-                    previousRuntimeGeneration &&
-                    snapshot.runtimeGeneration !== previousRuntimeGeneration
+                const replayTransition = replayIdentityTransition(
+                    runtimeIdentityReference.current,
+                    snapshot,
+                    gate.reconnecting
                 );
                 const shouldPreserveActiveRuns =
                     !snapshot.completed &&
                     gate.reconnecting &&
                     snapshot.events.length === 0 &&
-                    (isBackendRestart || !snapshot.runtimeGeneration);
-                if (snapshot.runtimeGeneration) {
-                    runtimeGenerationReference.current = snapshot.runtimeGeneration;
+                    !replayTransition.didLoseContinuity &&
+                    (replayTransition.isSameScopeRestart || !snapshot.runtimeGeneration);
+                if (snapshot.runtimeGeneration || snapshot.replayScope) {
+                    runtimeIdentityReference.current = {
+                        generation: snapshot.runtimeGeneration,
+                        replayScope: snapshot.replayScope,
+                    };
+                }
+                if (replayTransition.didLoseContinuity) {
+                    const displacedGroup = displacedReplayGroupForSession(
+                        displacedCompletedRunsReference.current,
+                        selectedSessionKey
+                    );
+                    if (displacedGroup) {
+                        displacedCompletedRunsReference.current.delete(displacedGroup[0]);
+                    }
                 }
                 const replayedSequences = new Set(
                     snapshot.events.map((event) => event.sequence)
@@ -365,6 +409,12 @@ export function useChatRuntime({
                 const recoveredProvisionalRunKey =
                     provisionalRuns.length === 1 ? provisionalRuns[0]?.[0] : undefined;
                 for (const [optimisticRunId, pendingRun] of gate.optimisticRuns) {
+                    if (
+                        replayTransition.didLoseContinuity &&
+                        !pendingRun.observedAfterSnapshotRequest
+                    ) {
+                        continue;
+                    }
                     const runIds = new Set(
                         [optimisticRunId, pendingRun.providerRunId].filter(
                             (runId): runId is string => Boolean(runId)

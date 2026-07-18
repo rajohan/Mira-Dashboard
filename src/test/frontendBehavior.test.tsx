@@ -1396,7 +1396,7 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
-    it("uses the socket response status for context compaction", async () => {
+    it("uses the socket response contracts for snapshots and compaction", async () => {
         const originalWebSocket = WebSocket;
         FakeWebSocket.instances = [];
         Object.defineProperty(globalThis, "WebSocket", {
@@ -1423,6 +1423,36 @@ describe("Mira Dashboard frontend behavior", () => {
             await waitFor(() => expect(result.current.isConnected).toBe(true));
             act(() => {
                 socket.message({ type: "response", id: "1", isOk: true, payload: [] });
+            });
+
+            const snapshotPromise = result.current.snapshot("agent:main:main");
+            const snapshotRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
+            expect(snapshotRequest).toMatchObject({
+                method: "chat.runtimeSnapshot",
+                params: { sessionKey: "agent:main:main" },
+            });
+            act(() => {
+                socket.message({
+                    type: "response",
+                    id: snapshotRequest.id,
+                    isOk: true,
+                    payload: {
+                        completed: false,
+                        events: [],
+                        replayScope: "gateway-scope",
+                        runtimeGeneration: "backend-generation",
+                        throughSequence: 7,
+                    },
+                });
+            });
+            await expect(snapshotPromise).resolves.toEqual({
+                completed: false,
+                events: [],
+                replayScope: "gateway-scope",
+                runtimeGeneration: "backend-generation",
+                throughSequence: 127,
             });
 
             const compactPromise = result.current.compact("agent:main:main");

@@ -296,6 +296,15 @@ function isCompactionEvent(event: unknown, payload: unknown): boolean {
     return event === "session.compaction" || isAgentCompactionEvent(event, payload);
 }
 
+function isSettlingLifecycleEvent(event: unknown, payload: unknown): boolean {
+    const record = runtimePayloadView(payload);
+    const stream = (stringField(record, "stream") || "").toLowerCase();
+    const phase = (stringField(record, "phase") || "").toLowerCase();
+    return (
+        event === "agent" && stream === "lifecycle" && ["end", "error"].includes(phase)
+    );
+}
+
 function isCompactionOnlyRun(run: RetainedRun): boolean {
     return (
         run.events.length > 0 &&
@@ -322,7 +331,6 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
     }
 
     const record = runtimePayloadView(payload);
-    const eventStream = stringField(record, "stream") || "";
     const compactionOperation = (stringField(record, "operation") || "").toLowerCase();
     const eventPhase = (stringField(record, "phase") || "").toLowerCase();
     const eventStatus = (stringField(record, "status") || "").toLowerCase();
@@ -342,7 +350,7 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
                 (stringField(record, "state") || "").toLowerCase()
             )) ||
         isTerminalCompaction ||
-        (eventStream === "lifecycle" && ["end", "error"].includes(eventPhase))
+        isSettlingLifecycleEvent(event, payload)
     );
 }
 
@@ -935,11 +943,21 @@ export class OpenClawChatBridge {
             .filter((snapshot) => snapshot.completed)
             .toSorted((left, right) => right.terminalSequence - left.terminalSequence);
         const newestCompleted = completed[0];
-        const completedToReplay =
-            completed.find((snapshot) => !isAuxiliaryOnlyCompletion(snapshot)) ||
-            newestCompleted;
-        const selected =
-            active.length > 0 ? active : completedToReplay ? [completedToReplay] : [];
+        const latestConversation = completed.find(
+            (snapshot) => !isAuxiliaryOnlyCompletion(snapshot)
+        );
+        const completedToReplay = latestConversation || newestCompleted;
+        const activeConversation = active.filter(
+            (snapshot) => !isCompactionOnlyRun(snapshot)
+        );
+        let selected: RetainedRun[];
+        if (activeConversation.length > 0) {
+            selected = active;
+        } else if (active.length > 0) {
+            selected = latestConversation ? [latestConversation, ...active] : active;
+        } else {
+            selected = completedToReplay ? [completedToReplay] : [];
+        }
 
         return {
             completed: active.length === 0 && selected.length > 0,
@@ -1722,16 +1740,26 @@ export class OpenClawChatBridge {
             .values()
             .filter((snapshot) => !snapshot.completed)
             .toArray();
-        const activeRunlessRuns = activeRuns.filter((run) => isRunlessRunId(run.runId));
+        const isCompaction = isCompactionEvent(envelope.event, envelope.payload);
+        const activeConversationRuns = activeRuns.filter(
+            (run) => !isCompactionOnlyRun(run)
+        );
+        const canSettleOnlyCompaction =
+            activeConversationRuns.length === 0 &&
+            isSettlingLifecycleEvent(envelope.event, envelope.payload);
+        const compatibleActiveRuns =
+            isCompaction || canSettleOnlyCompaction ? activeRuns : activeConversationRuns;
+        const activeRunlessRuns = compatibleActiveRuns.filter((run) =>
+            isRunlessRunId(run.runId)
+        );
         const compatibleActiveRun =
-            activeRuns.length === 1
-                ? activeRuns[0]
+            compatibleActiveRuns.length === 1
+                ? compatibleActiveRuns[0]
                 : activeRunlessRuns.length === 1
                   ? activeRunlessRuns[0]
                   : undefined;
         const isMetadataOnlyCompletion =
             !explicitRunId && isMetadataOnlyCompletionEnvelope(retainedEnvelope);
-        const isCompaction = isCompactionEvent(envelope.event, envelope.payload);
         const completedRuns =
             isCompaction ||
             (!explicitRunId &&
