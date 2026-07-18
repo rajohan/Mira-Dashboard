@@ -12,6 +12,7 @@ import {
 } from "../chatTypes";
 
 export interface RawOpenClawHistoryMessage {
+    __openclaw?: unknown;
     role?: unknown;
     content?: unknown;
     text?: unknown;

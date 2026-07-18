@@ -796,14 +796,8 @@ function applyFinishEvent(
         return { ...run, statusText: undefined };
     }
 
-    const hasFailedTool = run.diagnostics.some((entry) =>
-        [
-            entry.message.toolResult,
-            ...(entry.message.toolCalls || []).map((call) => call.toolResult),
-        ].some((result) => result?.isError === true)
-    );
     const isToolFailure = Boolean(run.toolFailure || event.toolFailure);
-    const error = isToolFailure && hasFailedTool ? undefined : event.error;
+    const error = isToolFailure ? undefined : event.error;
 
     const withMessage = event.message
         ? applyAssistantEvent(

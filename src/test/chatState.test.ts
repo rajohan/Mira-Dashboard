@@ -1356,6 +1356,45 @@ describe("chat runtime state", () => {
         });
     });
 
+    it("suppresses a tool terminal error before its diagnostic arrives", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                error: "Bash failed",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-tool-failure",
+                toolFailure: true,
+            }),
+            event(32, {
+                kind: "tool",
+                message: {
+                    content: "command failed",
+                    role: "tool",
+                    text: "command failed",
+                    toolResult: {
+                        content: "command failed",
+                        isError: true,
+                        name: "Bash",
+                    },
+                },
+                runId: "run-tool-failure",
+                toolKey: "tool:bash:failed",
+            }),
+        ]);
+
+        const failedRun = state.sessions[SESSION]?.runs["run-tool-failure"];
+
+        expect(failedRun).toMatchObject({
+            error: undefined,
+            phase: "error",
+            toolFailure: true,
+        });
+        expect(failedRun?.diagnostics).toHaveLength(1);
+        expect(failedRun?.diagnostics[0]?.message.toolResult).toMatchObject({
+            isError: true,
+        });
+    });
+
     it("lets an authoritative final replace an earlier terminal state", () => {
         const state = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {

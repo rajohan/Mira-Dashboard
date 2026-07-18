@@ -2721,7 +2721,7 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(
                 socket.sent.filter((entry) => entry.includes('"method":"chat.history"'))
-            ).toHaveLength(2);
+            ).toHaveLength(1);
         });
         await respondToSocketRequest(socket, "chat.history", {
             messages: [
@@ -2749,29 +2749,9 @@ describe("Mira Dashboard pages", () => {
         });
         await flushQueuedTimers();
 
-        await waitFor(() => {
-            expect(
-                socket.sent.some((entry) => entry.includes('"method":"chat.history"'))
-            ).toBe(true);
-        });
         expect(findSocketRequest(socket, "chat.history")?.params).toMatchObject({
             sessionKey: "agent:main:main",
         });
-        await respondToSocketRequest(socket, "chat.history", {
-            messages: [
-                {
-                    role: "user",
-                    content: "Previous question",
-                    timestamp: "2026-06-24T08:00:00.000Z",
-                },
-                {
-                    role: "assistant",
-                    content: "Previous answer",
-                    timestamp: "2026-06-24T08:00:01.000Z",
-                },
-            ],
-        });
-        await flushQueuedTimers();
 
         await waitFor(() => {
             expect(
@@ -2831,6 +2811,7 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
         });
 
+        await user.click(screen.getByRole("button", { name: "Chat display settings" }));
         const thinkingToggle = screen.getByRole("button", { name: "Show thinking" });
         const toolsToggle = screen.getByRole("button", { name: "Show tools" });
         await user.click(thinkingToggle);
@@ -2848,6 +2829,12 @@ describe("Mira Dashboard pages", () => {
         expect(keepThinkingToggle).toBeDisabled();
         await user.click(thinkingToggle);
         expect(keepThinkingToggle).toHaveAttribute("aria-pressed", "true");
+        const toolDetailsToggle = screen.getByRole("button", {
+            name: "Expand tool call details",
+        });
+        expect(toolDetailsToggle).toHaveAttribute("aria-pressed", "false");
+        await user.click(toolDetailsToggle);
+        expect(toolDetailsToggle).toHaveAttribute("aria-pressed", "true");
 
         await user.click(screen.getByRole("button", { name: "Send" }));
 
@@ -3333,12 +3320,14 @@ describe("Mira Dashboard pages", () => {
     });
 
     it("keeps chat page storage and history helpers deterministic", () => {
+        localStorage.removeItem("mira-dashboard-chat-diagnostic-visibility");
         const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
         try {
             Reflect.deleteProperty(globalThis, "window");
             expect(readStoredChatDiagnosticVisibility()).toEqual({
                 keepThinkingAfterFinal: false,
                 thinking: false,
+                toolDetailsExpanded: false,
                 tools: false,
             });
         } finally {
@@ -3428,6 +3417,7 @@ describe("Mira Dashboard pages", () => {
             JSON.stringify({
                 keepThinkingAfterFinal: true,
                 thinking: false,
+                toolDetailsExpanded: false,
                 tools: true,
             })
         );
@@ -3435,6 +3425,7 @@ describe("Mira Dashboard pages", () => {
         expect(readStoredChatDiagnosticVisibility()).toEqual({
             keepThinkingAfterFinal: true,
             thinking: false,
+            toolDetailsExpanded: false,
             tools: true,
         });
     });

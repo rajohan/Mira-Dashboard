@@ -308,6 +308,21 @@ CREATE TABLE IF NOT EXISTS chat_runtime_snapshots (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_runtime_snapshots_scope_session_normalized
     ON chat_runtime_snapshots(gateway_scope, lower(trim(session_key)));
 
+CREATE TABLE IF NOT EXISTS chat_runtime_snapshot_events (
+    gateway_scope TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    runtime_sequence INTEGER NOT NULL,
+    envelope_json TEXT NOT NULL,
+    PRIMARY KEY (gateway_scope, session_key, runtime_sequence)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_runtime_snapshot_events_scope_session_sequence_normalized
+    ON chat_runtime_snapshot_events(
+        gateway_scope,
+        lower(trim(session_key)),
+        runtime_sequence
+    );
+
 CREATE TABLE IF NOT EXISTS docker_managed_services (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     app_slug TEXT NOT NULL,

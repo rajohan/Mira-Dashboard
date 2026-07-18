@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef } from "react";
 
 import type {
@@ -164,12 +165,7 @@ function DetailBlock({
     children: ReactNode;
     tone?: "default" | "warning" | "danger";
 }) {
-    const toneClass =
-        tone === "danger"
-            ? "border-red-500/30 bg-red-500/10 text-red-100"
-            : tone === "warning"
-              ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
-              : "border-primary-600 bg-primary-900/70 text-primary-100";
+    const toneClass = detailToneClass(tone);
 
     return (
         <div
@@ -179,6 +175,63 @@ function DetailBlock({
                 {label}
             </div>
             {children}
+        </div>
+    );
+}
+
+function detailToneClass(tone: "default" | "warning" | "danger"): string {
+    return tone === "danger"
+        ? "border-red-500/30 bg-red-500/10 text-red-100"
+        : tone === "warning"
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+          : "border-primary-600 bg-primary-900/70 text-primary-100";
+}
+
+/** Renders a collapsible tool bubble with its status always visible. */
+function ToolDetailBlock({
+    label,
+    status,
+    summary,
+    isExpanded,
+    onToggle,
+    tone,
+    children,
+}: {
+    label: string;
+    status: string;
+    summary?: string;
+    isExpanded: boolean;
+    onToggle: () => void;
+    tone: "default" | "warning" | "danger";
+    children: ReactNode;
+}) {
+    return (
+        <div
+            className={`mt-1.5 min-w-0 overflow-hidden rounded-lg border px-2 py-1.5 text-xs ${detailToneClass(tone)}`}
+        >
+            <button
+                type="button"
+                aria-expanded={isExpanded}
+                aria-label={`${isExpanded ? "Collapse" : "Expand"} ${label} tool details`}
+                onClick={onToggle}
+                className="flex w-full min-w-0 items-center gap-1.5 text-left"
+            >
+                <ChevronRight
+                    className={`size-3.5 shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                />
+                <span className="min-w-0 flex-1 truncate font-medium tracking-wide uppercase opacity-80">
+                    {label}
+                </span>
+                <span className="shrink-0 text-[10px] tracking-wide uppercase opacity-60">
+                    {status}
+                </span>
+            </button>
+            {!isExpanded && summary ? (
+                <div className="mt-1 truncate pl-5 opacity-75" title={summary}>
+                    {summary}
+                </div>
+            ) : undefined}
+            {isExpanded ? children : undefined}
         </div>
     );
 }
@@ -198,9 +251,17 @@ function ToolSection({ label, children }: { label: string; children: ReactNode }
 /** Renders the chat message details UI. */
 export function ChatMessageDetails({
     message,
+    messageKey,
+    shouldExpandToolDetails = false,
+    toolDetailExpansionOverrides = new Map(),
+    onToggleToolDetails,
     visibility,
 }: {
     message: ChatHistoryMessage;
+    messageKey?: string;
+    shouldExpandToolDetails?: boolean;
+    toolDetailExpansionOverrides?: ReadonlyMap<string, boolean>;
+    onToggleToolDetails?: (toolKey: string) => void;
     visibility: ChatVisibilitySettings;
 }) {
     const shouldShowThinking =
@@ -214,10 +275,16 @@ export function ChatMessageDetails({
     );
     const shouldShowToolResult =
         visibility.shouldShowTools && message.toolResult && !hasToolResultInCall;
-
     if (!shouldShowThinking && !shouldShowToolCalls && !shouldShowToolResult) {
         return;
     }
+
+    const toolKeyPrefix =
+        messageKey ||
+        message.runtimeKey ||
+        `${message.runId || "message"}:${message.timestamp || "untimed"}`;
+    const isToolDetailsExpanded = (toolKey: string) =>
+        toolDetailExpansionOverrides.get(toolKey) ?? shouldExpandToolDetails;
 
     return (
         <div className="mt-1.5 space-y-1.5">
@@ -236,11 +303,23 @@ export function ChatMessageDetails({
                           (isMatchingToolResult(toolCall, message.toolResult)
                               ? message.toolResult
                               : undefined);
+                      const label = formatToolDisplayName(toolCall.name);
+                      const toolKey = `${toolKeyPrefix}:call:${toolCall.id || index}`;
                       return (
-                          <DetailBlock
+                          <ToolDetailBlock
                               key={toolCall.id || `tool-${index}`}
-                              label={formatToolDisplayName(toolCall.name)}
-                              tone="warning"
+                              label={label}
+                              status={
+                                  toolResult?.isError
+                                      ? "Failed"
+                                      : toolResult
+                                        ? "Completed"
+                                        : "Running"
+                              }
+                              summary={summary}
+                              isExpanded={isToolDetailsExpanded(toolKey)}
+                              onToggle={() => onToggleToolDetails?.(toolKey)}
+                              tone={toolResult?.isError ? "danger" : "warning"}
                           >
                               {summary ? (
                                   <ToolSection label="Description">
@@ -272,14 +351,23 @@ export function ChatMessageDetails({
                                       <ToolResultImages images={toolResult.images} />
                                   </ToolSection>
                               ) : undefined}
-                          </DetailBlock>
+                          </ToolDetailBlock>
                       );
                   })
                 : undefined}
 
             {shouldShowToolResult ? (
-                <DetailBlock
+                <ToolDetailBlock
                     label={`Tool result${message.toolResult?.name ? ` · ${formatToolDisplayName(message.toolResult.name)}` : ""}`}
+                    status={message.toolResult?.isError ? "Failed" : "Completed"}
+                    isExpanded={isToolDetailsExpanded(
+                        `${toolKeyPrefix}:result:${message.toolResult?.id || message.toolResult?.name || "standalone"}`
+                    )}
+                    onToggle={() =>
+                        onToggleToolDetails?.(
+                            `${toolKeyPrefix}:result:${message.toolResult?.id || message.toolResult?.name || "standalone"}`
+                        )
+                    }
                     tone={message.toolResult?.isError ? "danger" : "default"}
                 >
                     {message.toolResult?.content.trim() ? (
@@ -290,7 +378,7 @@ export function ChatMessageDetails({
                         <span className="text-primary-300">No text output</span>
                     )}
                     <ToolResultImages images={message.toolResult?.images} />
-                </DetailBlock>
+                </ToolDetailBlock>
             ) : undefined}
         </div>
     );

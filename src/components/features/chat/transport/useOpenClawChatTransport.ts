@@ -10,6 +10,7 @@ import type {
 } from "./chatTransport";
 import { asRecord, openClawThroughSequence, stringValue } from "./openClawAdapterValues";
 import { OpenClawChatAdapter } from "./openClawChatAdapter";
+import { OpenClawHistoryLoader } from "./openClawHistoryLoader";
 
 /** Connects the provider-independent chat contract to OpenClaw's Gateway RPCs. */
 export function useOpenClawChatTransport(): ChatTransport {
@@ -17,21 +18,23 @@ export function useOpenClawChatTransport(): ChatTransport {
     const adapterReference = useRef<{
         adapter: OpenClawChatAdapter;
         generation: number;
+        historyLoader: OpenClawHistoryLoader;
     }>(undefined);
     if (adapterReference.current?.generation !== socket.connectionId) {
+        const adapter = new OpenClawChatAdapter();
         adapterReference.current = {
-            adapter: new OpenClawChatAdapter(),
+            adapter,
             generation: socket.connectionId,
+            historyLoader: new OpenClawHistoryLoader(adapter, (request) =>
+                socket.request("chat.history", request)
+            ),
         };
     }
     const adapter = adapterReference.current.adapter;
+    const historyLoader = adapterReference.current.historyLoader;
 
-    const history = async (sessionKey: string, limit: number) => {
-        const result = asRecord(
-            await socket.request("chat.history", { limit, sessionKey })
-        );
-        return adapter.history(result?.messages);
-    };
+    const history = (sessionKey: string, limit: number) =>
+        historyLoader.history(sessionKey, limit);
 
     const models = async () => {
         const result = asRecord(

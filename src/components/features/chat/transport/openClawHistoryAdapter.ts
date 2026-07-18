@@ -30,13 +30,14 @@ function matchingToolCallIndex(
 }
 
 /** Folds OpenClaw tool-result rows into their canonical assistant call. */
-export function adaptOpenClawHistory(
+export function appendOpenClawHistory(
+    existing: ChatHistoryMessage[],
     messages: RawOpenClawHistoryMessage[] | undefined
 ): ChatHistoryMessage[] {
     const normalized = (messages || []).map((message) =>
         normalizeOpenClawHistoryMessage(message)
     );
-    const result: ChatHistoryMessage[] = [];
+    const result: ChatHistoryMessage[] = [...existing];
     for (const message of normalized) {
         if (!message.toolResult || !message.role.toLowerCase().startsWith("tool")) {
             result.push(message);
@@ -49,7 +50,7 @@ export function adaptOpenClawHistory(
             (candidate, index) =>
                 (message.runId
                     ? candidate.runId === message.runId
-                    : index > latestUserIndex) &&
+                    : Boolean(message.toolResult?.id) || index > latestUserIndex) &&
                 matchingToolCallIndex(message, candidate) !== -1
         );
         if (assistantIndex === -1) {
@@ -73,4 +74,11 @@ export function adaptOpenClawHistory(
         };
     }
     return result;
+}
+
+/** Folds OpenClaw tool-result rows into their canonical assistant call. */
+export function adaptOpenClawHistory(
+    messages: RawOpenClawHistoryMessage[] | undefined
+): ChatHistoryMessage[] {
+    return appendOpenClawHistory([], messages);
 }

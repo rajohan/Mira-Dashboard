@@ -38,6 +38,10 @@ export interface OpenClawChatSnapshotStore {
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void;
 }
 
+interface OpenClawChatBridgeOptions {
+    maxReplayBytes?: number;
+}
+
 interface RetainedRun {
     completed: boolean;
     eventBytes: number[];
@@ -48,9 +52,11 @@ interface RetainedRun {
     updatedAt: number;
 }
 
-const MAX_EVENTS_PER_RUN = 2000;
-const MAX_BYTES_PER_RUN = 1_000_000;
+const MAX_EVENTS_PER_ACTIVE_RUN = 20_000;
+const MAX_BYTES_PER_ACTIVE_RUN = 64_000_000;
+const MAX_BYTES_PER_EVENT = 1_000_000;
 const MAX_RUNS_PER_SESSION = 4;
+const MAX_BYTES_ACROSS_REPLAY = MAX_BYTES_PER_ACTIVE_RUN * MAX_RUNS_PER_SESSION;
 export const MAX_CHAT_RUNTIME_SESSIONS = 50;
 const MAX_RUN_ASSOCIATIONS = 200;
 const ACTIVE_RUN_TTL_MS = 6 * 60 * 60_000;
@@ -199,16 +205,36 @@ function shouldRetainRuntimeEvent(
     );
 }
 
+function replayToolData(
+    envelope: OpenClawRuntimeEnvelope
+): Record<string, unknown> | undefined {
+    const payload = asRecord(envelope.payload);
+    const data = runtimePayloadView(payload);
+    if (
+        envelope.event === "session.tool" ||
+        (envelope.event === "agent" && stringField(data, "stream") === "tool")
+    ) {
+        return data;
+    }
+    return undefined;
+}
+
+function replayToolIdentifier(
+    data: Record<string, unknown> | undefined
+): string | undefined {
+    return (
+        stringField(data, "toolCallId") ||
+        stringField(data, "callId") ||
+        stringField(data, "itemId") ||
+        stringField(data, "id")
+    );
+}
+
 function replayCoalescingKey(envelope: OpenClawRuntimeEnvelope): string | undefined {
-    if (envelope.event === "session.tool") {
-        const payload = asRecord(envelope.payload);
-        const data = asRecord(payload?.data) || payload;
-        const itemId =
-            stringField(data, "toolCallId") ||
-            stringField(data, "callId") ||
-            stringField(data, "itemId") ||
-            stringField(data, "id");
-        return itemId ? `session:tool:${itemId}` : undefined;
+    const toolData = replayToolData(envelope);
+    if (toolData) {
+        const itemId = replayToolIdentifier(toolData);
+        return itemId ? `${String(envelope.event)}:tool:${itemId}` : undefined;
     }
     if (envelope.event !== "agent") {
         return undefined;
@@ -230,7 +256,7 @@ function coalesceReplayEnvelope(
     previous: OpenClawRuntimeEnvelope,
     next: OpenClawRuntimeEnvelope
 ): OpenClawRuntimeEnvelope {
-    if (previous.event !== "session.tool" || next.event !== "session.tool") {
+    if (!replayToolData(previous) || !replayToolData(next)) {
         return next;
     }
     const previousPayload = asRecord(previous.payload) || {};
@@ -245,6 +271,70 @@ function coalesceReplayEnvelope(
             data: { ...previousData, ...nextData },
         },
     };
+}
+
+const TRANSCRIPT_BACKED_ITEM_KINDS = new Set([
+    "command",
+    "custom_tool_call",
+    "custom_tool_call_output",
+    "function_call",
+    "function_call_output",
+    "tool_call",
+    "tool_call_output",
+    "tool_result",
+    "tool_use",
+    "toolcall",
+    "toolresult",
+]);
+
+function isTranscriptBackedToolEnvelope(envelope: OpenClawRuntimeEnvelope): boolean {
+    if (replayToolData(envelope)) {
+        return true;
+    }
+    if (envelope.event !== "agent") {
+        return false;
+    }
+    const data = runtimePayloadView(envelope.payload);
+    if (!data || stringField(data, "stream") !== "item") {
+        return false;
+    }
+    const item = nestedRuntimeItem(data) || data;
+    const kind = (
+        stringField(item, "kind") ||
+        stringField(item, "type") ||
+        stringField(data, "kind") ||
+        ""
+    ).toLowerCase();
+    return TRANSCRIPT_BACKED_ITEM_KINDS.has(kind);
+}
+
+function trimRetainedRun(run: RetainedRun): void {
+    while (
+        run.events.length > 1 &&
+        (run.events.length > MAX_EVENTS_PER_ACTIVE_RUN ||
+            run.totalBytes > MAX_BYTES_PER_ACTIVE_RUN)
+    ) {
+        const transcriptBackedIndex = run.events.findIndex((event) =>
+            isTranscriptBackedToolEnvelope(event)
+        );
+        const removalIndex = transcriptBackedIndex === -1 ? 0 : transcriptBackedIndex;
+        run.events.splice(removalIndex, 1);
+        run.totalBytes -= run.eventBytes.splice(removalIndex, 1)[0] || 0;
+    }
+}
+
+function compactCompletedRun(run: RetainedRun): void {
+    const retainedEvents = run.events.filter(
+        (event) => !isTranscriptBackedToolEnvelope(event)
+    );
+    if (retainedEvents.length === run.events.length) {
+        return;
+    }
+    run.events = retainedEvents;
+    run.eventBytes = retainedEvents.map((event) =>
+        Buffer.byteLength(JSON.stringify(event))
+    );
+    run.totalBytes = run.eventBytes.reduce((total, bytes) => total + bytes, 0);
 }
 
 function hasRunIdentifier(session: OpenClawChatSessionIdentity, runId: string): boolean {
@@ -459,6 +549,43 @@ function latestRunUpdatedAt(runs: Iterable<RetainedRun>): number {
     return latest;
 }
 
+function replayBytes(runs: Iterable<RetainedRun>): number {
+    let bytes = 0;
+    for (const run of runs) {
+        bytes += run.totalBytes;
+    }
+    return bytes;
+}
+
+function oldestReplayBudgetSessionKey(
+    sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
+    protectedSessionKey?: string
+): string | undefined {
+    let hasOldestActiveRun = true;
+    let oldestSessionKey: string | undefined;
+    let oldestUpdatedAt = Infinity;
+    for (const [candidateSessionKey, runs] of sessions) {
+        if (
+            protectedSessionKey &&
+            isSameSessionKey(candidateSessionKey, protectedSessionKey)
+        ) {
+            continue;
+        }
+        const hasActiveRun = runs.values().some((run) => !run.completed);
+        const updatedAt = latestRunUpdatedAt(runs.values());
+        if (
+            oldestSessionKey === undefined ||
+            (hasOldestActiveRun && !hasActiveRun) ||
+            (hasOldestActiveRun === hasActiveRun && updatedAt < oldestUpdatedAt)
+        ) {
+            hasOldestActiveRun = hasActiveRun;
+            oldestSessionKey = candidateSessionKey;
+            oldestUpdatedAt = updatedAt;
+        }
+    }
+    return oldestSessionKey;
+}
+
 function oldestEvictableSessionKey(
     sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
     protectedSessionKey?: string
@@ -606,15 +733,27 @@ export class OpenClawChatBridge {
     readonly #pendingSessionClears = new Set<string>();
     readonly #runsBySession = new Map<string, Map<string, RetainedRun>>();
     readonly #sessionsByRun = new Map<string, Set<string>>();
+    readonly #maxReplayBytes: number;
     readonly #store: OpenClawChatSnapshotStore | undefined;
+    #enforcingReplayMemoryLimit = false;
     #persistenceTimer: ReturnType<typeof setTimeout> | undefined;
+    #replayMemoryLimitDeferrals = 0;
     #sequence = 0;
     #sequenceHydrated = false;
     #sessionLimitDeferrals = 0;
     #storeClearPending = false;
     #storeFailureReported = false;
+    #totalReplayBytes = 0;
 
-    constructor(store?: OpenClawChatSnapshotStore) {
+    constructor(
+        store?: OpenClawChatSnapshotStore,
+        options: OpenClawChatBridgeOptions = {}
+    ) {
+        const maxReplayBytes = options.maxReplayBytes ?? MAX_BYTES_ACROSS_REPLAY;
+        if (!Number.isSafeInteger(maxReplayBytes) || maxReplayBytes <= 0) {
+            throw new Error("Replay memory limit must be a positive safe integer");
+        }
+        this.#maxReplayBytes = maxReplayBytes;
         this.#store = store;
         if (!store) {
             this.#sequenceHydrated = true;
@@ -931,6 +1070,9 @@ export class OpenClawChatBridge {
         if (runs.size === 0) {
             this.#runsBySession.delete(storageSessionKey);
         }
+        if (hasChanged) {
+            this.#refreshTotalReplayBytes();
+        }
         return hasChanged;
     }
 
@@ -1065,11 +1207,15 @@ export class OpenClawChatBridge {
 
     #evictSessionFromMemory(sessionKey: string): void {
         const storageSessionKey = normalizedSessionKey(sessionKey);
+        const evictedBytes = replayBytes(
+            this.#runsBySession.get(storageSessionKey)?.values() || []
+        );
         this.#pendingPersistence.delete(storageSessionKey);
         if (this.#pendingPersistence.size === 0) {
             this.#cancelPersistenceTimer();
         }
         this.#runsBySession.delete(storageSessionKey);
+        this.#totalReplayBytes = Math.max(0, this.#totalReplayBytes - evictedBytes);
         for (const runId of this.#sessionsByRun.keys()) {
             this.#forgetRunSession(runId, storageSessionKey);
         }
@@ -1097,6 +1243,7 @@ export class OpenClawChatBridge {
         if (runs.size === 0) {
             this.#runsBySession.delete(storageSessionKey);
         }
+        this.#refreshTotalReplayBytes();
         this.#flushSessionPersistence(storageSessionKey);
     }
 
@@ -1247,7 +1394,7 @@ export class OpenClawChatBridge {
                         sessionKey: canonicalStorageKey,
                     }),
                 };
-                if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_RUN) {
+                if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_EVENT) {
                     return [rewritten];
                 }
                 if (!isTerminalEvent(envelope.event, rewritten.payload)) {
@@ -1261,7 +1408,7 @@ export class OpenClawChatBridge {
                         canonicalStorageKey
                     ),
                 };
-                return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_RUN
+                return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_EVENT
                     ? [compact]
                     : [];
             });
@@ -1336,7 +1483,45 @@ export class OpenClawChatBridge {
             this.#forgetRunSession(runId, canonicalStorageKey);
         }
         this.#enforceSessionLimit(protectedSessionKey);
+        this.#enforceReplayMemoryLimit(protectedSessionKey || canonicalStorageKey);
         return true;
+    }
+
+    #refreshTotalReplayBytes(): void {
+        let totalBytes = 0;
+        for (const runs of this.#runsBySession.values()) {
+            totalBytes += replayBytes(runs.values());
+        }
+        this.#totalReplayBytes = totalBytes;
+    }
+
+    #enforceReplayMemoryLimit(protectedSessionKey?: string): void {
+        if (this.#enforcingReplayMemoryLimit || this.#replayMemoryLimitDeferrals > 0) {
+            return;
+        }
+        const storageProtectedSessionKey = protectedSessionKey
+            ? normalizedSessionKey(protectedSessionKey)
+            : undefined;
+        this.#enforcingReplayMemoryLimit = true;
+        try {
+            this.#refreshTotalReplayBytes();
+            while (this.#totalReplayBytes > this.#maxReplayBytes) {
+                const oldestSessionKey =
+                    oldestReplayBudgetSessionKey(
+                        this.#runsBySession,
+                        storageProtectedSessionKey
+                    ) ?? oldestReplayBudgetSessionKey(this.#runsBySession);
+                if (!oldestSessionKey) {
+                    break;
+                }
+                // Keep the freshest persisted copy before releasing process memory.
+                // The hard memory ceiling still wins if SQLite is temporarily failing.
+                this.#flushSessionPersistence(oldestSessionKey);
+                this.#evictSessionFromMemory(oldestSessionKey);
+            }
+        } finally {
+            this.#enforcingReplayMemoryLimit = false;
+        }
     }
 
     #enforceSessionLimit(protectedSessionKey?: string): void {
@@ -1500,13 +1685,7 @@ export class OpenClawChatBridge {
             Buffer.byteLength(JSON.stringify(event))
         );
         run.totalBytes = run.eventBytes.reduce((total, bytes) => total + bytes, 0);
-        while (
-            run.events.length > 1 &&
-            (run.events.length > MAX_EVENTS_PER_RUN || run.totalBytes > MAX_BYTES_PER_RUN)
-        ) {
-            run.events.shift();
-            run.totalBytes -= run.eventBytes.shift() || 0;
-        }
+        trimRetainedRun(run);
     }
 
     #rewriteProvisionalPayloads(
@@ -1532,7 +1711,7 @@ export class OpenClawChatBridge {
                 ...envelope,
                 payload: withRuntimeIdentity(payload, { runId: providerRunId }),
             };
-            if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_RUN) {
+            if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_EVENT) {
                 return [rewritten];
             }
             if (!isTerminalEvent(envelope.event, rewritten.payload)) {
@@ -1546,7 +1725,7 @@ export class OpenClawChatBridge {
                     storageSessionKey
                 ),
             };
-            return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_RUN
+            return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_EVENT
                 ? [compact]
                 : [];
         });
@@ -1632,6 +1811,7 @@ export class OpenClawChatBridge {
                 preferredProvisionalRunId,
                 providerRunId
             );
+            this.#enforceReplayMemoryLimit(storageSessionKey);
             this.#flushSessionPersistence(storageSessionKey);
             return;
         }
@@ -1659,6 +1839,7 @@ export class OpenClawChatBridge {
             provisionalEntries[0]![0],
             providerRunId
         );
+        this.#enforceReplayMemoryLimit(storageSessionKey);
         this.#flushSessionPersistence(storageSessionKey);
     }
 
@@ -1685,7 +1866,7 @@ export class OpenClawChatBridge {
                   JSON.stringify({ runId: explicitRunId, sessionKey: storageSessionKey })
               )
             : 0;
-        if (explicitRunId && associationBytes <= MAX_BYTES_PER_RUN) {
+        if (explicitRunId && associationBytes <= MAX_BYTES_PER_EVENT) {
             this.#rememberRunSession(explicitRunId, storageSessionKey);
         }
         if (!shouldRetainRuntimeEvent(envelope.event, payloadView)) {
@@ -1693,7 +1874,7 @@ export class OpenClawChatBridge {
         }
         const serializedBytes = Buffer.byteLength(JSON.stringify(envelope));
         const retainedEnvelope =
-            serializedBytes <= MAX_BYTES_PER_RUN
+            serializedBytes <= MAX_BYTES_PER_EVENT
                 ? envelope
                 : isTerminal
                   ? {
@@ -1713,7 +1894,7 @@ export class OpenClawChatBridge {
             retainedEnvelope === envelope
                 ? serializedBytes
                 : Buffer.byteLength(JSON.stringify(retainedEnvelope));
-        if (retainedBytes > MAX_BYTES_PER_RUN) {
+        if (retainedBytes > MAX_BYTES_PER_EVENT) {
             return;
         }
 
@@ -1848,7 +2029,7 @@ export class OpenClawChatBridge {
             );
             const coalescedBytes = Buffer.byteLength(JSON.stringify(coalescedEnvelope));
             const replayEnvelope =
-                coalescedBytes <= MAX_BYTES_PER_RUN
+                coalescedBytes <= MAX_BYTES_PER_EVENT
                     ? coalescedEnvelope
                     : retainedEnvelope;
             const replayBytes =
@@ -1859,14 +2040,7 @@ export class OpenClawChatBridge {
             snapshot.eventBytes.push(replayBytes);
             snapshot.totalBytes += replayBytes;
         }
-        while (
-            snapshot.events.length > 1 &&
-            (snapshot.events.length > MAX_EVENTS_PER_RUN ||
-                snapshot.totalBytes > MAX_BYTES_PER_RUN)
-        ) {
-            snapshot.events.shift();
-            snapshot.totalBytes -= snapshot.eventBytes.shift() || 0;
-        }
+        trimRetainedRun(snapshot);
         const completesRun =
             isTerminal &&
             (!isCompaction || snapshot.completed || isCompactionOnlyRun(snapshot));
@@ -1874,6 +2048,11 @@ export class OpenClawChatBridge {
             snapshot.terminalSequence = envelope.runtimeSequence;
         }
         snapshot.completed ||= completesRun;
+        if (snapshot.completed) {
+            // Completed tool calls are durable in chat.history. Keep the runtime-only
+            // thinking/control stream while bounding the long-term SQLite footprint.
+            compactCompletedRun(snapshot);
+        }
         snapshot.updatedAt = Math.max(
             snapshot.updatedAt,
             retainedEnvelope.runtimeRecordedAt
@@ -1893,7 +2072,8 @@ export class OpenClawChatBridge {
 
         this.#runsBySession.set(storageSessionKey, runs);
         this.#enforceSessionLimit();
-        if (shouldPersist) {
+        this.#enforceReplayMemoryLimit(storageSessionKey);
+        if (shouldPersist && this.#runsBySession.has(storageSessionKey)) {
             if (isTerminal) {
                 this.#flushSessionPersistence(storageSessionKey);
             } else {
@@ -1907,6 +2087,7 @@ export class OpenClawChatBridge {
         this.#sessionsByRun.clear();
         this.#hydratedSessionLookups.clear();
         this.#loadedStoreKeys.clear();
+        this.#totalReplayBytes = 0;
     }
 
     /** Flushes all coalesced replay writes at lifecycle boundaries. */
@@ -1953,6 +2134,7 @@ export class OpenClawChatBridge {
             }
         });
         this.#enforceSessionLimit();
+        this.#enforceReplayMemoryLimit();
     }
 
     /** Clears all replay state, for example after credentials change. */
@@ -2135,10 +2317,16 @@ export class OpenClawChatBridge {
 
     /** Returns active runs or the latest completed run for one session. */
     snapshot(sessionKey: string): OpenClawRuntimeSnapshot {
-        this.#ensureSessionLoaded(sessionKey);
-        if (this.#pruneStaleActiveRuns(sessionKey)) {
-            this.#flushSessionPersistence(sessionKey);
+        this.#replayMemoryLimitDeferrals += 1;
+        try {
+            this.#ensureSessionLoaded(sessionKey);
+            if (this.#pruneStaleActiveRuns(sessionKey)) {
+                this.#flushSessionPersistence(sessionKey);
+            }
+            return this.#snapshotFromMemory(sessionKey);
+        } finally {
+            this.#replayMemoryLimitDeferrals -= 1;
+            this.#enforceReplayMemoryLimit(sessionKey);
         }
-        return this.#snapshotFromMemory(sessionKey);
     }
 }

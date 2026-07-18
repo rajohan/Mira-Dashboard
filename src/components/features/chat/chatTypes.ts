@@ -136,6 +136,8 @@ export interface ChatToolResultDisplay {
     name?: string;
     content: string;
     isError?: boolean;
+    /** Runtime completion metadata that is not the transcript's actual tool output. */
+    isPlaceholder?: boolean;
     images?: ChatImageBlock[];
 }
 

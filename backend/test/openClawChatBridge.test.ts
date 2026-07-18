@@ -189,6 +189,344 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("preserves thinking while a long active replay round-trips through SQLite", () => {
+        const store = new SqliteOpenClawChatSnapshotStore(
+            `thinking-retention-${crypto.randomUUID()}`
+        );
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        const runId = "long-running-job";
+
+        try {
+            const bridge = new OpenClawChatBridge(store);
+            const thinkingTexts = [
+                "Started the long job",
+                "Reached the review phase",
+                "Checking the final result",
+            ];
+            for (const delta of thinkingTexts) {
+                bridge.recordEvent(
+                    "agent",
+                    {
+                        data: { delta },
+                        runId,
+                        sessionKey,
+                        stream: "thinking",
+                    },
+                    []
+                );
+            }
+            for (let index = 0; index < 130; index += 1) {
+                const toolCallId = `call-${index}`;
+                bridge.recordEvent(
+                    "agent",
+                    {
+                        data: {
+                            args: { command: "x".repeat(2000) },
+                            phase: "start",
+                            stream: "tool",
+                            toolCallId,
+                        },
+                        runId,
+                        sessionKey,
+                    },
+                    []
+                );
+                bridge.recordEvent(
+                    "agent",
+                    {
+                        data: {
+                            phase: "result",
+                            result: { output: "y".repeat(8000) },
+                            stream: "tool",
+                            toolCallId,
+                        },
+                        runId,
+                        sessionKey,
+                    },
+                    []
+                );
+            }
+            expect(bridge.flush()).toBe(true);
+
+            const restoredBridge = new OpenClawChatBridge(store);
+            const activeSnapshot = restoredBridge.snapshot(sessionKey);
+            const activeThinking = activeSnapshot.events.flatMap((event) => {
+                const payload = event.payload as {
+                    data?: { delta?: string; stream?: string };
+                };
+                return payload.data?.stream === undefined && payload.data?.delta
+                    ? [payload.data.delta]
+                    : [];
+            });
+            const activeToolCount = activeSnapshot.events.filter((event) => {
+                const payload = event.payload as { data?: { stream?: string } };
+                return payload.data?.stream === "tool";
+            }).length;
+
+            expect(activeSnapshot.completed).toBe(false);
+            expect(activeThinking).toEqual(thinkingTexts);
+            expect(activeToolCount).toBe(130);
+
+            restoredBridge.recordEvent(
+                "chat",
+                { message: "done", runId, sessionKey, state: "final" },
+                []
+            );
+            expect(restoredBridge.flush()).toBe(true);
+            const completedSnapshot = new OpenClawChatBridge(store).snapshot(sessionKey);
+            const completedThinking = completedSnapshot.events.flatMap((event) => {
+                const payload = event.payload as { data?: { delta?: string } };
+                return payload.data?.delta ? [payload.data.delta] : [];
+            });
+            const completedToolCount = completedSnapshot.events.filter((event) => {
+                const payload = event.payload as { data?: { stream?: string } };
+                return payload.data?.stream === "tool";
+            }).length;
+
+            expect(completedSnapshot.completed).toBe(true);
+            expect(completedThinking).toEqual(thinkingTexts);
+            expect(completedToolCount).toBe(0);
+        } finally {
+            store.clear();
+        }
+    });
+
+    it("evicts item-stream tool variants before thinking after an active run crosses 64 MB", () => {
+        const bridge = new OpenClawChatBridge();
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        const runId = "bounded-long-run";
+        const thinkingTexts = ["started", "reviewing", "finishing"];
+        for (const delta of thinkingTexts) {
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta },
+                    runId,
+                    sessionKey,
+                    stream: "thinking",
+                },
+                []
+            );
+        }
+        const largeOutput = "x".repeat(975_000);
+        const itemTypes = [
+            "custom_tool_call",
+            "custom_tool_call_output",
+            "function_call",
+            "function_call_output",
+            "tool_call",
+            "tool_call_output",
+            "tool_result",
+            "tool_use",
+        ];
+        for (let index = 0; index < 66; index += 1) {
+            const type = itemTypes[index % itemTypes.length];
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: {
+                        item: {
+                            content: largeOutput,
+                            id: `large-call-${index}`,
+                            name: "exec",
+                            type,
+                        },
+                        stream: "item",
+                    },
+                    runId,
+                    sessionKey,
+                },
+                []
+            );
+        }
+
+        const snapshot = bridge.snapshot(sessionKey);
+        const thinking = snapshot.events.flatMap((event) => {
+            const payload = event.payload as { data?: { delta?: string } };
+            return payload.data?.delta ? [payload.data.delta] : [];
+        });
+        const itemToolCount = snapshot.events.filter((event) => {
+            const payload = event.payload as { data?: { stream?: string } };
+            return payload.data?.stream === "item";
+        }).length;
+
+        expect(snapshot.completed).toBe(false);
+        expect(thinking).toEqual(thinkingTexts);
+        expect(itemToolCount).toBeGreaterThan(0);
+        expect(itemToolCount).toBeLessThan(66);
+    });
+
+    it("bounds aggregate replay memory across independent sessions", () => {
+        const bridge = new OpenClawChatBridge(undefined, {
+            maxReplayBytes: 900_000,
+        });
+        const oldSession = "agent:main:old-budget-session";
+        const currentSession = "agent:ops:current-budget-session";
+        const largeThinking = "x".repeat(600_000);
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: largeThinking },
+                runId: "old-run",
+                sessionKey: oldSession,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                runId: "old-run",
+                sessionKey: oldSession,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: largeThinking },
+                runId: "current-run",
+                sessionKey: currentSession,
+                stream: "thinking",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(oldSession).events).toEqual([]);
+        expect(bridge.snapshot(currentSession).events).toHaveLength(1);
+    });
+
+    it("rehydrates an oversized protected session without retaining it in memory", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store, {
+            maxReplayBytes: 500_000,
+        });
+        const sessionKey = "agent:main:oversized-protected-session";
+        const retained = bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "x".repeat(600_000) },
+                runId: "oversized-run",
+                sessionKey,
+                stream: "thinking",
+            },
+            []
+        );
+
+        expect(store.snapshots.get(sessionKey)?.events).toEqual([retained]);
+        expect(store.loadedKeys).toEqual([]);
+
+        expect(bridge.snapshot(sessionKey).events).toEqual([retained]);
+        expect(store.loadedKeys).toEqual([sessionKey]);
+
+        expect(bridge.snapshot(sessionKey).events).toEqual([retained]);
+        expect(store.loadedKeys).toEqual([sessionKey, sessionKey]);
+    });
+
+    it("rehydrates an aggregate-budget eviction from the snapshot store", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store, {
+            maxReplayBytes: 900_000,
+        });
+        const oldSession = "agent:main:persisted-budget-session";
+        const currentSession = "agent:ops:persisted-budget-session";
+        const largeThinking = "x".repeat(600_000);
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: largeThinking },
+                runId: "old-run",
+                sessionKey: oldSession,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                runId: "old-run",
+                sessionKey: oldSession,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: largeThinking },
+                runId: "current-run",
+                sessionKey: currentSession,
+                stream: "thinking",
+            },
+            []
+        );
+
+        expect(store.snapshots.has(oldSession)).toBe(true);
+        expect(bridge.snapshot(oldSession).events).toHaveLength(2);
+        expect(store.snapshots.has(currentSession)).toBe(true);
+        expect(bridge.snapshot(currentSession).events).toHaveLength(1);
+    });
+
+    it("rebuilds an incrementally persisted tool bubble across a restart", () => {
+        const store = new SqliteOpenClawChatSnapshotStore(
+            `incremental-tool-${crypto.randomUUID()}`
+        );
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        const runId = "incremental-tool-run";
+
+        try {
+            const bridge = new OpenClawChatBridge(store);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: {
+                        args: { command: "true" },
+                        phase: "start",
+                        stream: "tool",
+                        toolCallId: "call-1",
+                    },
+                    runId,
+                    sessionKey,
+                },
+                []
+            );
+            expect(bridge.flush()).toBe(true);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: {
+                        phase: "result",
+                        result: { exitCode: 0 },
+                        stream: "tool",
+                        toolCallId: "call-1",
+                    },
+                    runId,
+                    sessionKey,
+                },
+                []
+            );
+            expect(bridge.flush()).toBe(true);
+
+            const restored = new OpenClawChatBridge(store).snapshot(sessionKey);
+            expect(restored.events).toHaveLength(1);
+            expect(restored.events[0]?.payload).toMatchObject({
+                data: {
+                    args: { command: "true" },
+                    phase: "result",
+                    result: { exitCode: 0 },
+                    toolCallId: "call-1",
+                },
+            });
+        } finally {
+            store.clear();
+        }
+    });
+
     it("seeds the global sequence from unhydrated persisted sessions", () => {
         const store = new MemorySnapshotStore();
         const otherSession = "agent:other:main";
@@ -1352,6 +1690,50 @@ describe("OpenClaw chat bridge", () => {
             "session.tool",
         ]);
         expect(snapshot.events[1]?.payload).toMatchObject({
+            data: {
+                args: { command: "true" },
+                phase: "result",
+                result: { exitCode: 0, status: "completed" },
+                toolCallId: "call-1",
+            },
+        });
+    });
+
+    it("coalesces agent tool phases into one replay event", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    args: { command: "true" },
+                    phase: "start",
+                    stream: "tool",
+                    toolCallId: "call-1",
+                },
+                runId: "tool-run",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    phase: "result",
+                    result: { exitCode: 0, status: "completed" },
+                    stream: "tool",
+                    toolCallId: "call-1",
+                },
+                runId: "tool-run",
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.events).toHaveLength(1);
+        expect(snapshot.events[0]).toMatchObject({ event: "agent" });
+        expect(snapshot.events[0]?.payload).toMatchObject({
             data: {
                 args: { command: "true" },
                 phase: "result",
@@ -3040,9 +3422,9 @@ describe("OpenClaw chat bridge", () => {
         ).toMatchObject({ runId: "large-external-run", sessionKey: MAIN });
     });
 
-    it("bounds event count and drops oversized non-terminal payloads", () => {
+    it("retains multi-thousand-event runs and drops oversized individual payloads", () => {
         const bridge = new OpenClawChatBridge();
-        for (let index = 0; index < 2010; index += 1) {
+        for (let index = 0; index < 4400; index += 1) {
             bridge.recordEvent(
                 "agent",
                 {
@@ -3054,7 +3436,7 @@ describe("OpenClaw chat bridge", () => {
                 []
             );
         }
-        expect(bridge.snapshot(MAIN).events).toHaveLength(2000);
+        expect(bridge.snapshot(MAIN).events).toHaveLength(4400);
 
         bridge.clear();
         bridge.recordEvent(

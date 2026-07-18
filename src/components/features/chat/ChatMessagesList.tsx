@@ -73,6 +73,9 @@ interface ChatMessagesListProperties {
     onUserScrollIntent: () => void;
     onTtsError: (error: string) => void;
     onDeleteMessage: (messageKey: string) => void;
+    shouldExpandToolDetails?: boolean;
+    toolDetailExpansionOverrides?: ReadonlyMap<string, boolean>;
+    onToggleToolDetails?: (toolKey: string) => void;
 }
 
 /** Renders the attachment icon UI. */
@@ -311,6 +314,9 @@ export function ChatMessagesList({
     onUserScrollIntent,
     onTtsError,
     onDeleteMessage,
+    shouldExpandToolDetails = false,
+    toolDetailExpansionOverrides = new Map(),
+    onToggleToolDetails,
 }: ChatMessagesListProperties) {
     const audioReference = useRef<HTMLAudioElement | undefined>(undefined);
     const audioUrlReference = useRef<string | undefined>(undefined);
@@ -671,6 +677,14 @@ export function ChatMessagesList({
                                         {hasPrimaryMessageContent ? undefined : (
                                             <ChatMessageDetails
                                                 message={row.message}
+                                                messageKey={row.key}
+                                                onToggleToolDetails={onToggleToolDetails}
+                                                shouldExpandToolDetails={
+                                                    shouldExpandToolDetails
+                                                }
+                                                toolDetailExpansionOverrides={
+                                                    toolDetailExpansionOverrides
+                                                }
                                                 visibility={visibility}
                                             />
                                         )}
@@ -685,6 +699,14 @@ export function ChatMessagesList({
                                     <div className="max-w-[94%] min-w-0 sm:max-w-[86%] lg:max-w-[80%]">
                                         <ChatMessageDetails
                                             message={row.message}
+                                            messageKey={row.key}
+                                            onToggleToolDetails={onToggleToolDetails}
+                                            shouldExpandToolDetails={
+                                                shouldExpandToolDetails
+                                            }
+                                            toolDetailExpansionOverrides={
+                                                toolDetailExpansionOverrides
+                                            }
                                             visibility={visibility}
                                         />
                                     </div>
