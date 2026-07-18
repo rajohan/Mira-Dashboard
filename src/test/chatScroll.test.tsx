@@ -153,13 +153,12 @@ describe("chat scroll", () => {
         const pendingFrameId = animationFrameState.nextFrameId;
 
         container.scrollTop = 200;
-        act(() => {
-            result.current.handleUserScrollIntent();
-            result.current.handleScroll();
-        });
+        act(() => result.current.handleUserScrollIntent());
 
         expect(cancelFrame).toHaveBeenCalledWith(pendingFrameId);
         expect(animationFrameState.frames.has(pendingFrameId)).toBe(false);
+
+        act(() => result.current.handleScroll());
         expect(stickToBottomReference.current).toBe(false);
         unmount();
     });

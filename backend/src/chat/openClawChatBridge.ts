@@ -29,6 +29,12 @@ export interface OpenClawChatSnapshotStore {
     keys(): string[];
     load(sessionKey: string): OpenClawRuntimeSnapshot | undefined;
     maximumSequence(): number;
+    promote(
+        sourceSessionKey: string,
+        canonicalSessionKey: string,
+        sourceSnapshot: OpenClawRuntimeSnapshot,
+        canonicalSnapshot: OpenClawRuntimeSnapshot
+    ): void;
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void;
 }
 
@@ -315,27 +321,12 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
         return true;
     }
 
-    const record = asRecord(payload);
-    const data = asRecord(record?.data);
-    const eventStream =
-        stringField(data, "stream") || stringField(record, "stream") || "";
-    const compactionOperation = (
-        stringField(data, "operation") ||
-        stringField(record, "operation") ||
-        ""
-    ).toLowerCase();
-    const eventPhase = (
-        stringField(data, "phase") ||
-        stringField(record, "phase") ||
-        ""
-    ).toLowerCase();
-    const eventStatus = (
-        stringField(data, "status") ||
-        stringField(record, "status") ||
-        ""
-    ).toLowerCase();
+    const record = runtimePayloadView(payload);
+    const eventStream = stringField(record, "stream") || "";
+    const compactionOperation = (stringField(record, "operation") || "").toLowerCase();
+    const eventPhase = (stringField(record, "phase") || "").toLowerCase();
+    const eventStatus = (stringField(record, "status") || "").toLowerCase();
     const isRetryingCompaction =
-        data?.willRetry === true ||
         record?.willRetry === true ||
         eventPhase === "retrying" ||
         eventStatus === "retrying";
@@ -347,8 +338,9 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
             COMPACTION_TERMINAL_STATES.has(eventStatus));
     return (
         (event === "chat" &&
-            typeof record?.state === "string" &&
-            ["aborted", "error", "final"].includes(record.state)) ||
+            ["aborted", "error", "final"].includes(
+                (stringField(record, "state") || "").toLowerCase()
+            )) ||
         isTerminalCompaction ||
         (eventStream === "lifecycle" && ["end", "error"].includes(eventPhase))
     );
@@ -360,6 +352,7 @@ function compactTerminalPayload(
     sessionKey: string
 ): Record<string, unknown> {
     const data = asRecord(payload?.data);
+    const payloadView = runtimePayloadView(payload);
     const compactData = {
         aborted: data?.aborted === true ? true : undefined,
         completed: data?.completed === true ? true : undefined,
@@ -369,6 +362,7 @@ function compactTerminalPayload(
         operationId: stringField(data, "operationId"),
         phase: stringField(data, "phase"),
         promptError: stringField(data, "promptError"),
+        state: stringField(data, "state"),
         status: stringField(data, "status"),
         stream: stringField(data, "stream"),
     };
@@ -376,20 +370,20 @@ function compactTerminalPayload(
         (value) => value !== undefined
     );
     return {
-        aborted: payload?.aborted === true ? true : undefined,
-        completed: payload?.completed === true ? true : undefined,
+        aborted: payloadView?.aborted === true ? true : undefined,
+        completed: payloadView?.completed === true ? true : undefined,
         data: hasCompactData ? compactData : undefined,
-        error: stringField(payload, "error"),
-        errorMessage: stringField(payload, "errorMessage"),
-        operation: stringField(payload, "operation"),
-        operationId: stringField(payload, "operationId"),
-        phase: stringField(payload, "phase"),
-        promptError: stringField(payload, "promptError"),
+        error: stringField(payloadView, "error"),
+        errorMessage: stringField(payloadView, "errorMessage"),
+        operation: stringField(payloadView, "operation"),
+        operationId: stringField(payloadView, "operationId"),
+        phase: stringField(payloadView, "phase"),
+        promptError: stringField(payloadView, "promptError"),
         runId,
         sessionKey,
-        state: stringField(payload, "state"),
-        status: stringField(payload, "status"),
-        stream: stringField(payload, "stream"),
+        state: stringField(payloadView, "state"),
+        status: stringField(payloadView, "status"),
+        stream: stringField(payloadView, "stream"),
     };
 }
 
@@ -541,7 +535,10 @@ function messageSignature(payload: unknown): string | undefined {
 function hasChatFinal(run: RetainedRun): boolean {
     return run.events.some(
         (candidate) =>
-            candidate.event === "chat" && asRecord(candidate.payload)?.state === "final"
+            candidate.event === "chat" &&
+            (
+                stringField(runtimePayloadView(candidate.payload), "state") || ""
+            ).toLowerCase() === "final"
     );
 }
 
@@ -580,7 +577,9 @@ function isMatchingSessionEcho(
         run.events.some(
             (candidate) =>
                 candidate.event === "chat" &&
-                asRecord(candidate.payload)?.state === "final" &&
+                (
+                    stringField(runtimePayloadView(candidate.payload), "state") || ""
+                ).toLowerCase() === "final" &&
                 messageSignature(candidate.payload) === signature
         )
     );
@@ -786,23 +785,23 @@ export class OpenClawChatBridge {
         return true;
     }
 
-    #ensureSessionLoaded(sessionKey: string): void {
+    #ensureSessionLoaded(sessionKey: string): boolean {
         if (!this.#store) {
-            return;
+            return true;
         }
         const storageSessionKey = normalizedSessionKey(sessionKey);
         if (
             !this.#retryPendingSessionClear(storageSessionKey) ||
             !this.#retryExactDelete(storageSessionKey)
         ) {
-            return;
+            return false;
         }
         if (this.#hydratedSessionLookups.has(storageSessionKey)) {
-            return;
+            return true;
         }
         const storedKeys = this.#storedSessionKeys();
         if (!storedKeys) {
-            return;
+            return false;
         }
         const exactKey = storedKeys.find((candidate) =>
             isExactSessionKey(candidate, storageSessionKey)
@@ -814,18 +813,17 @@ export class OpenClawChatBridge {
               );
         if (matchingKeys.length === 0) {
             this.#hydratedSessionLookups.add(storageSessionKey);
-            return;
+            return true;
         }
         if (matchingKeys.length !== 1) {
-            return;
+            return false;
         }
         const storedKey = matchingKeys[0]!;
         const storedStorageKey = normalizedSessionKey(storedKey);
         if (this.#hasPendingExactDelete(storedKey)) {
-            if (this.#retryExactDelete(storedKey)) {
-                this.#ensureSessionLoaded(sessionKey);
-            }
-            return;
+            return (
+                this.#retryExactDelete(storedKey) && this.#ensureSessionLoaded(sessionKey)
+            );
         }
         this.#hydratedSessionLookups.add(storageSessionKey);
         if (this.#loadedStoreKeys.has(storedStorageKey)) {
@@ -842,8 +840,9 @@ export class OpenClawChatBridge {
                 )
             ) {
                 this.#hydratedSessionLookups.delete(storageSessionKey);
+                return false;
             }
-            return;
+            return true;
         }
         let snapshot: OpenClawRuntimeSnapshot | undefined;
         try {
@@ -852,11 +851,11 @@ export class OpenClawChatBridge {
         } catch (error) {
             this.#hydratedSessionLookups.delete(storageSessionKey);
             this.#reportStoreFailure(error);
-            return;
+            return false;
         }
         this.#loadedStoreKeys.add(storedStorageKey);
         if (!snapshot) {
-            return;
+            return true;
         }
         this.#sequence = Math.max(this.#sequence, snapshot.throughSequence);
         const sortedEvents = snapshot.events.toSorted(
@@ -870,11 +869,12 @@ export class OpenClawChatBridge {
         });
         const prunedStaleRun = this.#pruneStaleActiveRuns(storedStorageKey);
         if (prunedStaleRun && !this.#runsBySession.has(storedStorageKey)) {
-            if (!this.#flushSessionPersistence(storedStorageKey)) {
+            const didPersist = this.#flushSessionPersistence(storedStorageKey);
+            if (!didPersist) {
                 this.#hydratedSessionLookups.delete(storageSessionKey);
             }
             this.#enforceSessionLimit(storageSessionKey);
-            return;
+            return didPersist;
         }
         if (
             storedStorageKey !== storageSessionKey &&
@@ -890,13 +890,16 @@ export class OpenClawChatBridge {
             ) {
                 this.#hydratedSessionLookups.delete(storageSessionKey);
                 this.#enforceSessionLimit(storedStorageKey);
+                return false;
             }
-            return;
+            return true;
         }
         this.#enforceSessionLimit(storedStorageKey);
-        if (prunedStaleRun) {
-            this.#flushSessionPersistence(storedStorageKey);
+        if (prunedStaleRun && !this.#flushSessionPersistence(storedStorageKey)) {
+            this.#hydratedSessionLookups.delete(storageSessionKey);
+            return false;
         }
+        return true;
     }
 
     #pruneStaleActiveRuns(sessionKey: string, now = Date.now()): boolean {
@@ -923,8 +926,9 @@ export class OpenClawChatBridge {
         return hasChanged;
     }
 
-    #snapshotFromMemory(sessionKey: string): OpenClawRuntimeSnapshot {
-        const runs = this.#runsBySession.get(normalizedSessionKey(sessionKey));
+    #snapshotFromRuns(
+        runs: ReadonlyMap<string, RetainedRun> | undefined
+    ): OpenClawRuntimeSnapshot {
         const snapshots = runs ? runs.values().toArray() : [];
         const active = snapshots.filter((snapshot) => !snapshot.completed);
         const completed = snapshots
@@ -944,6 +948,12 @@ export class OpenClawChatBridge {
                 .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence),
             throughSequence: this.#sequence,
         };
+    }
+
+    #snapshotFromMemory(sessionKey: string): OpenClawRuntimeSnapshot {
+        return this.#snapshotFromRuns(
+            this.#runsBySession.get(normalizedSessionKey(sessionKey))
+        );
     }
 
     #deletePersistedSession(sessionKey: string): boolean {
@@ -972,7 +982,8 @@ export class OpenClawChatBridge {
         if (
             !this.#retryStoreClear() ||
             !this.#retryPendingSessionClear(storageSessionKey) ||
-            !this.#retryExactDelete(storageSessionKey)
+            !this.#retryExactDelete(storageSessionKey) ||
+            !this.#ensureSessionLoaded(storageSessionKey)
         ) {
             return false;
         }
@@ -1110,6 +1121,59 @@ export class OpenClawChatBridge {
         );
     }
 
+    #persistSessionPromotion(
+        sourceSessionKey: string,
+        canonicalSessionKey: string,
+        sourceSnapshot: OpenClawRuntimeSnapshot,
+        canonicalSnapshot: OpenClawRuntimeSnapshot
+    ): boolean {
+        if (!this.#store) {
+            return true;
+        }
+        if (
+            !this.#retryStoreClear() ||
+            !this.#retryPendingSessionClear(sourceSessionKey) ||
+            !this.#retryPendingSessionClear(canonicalSessionKey) ||
+            !this.#retryExactDelete(sourceSessionKey) ||
+            !this.#retryExactDelete(canonicalSessionKey)
+        ) {
+            return false;
+        }
+        try {
+            this.#store.promote(
+                sourceSessionKey,
+                canonicalSessionKey,
+                sourceSnapshot,
+                canonicalSnapshot
+            );
+            for (const pendingKey of this.#pendingDeleteKeys) {
+                if (
+                    isExactSessionKey(pendingKey, sourceSessionKey) ||
+                    isExactSessionKey(pendingKey, canonicalSessionKey)
+                ) {
+                    this.#pendingDeleteKeys.delete(pendingKey);
+                }
+            }
+            if (sourceSnapshot.events.length === 0) {
+                this.#loadedStoreKeys.delete(sourceSessionKey);
+            } else {
+                this.#loadedStoreKeys.add(sourceSessionKey);
+            }
+            if (canonicalSnapshot.events.length === 0) {
+                this.#loadedStoreKeys.delete(canonicalSessionKey);
+            } else {
+                this.#loadedStoreKeys.add(canonicalSessionKey);
+            }
+            this.#hydratedSessionLookups.add(sourceSessionKey);
+            this.#hydratedSessionLookups.add(canonicalSessionKey);
+            this.#storeFailureReported = false;
+            return true;
+        } catch (error) {
+            this.#reportStoreFailure(error);
+            return false;
+        }
+    }
+
     #promoteSessionEntry(
         sourceSessionKey: string,
         canonicalSessionKey: string,
@@ -1219,18 +1283,22 @@ export class OpenClawChatBridge {
             nextCanonicalRuns.delete(oldestRunId);
             evictedCanonicalRunIds.add(oldestRunId);
         }
+        const sourceSnapshot = this.#snapshotFromRuns(nextSourceRuns);
+        const canonicalSnapshot = this.#snapshotFromRuns(nextCanonicalRuns);
+        if (
+            !this.#persistSessionPromotion(
+                sourceStorageKey,
+                canonicalStorageKey,
+                sourceSnapshot,
+                canonicalSnapshot
+            )
+        ) {
+            return false;
+        }
         if (nextCanonicalRuns.size === 0) {
             this.#runsBySession.delete(canonicalStorageKey);
         } else {
             this.#runsBySession.set(canonicalStorageKey, nextCanonicalRuns);
-        }
-        if (!this.#persistSession(canonicalStorageKey)) {
-            if (previousCanonicalRuns) {
-                this.#runsBySession.set(canonicalStorageKey, previousCanonicalRuns);
-            } else {
-                this.#runsBySession.delete(canonicalStorageKey);
-            }
-            return false;
         }
         this.#pendingPersistence.delete(canonicalStorageKey);
 
@@ -1239,6 +1307,7 @@ export class OpenClawChatBridge {
         } else {
             this.#runsBySession.set(sourceStorageKey, nextSourceRuns);
         }
+        this.#pendingPersistence.delete(sourceStorageKey);
         for (const runId of movedRunIds) {
             this.#forgetRunSession(runId, sourceStorageKey);
             if (nextCanonicalRuns.has(runId)) {
@@ -1249,7 +1318,6 @@ export class OpenClawChatBridge {
             this.#forgetRunSession(runId, canonicalStorageKey);
         }
         this.#enforceSessionLimit(protectedSessionKey);
-        this.#flushSessionPersistence(sourceStorageKey);
         return true;
     }
 

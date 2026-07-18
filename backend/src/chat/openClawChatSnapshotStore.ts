@@ -18,6 +18,10 @@ interface SnapshotMaximumSequenceRow {
     maximum_sequence: unknown;
 }
 
+function hasReplay(snapshot: OpenClawRuntimeSnapshot): boolean {
+    return snapshot.events.length > 0;
+}
+
 const SAVE_SNAPSHOT_SQL = `
     INSERT INTO chat_runtime_snapshots (
         gateway_scope,
@@ -105,6 +109,22 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
         this.#now = now;
     }
 
+    #insertSnapshot(
+        sessionKey: string,
+        snapshot: OpenClawRuntimeSnapshot,
+        updatedAt: string
+    ): void {
+        database
+            .prepare(SAVE_SNAPSHOT_SQL)
+            .run(this.#gatewayScope, sessionKey, JSON.stringify(snapshot), updatedAt);
+    }
+
+    #pruneSnapshots(): void {
+        database
+            .prepare(PRUNE_SNAPSHOTS_SQL)
+            .run(this.#gatewayScope, this.#gatewayScope, MAX_CHAT_RUNTIME_SESSIONS);
+    }
+
     clear(): void {
         database
             .prepare("DELETE FROM chat_runtime_snapshots WHERE gateway_scope = ?")
@@ -171,23 +191,41 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             : 0;
     }
 
+    promote(
+        sourceSessionKey: string,
+        canonicalSessionKey: string,
+        sourceSnapshot: OpenClawRuntimeSnapshot,
+        canonicalSnapshot: OpenClawRuntimeSnapshot
+    ): void {
+        const sourceKey = normalizedSessionKey(sourceSessionKey);
+        const canonicalKey = normalizedSessionKey(canonicalSessionKey);
+        const persist = database.transaction(() => {
+            database
+                .prepare(
+                    `DELETE FROM chat_runtime_snapshots
+                     WHERE gateway_scope = ? AND session_key IN (?, ?)`
+                )
+                .run(this.#gatewayScope, sourceKey, canonicalKey);
+            const updatedAt = this.#now();
+            if (hasReplay(sourceSnapshot)) {
+                this.#insertSnapshot(sourceKey, sourceSnapshot, updatedAt);
+            }
+            if (hasReplay(canonicalSnapshot)) {
+                this.#insertSnapshot(canonicalKey, canonicalSnapshot, updatedAt);
+            }
+            this.#pruneSnapshots();
+        });
+        persist();
+    }
+
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {
         const normalizedKey = normalizedSessionKey(sessionKey);
         const persist = database.transaction(() => {
             // Reinsert so a refresh always receives a newer rowid tie-breaker,
             // even when multiple writes share the same millisecond timestamp.
             this.delete(normalizedKey);
-            database
-                .prepare(SAVE_SNAPSHOT_SQL)
-                .run(
-                    this.#gatewayScope,
-                    normalizedKey,
-                    JSON.stringify(snapshot),
-                    this.#now()
-                );
-            database
-                .prepare(PRUNE_SNAPSHOTS_SQL)
-                .run(this.#gatewayScope, this.#gatewayScope, MAX_CHAT_RUNTIME_SESSIONS);
+            this.#insertSnapshot(normalizedKey, snapshot, this.#now());
+            this.#pruneSnapshots();
         });
         persist();
     }

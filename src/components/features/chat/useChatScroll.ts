@@ -3,6 +3,7 @@ import {
     type Dispatch,
     type RefObject,
     type SetStateAction,
+    useCallback,
     useLayoutEffect,
     useRef,
 } from "react";
@@ -54,6 +55,15 @@ export function useChatScroll(
         );
     };
 
+    const cancelBottomFollow = useCallback(() => {
+        structuralBottomFollowReference.current = false;
+        if (bottomFollowFrameReference.current === undefined) {
+            return;
+        }
+        cancelAnimationFrame(bottomFollowFrameReference.current);
+        bottomFollowFrameReference.current = undefined;
+    }, []);
+
     const handleScroll = () => {
         const container = messagesContainerReference.current;
         const scrollTop = container?.scrollTop ?? 0;
@@ -68,8 +78,7 @@ export function useChatScroll(
             !isStructuralCorrectionPending &&
             bottomFollowFrameReference.current !== undefined
         ) {
-            cancelAnimationFrame(bottomFollowFrameReference.current);
-            bottomFollowFrameReference.current = undefined;
+            cancelBottomFollow();
         }
         const atBottom = checkIsAtBottom();
         const shouldStaySticky = Boolean(
@@ -110,7 +119,7 @@ export function useChatScroll(
     };
 
     const handleUserScrollIntent = () => {
-        structuralBottomFollowReference.current = false;
+        cancelBottomFollow();
     };
 
     const handleDynamicContentLoad = () => {
@@ -152,14 +161,9 @@ export function useChatScroll(
 
     useLayoutEffect(
         () => () => {
-            if (bottomFollowFrameReference.current === undefined) {
-                return;
-            }
-            cancelAnimationFrame(bottomFollowFrameReference.current);
-            bottomFollowFrameReference.current = undefined;
-            structuralBottomFollowReference.current = false;
+            cancelBottomFollow();
         },
-        []
+        [cancelBottomFollow]
     );
 
     return {

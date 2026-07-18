@@ -979,6 +979,13 @@ describe("chat runtime state", () => {
                 }),
             ],
             phase: "completed",
+            userMessages: [
+                expect.objectContaining({
+                    message: expect.objectContaining({
+                        text: "message from another client",
+                    }),
+                }),
+            ],
         });
     });
 

@@ -16,6 +16,7 @@ class MemorySnapshotStore implements OpenClawChatSnapshotStore {
     deleteFailures = 0;
     keysCount = 0;
     keysFailures = 0;
+    loadFailures = 0;
     maximumSequenceFailures = 0;
     saveCount = 0;
     saveFailures = 0;
@@ -47,6 +48,10 @@ class MemorySnapshotStore implements OpenClawChatSnapshotStore {
 
     load(sessionKey: string): OpenClawRuntimeSnapshot | undefined {
         this.loadedKeys.push(sessionKey);
+        if (this.loadFailures > 0) {
+            this.loadFailures -= 1;
+            throw new Error("load failed");
+        }
         const snapshot = this.snapshots.get(sessionKey);
         return snapshot ? structuredClone(snapshot) : undefined;
     }
@@ -66,6 +71,41 @@ class MemorySnapshotStore implements OpenClawChatSnapshotStore {
             }
         }
         return maximumSequence;
+    }
+
+    promote(
+        sourceSessionKey: string,
+        canonicalSessionKey: string,
+        sourceSnapshot: OpenClawRuntimeSnapshot,
+        canonicalSnapshot: OpenClawRuntimeSnapshot
+    ): void {
+        this.saveCount += 1;
+        if (this.saveFailures > 0) {
+            this.saveFailures -= 1;
+            throw new Error("save failed");
+        }
+        if (this.deleteFailures > 0) {
+            this.deleteFailures -= 1;
+            throw new Error("delete failed");
+        }
+        const nextSourceSnapshot =
+            sourceSnapshot.events.length > 0
+                ? structuredClone(sourceSnapshot)
+                : undefined;
+        const nextCanonicalSnapshot =
+            canonicalSnapshot.events.length > 0
+                ? structuredClone(canonicalSnapshot)
+                : undefined;
+        if (nextSourceSnapshot) {
+            this.snapshots.set(sourceSessionKey, nextSourceSnapshot);
+        } else {
+            this.snapshots.delete(sourceSessionKey);
+        }
+        if (nextCanonicalSnapshot) {
+            this.snapshots.set(canonicalSessionKey, nextCanonicalSnapshot);
+        } else {
+            this.snapshots.delete(canonicalSessionKey);
+        }
     }
 
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {
@@ -194,6 +234,44 @@ describe("OpenClaw chat bridge", () => {
         );
 
         expect(nextEvent.runtimeSequence).toBe(74);
+    });
+
+    it("hydrates durable replay before retrying a write after lookup failures", () => {
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            for (const failure of ["keysFailures", "loadFailures"] as const) {
+                const store = new MemorySnapshotStore();
+                store.snapshots.set(
+                    MAIN,
+                    persistedSnapshot(MAIN, "shared-run", Date.now(), undefined, 1)
+                );
+                store[failure] = 2;
+                const bridge = new OpenClawChatBridge(store);
+                const nextEvent = bridge.recordEvent(
+                    "agent",
+                    {
+                        data: { delta: "continued after hydration retry" },
+                        runId: "shared-run",
+                        sessionKey: MAIN,
+                        stream: "thinking",
+                    },
+                    []
+                );
+
+                expect(store.snapshots.get(MAIN)?.events).toHaveLength(1);
+                expect(bridge.flush()).toBe(false);
+                expect(store.snapshots.get(MAIN)?.events).toHaveLength(1);
+
+                expect(bridge.flush()).toBe(true);
+                expect(store.snapshots.get(MAIN)?.events).toEqual([
+                    expect.objectContaining({ runtimeSequence: 1 }),
+                    nextEvent,
+                ]);
+            }
+        } finally {
+            warning.mockRestore();
+        }
     });
 
     it("persists manual compaction without displacing the latest completed run", () => {
@@ -2931,6 +3009,29 @@ describe("OpenClaw chat bridge", () => {
                 state: "final",
             }),
         ]);
+
+        bridge.clear();
+        bridge.recordEvent(
+            "chat",
+            {
+                data: {
+                    message: "x".repeat(1_000_001),
+                    runId: "nested-large-run",
+                    sessionKey: MAIN,
+                    state: "final",
+                },
+            },
+            []
+        );
+        const nestedFinalSnapshot = bridge.snapshot(MAIN);
+        expect(nestedFinalSnapshot.completed).toBe(true);
+        expect(nestedFinalSnapshot.events).toHaveLength(1);
+        expect(nestedFinalSnapshot.events[0]?.payload).toMatchObject({
+            data: { state: "final" },
+            runId: "nested-large-run",
+            sessionKey: MAIN,
+            state: "final",
+        });
 
         bridge.clear();
         bridge.recordEvent(

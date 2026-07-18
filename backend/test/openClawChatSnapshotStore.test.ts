@@ -221,6 +221,42 @@ describe("OpenClaw chat snapshot store", () => {
         }
     });
 
+    it("promotes an alias atomically at the persisted session limit", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const sourceKey = "main";
+        const canonicalKey = "agent:main:main";
+        const canonicalSnapshot = snapshotFor(canonicalKey, 100);
+        const unrelatedKeys = Array.from(
+            { length: MAX_CHAT_RUNTIME_SESSIONS - 1 },
+            (_, index) => `agent:test:promotion-${index}`
+        );
+
+        try {
+            for (const [index, sessionKey] of unrelatedKeys.entries()) {
+                store.save(sessionKey, snapshotFor(sessionKey, index + 1));
+            }
+            store.save(sourceKey, snapshotFor(sourceKey, 100));
+
+            store.promote(
+                sourceKey,
+                canonicalKey,
+                { completed: false, events: [], throughSequence: 100 },
+                canonicalSnapshot
+            );
+
+            const restartedStore = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+            const storedKeys = restartedStore.keys();
+            expect(storedKeys).toHaveLength(MAX_CHAT_RUNTIME_SESSIONS);
+            expect(storedKeys).not.toContain(sourceKey);
+            expect(storedKeys).toContain(canonicalKey);
+            expect(storedKeys).toEqual(expect.arrayContaining(unrelatedKeys));
+            expect(restartedStore.load(canonicalKey)).toEqual(canonicalSnapshot);
+        } finally {
+            store.clear();
+        }
+    });
+
     it("deletes snapshots with invalid or inconsistent sequence metadata", () => {
         const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
         const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
