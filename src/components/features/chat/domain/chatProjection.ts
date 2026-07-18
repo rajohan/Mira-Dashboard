@@ -113,7 +113,18 @@ function stableDiagnosticRowKey(message: ChatHistoryMessage): string | undefined
     return undefined;
 }
 
+function userMessageDeleteKey(message: ChatHistoryMessage): string {
+    return messageDeleteKey({
+        ...message,
+        runId: undefined,
+        runtimeKey: undefined,
+    });
+}
+
 function projectedMessageRowKey(message: ChatHistoryMessage): string {
+    if (isUserMessage(message)) {
+        return userMessageDeleteKey(message);
+    }
     return (
         stableDiagnosticRowKey(message) ||
         (message.local === true && message.runId
@@ -128,7 +139,7 @@ function projectedMessageDeleteKeys(message: ChatHistoryMessage): string[] {
     if (message.role.toLowerCase() !== "user" || !message.runId) {
         return [currentKey];
     }
-    const persistedHistoryKey = messageDeleteKey({ ...message, runId: undefined });
+    const persistedHistoryKey = userMessageDeleteKey(message);
     return currentKey === persistedHistoryKey
         ? [currentKey]
         : [currentKey, persistedHistoryKey];

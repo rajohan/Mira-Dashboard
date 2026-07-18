@@ -215,9 +215,11 @@ export function useChatRuntime({
                 (run.terminalSequence === event.sequence ||
                     run.lastSequence === event.sequence)
         );
-        const { error: visibleError } = completedRun || event;
-        const isToolFailure = Boolean(completedRun?.toolFailure || event.toolFailure);
-        if (visibleError && !isToolFailure) {
+        let visibleError = event.error;
+        if (visibleError && completedRun) {
+            visibleError = completedRun.error;
+        }
+        if (visibleError) {
             callbacksReference.current.onError?.(visibleError);
         }
         callbacksReference.current.onSettled?.(selectedSessionReference.current);

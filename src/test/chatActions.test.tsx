@@ -317,6 +317,46 @@ describe("chat actions", () => {
         expect(runtime.acknowledgeRun).not.toHaveBeenCalled();
     });
 
+    it("uses active session metadata for a runless steer acknowledgement", async () => {
+        const transport = fakeTransport(jest.fn(async () => ({})));
+        const runtime = fakeRuntime();
+        const { result } = renderHook(() =>
+            useChatActions({
+                activeRunCount: 0,
+                attachments: [],
+                attachmentsReference: { current: [] },
+                clearAttachments: jest.fn(),
+                confirmResetSession: jest.fn(async () => true),
+                draft: "steer after reconnect",
+                isCompacting: false,
+                isConnected: true,
+                isRecording: false,
+                isTranscribing: false,
+                runtime,
+                scheduleBottomFollow: jest.fn(),
+                selectedSession: { ...selectedSession(), hasActiveRun: true },
+                selectedSessionKey: SESSION_A,
+                selectedSessionKeyReference: { current: SESSION_A },
+                setDraft: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                transport,
+            })
+        );
+
+        await act(async () => result.current.handleSend());
+
+        const optimisticRunId = (runtime.beginRun as ReturnType<typeof jest.fn>).mock
+            .calls[0]?.[1] as string;
+        expect(runtime.beginRun).toHaveBeenCalledWith(SESSION_A, optimisticRunId, {
+            replaceStatusOnlyRuns: false,
+        });
+        expect(runtime.clearRun).toHaveBeenCalledWith(SESSION_A, optimisticRunId);
+        expect(runtime.acknowledgeRun).not.toHaveBeenCalled();
+    });
+
     it("keeps a new-turn placeholder when the provider omits its run id", async () => {
         const transport = fakeTransport(jest.fn(async () => ({})));
         const runtime = fakeRuntime();

@@ -360,7 +360,10 @@ describe("chat projection", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
                 kind: "user",
-                message: message("user", "steer", "dashboard-chat-steer"),
+                message: {
+                    ...message("user", "steer", "dashboard-chat-steer"),
+                    timestamp: NOW,
+                },
                 runId: "dashboard-chat-steer",
             }),
             event(32, {
@@ -381,8 +384,33 @@ describe("chat projection", () => {
             new Set()
         ).rows;
 
-        expect(rows.find((row) => row.message.role === "user")?.kind).toBe("message");
+        const userRow = rows.find((row) => row.message.role === "user");
+        expect(userRow).toBeDefined();
+        const optimisticUserRow = userRow!;
+        expect(optimisticUserRow.kind).toBe("message");
+        expect(optimisticUserRow.key).toBe(
+            messageDeleteKey({
+                ...optimisticUserRow.message,
+                runId: undefined,
+                runtimeKey: undefined,
+            })
+        );
         expect(rows.find((row) => row.message.role === "assistant")?.kind).toBe("stream");
+
+        const recoveredHistoryMessage = {
+            ...message("user", "steer"),
+            timestamp: NOW,
+        };
+        expect(
+            projectChat(
+                [recoveredHistoryMessage],
+                createChatRuntimeState(),
+                SESSION,
+                createChatVisibility(true, true),
+                true,
+                new Set([optimisticUserRow.key])
+            ).rows
+        ).toEqual([]);
     });
 
     it("keeps a thinking row anchored while runtime output recovers into history", () => {

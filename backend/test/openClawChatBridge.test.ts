@@ -1708,6 +1708,53 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("persists nested runtime session identities for restart replay", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        const recorded = bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    delta: "nested reasoning",
+                    runId: "nested-run",
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+            },
+            []
+        );
+
+        expect(recorded.payload).toMatchObject({
+            data: {
+                runId: "nested-run",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            runId: "nested-run",
+            sessionKey: MAIN,
+        });
+        expect(bridge.flush()).toBe(true);
+
+        const restarted = new OpenClawChatBridge(store);
+        expect(restarted.snapshot(MAIN)).toMatchObject({
+            completed: false,
+            events: [
+                {
+                    event: "agent",
+                    payload: {
+                        data: {
+                            delta: "nested reasoning",
+                            runId: "nested-run",
+                            sessionKey: MAIN,
+                        },
+                        runId: "nested-run",
+                        sessionKey: MAIN,
+                    },
+                },
+            ],
+        });
+    });
+
     it("selects completed replay by terminal order after delayed older events", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

@@ -86,6 +86,56 @@ function stringField(
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+/** Uses the same nested event-data precedence as the browser runtime adapter. */
+function runtimePayloadView(payload: unknown): Record<string, unknown> | undefined {
+    const record = asRecord(payload);
+    if (!record) {
+        return undefined;
+    }
+    const data = asRecord(record.data);
+    return data ? { ...record, ...data } : record;
+}
+
+/** Makes nested runtime identities available at the envelope boundary as well. */
+function withRuntimeIdentity(
+    payload: Record<string, unknown>,
+    {
+        runId,
+        sessionKey,
+        shouldRemoveSessionKey = false,
+    }: {
+        runId?: string;
+        sessionKey?: string;
+        shouldRemoveSessionKey?: boolean;
+    }
+): Record<string, unknown> {
+    const normalized = { ...payload };
+    if (runId) {
+        normalized.runId = runId;
+    }
+    if (shouldRemoveSessionKey) {
+        delete normalized.sessionKey;
+    } else if (sessionKey) {
+        normalized.sessionKey = sessionKey;
+    }
+
+    const data = asRecord(payload.data);
+    if (!data) {
+        return normalized;
+    }
+    const normalizedData = { ...data };
+    if (runId && Object.hasOwn(data, "runId")) {
+        normalizedData.runId = runId;
+    }
+    if (shouldRemoveSessionKey) {
+        delete normalizedData.sessionKey;
+    } else if (sessionKey && Object.hasOwn(data, "sessionKey")) {
+        normalizedData.sessionKey = sessionKey;
+    }
+    normalized.data = normalizedData;
+    return normalized;
+}
+
 function nestedRuntimeItem(
     data: Record<string, unknown> | undefined
 ): Record<string, unknown> | undefined {
@@ -1201,10 +1251,12 @@ export class OpenClawChatBridge {
             return payload;
         }
 
+        const payloadView = runtimePayloadView(record) || record;
+
         this.reconcileSessions(sessions);
 
-        const runId = stringField(record, "runId");
-        const providedSessionKey = stringField(record, "sessionKey");
+        const runId = stringField(payloadView, "runId");
+        const providedSessionKey = stringField(payloadView, "sessionKey");
         if (providedSessionKey) {
             const candidates = this.#sessionCandidates(
                 providedSessionKey,
@@ -1213,16 +1265,21 @@ export class OpenClawChatBridge {
             );
             if (candidates.size === 1) {
                 const canonical = candidates.values().next().value;
-                return canonical && canonical !== providedSessionKey
-                    ? { ...record, sessionKey: canonical }
-                    : payload;
+                return withRuntimeIdentity(record, {
+                    runId,
+                    sessionKey: canonical || providedSessionKey,
+                });
             }
             if (candidates.size > 1 && !isAgentSessionKey(providedSessionKey)) {
-                const unscoped = { ...record };
-                delete unscoped.sessionKey;
-                return unscoped;
+                return withRuntimeIdentity(record, {
+                    runId,
+                    shouldRemoveSessionKey: true,
+                });
             }
-            return payload;
+            return withRuntimeIdentity(record, {
+                runId,
+                sessionKey: providedSessionKey,
+            });
         }
 
         if (!runId) {
@@ -1240,7 +1297,7 @@ export class OpenClawChatBridge {
                 ? candidateSessionKeys.values().next().value
                 : undefined;
 
-        return sessionKey ? { ...record, sessionKey } : payload;
+        return withRuntimeIdentity(record, { runId, sessionKey });
     }
 
     #rememberRunSession(runId: string, sessionKey: string): void {
@@ -1442,15 +1499,16 @@ export class OpenClawChatBridge {
         }
 
         const payload = asRecord(envelope.payload);
-        if (!payload) {
+        const payloadView = runtimePayloadView(payload);
+        if (!payload || !payloadView) {
             return;
         }
-        const sessionKey = stringField(payload, "sessionKey");
+        const sessionKey = stringField(payloadView, "sessionKey");
         if (!sessionKey) {
             return;
         }
 
-        const explicitRunId = stringField(payload, "runId");
+        const explicitRunId = stringField(payloadView, "runId");
         const isTerminal = isTerminalEvent(envelope.event, envelope.payload);
         const associationBytes = explicitRunId
             ? Buffer.byteLength(JSON.stringify({ runId: explicitRunId, sessionKey }))
@@ -1458,7 +1516,7 @@ export class OpenClawChatBridge {
         if (explicitRunId && associationBytes <= MAX_BYTES_PER_RUN) {
             this.#rememberRunSession(explicitRunId, sessionKey);
         }
-        if (!shouldRetainRuntimeEvent(envelope.event, payload)) {
+        if (!shouldRetainRuntimeEvent(envelope.event, payloadView)) {
             return;
         }
         const serializedBytes = Buffer.byteLength(JSON.stringify(envelope));
@@ -1858,7 +1916,7 @@ export class OpenClawChatBridge {
         sessions: readonly OpenClawChatSessionIdentity[]
     ): OpenClawRuntimeEnvelope {
         this.#requireSequenceHydrated();
-        const providedSessionKey = stringField(asRecord(payload), "sessionKey");
+        const providedSessionKey = stringField(runtimePayloadView(payload), "sessionKey");
         if (providedSessionKey) {
             this.#ensureSessionLoaded(providedSessionKey);
         }
