@@ -50,6 +50,12 @@ function historySequence(message: RawOpenClawHistoryMessage): number | undefined
     return nonNegativeInteger(historyMetadata(message)?.seq);
 }
 
+function hasCompleteHistorySequenceMetadata(
+    messages: readonly RawOpenClawHistoryMessage[]
+): boolean {
+    return messages.every((message) => historySequence(message) !== undefined);
+}
+
 function parseHistoryPage(raw: unknown, requestedOffset: number): OpenClawHistoryPage {
     const result = asRecord(raw);
     const messages = Array.isArray(result?.messages)
@@ -196,11 +202,13 @@ export class OpenClawHistoryLoader {
         cacheKey: string,
         sessionKey: string,
         limit: number,
-        first: OpenClawHistoryPage
+        first: OpenClawHistoryPage,
+        shouldCache = true
     ): Promise<ChatHistoryMessage[]> {
         const pages = await this.#pagesUntil(sessionKey, limit, first);
         const throughSequence = first.totalMessages;
-        const rawMessages = orderedUniqueMessages(pages).filter((message) => {
+        const orderedMessages = orderedUniqueMessages(pages);
+        const rawMessages = orderedMessages.filter((message) => {
             const sequence = historySequence(message);
             return (
                 throughSequence === undefined ||
@@ -209,7 +217,11 @@ export class OpenClawHistoryLoader {
             );
         });
         const messages = this.#adapter.history(rawMessages);
-        if (throughSequence === undefined) {
+        if (
+            !shouldCache ||
+            throughSequence === undefined ||
+            !hasCompleteHistorySequenceMetadata(orderedMessages)
+        ) {
             this.#cache.delete(cacheKey);
         } else {
             this.#remember(cacheKey, {
@@ -240,6 +252,9 @@ export class OpenClawHistoryLoader {
         if (!canReuse || !cached || totalMessages === undefined) {
             return this.#loadFresh(cacheKey, sessionKey, limit, first);
         }
+        if (!hasCompleteHistorySequenceMetadata(first.messages)) {
+            return this.#loadFresh(cacheKey, sessionKey, limit, first, false);
+        }
         if (totalMessages === cached.throughSequence) {
             return cached.messages;
         }
@@ -250,7 +265,11 @@ export class OpenClawHistoryLoader {
             first,
             cached.throughSequence
         );
-        const appendedRawMessages = orderedUniqueMessages(pages).filter((message) => {
+        const orderedMessages = orderedUniqueMessages(pages);
+        if (!hasCompleteHistorySequenceMetadata(orderedMessages)) {
+            return this.#loadFresh(cacheKey, sessionKey, limit, first, false);
+        }
+        const appendedRawMessages = orderedMessages.filter((message) => {
             const sequence = historySequence(message);
             return (
                 sequence !== undefined &&
@@ -283,9 +302,7 @@ export class OpenClawHistoryLoader {
         try {
             return await request;
         } finally {
-            if (this.#pending.get(cacheKey) === request) {
-                this.#pending.delete(cacheKey);
-            }
+            this.#pending.delete(cacheKey);
         }
     }
 }

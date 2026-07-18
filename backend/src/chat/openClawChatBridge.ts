@@ -38,6 +38,10 @@ export interface OpenClawChatSnapshotStore {
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void;
 }
 
+interface OpenClawChatBridgeOptions {
+    maxReplayBytes?: number;
+}
+
 interface RetainedRun {
     completed: boolean;
     eventBytes: number[];
@@ -52,6 +56,7 @@ const MAX_EVENTS_PER_ACTIVE_RUN = 20_000;
 const MAX_BYTES_PER_ACTIVE_RUN = 64_000_000;
 const MAX_BYTES_PER_EVENT = 1_000_000;
 const MAX_RUNS_PER_SESSION = 4;
+const MAX_BYTES_ACROSS_REPLAY = MAX_BYTES_PER_ACTIVE_RUN * MAX_RUNS_PER_SESSION;
 export const MAX_CHAT_RUNTIME_SESSIONS = 50;
 const MAX_RUN_ASSOCIATIONS = 200;
 const ACTIVE_RUN_TTL_MS = 6 * 60 * 60_000;
@@ -530,6 +535,43 @@ function latestRunUpdatedAt(runs: Iterable<RetainedRun>): number {
     return latest;
 }
 
+function replayBytes(runs: Iterable<RetainedRun>): number {
+    let bytes = 0;
+    for (const run of runs) {
+        bytes += run.totalBytes;
+    }
+    return bytes;
+}
+
+function oldestReplayBudgetSessionKey(
+    sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
+    protectedSessionKey?: string
+): string | undefined {
+    let hasOldestActiveRun = true;
+    let oldestSessionKey: string | undefined;
+    let oldestUpdatedAt = Infinity;
+    for (const [candidateSessionKey, runs] of sessions) {
+        if (
+            protectedSessionKey &&
+            isSameSessionKey(candidateSessionKey, protectedSessionKey)
+        ) {
+            continue;
+        }
+        const hasActiveRun = runs.values().some((run) => !run.completed);
+        const updatedAt = latestRunUpdatedAt(runs.values());
+        if (
+            oldestSessionKey === undefined ||
+            (hasOldestActiveRun && !hasActiveRun) ||
+            (hasOldestActiveRun === hasActiveRun && updatedAt < oldestUpdatedAt)
+        ) {
+            hasOldestActiveRun = hasActiveRun;
+            oldestSessionKey = candidateSessionKey;
+            oldestUpdatedAt = updatedAt;
+        }
+    }
+    return oldestSessionKey;
+}
+
 function oldestEvictableSessionKey(
     sessions: ReadonlyMap<string, ReadonlyMap<string, RetainedRun>>,
     protectedSessionKey?: string
@@ -677,15 +719,26 @@ export class OpenClawChatBridge {
     readonly #pendingSessionClears = new Set<string>();
     readonly #runsBySession = new Map<string, Map<string, RetainedRun>>();
     readonly #sessionsByRun = new Map<string, Set<string>>();
+    readonly #maxReplayBytes: number;
     readonly #store: OpenClawChatSnapshotStore | undefined;
+    #enforcingReplayMemoryLimit = false;
     #persistenceTimer: ReturnType<typeof setTimeout> | undefined;
     #sequence = 0;
     #sequenceHydrated = false;
     #sessionLimitDeferrals = 0;
     #storeClearPending = false;
     #storeFailureReported = false;
+    #totalReplayBytes = 0;
 
-    constructor(store?: OpenClawChatSnapshotStore) {
+    constructor(
+        store?: OpenClawChatSnapshotStore,
+        options: OpenClawChatBridgeOptions = {}
+    ) {
+        const maxReplayBytes = options.maxReplayBytes ?? MAX_BYTES_ACROSS_REPLAY;
+        if (!Number.isSafeInteger(maxReplayBytes) || maxReplayBytes <= 0) {
+            throw new Error("Replay memory limit must be a positive safe integer");
+        }
+        this.#maxReplayBytes = maxReplayBytes;
         this.#store = store;
         if (!store) {
             this.#sequenceHydrated = true;
@@ -1002,6 +1055,9 @@ export class OpenClawChatBridge {
         if (runs.size === 0) {
             this.#runsBySession.delete(storageSessionKey);
         }
+        if (hasChanged) {
+            this.#refreshTotalReplayBytes();
+        }
         return hasChanged;
     }
 
@@ -1136,11 +1192,15 @@ export class OpenClawChatBridge {
 
     #evictSessionFromMemory(sessionKey: string): void {
         const storageSessionKey = normalizedSessionKey(sessionKey);
+        const evictedBytes = replayBytes(
+            this.#runsBySession.get(storageSessionKey)?.values() || []
+        );
         this.#pendingPersistence.delete(storageSessionKey);
         if (this.#pendingPersistence.size === 0) {
             this.#cancelPersistenceTimer();
         }
         this.#runsBySession.delete(storageSessionKey);
+        this.#totalReplayBytes = Math.max(0, this.#totalReplayBytes - evictedBytes);
         for (const runId of this.#sessionsByRun.keys()) {
             this.#forgetRunSession(runId, storageSessionKey);
         }
@@ -1168,6 +1228,7 @@ export class OpenClawChatBridge {
         if (runs.size === 0) {
             this.#runsBySession.delete(storageSessionKey);
         }
+        this.#refreshTotalReplayBytes();
         this.#flushSessionPersistence(storageSessionKey);
     }
 
@@ -1407,7 +1468,44 @@ export class OpenClawChatBridge {
             this.#forgetRunSession(runId, canonicalStorageKey);
         }
         this.#enforceSessionLimit(protectedSessionKey);
+        this.#enforceReplayMemoryLimit(protectedSessionKey || canonicalStorageKey);
         return true;
+    }
+
+    #refreshTotalReplayBytes(): void {
+        let totalBytes = 0;
+        for (const runs of this.#runsBySession.values()) {
+            totalBytes += replayBytes(runs.values());
+        }
+        this.#totalReplayBytes = totalBytes;
+    }
+
+    #enforceReplayMemoryLimit(protectedSessionKey?: string): void {
+        if (this.#enforcingReplayMemoryLimit) {
+            return;
+        }
+        const storageProtectedSessionKey = protectedSessionKey
+            ? normalizedSessionKey(protectedSessionKey)
+            : undefined;
+        this.#enforcingReplayMemoryLimit = true;
+        try {
+            this.#refreshTotalReplayBytes();
+            while (this.#totalReplayBytes > this.#maxReplayBytes) {
+                const oldestSessionKey = oldestReplayBudgetSessionKey(
+                    this.#runsBySession,
+                    storageProtectedSessionKey
+                );
+                if (!oldestSessionKey) {
+                    break;
+                }
+                // Keep the freshest persisted copy before releasing process memory.
+                // The hard memory ceiling still wins if SQLite is temporarily failing.
+                this.#flushSessionPersistence(oldestSessionKey);
+                this.#evictSessionFromMemory(oldestSessionKey);
+            }
+        } finally {
+            this.#enforcingReplayMemoryLimit = false;
+        }
     }
 
     #enforceSessionLimit(protectedSessionKey?: string): void {
@@ -1697,6 +1795,7 @@ export class OpenClawChatBridge {
                 preferredProvisionalRunId,
                 providerRunId
             );
+            this.#enforceReplayMemoryLimit(storageSessionKey);
             this.#flushSessionPersistence(storageSessionKey);
             return;
         }
@@ -1724,6 +1823,7 @@ export class OpenClawChatBridge {
             provisionalEntries[0]![0],
             providerRunId
         );
+        this.#enforceReplayMemoryLimit(storageSessionKey);
         this.#flushSessionPersistence(storageSessionKey);
     }
 
@@ -1956,6 +2056,7 @@ export class OpenClawChatBridge {
 
         this.#runsBySession.set(storageSessionKey, runs);
         this.#enforceSessionLimit();
+        this.#enforceReplayMemoryLimit(storageSessionKey);
         if (shouldPersist) {
             if (isTerminal) {
                 this.#flushSessionPersistence(storageSessionKey);
@@ -1970,6 +2071,7 @@ export class OpenClawChatBridge {
         this.#sessionsByRun.clear();
         this.#hydratedSessionLookups.clear();
         this.#loadedStoreKeys.clear();
+        this.#totalReplayBytes = 0;
     }
 
     /** Flushes all coalesced replay writes at lifecycle boundaries. */
@@ -2016,6 +2118,7 @@ export class OpenClawChatBridge {
             }
         });
         this.#enforceSessionLimit();
+        this.#enforceReplayMemoryLimit();
     }
 
     /** Clears all replay state, for example after credentials change. */

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { database } from "../database.ts";
 import {
     MAX_CHAT_RUNTIME_SESSIONS,
@@ -24,12 +26,23 @@ interface SnapshotMaximumSequenceRow {
 }
 
 interface ParsedStoredSnapshot {
+    eventFingerprints: StoredEventFingerprint[];
     runSignature: string[];
     snapshot: OpenClawRuntimeSnapshot;
-    usesEventRows: boolean;
 }
 
-const EVENT_ROW_STORAGE = "rows-v1";
+interface StoredEventFingerprint {
+    fingerprint: string;
+    runtimeSequence: number;
+}
+
+interface SerializedSnapshotEvent extends StoredEventFingerprint {
+    envelope: OpenClawRuntimeEnvelope;
+    envelopeJson?: string;
+}
+
+const EVENT_ROW_STORAGE = "rows-v2";
+const SHA256_PATTERN = /^[a-f\d]{64}$/u;
 
 function hasReplay(snapshot: OpenClawRuntimeSnapshot): boolean {
     return snapshot.events.length > 0;
@@ -97,10 +110,28 @@ function isRuntimeEnvelope(value: unknown): value is OpenClawRuntimeEnvelope {
     );
 }
 
+function eventFingerprint(envelopeJson: string): string {
+    return createHash("sha256").update(envelopeJson).digest("hex");
+}
+
+function isStoredEventFingerprint(value: unknown): value is StoredEventFingerprint {
+    const fingerprint = asRecord(value);
+    return Boolean(
+        fingerprint &&
+        Number.isSafeInteger(fingerprint.runtimeSequence) &&
+        (fingerprint.runtimeSequence as number) >= 0 &&
+        typeof fingerprint.fingerprint === "string" &&
+        SHA256_PATTERN.test(fingerprint.fingerprint)
+    );
+}
+
 function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefined {
     try {
         const value = JSON.parse(serialized) as Record<string, unknown>;
         const events = Array.isArray(value.events) ? value.events : [];
+        const eventFingerprints = Array.isArray(value.eventFingerprints)
+            ? value.eventFingerprints.filter(isStoredEventFingerprint)
+            : [];
         const throughSequence = value.throughSequence;
         if (
             !value ||
@@ -108,14 +139,18 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             Array.isArray(value) ||
             typeof value.completed !== "boolean" ||
             !Array.isArray(value.events) ||
-            !events.every(isRuntimeEnvelope) ||
+            events.length > 0 ||
+            !Array.isArray(value.eventFingerprints) ||
+            eventFingerprints.length !== value.eventFingerprints.length ||
             !Number.isSafeInteger(throughSequence) ||
             (throughSequence as number) < 0 ||
             value.eventStorage !== EVENT_ROW_STORAGE ||
-            events.some(
-                (event) =>
-                    (event as OpenClawRuntimeEnvelope).runtimeSequence >
-                    (throughSequence as number)
+            eventFingerprints.some(
+                (event, index) =>
+                    event.runtimeSequence > (throughSequence as number) ||
+                    (index > 0 &&
+                        event.runtimeSequence <=
+                            eventFingerprints[index - 1]!.runtimeSequence)
             )
         ) {
             return undefined;
@@ -133,9 +168,9 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             return undefined;
         }
         return {
+            eventFingerprints,
             runSignature,
             snapshot: value as unknown as OpenClawRuntimeSnapshot,
-            usesEventRows: true,
         };
     } catch {
         return undefined;
@@ -201,10 +236,15 @@ function hasSameRunSignature(left: string[], right: string[]): boolean {
 
 function snapshotMetadata(
     snapshot: OpenClawRuntimeSnapshot,
-    runSignature: string[]
+    runSignature: string[],
+    events: readonly SerializedSnapshotEvent[]
 ): Record<string, unknown> {
     return {
         completed: snapshot.completed,
+        eventFingerprints: events.map(({ fingerprint, runtimeSequence }) => ({
+            fingerprint,
+            runtimeSequence,
+        })),
         eventStorage: EVENT_ROW_STORAGE,
         events: [],
         runSignature,
@@ -214,6 +254,7 @@ function snapshotMetadata(
 
 /** Persists runtime replay incrementally without exposing its payload as a new API. */
 export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStore {
+    readonly #eventFingerprints = new WeakMap<OpenClawRuntimeEnvelope, string>();
     readonly #gatewayScope: string;
     readonly #now: () => string;
 
@@ -233,6 +274,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
         sessionKey: string,
         snapshot: OpenClawRuntimeSnapshot,
         runSignature: string[],
+        events: readonly SerializedSnapshotEvent[],
         updatedAt: string
     ): void {
         database
@@ -240,7 +282,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             .run(
                 this.#gatewayScope,
                 sessionKey,
-                JSON.stringify(snapshotMetadata(snapshot, runSignature)),
+                JSON.stringify(snapshotMetadata(snapshot, runSignature, events)),
                 updatedAt
             );
     }
@@ -256,7 +298,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
 
     #insertEventRows(
         sessionKey: string,
-        events: readonly OpenClawRuntimeEnvelope[]
+        events: readonly SerializedSnapshotEvent[]
     ): void {
         const insert = database.prepare(SAVE_SNAPSHOT_EVENT_SQL);
         for (const event of events) {
@@ -264,9 +306,33 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                 this.#gatewayScope,
                 sessionKey,
                 event.runtimeSequence,
-                JSON.stringify(event)
+                event.envelopeJson || JSON.stringify(event.envelope)
             );
         }
+    }
+
+    #serializeEvents(
+        events: readonly OpenClawRuntimeEnvelope[]
+    ): SerializedSnapshotEvent[] {
+        return events.map((envelope) => {
+            const cachedFingerprint = this.#eventFingerprints.get(envelope);
+            if (cachedFingerprint) {
+                return {
+                    envelope,
+                    fingerprint: cachedFingerprint,
+                    runtimeSequence: envelope.runtimeSequence,
+                };
+            }
+            const envelopeJson = JSON.stringify(envelope);
+            const fingerprint = eventFingerprint(envelopeJson);
+            this.#eventFingerprints.set(envelope, fingerprint);
+            return {
+                envelope,
+                envelopeJson,
+                fingerprint,
+                runtimeSequence: envelope.runtimeSequence,
+            };
+        });
     }
 
     #persistSnapshot(
@@ -286,20 +352,28 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             ? parseStoredSnapshot(existingRow.snapshot_json)
             : undefined;
         const runSignature = snapshotRunSignature(snapshot);
+        const serializedEvents = this.#serializeEvents(snapshot.events);
         const canAppend = Boolean(
             !shouldReplace &&
-            existing?.usesEventRows &&
+            existing &&
             existing.snapshot.completed === snapshot.completed &&
             existing.snapshot.throughSequence <= snapshot.throughSequence &&
-            hasSameRunSignature(existing.runSignature, runSignature)
+            hasSameRunSignature(existing.runSignature, runSignature) &&
+            existing.eventFingerprints.length <= serializedEvents.length &&
+            existing.eventFingerprints.every((event, index) => {
+                const candidate = serializedEvents[index];
+                return (
+                    candidate?.runtimeSequence === event.runtimeSequence &&
+                    candidate.fingerprint === event.fingerprint
+                );
+            })
         );
         if (!canAppend) {
             this.#deleteEventRows(sessionKey);
         }
-        const afterSequence = canAppend ? existing!.snapshot.throughSequence : -1;
         this.#insertEventRows(
             sessionKey,
-            snapshot.events.filter((event) => event.runtimeSequence > afterSequence)
+            serializedEvents.slice(canAppend ? existing!.eventFingerprints.length : 0)
         );
         database
             .prepare(
@@ -307,7 +381,13 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                  WHERE gateway_scope = ? AND session_key = ?`
             )
             .run(this.#gatewayScope, sessionKey);
-        this.#insertSnapshotMetadata(sessionKey, snapshot, runSignature, updatedAt);
+        this.#insertSnapshotMetadata(
+            sessionKey,
+            snapshot,
+            runSignature,
+            serializedEvents,
+            updatedAt
+        );
     }
 
     #pruneSnapshots(): void {
@@ -383,9 +463,25 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
         const events = eventRows.map((eventRow) =>
             parseStoredEvent(eventRow, stored.snapshot.throughSequence)
         );
-        if (events.includes(undefined)) {
+        const hasMatchingFingerprints =
+            eventRows.length === stored.eventFingerprints.length &&
+            eventRows.every((eventRow, index) => {
+                const storedFingerprint = stored.eventFingerprints[index];
+                return (
+                    storedFingerprint?.runtimeSequence === eventRow.runtime_sequence &&
+                    storedFingerprint.fingerprint ===
+                        eventFingerprint(eventRow.envelope_json)
+                );
+            });
+        if (events.includes(undefined) || !hasMatchingFingerprints) {
             this.delete(normalizedKey);
             return undefined;
+        }
+        for (const [index, envelope] of events.entries()) {
+            this.#eventFingerprints.set(
+                envelope!,
+                stored.eventFingerprints[index]!.fingerprint
+            );
         }
         return {
             completed: stored.snapshot.completed,

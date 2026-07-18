@@ -50,7 +50,7 @@ export function appendOpenClawHistory(
             (candidate, index) =>
                 (message.runId
                     ? candidate.runId === message.runId
-                    : index > latestUserIndex) &&
+                    : Boolean(message.toolResult?.id) || index > latestUserIndex) &&
                 matchingToolCallIndex(message, candidate) !== -1
         );
         if (assistantIndex === -1) {

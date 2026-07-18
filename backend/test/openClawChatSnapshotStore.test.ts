@@ -126,9 +126,90 @@ describe("OpenClaw chat snapshot store", () => {
 
             expect(retainedEventRow.rowid).toBe(firstEventRow.rowid);
             expect(eventCount.count).toBe(2);
-            expect(metadata).toEqual({ bytes: expect.any(Number), storage: "rows-v1" });
-            expect(metadata.bytes).toBeLessThan(300);
+            expect(metadata).toEqual({ bytes: expect.any(Number), storage: "rows-v2" });
+            expect(metadata.bytes).toBeLessThan(1000);
             expect(store.load(sessionKey)).toEqual(expandedSnapshot);
+        } finally {
+            store.clear();
+        }
+    });
+
+    it("replaces stale event rows after replay coalescing changes the prefix", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        const firstSnapshot = snapshotFor(sessionKey, 1);
+        const coalescedSnapshot: OpenClawRuntimeSnapshot = {
+            completed: false,
+            events: [
+                {
+                    ...firstSnapshot.events[0]!,
+                    payload: {
+                        runId: "run-1",
+                        sessionKey,
+                        stream: "thinking",
+                        text: "coalesced update",
+                    },
+                    runtimeSequence: 2,
+                },
+            ],
+            throughSequence: 2,
+        };
+
+        try {
+            store.save(sessionKey, firstSnapshot);
+            store.save(sessionKey, coalescedSnapshot);
+
+            const persistedSequences = (
+                database
+                    .prepare(
+                        `SELECT runtime_sequence
+                         FROM chat_runtime_snapshot_events
+                         WHERE gateway_scope = ? AND session_key = ?
+                         ORDER BY runtime_sequence ASC`
+                    )
+                    .all(gatewayScope, sessionKey) as Array<{
+                    runtime_sequence: number;
+                }>
+            ).map((row) => row.runtime_sequence);
+            expect(persistedSequences).toEqual([2]);
+            expect(store.load(sessionKey)).toEqual(coalescedSnapshot);
+        } finally {
+            store.clear();
+        }
+    });
+
+    it("replaces a persisted row when an envelope changes at the same sequence", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        const firstSnapshot = snapshotFor(sessionKey, 1);
+        const rewrittenSnapshot: OpenClawRuntimeSnapshot = {
+            ...firstSnapshot,
+            events: [
+                {
+                    ...firstSnapshot.events[0]!,
+                    payload: {
+                        ...(firstSnapshot.events[0]!.payload as Record<string, unknown>),
+                        text: "rewritten",
+                    },
+                },
+            ],
+        };
+
+        try {
+            store.save(sessionKey, firstSnapshot);
+            store.save(sessionKey, rewrittenSnapshot);
+
+            const rewrittenRow = database
+                .prepare(
+                    `SELECT json_extract(envelope_json, '$.payload.text') AS text
+                     FROM chat_runtime_snapshot_events
+                     WHERE gateway_scope = ? AND session_key = ? AND runtime_sequence = 1`
+                )
+                .get(gatewayScope, sessionKey) as { text: string };
+            expect(rewrittenRow.text).toBe("rewritten");
+            expect(store.load(sessionKey)).toEqual(rewrittenSnapshot);
         } finally {
             store.clear();
         }

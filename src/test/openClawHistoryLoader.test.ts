@@ -23,6 +23,15 @@ function rawMessage(
     };
 }
 
+function rawMessageWithoutSequence(id: string, role: string, content: unknown) {
+    return {
+        __openclaw: { id },
+        content,
+        role,
+        timestamp: "2026-07-18T16:36:00.000Z",
+    };
+}
+
 describe("OpenClaw history loader", () => {
     it("loads every offset page and folds tools split across a page boundary", async () => {
         const requests: Array<{ limit: number; offset: number; sessionKey: string }> = [];
@@ -249,6 +258,70 @@ describe("OpenClaw history loader", () => {
             "nine",
             "ten",
         ]);
+    });
+
+    it("does not reuse or advance the cache when sequence metadata is incomplete", async () => {
+        let hasIncompleteAppend = false;
+        const requests: number[] = [];
+        const loader = new OpenClawHistoryLoader(
+            new OpenClawChatAdapter(),
+            async (request) => {
+                requests.push(request.offset);
+                if (!hasIncompleteAppend) {
+                    return {
+                        hasMore: false,
+                        messages: [
+                            rawMessage(1, "assistant", "one"),
+                            rawMessage(2, "assistant", "two"),
+                        ],
+                        offset: 0,
+                        sessionId: "session-1",
+                        totalMessages: 2,
+                    };
+                }
+                return request.offset === 0
+                    ? {
+                          hasMore: true,
+                          messages: [
+                              rawMessage(2, "assistant", "two"),
+                              rawMessageWithoutSequence(
+                                  "message-3",
+                                  "assistant",
+                                  "three"
+                              ),
+                          ],
+                          nextOffset: 2,
+                          offset: 0,
+                          sessionId: "session-1",
+                          totalMessages: 3,
+                      }
+                    : {
+                          hasMore: false,
+                          messages: [rawMessage(1, "assistant", "one")],
+                          offset: 2,
+                          sessionId: "session-1",
+                          totalMessages: 3,
+                      };
+            }
+        );
+
+        await loader.history(SESSION, 2);
+        hasIncompleteAppend = true;
+        const firstUncached = await loader.history(SESSION, 2);
+        const secondUncached = await loader.history(SESSION, 2);
+
+        expect(requests).toEqual([0, 0, 2, 0, 2]);
+        expect(firstUncached.map((message) => message.text)).toEqual([
+            "one",
+            "two",
+            "three",
+        ]);
+        expect(secondUncached.map((message) => message.text)).toEqual([
+            "one",
+            "two",
+            "three",
+        ]);
+        expect(secondUncached).not.toBe(firstUncached);
     });
 
     it("bounds complete transcript caches while preserving recent sessions", async () => {

@@ -295,6 +295,27 @@ describe("OpenClaw chat adapter", () => {
         expect(messages[2]?.role).toBe("tool");
     });
 
+    it("folds an exact tool id across a newer user boundary without a run id", () => {
+        const adapter = new OpenClawChatAdapter();
+        const messages = adapter.history([
+            {
+                content: [{ id: "call-1", name: "read", type: "toolCall" }],
+                role: "assistant",
+            },
+            { content: "next", role: "user" },
+            {
+                content: "late result",
+                role: "tool",
+                toolCallId: "call-1",
+                toolName: "read",
+            },
+        ]);
+
+        expect(messages).toHaveLength(2);
+        expect(messages[0]?.toolCalls?.[0]?.toolResult?.content).toBe("late result");
+        expect(messages[1]?.role).toBe("user");
+    });
+
     it("folds a run-scoped tool result across a newer user boundary", () => {
         const adapter = new OpenClawChatAdapter();
         const messages = adapter.history([

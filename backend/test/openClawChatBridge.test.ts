@@ -189,7 +189,7 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
-    it("preserves thinking in SQLite when transcript-backed tools exceed the replay budget", () => {
+    it("preserves thinking while a long active replay round-trips through SQLite", () => {
         const store = new SqliteOpenClawChatSnapshotStore(
             `thinking-retention-${crypto.randomUUID()}`
         );
@@ -289,6 +289,146 @@ describe("OpenClaw chat bridge", () => {
         } finally {
             store.clear();
         }
+    });
+
+    it("evicts transcript-backed tools after an active run crosses 64 MB", () => {
+        const bridge = new OpenClawChatBridge();
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        const runId = "bounded-long-run";
+        const thinkingTexts = ["started", "reviewing", "finishing"];
+        for (const delta of thinkingTexts) {
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta },
+                    runId,
+                    sessionKey,
+                    stream: "thinking",
+                },
+                []
+            );
+        }
+        const largeOutput = "x".repeat(975_000);
+        for (let index = 0; index < 66; index += 1) {
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: {
+                        phase: "result",
+                        result: { output: largeOutput },
+                        stream: "tool",
+                        toolCallId: `large-call-${index}`,
+                    },
+                    runId,
+                    sessionKey,
+                },
+                []
+            );
+        }
+
+        const snapshot = bridge.snapshot(sessionKey);
+        const thinking = snapshot.events.flatMap((event) => {
+            const payload = event.payload as { data?: { delta?: string } };
+            return payload.data?.delta ? [payload.data.delta] : [];
+        });
+        const toolCount = snapshot.events.filter((event) => {
+            const payload = event.payload as { data?: { stream?: string } };
+            return payload.data?.stream === "tool";
+        }).length;
+
+        expect(snapshot.completed).toBe(false);
+        expect(thinking).toEqual(thinkingTexts);
+        expect(toolCount).toBeGreaterThan(0);
+        expect(toolCount).toBeLessThan(66);
+    });
+
+    it("bounds aggregate replay memory across independent sessions", () => {
+        const bridge = new OpenClawChatBridge(undefined, {
+            maxReplayBytes: 900_000,
+        });
+        const oldSession = "agent:main:old-budget-session";
+        const currentSession = "agent:ops:current-budget-session";
+        const largeThinking = "x".repeat(600_000);
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: largeThinking },
+                runId: "old-run",
+                sessionKey: oldSession,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                runId: "old-run",
+                sessionKey: oldSession,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: largeThinking },
+                runId: "current-run",
+                sessionKey: currentSession,
+                stream: "thinking",
+            },
+            []
+        );
+
+        expect(bridge.snapshot(oldSession).events).toEqual([]);
+        expect(bridge.snapshot(currentSession).events).toHaveLength(1);
+    });
+
+    it("rehydrates an aggregate-budget eviction from the snapshot store", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store, {
+            maxReplayBytes: 900_000,
+        });
+        const oldSession = "agent:main:persisted-budget-session";
+        const currentSession = "agent:ops:persisted-budget-session";
+        const largeThinking = "x".repeat(600_000);
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: largeThinking },
+                runId: "old-run",
+                sessionKey: oldSession,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "chat",
+            {
+                message: "done",
+                runId: "old-run",
+                sessionKey: oldSession,
+                state: "final",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: largeThinking },
+                runId: "current-run",
+                sessionKey: currentSession,
+                stream: "thinking",
+            },
+            []
+        );
+
+        expect(store.snapshots.has(oldSession)).toBe(true);
+        expect(bridge.snapshot(oldSession).events).toHaveLength(2);
+        expect(store.snapshots.has(currentSession)).toBe(true);
+        expect(bridge.snapshot(currentSession).events).toHaveLength(1);
     });
 
     it("rebuilds an incrementally persisted tool bubble across a restart", () => {
