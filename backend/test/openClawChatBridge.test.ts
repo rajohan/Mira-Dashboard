@@ -1100,10 +1100,10 @@ describe("OpenClaw chat bridge", () => {
                         kind: "preamble",
                         phase: "update",
                         progressText: `Working ${index}`,
+                        stream: "item",
                     },
                     runId: "long-run",
                     sessionKey: MAIN,
-                    stream: "item",
                 },
                 []
             );
@@ -1134,11 +1134,11 @@ describe("OpenClaw chat bridge", () => {
                     itemId: "call-1",
                     kind: "command",
                     phase: "start",
+                    stream: "item",
                     suppressChannelProgress: true,
                 },
                 runId: "tool-run",
                 sessionKey: MAIN,
-                stream: "item",
             },
             []
         );
@@ -1165,11 +1165,11 @@ describe("OpenClaw chat bridge", () => {
                     itemId: "call-1",
                     kind: "command",
                     phase: "end",
+                    stream: "item",
                     suppressChannelProgress: true,
                 },
                 runId: "tool-run",
                 sessionKey: MAIN,
-                stream: "item",
             },
             []
         );
@@ -2946,6 +2946,27 @@ describe("OpenClaw chat bridge", () => {
             expect.objectContaining({
                 data: expect.objectContaining({ status: "aborted" }),
                 runId: "large-aborted-run",
+                sessionKey: MAIN,
+            }),
+        ]);
+
+        bridge.clear();
+        bridge.recordEvent(
+            "session.compaction",
+            {
+                data: { detail: "x".repeat(1_000_001) },
+                operation: "compact",
+                operationId: "large-compaction",
+                phase: "end",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        expect(payloads(bridge)).toEqual([
+            expect.objectContaining({
+                operation: "compact",
+                operationId: "large-compaction",
+                phase: "end",
                 sessionKey: MAIN,
             }),
         ]);

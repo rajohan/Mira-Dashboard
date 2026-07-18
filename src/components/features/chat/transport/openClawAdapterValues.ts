@@ -231,6 +231,13 @@ export interface OpenClawEventContext {
     timestamp: string;
 }
 
+export function openClawCompactionRunId(
+    sessionKey: string,
+    sourceRunId?: string
+): string {
+    return `compaction:${sourceRunId || sessionKey}`;
+}
+
 export function openClawEventContext(raw: unknown): OpenClawEventContext | undefined {
     const envelope = asRecord(raw);
     if (!envelope || envelope.type !== "event") {
@@ -256,7 +263,7 @@ export function openClawEventContext(raw: unknown): OpenClawEventContext | undef
         eventName,
         payload,
         runId: isCompactionEvent
-            ? `compaction:${sourceRunId || sessionKey}`
+            ? openClawCompactionRunId(sessionKey, sourceRunId)
             : sourceRunId,
         sessionKey,
         timestamp: timestampFor(envelope, data),

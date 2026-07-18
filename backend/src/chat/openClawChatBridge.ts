@@ -164,11 +164,11 @@ function shouldRetainRuntimeEvent(
     if (event !== "agent") {
         return true;
     }
-    const stream = stringField(payload, "stream") || "";
+    const data = runtimePayloadView(payload);
+    const stream = stringField(data, "stream") || "";
     if (stream.startsWith("codex_app_server.")) {
         return false;
     }
-    const data = asRecord(payload.data);
     if (stream !== "item" || !data) {
         return true;
     }
@@ -207,9 +207,8 @@ function replayCoalescingKey(envelope: OpenClawRuntimeEnvelope): string | undefi
     if (envelope.event !== "agent") {
         return undefined;
     }
-    const payload = asRecord(envelope.payload);
-    const data = asRecord(payload?.data);
-    if (stringField(payload, "stream") !== "item" || !data) {
+    const data = runtimePayloadView(envelope.payload);
+    if (!data || stringField(data, "stream") !== "item") {
         return undefined;
     }
     const item = nestedRuntimeItem(data) || data;
@@ -363,20 +362,29 @@ function compactTerminalPayload(
     const data = asRecord(payload?.data);
     const compactData = {
         aborted: data?.aborted === true ? true : undefined,
+        completed: data?.completed === true ? true : undefined,
         error: stringField(data, "error"),
         errorMessage: stringField(data, "errorMessage"),
+        operation: stringField(data, "operation"),
+        operationId: stringField(data, "operationId"),
         phase: stringField(data, "phase"),
         promptError: stringField(data, "promptError"),
         status: stringField(data, "status"),
+        stream: stringField(data, "stream"),
     };
     const hasCompactData = Object.values(compactData).some(
         (value) => value !== undefined
     );
     return {
         aborted: payload?.aborted === true ? true : undefined,
+        completed: payload?.completed === true ? true : undefined,
         data: hasCompactData ? compactData : undefined,
         error: stringField(payload, "error"),
         errorMessage: stringField(payload, "errorMessage"),
+        operation: stringField(payload, "operation"),
+        operationId: stringField(payload, "operationId"),
+        phase: stringField(payload, "phase"),
+        promptError: stringField(payload, "promptError"),
         runId,
         sessionKey,
         state: stringField(payload, "state"),

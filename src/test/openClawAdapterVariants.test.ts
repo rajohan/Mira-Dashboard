@@ -390,7 +390,7 @@ describe("OpenClaw adapter variants", () => {
             error: "model failed",
             kind: "finish",
             outcome: "error",
-            settlesCompaction: true,
+            settlesCompactionRunId: "compaction:run-variants",
         });
         expect(modelAborted[0]).toMatchObject({
             error: undefined,

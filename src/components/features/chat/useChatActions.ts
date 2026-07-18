@@ -96,6 +96,8 @@ export function useChatActions({
 }: ChatActionsOptions) {
     const sendCountReference = useRef(0);
     const sendEpochReference = useRef(0);
+    const inFlightInputRevisionsReference = useRef(new Set<number>());
+    const inputRevisionReference = useRef({ attachments, draft, revision: 0 });
     const pendingPatchesReference = useRef(new Map<string, Set<Promise<boolean>>>());
     const draftReference = useRef(draft);
     const isCompactingReference = useRef(isCompacting);
@@ -109,6 +111,16 @@ export function useChatActions({
         {}
     );
 
+    if (
+        inputRevisionReference.current.attachments !== attachments ||
+        inputRevisionReference.current.draft !== draft
+    ) {
+        inputRevisionReference.current = {
+            attachments,
+            draft,
+            revision: inputRevisionReference.current.revision + 1,
+        };
+    }
     draftReference.current = draft;
     isCompactingReference.current = isCompacting;
 
@@ -119,6 +131,7 @@ export function useChatActions({
 
         sendEpochReference.current += 1;
         sendCountReference.current = 0;
+        inFlightInputRevisionsReference.current.clear();
         compactingSessionKeysReference.current = new Set();
         setCompactingSessionKeys(new Set());
         setIsSending(false);
@@ -136,13 +149,15 @@ export function useChatActions({
         confirmResetSession,
     });
 
-    const beginSend = () => {
+    const beginSend = (inputRevision: number) => {
         sendCountReference.current += 1;
+        inFlightInputRevisionsReference.current.add(inputRevision);
         setIsSending(true);
         return sendEpochReference.current;
     };
 
-    const endSend = (sendEpoch: number) => {
+    const endSend = (sendEpoch: number, inputRevision: number) => {
+        inFlightInputRevisionsReference.current.delete(inputRevision);
         if (sendEpoch !== sendEpochReference.current) {
             return;
         }
@@ -151,7 +166,11 @@ export function useChatActions({
     };
 
     const isBlockedByInFlightSend = () =>
-        sendCountReference.current > 0 && activeRunCount === 0;
+        sendCountReference.current > 0 &&
+        (activeRunCount === 0 ||
+            inFlightInputRevisionsReference.current.has(
+                inputRevisionReference.current.revision
+            ));
 
     const isSessionCompacting = (sessionKey: string) =>
         isCompactingReference.current ||
@@ -193,23 +212,24 @@ export function useChatActions({
             return;
         }
 
-        const sendEpoch = beginSend();
+        const inputRevision = inputRevisionReference.current.revision;
+        const sendEpoch = beginSend(inputRevision);
         if (text.startsWith("/")) {
             try {
                 const wasHandled = await handleSlashCommand(text, currentAttachments);
                 if (selectedSessionKeyReference.current !== pendingSessionKey) {
-                    endSend(sendEpoch);
+                    endSend(sendEpoch, inputRevision);
                     return;
                 }
                 if (wasHandled) {
-                    endSend(sendEpoch);
+                    endSend(sendEpoch, inputRevision);
                     return;
                 }
             } catch (error) {
                 if (selectedSessionKeyReference.current === pendingSessionKey) {
                     setSendError(chatErrorMessage(error, "Failed to run slash command"));
                 }
-                endSend(sendEpoch);
+                endSend(sendEpoch, inputRevision);
                 return;
             }
         }
@@ -313,7 +333,7 @@ export function useChatActions({
                 );
             }
         } finally {
-            endSend(sendEpoch);
+            endSend(sendEpoch, inputRevision);
         }
     };
 

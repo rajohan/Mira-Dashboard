@@ -6,6 +6,7 @@ import {
     itemStrings,
     itemTexts,
     normalizeAssistant,
+    openClawCompactionRunId,
     openClawEventContext,
     openClawPayloadView,
     openClawSequence,
@@ -221,8 +222,10 @@ function runtimeStreamDrafts(
             kind: "finish",
             error: terminalError,
             outcome,
-            settlesCompaction:
-                stream === "lifecycle" && (phase === "end" || phase === "error"),
+            settlesCompactionRunId:
+                stream === "lifecycle" && (phase === "end" || phase === "error")
+                    ? openClawCompactionRunId(common.sessionKey, common.runId)
+                    : undefined,
             toolFailure: isToolFailureError(terminalError) || undefined,
         });
     } else if (!progress.text && OPENCLAW_WORK_STREAMS.has(stream) && phase === "start") {

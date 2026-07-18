@@ -1198,9 +1198,8 @@ describe("Mira Dashboard frontend behavior", () => {
                     {},
                     { timeoutMs: NaN }
                 );
-                const invalidTimeoutRequest = JSON.parse(
-                    replacementSocket.sent.at(-1)!
-                ) as { id: string; timeoutMs?: number };
+                const invalidTimeoutRequest: { id: string; timeoutMs?: number } =
+                    JSON.parse(replacementSocket.sent.at(-1)!);
                 expect(invalidTimeoutRequest.timeoutMs).toBe(30_000);
                 expect(timeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 30_000);
                 replacementSocket.message({
@@ -1218,9 +1217,8 @@ describe("Mira Dashboard frontend behavior", () => {
                     {},
                     { timeoutMs: Number.MAX_SAFE_INTEGER }
                 );
-                const clampedTimeoutRequest = JSON.parse(
-                    replacementSocket.sent.at(-1)!
-                ) as { id: string; timeoutMs?: number };
+                const clampedTimeoutRequest: { id: string; timeoutMs?: number } =
+                    JSON.parse(replacementSocket.sent.at(-1)!);
                 expect(clampedTimeoutRequest.timeoutMs).toBe(2_147_483_647);
                 expect(timeoutSpy).toHaveBeenLastCalledWith(
                     expect.any(Function),

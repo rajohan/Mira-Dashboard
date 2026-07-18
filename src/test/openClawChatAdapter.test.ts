@@ -244,6 +244,7 @@ describe("OpenClaw chat adapter", () => {
                 content: "steer",
                 idempotencyKey: "dashboard-chat-123:user",
                 role: "user",
+                runId: " ".repeat(3),
             },
         ]);
 
@@ -491,14 +492,14 @@ describe("OpenClaw chat adapter", () => {
         ).toBe("⚠️ 🛠️ warnings can also be ordinary final text");
     });
 
-    it("retains an empty error-only tool result as a failure", () => {
+    it("retains an error-only tool result as a failure", () => {
         const adapter = new OpenClawChatAdapter();
         const events = adapter.event(
             envelope(
                 "session.tool",
                 {
                     data: {
-                        error: "",
+                        error: "tool failed",
                         name: "functions.exec_command",
                         phase: "end",
                     },
@@ -510,9 +511,31 @@ describe("OpenClaw chat adapter", () => {
         const tool = events.find((event) => event.kind === "tool");
 
         expect(tool?.kind === "tool" && tool.message.toolResult).toMatchObject({
-            content: "",
+            content: "tool failed",
             isError: true,
         });
+    });
+
+    it("does not classify a nullable empty tool error as a failure", () => {
+        const adapter = new OpenClawChatAdapter();
+        const nullableError: unknown = JSON.parse("null");
+        const events = adapter.event(
+            envelope(
+                "session.tool",
+                {
+                    data: {
+                        error: nullableError,
+                        name: "functions.exec_command",
+                        phase: "end",
+                    },
+                    stream: "tool",
+                },
+                16
+            )
+        );
+        const tool = events.find((event) => event.kind === "tool");
+
+        expect(tool?.kind === "tool" && tool.message.toolResult).toBeUndefined();
     });
 
     it("normalizes malformed raw history metadata without throwing", () => {

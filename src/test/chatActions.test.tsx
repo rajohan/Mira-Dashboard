@@ -158,6 +158,52 @@ describe("chat actions", () => {
         });
     });
 
+    it("blocks duplicate live-steer submissions from the same input revision", async () => {
+        const sendDeferred = Promise.withResolvers<{ runId?: string }>();
+        const transport = fakeTransport(jest.fn(() => sendDeferred.promise));
+        const runtime = fakeRuntime();
+        const { result } = renderHook(() =>
+            useChatActions({
+                activeRunCount: 1,
+                attachments: [],
+                attachmentsReference: { current: [] },
+                clearAttachments: jest.fn(),
+                confirmResetSession: jest.fn(async () => true),
+                draft: "steer once",
+                isCompacting: false,
+                isConnected: true,
+                isRecording: false,
+                isTranscribing: false,
+                runtime,
+                scheduleBottomFollow: jest.fn(),
+                selectedSession: selectedSession(),
+                selectedSessionKey: SESSION_A,
+                selectedSessionKeyReference: { current: SESSION_A },
+                setDraft: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                transport,
+            })
+        );
+
+        let firstSend: Promise<void> | undefined;
+        let duplicateSend: Promise<void> | undefined;
+        act(() => {
+            firstSend = result.current.handleSend();
+            duplicateSend = result.current.handleSend();
+        });
+
+        await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(1));
+        expect(runtime.beginRun).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            sendDeferred.resolve({ runId: "active-run" });
+            await Promise.all([firstSend, duplicateSend]);
+        });
+    });
+
     it("uses the session compaction RPC and clears request state when it finishes", async () => {
         const compactDeferred = Promise.withResolvers<void>();
         const transport = fakeTransport();

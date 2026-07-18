@@ -57,7 +57,11 @@ export function openClawToolMessage(
             : typeof resultRecord?.exitCode === "number"
               ? resultRecord.exitCode
               : undefined;
-    const hasErrorResult = data.error !== undefined && result === data.error;
+    const hasErrorResult =
+        result === data.error &&
+        (typeof data.error === "string"
+            ? data.error.trim().length > 0
+            : Boolean(data.error));
     const isFailedResult =
         ["error", "failed", "failure"].includes(status) ||
         (exitCode !== undefined && exitCode !== 0);

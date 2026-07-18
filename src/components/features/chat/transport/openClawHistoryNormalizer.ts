@@ -31,8 +31,9 @@ export interface RawOpenClawHistoryMessage {
 }
 
 function normalizedRunId(message: RawOpenClawHistoryMessage): string | undefined {
-    if (typeof message.runId === "string") {
-        return message.runId;
+    const runId = typeof message.runId === "string" ? message.runId.trim() : "";
+    if (runId) {
+        return runId;
     }
     if (
         typeof message.role !== "string" ||

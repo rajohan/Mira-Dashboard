@@ -96,7 +96,7 @@ export type ChatRuntimeEvent =
           error?: string;
           message?: ChatHistoryMessage;
           outcome: Exclude<ChatRunPhase, "active">;
-          settlesCompaction?: boolean;
+          settlesCompactionRunId?: string;
           toolFailure?: boolean;
       });
 
@@ -835,30 +835,30 @@ function applyFinishEvent(
     };
 }
 
-function settleRetryingCompactionRuns(
+function settleRetryingCompactionRun(
     session: ChatSessionRuntimeState,
     event: ChatRuntimeEvent
 ): void {
-    if (event.kind !== "finish" || !event.settlesCompaction) {
+    if (event.kind !== "finish" || !event.settlesCompactionRunId) {
         return;
     }
-    for (const [runKey, run] of Object.entries(session.runs)) {
-        if (run.operation !== "compact" || run.operationPhase !== "retrying") {
-            continue;
-        }
-        session.runs[runKey] = {
-            ...run,
-            error: event.error,
-            lastSequence: event.sequence,
-            operationPhase: event.outcome === "completed" ? "complete" : "inactive",
-            operationUpdatedAt: event.timestamp,
-            phase: event.outcome,
-            statusText: undefined,
-            terminalAt: event.timestamp,
-            terminalSequence: event.sequence,
-            updatedAt: event.timestamp,
-        };
+    const runKey = matchingRunKey(session, event.settlesCompactionRunId);
+    const run = runKey ? session.runs[runKey] : undefined;
+    if (!runKey || run?.operation !== "compact" || run.operationPhase !== "retrying") {
+        return;
     }
+    session.runs[runKey] = {
+        ...run,
+        error: event.error,
+        lastSequence: event.sequence,
+        operationPhase: event.outcome === "completed" ? "complete" : "inactive",
+        operationUpdatedAt: event.timestamp,
+        phase: event.outcome,
+        statusText: undefined,
+        terminalAt: event.timestamp,
+        terminalSequence: event.sequence,
+        updatedAt: event.timestamp,
+    };
 }
 
 /** Applies normalized runtime events deterministically and idempotently. */
@@ -900,7 +900,7 @@ export function reduceChatRuntime(
                   ),
               }
             : { lastSequence: -1, runs: {}, sessionKey };
-        settleRetryingCompactionRuns(session, normalizedEvent);
+        settleRetryingCompactionRun(session, normalizedEvent);
         const resolved = resolveRun(session, normalizedEvent);
         session.lastSequence = normalizedEvent.sequence;
         const sessions = { ...nextState.sessions };

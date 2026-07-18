@@ -2234,7 +2234,7 @@ describe("chat projection", () => {
                 kind: "finish",
                 outcome: "completed",
                 runId: "run-1",
-                settlesCompaction: true,
+                settlesCompactionRunId: "compaction:run-1",
             }),
         ]);
         const projection = projectChat(
@@ -2253,6 +2253,29 @@ describe("chat projection", () => {
         });
     });
 
+    it("does not settle a retrying compaction from an unrelated lifecycle", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, {
+                kind: "status",
+                operation: "compact",
+                operationPhase: "retrying",
+                runId: "compaction:run-2",
+                text: "Compacting context",
+            }),
+            event(16, {
+                kind: "finish",
+                outcome: "completed",
+                runId: "run-1",
+                settlesCompactionRunId: "compaction:run-1",
+            }),
+        ]);
+
+        expect(runtime.sessions[SESSION]?.runs["compaction:run-2"]).toMatchObject({
+            operationPhase: "retrying",
+            phase: "active",
+        });
+    });
+
     it("keeps a failed retrying compaction out of completed feedback", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(8, {
@@ -2267,7 +2290,7 @@ describe("chat projection", () => {
                 kind: "finish",
                 outcome: "error",
                 runId: "run-1",
-                settlesCompaction: true,
+                settlesCompactionRunId: "compaction:run-1",
             }),
         ]);
         const projection = projectChat(
