@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { ChatRow } from "./chatTypes";
 import type { ChatCompactionStatus } from "./domain/chatProjection";
+import type { ChatRunState } from "./domain/chatState";
 
 const ACTIVE_COMPACTION_TIMEOUT_MS = 5 * 60_000;
 const COMPLETED_COMPACTION_VISIBILITY_MS = 5000;
@@ -51,13 +52,22 @@ export function compactionIndicatorRow(status: ChatCompactionStatus): ChatRow {
     };
 }
 
+interface ChatActivityProjectionOptions {
+    activeRuns: readonly Pick<ChatRunState, "runId">[];
+    compactionStatus: ChatCompactionStatus | undefined;
+    isActiveSession: boolean;
+    rows: ChatRow[];
+    sessionKey: string;
+}
+
 /** Keeps one activity row visible while preferring explicit compaction feedback. */
-export function projectChatActivityRows(
-    rows: ChatRow[],
-    compactionStatus: ChatCompactionStatus | undefined,
-    isActiveSession: boolean,
-    sessionKey: string
-): ChatRow[] {
+export function projectChatActivityRows({
+    activeRuns,
+    compactionStatus,
+    isActiveSession,
+    rows,
+    sessionKey,
+}: ChatActivityProjectionOptions): ChatRow[] {
     if (compactionStatus?.phase === "active") {
         return [
             ...rows.filter((row) => row.kind !== "typing"),
@@ -70,7 +80,15 @@ export function projectChatActivityRows(
     if (
         !isActiveSession ||
         !sessionKey ||
-        rows.some((row) => row.kind === "typing" || row.kind === "stream")
+        rows.some(
+            (row) =>
+                row.kind === "typing" ||
+                (row.kind === "stream" &&
+                    Boolean(
+                        row.message.runId &&
+                        activeRuns.some((run) => run.runId === row.message.runId)
+                    ))
+        )
     ) {
         return rows;
     }

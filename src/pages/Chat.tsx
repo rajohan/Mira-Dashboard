@@ -177,12 +177,13 @@ export function Chat() {
         deletedMessageKeys
     );
     const compactionIndicator = useChatCompactionIndicator(projection.compactionStatus);
-    const chatRows = projectChatActivityRows(
-        projection.rows,
-        compactionIndicator,
-        isSessionActive(selectedSession),
-        selectedSessionKey
-    );
+    const chatRows = projectChatActivityRows({
+        activeRuns: projection.activeRuns,
+        compactionStatus: compactionIndicator,
+        isActiveSession: isSessionActive(selectedSession),
+        rows: projection.rows,
+        sessionKey: selectedSessionKey,
+    });
     const scroll = useChatScroll(
         chatRows,
         selectedSessionKey,

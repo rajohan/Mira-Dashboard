@@ -26,7 +26,13 @@ describe("chat compaction indicator", () => {
         };
 
         expect(
-            projectChatActivityRows([normalActivity], compaction, true, "agent:main:main")
+            projectChatActivityRows({
+                activeRuns: [],
+                compactionStatus: compaction,
+                isActiveSession: true,
+                rows: [normalActivity],
+                sessionKey: "agent:main:main",
+            })
         ).toEqual([
             expect.objectContaining({
                 key: "compaction-compact-1",
@@ -34,7 +40,15 @@ describe("chat compaction indicator", () => {
                 message: expect.objectContaining({ text: "Compacting context" }),
             }),
         ]);
-        expect(projectChatActivityRows([], undefined, true, "agent:main:main")).toEqual([
+        expect(
+            projectChatActivityRows({
+                activeRuns: [],
+                compactionStatus: undefined,
+                isActiveSession: true,
+                rows: [],
+                sessionKey: "agent:main:main",
+            })
+        ).toEqual([
             expect.objectContaining({
                 key: "typing-session-agent:main:main",
                 kind: "typing",
@@ -48,13 +62,35 @@ describe("chat compaction indicator", () => {
                 message: {
                     content: "Streaming answer",
                     role: "assistant",
+                    runId: "active-run",
                     text: "Streaming answer",
                 },
             },
         ];
         expect(
-            projectChatActivityRows(streamingRows, undefined, true, "agent:main:main")
+            projectChatActivityRows({
+                activeRuns: [{ runId: "active-run" }],
+                compactionStatus: undefined,
+                isActiveSession: true,
+                rows: streamingRows,
+                sessionKey: "agent:main:main",
+            })
         ).toBe(streamingRows);
+        expect(
+            projectChatActivityRows({
+                activeRuns: [],
+                compactionStatus: undefined,
+                isActiveSession: true,
+                rows: streamingRows,
+                sessionKey: "agent:main:main",
+            })
+        ).toEqual([
+            ...streamingRows,
+            expect.objectContaining({
+                key: "typing-session-agent:main:main",
+                kind: "typing",
+            }),
+        ]);
     });
 
     it("preserves normal activity while completed compaction feedback is visible", () => {
@@ -65,17 +101,18 @@ describe("chat compaction indicator", () => {
         };
 
         expect(
-            projectChatActivityRows(
-                [normalActivity],
-                {
+            projectChatActivityRows({
+                activeRuns: [],
+                compactionStatus: {
                     key: "compact-1",
                     phase: "complete",
                     text: "Context compacted",
                     timestamp: "2026-07-17T18:00:00.000Z",
                 },
-                true,
-                "agent:main:main"
-            )
+                isActiveSession: true,
+                rows: [normalActivity],
+                sessionKey: "agent:main:main",
+            })
         ).toEqual([
             normalActivity,
             expect.objectContaining({

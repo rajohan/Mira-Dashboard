@@ -1089,12 +1089,18 @@ export class OpenClawChatBridge {
             }
             const rewrittenEvents = sourceRun.events.flatMap((envelope) => {
                 const payload = asRecord(envelope.payload);
-                if (stringField(payload, "sessionKey") !== sourceSessionKey) {
+                const payloadView = runtimePayloadView(payload);
+                if (
+                    !payload ||
+                    stringField(payloadView, "sessionKey") !== sourceSessionKey
+                ) {
                     return [envelope];
                 }
                 const rewritten = {
                     ...envelope,
-                    payload: { ...payload, sessionKey: canonicalSessionKey },
+                    payload: withRuntimeIdentity(payload, {
+                        sessionKey: canonicalSessionKey,
+                    }),
                 };
                 if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_RUN) {
                     return [rewritten];
@@ -1106,7 +1112,7 @@ export class OpenClawChatBridge {
                     ...envelope,
                     payload: compactTerminalPayload(
                         asRecord(rewritten.payload),
-                        stringField(payload, "runId"),
+                        stringField(payloadView, "runId"),
                         canonicalSessionKey
                     ),
                 };
@@ -1356,7 +1362,7 @@ export class OpenClawChatBridge {
     ): void {
         const events = run.events.flatMap((envelope) => {
             const payload = asRecord(envelope.payload);
-            const payloadRunId = stringField(payload, "runId");
+            const payloadRunId = stringField(runtimePayloadView(payload), "runId");
             if (
                 !payload ||
                 (payloadRunId &&
@@ -1368,7 +1374,7 @@ export class OpenClawChatBridge {
 
             const rewritten = {
                 ...envelope,
-                payload: { ...payload, runId: providerRunId },
+                payload: withRuntimeIdentity(payload, { runId: providerRunId }),
             };
             if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_RUN) {
                 return [rewritten];

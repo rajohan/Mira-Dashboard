@@ -686,16 +686,35 @@ describe("OpenClaw chat bridge", () => {
 
     it("promotes an already-loaded short session alias to its canonical key", () => {
         const store = new MemorySnapshotStore();
-        store.snapshots.set("main", persistedSnapshot("main", "run-1"));
+        const snapshot = persistedSnapshot("main", "run-1");
+        snapshot.events[0]!.payload = {
+            data: {
+                runId: "run-1",
+                sessionKey: "main",
+                stream: "thinking",
+            },
+            runId: "run-1",
+            sessionKey: "main",
+            stream: "thinking",
+        };
+        store.snapshots.set("main", snapshot);
         const bridge = new OpenClawChatBridge(store);
 
         expect(bridge.snapshot("main").events).toHaveLength(1);
         expect(bridge.snapshot(MAIN).events[0]?.payload).toMatchObject({
+            data: { runId: "run-1", sessionKey: MAIN },
             runId: "run-1",
             sessionKey: MAIN,
         });
         expect(store.snapshots.has("main")).toBe(false);
         expect(store.snapshots.has(MAIN)).toBe(true);
+        expect(
+            new OpenClawChatBridge(store).snapshot(MAIN).events[0]?.payload
+        ).toMatchObject({
+            data: { runId: "run-1", sessionKey: MAIN },
+            runId: "run-1",
+            sessionKey: MAIN,
+        });
     });
 
     it("hydrates and merges an unloaded canonical replay before alias promotion", () => {
@@ -1752,6 +1771,42 @@ describe("OpenClaw chat bridge", () => {
                     },
                 },
             ],
+        });
+    });
+
+    it("rewrites nested run identities when a provisional run is promoted", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    delta: "nested reasoning",
+                    runId: "dashboard-chat-nested",
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+            },
+            []
+        );
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: "dashboard-chat-nested",
+                message: "question",
+                sessionKey: MAIN,
+            },
+            { runId: "provider-nested" }
+        );
+        expect(bridge.flush()).toBe(true);
+
+        expect(
+            new OpenClawChatBridge(store).snapshot(MAIN).events[0]?.payload
+        ).toMatchObject({
+            data: { runId: "provider-nested", sessionKey: MAIN },
+            runId: "provider-nested",
+            sessionKey: MAIN,
         });
     });
 
