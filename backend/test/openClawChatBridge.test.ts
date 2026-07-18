@@ -736,6 +736,31 @@ describe("OpenClaw chat bridge", () => {
         }
     });
 
+    it("uses one replay entry for equivalent session-key spellings", () => {
+        const store = new MemorySnapshotStore();
+        store.snapshots.set(MAIN, persistedSnapshot(MAIN, "run-1"));
+        const bridge = new OpenClawChatBridge(store);
+
+        expect(bridge.snapshot(MAIN).events).toHaveLength(1);
+        expect(bridge.snapshot(` ${MAIN.toUpperCase()} `).events).toHaveLength(1);
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "continued" },
+                runId: "run-1",
+                sessionKey: MAIN.toUpperCase(),
+                stream: "thinking",
+            },
+            []
+        );
+        expect(bridge.snapshot(MAIN).events).toHaveLength(2);
+        expect(bridge.snapshot(MAIN.toUpperCase()).events).toHaveLength(2);
+
+        expect(bridge.flush()).toBe(true);
+        expect(store.snapshots.keys().toArray()).toEqual([MAIN]);
+    });
+
     it("retries canonical alias promotion after persistence fails", () => {
         const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
 

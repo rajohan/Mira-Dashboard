@@ -205,7 +205,7 @@ export function base64ToText(base64: string): string | undefined {
 }
 
 /** Returns a stable media identity independent of the turn carrying it. */
-function messageMediaIdentity(message: ChatHistoryMessage): string | undefined {
+export function messageMediaIdentity(message: ChatHistoryMessage): string | undefined {
     if (!message.images?.length && !message.attachments?.length) {
         return undefined;
     }

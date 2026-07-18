@@ -11,9 +11,10 @@ import {
     mergeChatMessageDetails,
     messageDeleteKey,
     messageIdentity,
+    messageMediaIdentity,
     stableChatStringify,
 } from "../chatUtilities";
-import { presentChatMessages } from "./chatPresentation";
+import { hasPrimaryAnswerContent, presentChatMessages } from "./chatPresentation";
 import type {
     ChatRunState,
     ChatRuntimeState,
@@ -257,9 +258,7 @@ function hasUnansweredUserBeforeSegment(
         const role = message.role.toLowerCase();
         return (
             (role === "assistant" || role === "system") &&
-            message.text.trim().length > 0 &&
-            !message.toolCalls?.length &&
-            !message.toolResult
+            hasPrimaryAnswerContent(message)
         );
     });
 }
@@ -453,10 +452,19 @@ function isMatchingRuntimeUser(
     runtimeMessage: ChatHistoryMessage,
     run: ChatRunState
 ): boolean {
-    if (
-        !isUserMessage(candidate) ||
-        messageIdentity(candidate) !== messageIdentity(runtimeMessage)
-    ) {
+    if (!isUserMessage(candidate) || !isUserMessage(runtimeMessage)) {
+        return false;
+    }
+    const areIdentitiesMatching =
+        messageIdentity(candidate) === messageIdentity(runtimeMessage);
+    const candidateMediaIdentity = messageMediaIdentity(candidate);
+    const isMediaOnlyContentMatching = Boolean(
+        !candidate.text.trim() &&
+        !runtimeMessage.text.trim() &&
+        candidateMediaIdentity &&
+        candidateMediaIdentity === messageMediaIdentity(runtimeMessage)
+    );
+    if (!areIdentitiesMatching && !isMediaOnlyContentMatching) {
         return false;
     }
     const candidateTimestamp = messageTimestamp(candidate);

@@ -858,6 +858,48 @@ describe("chat projection", () => {
         expect(repeated.map((item) => item.runId)).toEqual(["run-2", "run-1"]);
     });
 
+    it("merges a media-only provider echo into its optimistic dashboard row", () => {
+        const attachment = {
+            contentBase64: "c2FtZSBjb250ZW50",
+            fileName: "same.txt",
+            id: "local-random-id",
+            kind: "text" as const,
+            mimeType: "text/plain",
+            sizeBytes: 12,
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:01.000Z", {
+                kind: "user",
+                message: {
+                    attachments: [{ ...attachment, id: "inline-same.txt-0" }],
+                    content: "",
+                    role: "user",
+                    text: "",
+                },
+                runId: "provider-run",
+            }),
+        ]);
+        const history: ChatHistoryMessage[] = [
+            {
+                attachments: [attachment],
+                content: "",
+                local: true,
+                role: "user",
+                runId: "dashboard-chat-optimistic",
+                text: "",
+                timestamp: "2026-07-16T12:00:00.000Z",
+            },
+        ];
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+
+        expect(reconciled).toHaveLength(1);
+        expect(reconciled[0]).toMatchObject({
+            attachments: [expect.objectContaining({ fileName: "same.txt" })],
+            runId: "provider-run",
+        });
+    });
+
     it("anchors grouped thinking after recovered and live tools on refresh", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(8, {
@@ -1481,6 +1523,73 @@ describe("chat projection", () => {
             message: { text: "Thinking" },
         });
     });
+
+    it.each([
+        {
+            label: "media-only",
+            previousAnswer: {
+                attachments: [{ fileName: "answer.txt", id: "answer", kind: "text" }],
+                content: "",
+                role: "assistant",
+                text: "",
+            } satisfies ChatHistoryMessage,
+        },
+        {
+            label: "final tool-bearing",
+            previousAnswer: {
+                content: "first answer",
+                isFinal: true,
+                role: "assistant",
+                text: "first answer",
+                toolCalls: [{ id: "call-1", name: "read" }],
+            } satisfies ChatHistoryMessage,
+        },
+    ])(
+        "recognizes a $label prior answer before adopting a later unscoped final",
+        ({ previousAnswer }) => {
+            const history: ChatHistoryMessage[] = [
+                {
+                    ...message("user", "question one"),
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+                {
+                    ...previousAnswer,
+                    timestamp: "2026-07-16T12:00:30.000Z",
+                },
+                {
+                    ...message("user", "question two"),
+                    timestamp: "2026-07-16T12:01:00.000Z",
+                },
+                {
+                    ...message("assistant", "second answer"),
+                    timestamp: "2026-07-16T12:01:31.000Z",
+                },
+            ];
+            const runtime = reduceChatRuntime(createChatRuntimeState(), [
+                eventAt(16, "2026-07-16T12:01:30.000Z", {
+                    kind: "status",
+                    runId: "active-second-run",
+                    text: "Thinking",
+                }),
+            ]);
+
+            const projection = projectChat(
+                history,
+                runtime,
+                SESSION,
+                createChatVisibility(true, true),
+                true,
+                new Set()
+            );
+
+            expect(projection.rows.at(-1)).toMatchObject({
+                kind: "message",
+                message: { text: "second answer" },
+            });
+            expect(projection.rows.some((row) => row.kind === "typing")).toBe(false);
+            expect(projection.activeRuns).toEqual([]);
+        }
+    );
 
     it("does not replay completed tool diagnostics already present in history", () => {
         const toolDiagnostic: ChatHistoryMessage = {

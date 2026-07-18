@@ -37,6 +37,40 @@ export function stripThinkingFromMessage(
     };
 }
 
+interface PrimaryAnswerDetails {
+    hasPrimaryContent: boolean;
+    hasToolOutput: boolean;
+    isPrimaryAnswerContent: boolean;
+    withoutThinking: ChatHistoryMessage;
+}
+
+function primaryAnswerDetails(message: ChatHistoryMessage): PrimaryAnswerDetails {
+    const withoutThinking = stripThinkingFromMessage(message);
+    const hasToolOutput = Boolean(message.toolCalls?.length || message.toolResult);
+    const hasVisibleAttachments = Boolean(
+        withoutThinking.attachments?.length &&
+        !withoutThinking.hasOnlyHiddenToolAttachments &&
+        (!hasToolOutput || message.isFinal === true)
+    );
+    const hasPrimaryContent = Boolean(
+        withoutThinking.text.trim() ||
+        withoutThinking.images?.length ||
+        hasVisibleAttachments
+    );
+    return {
+        hasPrimaryContent,
+        hasToolOutput,
+        isPrimaryAnswerContent:
+            hasPrimaryContent && (!hasToolOutput || message.isFinal === true),
+        withoutThinking,
+    };
+}
+
+/** Identifies answer content independently from role and visibility settings. */
+export function hasPrimaryAnswerContent(message: ChatHistoryMessage): boolean {
+    return primaryAnswerDetails(message).isPrimaryAnswerContent;
+}
+
 function applyFinalThinkingPreference(
     messages: ChatHistoryMessage[],
     visibility: ChatVisibilitySettings,
@@ -87,29 +121,18 @@ function applyFinalThinkingPreference(
 
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index]!;
-        const withoutThinking = stripThinkingFromMessage(message);
+        const details = primaryAnswerDetails(message);
+        const { hasPrimaryContent, hasToolOutput, withoutThinking } = details;
         if (message.role.toLowerCase() === "user") {
             flush();
             reversed.push(withoutThinking);
             continue;
         }
 
-        const hasToolOutput = Boolean(message.toolCalls?.length || message.toolResult);
-        const hasVisibleAttachments = Boolean(
-            withoutThinking.attachments?.length &&
-            !withoutThinking.hasOnlyHiddenToolAttachments &&
-            (!hasToolOutput || message.isFinal === true)
-        );
-        const hasPrimaryContent = Boolean(
-            withoutThinking.text.trim() ||
-            withoutThinking.images?.length ||
-            hasVisibleAttachments
-        );
         const isDiagnosticTool = hasToolOutput && !hasPrimaryContent;
         const isPrimaryAnswer = Boolean(
             message.role.toLowerCase() === "assistant" &&
-            hasPrimaryContent &&
-            (!hasToolOutput || message.isFinal === true) &&
+            details.isPrimaryAnswerContent &&
             isRenderableChatHistoryMessage(withoutThinking, visibility)
         );
         response.push({
@@ -176,14 +199,7 @@ function responseSegments(messages: ChatHistoryMessage[]): number[] {
 }
 
 function isPrimaryAssistantMessage(message: ChatHistoryMessage): boolean {
-    const withoutThinking = stripThinkingFromMessage(message);
-    return Boolean(
-        message.role.toLowerCase() === "assistant" &&
-        (!hasToolDetails(withoutThinking) || message.isFinal === true) &&
-        (withoutThinking.text.trim() ||
-            withoutThinking.images?.length ||
-            withoutThinking.attachments?.length)
-    );
+    return message.role.toLowerCase() === "assistant" && hasPrimaryAnswerContent(message);
 }
 
 function thinkingAnchorIndex(

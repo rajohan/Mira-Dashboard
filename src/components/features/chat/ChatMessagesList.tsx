@@ -52,7 +52,10 @@ function isScrollbarPointer(event: PointerEvent<HTMLDivElement>): boolean {
 }
 
 function isKeyboardScroll(event: KeyboardEvent<HTMLDivElement>): boolean {
-    return event.target === event.currentTarget && SCROLL_KEYS.has(event.key);
+    return (
+        SCROLL_KEYS.has(event.key) &&
+        (event.target === event.currentTarget || event.key !== " ")
+    );
 }
 
 /** Provides props for chat messages list. */

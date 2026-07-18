@@ -192,12 +192,13 @@ const subscribers = new Set<DashboardSocket>();
 const pendingRequests = new Map<string, PendingRequest>();
 const chatReplayState: {
     bridge: OpenClawChatBridge;
+    generation: string;
     scope: string | undefined;
 } = {
     bridge: new OpenClawChatBridge(),
+    generation: randomUUID(),
     scope: undefined,
 };
-const chatRuntimeGeneration = randomUUID();
 type GatewayClientConstructor = new (
     options: OpenClawGatewayClientOptions
 ) => OpenClawGatewayClientInstance;
@@ -239,6 +240,7 @@ function didSelectChatReplayScope(endpoint: string, token: string): boolean {
         new SqliteOpenClawChatSnapshotStore(gatewayScope)
     );
     chatReplayState.scope = gatewayScope;
+    chatReplayState.generation = randomUUID();
     chatReplayState.bridge.hydratePersistedSessions();
     return true;
 }
@@ -1201,7 +1203,7 @@ function handleDashboardClient(ws: DashboardSocket): void {
                                     isOk: true,
                                     payload: {
                                         ...chatReplayState.bridge.snapshot(sessionKey),
-                                        runtimeGeneration: chatRuntimeGeneration,
+                                        runtimeGeneration: chatReplayState.generation,
                                     },
                                 })
                             );

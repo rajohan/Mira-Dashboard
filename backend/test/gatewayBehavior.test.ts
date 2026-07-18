@@ -413,6 +413,65 @@ describe("gateway behavior", () => {
         });
     });
 
+    it("rotates the chat runtime generation when Gateway credentials change", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("OPENCLAW_GATEWAY_URL");
+        const root = createTemporaryRoot("mira-gateway-runtime-generation-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+        process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-generation.test";
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+        const socket = new FakeDashboardSocket();
+        gateway.handleDashboardClient(socket);
+        const requestGeneration = async (id: string): Promise<string | undefined> => {
+            socket.emitMessage({
+                id,
+                method: "chat.runtimeSnapshot",
+                params: { sessionKey: "agent:main:main" },
+                type: "request",
+            });
+            await waitFor(() => socket.sent.some((raw) => raw.includes(`"id":"${id}"`)));
+            return socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            id?: string;
+                            payload?: { runtimeGeneration?: string };
+                        }
+                )
+                .find((message) => message.id === id)?.payload?.runtimeGeneration;
+        };
+
+        gateway.init("token-one");
+        const firstGeneration = await requestGeneration("generation-one");
+        gateway.init("token-two");
+        const secondGeneration = await requestGeneration("generation-two");
+        gateway.init("token-two");
+        const unchangedGeneration = await requestGeneration("generation-unchanged");
+
+        expect(firstGeneration).toEqual(expect.any(String));
+        expect(secondGeneration).toEqual(expect.any(String));
+        expect(secondGeneration).not.toBe(firstGeneration);
+        expect(unchangedGeneration).toBe(secondGeneration);
+        socket.close();
+    });
+
     it("normalizes sessions, enriches events, and hydrates omitted chat images without a real gateway", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");

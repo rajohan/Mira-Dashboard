@@ -256,13 +256,17 @@ function isAgentSessionKey(sessionKey: string): boolean {
     return /^agent:[^:]+:.+$/iu.test(sessionKey.trim());
 }
 
+function normalizedSessionKey(sessionKey: string): string {
+    return sessionKey.trim().toLowerCase();
+}
+
 function isExactSessionKey(left: string, right: string): boolean {
-    return left.trim().toLowerCase() === right.trim().toLowerCase();
+    return normalizedSessionKey(left) === normalizedSessionKey(right);
 }
 
 function isSameSessionKey(left: string, right: string): boolean {
-    const normalizedLeft = left.trim().toLowerCase();
-    const normalizedRight = right.trim().toLowerCase();
+    const normalizedLeft = normalizedSessionKey(left);
+    const normalizedRight = normalizedSessionKey(right);
     if (normalizedLeft === normalizedRight) {
         return true;
     }
@@ -301,7 +305,7 @@ function matchingSessionKeys(
     const matches = new Map<string, string>();
     for (const session of sessions) {
         if (isSameSessionKey(session.key, sessionKey)) {
-            matches.set(session.key.toLowerCase(), session.key);
+            matches.set(normalizedSessionKey(session.key), session.key);
         }
     }
     return matches;
@@ -778,14 +782,14 @@ export class OpenClawChatBridge {
         if (!this.#store) {
             return;
         }
-        const normalizedLookup = sessionKey.trim().toLowerCase();
+        const storageSessionKey = normalizedSessionKey(sessionKey);
         if (
-            !this.#retryPendingSessionClear(sessionKey) ||
-            !this.#retryExactDelete(sessionKey)
+            !this.#retryPendingSessionClear(storageSessionKey) ||
+            !this.#retryExactDelete(storageSessionKey)
         ) {
             return;
         }
-        if (this.#hydratedSessionLookups.has(normalizedLookup)) {
+        if (this.#hydratedSessionLookups.has(storageSessionKey)) {
             return;
         }
         const storedKeys = this.#storedSessionKeys();
@@ -793,34 +797,43 @@ export class OpenClawChatBridge {
             return;
         }
         const exactKey = storedKeys.find((candidate) =>
-            isExactSessionKey(candidate, sessionKey)
+            isExactSessionKey(candidate, storageSessionKey)
         );
         const matchingKeys = exactKey
             ? [exactKey]
-            : storedKeys.filter((candidate) => isSameSessionKey(candidate, sessionKey));
+            : storedKeys.filter((candidate) =>
+                  isSameSessionKey(candidate, storageSessionKey)
+              );
         if (matchingKeys.length === 0) {
-            this.#hydratedSessionLookups.add(normalizedLookup);
+            this.#hydratedSessionLookups.add(storageSessionKey);
             return;
         }
         if (matchingKeys.length !== 1) {
             return;
         }
         const storedKey = matchingKeys[0]!;
+        const storedStorageKey = normalizedSessionKey(storedKey);
         if (this.#hasPendingExactDelete(storedKey)) {
             if (this.#retryExactDelete(storedKey)) {
                 this.#ensureSessionLoaded(sessionKey);
             }
             return;
         }
-        this.#hydratedSessionLookups.add(normalizedLookup);
-        if (this.#loadedStoreKeys.has(storedKey)) {
+        this.#hydratedSessionLookups.add(storageSessionKey);
+        if (this.#loadedStoreKeys.has(storedStorageKey)) {
             const requiresCanonicalPromotion =
-                storedKey !== sessionKey && isAgentSessionKey(sessionKey);
+                storedStorageKey !== storageSessionKey &&
+                isAgentSessionKey(storageSessionKey);
             if (
                 requiresCanonicalPromotion &&
-                !this.#promoteSessionEntry(storedKey, sessionKey, undefined, sessionKey)
+                !this.#promoteSessionEntry(
+                    storedStorageKey,
+                    storageSessionKey,
+                    undefined,
+                    storageSessionKey
+                )
             ) {
-                this.#hydratedSessionLookups.delete(normalizedLookup);
+                this.#hydratedSessionLookups.delete(storageSessionKey);
             }
             return;
         }
@@ -829,11 +842,11 @@ export class OpenClawChatBridge {
             snapshot = this.#store.load(storedKey);
             this.#storeFailureReported = false;
         } catch (error) {
-            this.#hydratedSessionLookups.delete(normalizedLookup);
+            this.#hydratedSessionLookups.delete(storageSessionKey);
             this.#reportStoreFailure(error);
             return;
         }
-        this.#loadedStoreKeys.add(storedKey);
+        this.#loadedStoreKeys.add(storedStorageKey);
         if (!snapshot) {
             return;
         }
@@ -847,24 +860,33 @@ export class OpenClawChatBridge {
                 this.#retain(envelope, false);
             }
         });
-        const prunedStaleRun = this.#pruneStaleActiveRuns(storedKey);
-        if (storedKey !== sessionKey && isAgentSessionKey(sessionKey)) {
+        const prunedStaleRun = this.#pruneStaleActiveRuns(storedStorageKey);
+        if (
+            storedStorageKey !== storageSessionKey &&
+            isAgentSessionKey(storageSessionKey)
+        ) {
             if (
-                !this.#promoteSessionEntry(storedKey, sessionKey, undefined, sessionKey)
+                !this.#promoteSessionEntry(
+                    storedStorageKey,
+                    storageSessionKey,
+                    undefined,
+                    storageSessionKey
+                )
             ) {
-                this.#hydratedSessionLookups.delete(normalizedLookup);
-                this.#enforceSessionLimit(storedKey);
+                this.#hydratedSessionLookups.delete(storageSessionKey);
+                this.#enforceSessionLimit(storedStorageKey);
             }
             return;
         }
-        this.#enforceSessionLimit(storedKey);
+        this.#enforceSessionLimit(storedStorageKey);
         if (prunedStaleRun) {
-            this.#flushSessionPersistence(storedKey);
+            this.#flushSessionPersistence(storedStorageKey);
         }
     }
 
     #pruneStaleActiveRuns(sessionKey: string, now = Date.now()): boolean {
-        const runs = this.#runsBySession.get(sessionKey);
+        const storageSessionKey = normalizedSessionKey(sessionKey);
+        const runs = this.#runsBySession.get(storageSessionKey);
         if (!runs) {
             return false;
         }
@@ -881,13 +903,13 @@ export class OpenClawChatBridge {
             hasChanged = true;
         }
         if (runs.size === 0) {
-            this.#runsBySession.delete(sessionKey);
+            this.#runsBySession.delete(storageSessionKey);
         }
         return hasChanged;
     }
 
     #snapshotFromMemory(sessionKey: string): OpenClawRuntimeSnapshot {
-        const runs = this.#runsBySession.get(sessionKey);
+        const runs = this.#runsBySession.get(normalizedSessionKey(sessionKey));
         const snapshots = runs ? runs.values().toArray() : [];
         const active = snapshots.filter((snapshot) => !snapshot.completed);
         const completed = snapshots
@@ -913,11 +935,12 @@ export class OpenClawChatBridge {
         if (!this.#store) {
             return true;
         }
-        this.#pendingDeleteKeys.add(sessionKey);
+        const storageSessionKey = normalizedSessionKey(sessionKey);
+        this.#pendingDeleteKeys.add(storageSessionKey);
         try {
-            this.#store.delete(sessionKey);
-            this.#pendingDeleteKeys.delete(sessionKey);
-            this.#loadedStoreKeys.delete(sessionKey);
+            this.#store.delete(storageSessionKey);
+            this.#pendingDeleteKeys.delete(storageSessionKey);
+            this.#loadedStoreKeys.delete(storageSessionKey);
             this.#storeFailureReported = false;
             return true;
         } catch (error) {
@@ -930,25 +953,26 @@ export class OpenClawChatBridge {
         if (!this.#store) {
             return true;
         }
+        const storageSessionKey = normalizedSessionKey(sessionKey);
         if (
             !this.#retryStoreClear() ||
-            !this.#retryPendingSessionClear(sessionKey) ||
-            !this.#retryExactDelete(sessionKey)
+            !this.#retryPendingSessionClear(storageSessionKey) ||
+            !this.#retryExactDelete(storageSessionKey)
         ) {
             return false;
         }
-        const snapshot = this.#snapshotFromMemory(sessionKey);
+        const snapshot = this.#snapshotFromMemory(storageSessionKey);
         try {
             if (snapshot.events.length === 0) {
-                return this.#deletePersistedSession(sessionKey);
+                return this.#deletePersistedSession(storageSessionKey);
             }
-            this.#store.save(sessionKey, snapshot);
+            this.#store.save(storageSessionKey, snapshot);
             for (const pendingKey of this.#pendingDeleteKeys) {
-                if (isExactSessionKey(pendingKey, sessionKey)) {
+                if (isExactSessionKey(pendingKey, storageSessionKey)) {
                     this.#pendingDeleteKeys.delete(pendingKey);
                 }
             }
-            this.#loadedStoreKeys.add(sessionKey);
+            this.#loadedStoreKeys.add(storageSessionKey);
             this.#storeFailureReported = false;
             return true;
         } catch (error) {
@@ -958,11 +982,12 @@ export class OpenClawChatBridge {
     }
 
     #flushSessionPersistence(sessionKey: string): boolean {
-        const didPersist = this.#persistSession(sessionKey);
+        const storageSessionKey = normalizedSessionKey(sessionKey);
+        const didPersist = this.#persistSession(storageSessionKey);
         if (didPersist) {
-            this.#pendingPersistence.delete(sessionKey);
+            this.#pendingPersistence.delete(storageSessionKey);
         } else {
-            this.#pendingPersistence.add(sessionKey);
+            this.#pendingPersistence.add(storageSessionKey);
         }
         if (this.#pendingPersistence.size === 0) {
             this.#cancelPersistenceTimer();
@@ -984,7 +1009,7 @@ export class OpenClawChatBridge {
         if (!this.#store) {
             return;
         }
-        this.#pendingPersistence.add(sessionKey);
+        this.#pendingPersistence.add(normalizedSessionKey(sessionKey));
         if (this.#persistenceTimer) {
             return;
         }
@@ -995,24 +1020,26 @@ export class OpenClawChatBridge {
     }
 
     #evictSessionFromMemory(sessionKey: string): void {
-        this.#pendingPersistence.delete(sessionKey);
+        const storageSessionKey = normalizedSessionKey(sessionKey);
+        this.#pendingPersistence.delete(storageSessionKey);
         if (this.#pendingPersistence.size === 0) {
             this.#cancelPersistenceTimer();
         }
-        this.#runsBySession.delete(sessionKey);
+        this.#runsBySession.delete(storageSessionKey);
         for (const runId of this.#sessionsByRun.keys()) {
-            this.#forgetRunSession(runId, sessionKey);
+            this.#forgetRunSession(runId, storageSessionKey);
         }
-        this.#loadedStoreKeys.delete(sessionKey);
+        this.#loadedStoreKeys.delete(storageSessionKey);
         for (const lookup of this.#hydratedSessionLookups) {
-            if (isSameSessionKey(lookup, sessionKey)) {
+            if (isSameSessionKey(lookup, storageSessionKey)) {
                 this.#hydratedSessionLookups.delete(lookup);
             }
         }
     }
 
     #clearCompletedRuns(sessionKey: string, preservedRunId?: string): void {
-        const runs = this.#runsBySession.get(sessionKey);
+        const storageSessionKey = normalizedSessionKey(sessionKey);
+        const runs = this.#runsBySession.get(storageSessionKey);
         if (!runs) {
             return;
         }
@@ -1021,12 +1048,12 @@ export class OpenClawChatBridge {
                 continue;
             }
             runs.delete(runId);
-            this.#forgetRunSession(runId, sessionKey);
+            this.#forgetRunSession(runId, storageSessionKey);
         }
         if (runs.size === 0) {
-            this.#runsBySession.delete(sessionKey);
+            this.#runsBySession.delete(storageSessionKey);
         }
-        this.#flushSessionPersistence(sessionKey);
+        this.#flushSessionPersistence(storageSessionKey);
     }
 
     #cloneRetainedRun(run: RetainedRun): RetainedRun {
@@ -1041,20 +1068,31 @@ export class OpenClawChatBridge {
         if (!this.#store) {
             return true;
         }
+        const storageSessionKey = normalizedSessionKey(canonicalSessionKey);
         const storedKeys = this.#storedSessionKeys();
         if (!storedKeys) {
             return false;
         }
         const storedCanonicalKey = storedKeys.find((candidate) =>
-            isExactSessionKey(candidate, canonicalSessionKey)
+            isExactSessionKey(candidate, storageSessionKey)
         );
-        if (!storedCanonicalKey || this.#loadedStoreKeys.has(storedCanonicalKey)) {
+        const storedCanonicalStorageKey = storedCanonicalKey
+            ? normalizedSessionKey(storedCanonicalKey)
+            : undefined;
+        if (
+            !storedCanonicalKey ||
+            (storedCanonicalStorageKey &&
+                this.#loadedStoreKeys.has(storedCanonicalStorageKey))
+        ) {
             return true;
         }
         this.#withDeferredSessionLimit(() =>
             this.#ensureSessionLoaded(storedCanonicalKey)
         );
-        return this.#loadedStoreKeys.has(storedCanonicalKey);
+        return Boolean(
+            storedCanonicalStorageKey &&
+            this.#loadedStoreKeys.has(storedCanonicalStorageKey)
+        );
     }
 
     #promoteSessionEntry(
@@ -1063,18 +1101,19 @@ export class OpenClawChatBridge {
         preferredRunId?: string,
         protectedSessionKey?: string
     ): boolean {
-        if (sourceSessionKey === canonicalSessionKey) {
+        const sourceStorageKey = normalizedSessionKey(sourceSessionKey);
+        const canonicalStorageKey = normalizedSessionKey(canonicalSessionKey);
+        if (sourceStorageKey === canonicalStorageKey) {
             return true;
         }
-        if (!this.#ensureCanonicalDestinationLoaded(canonicalSessionKey)) {
+        if (!this.#ensureCanonicalDestinationLoaded(canonicalStorageKey)) {
             return false;
         }
-        const sourceRuns = this.#runsBySession.get(sourceSessionKey);
+        const sourceRuns = this.#runsBySession.get(sourceStorageKey);
         if (!sourceRuns || (preferredRunId && !sourceRuns.has(preferredRunId))) {
             return false;
         }
-
-        const previousCanonicalRuns = this.#runsBySession.get(canonicalSessionKey);
+        const previousCanonicalRuns = this.#runsBySession.get(canonicalStorageKey);
         const nextSourceRuns = new Map(
             [...sourceRuns].map(([runId, run]) => [runId, this.#cloneRetainedRun(run)])
         );
@@ -1098,14 +1137,17 @@ export class OpenClawChatBridge {
                 const payloadView = runtimePayloadView(payload);
                 if (
                     !payload ||
-                    stringField(payloadView, "sessionKey") !== sourceSessionKey
+                    !isExactSessionKey(
+                        stringField(payloadView, "sessionKey") || "",
+                        sourceStorageKey
+                    )
                 ) {
                     return [envelope];
                 }
                 const rewritten = {
                     ...envelope,
                     payload: withRuntimeIdentity(payload, {
-                        sessionKey: canonicalSessionKey,
+                        sessionKey: canonicalStorageKey,
                     }),
                 };
                 if (Buffer.byteLength(JSON.stringify(rewritten)) <= MAX_BYTES_PER_RUN) {
@@ -1119,7 +1161,7 @@ export class OpenClawChatBridge {
                     payload: compactTerminalPayload(
                         asRecord(rewritten.payload),
                         stringField(payloadView, "runId"),
-                        canonicalSessionKey
+                        canonicalStorageKey
                     ),
                 };
                 return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_RUN
@@ -1163,43 +1205,36 @@ export class OpenClawChatBridge {
             evictedCanonicalRunIds.add(oldestRunId);
         }
         if (nextCanonicalRuns.size === 0) {
-            this.#runsBySession.delete(canonicalSessionKey);
+            this.#runsBySession.delete(canonicalStorageKey);
         } else {
-            this.#runsBySession.set(canonicalSessionKey, nextCanonicalRuns);
+            this.#runsBySession.set(canonicalStorageKey, nextCanonicalRuns);
         }
-        if (!this.#persistSession(canonicalSessionKey)) {
+        if (!this.#persistSession(canonicalStorageKey)) {
             if (previousCanonicalRuns) {
-                this.#runsBySession.set(canonicalSessionKey, previousCanonicalRuns);
+                this.#runsBySession.set(canonicalStorageKey, previousCanonicalRuns);
             } else {
-                this.#runsBySession.delete(canonicalSessionKey);
+                this.#runsBySession.delete(canonicalStorageKey);
             }
             return false;
         }
-        this.#pendingPersistence.delete(canonicalSessionKey);
+        this.#pendingPersistence.delete(canonicalStorageKey);
 
         if (nextSourceRuns.size === 0) {
-            this.#runsBySession.delete(sourceSessionKey);
+            this.#runsBySession.delete(sourceStorageKey);
         } else {
-            this.#runsBySession.set(sourceSessionKey, nextSourceRuns);
+            this.#runsBySession.set(sourceStorageKey, nextSourceRuns);
         }
         for (const runId of movedRunIds) {
-            this.#forgetRunSession(runId, sourceSessionKey);
+            this.#forgetRunSession(runId, sourceStorageKey);
             if (nextCanonicalRuns.has(runId)) {
-                this.#rememberRunSession(runId, canonicalSessionKey);
+                this.#rememberRunSession(runId, canonicalStorageKey);
             }
         }
         for (const runId of evictedCanonicalRunIds) {
-            this.#forgetRunSession(runId, canonicalSessionKey);
+            this.#forgetRunSession(runId, canonicalStorageKey);
         }
         this.#enforceSessionLimit(protectedSessionKey);
-        if (isExactSessionKey(sourceSessionKey, canonicalSessionKey)) {
-            this.#pendingPersistence.delete(sourceSessionKey);
-            if (this.#pendingPersistence.size === 0) {
-                this.#cancelPersistenceTimer();
-            }
-        } else {
-            this.#flushSessionPersistence(sourceSessionKey);
-        }
+        this.#flushSessionPersistence(sourceStorageKey);
         return true;
     }
 
@@ -1207,10 +1242,13 @@ export class OpenClawChatBridge {
         if (this.#sessionLimitDeferrals > 0) {
             return;
         }
+        const storageProtectedSessionKey = protectedSessionKey
+            ? normalizedSessionKey(protectedSessionKey)
+            : undefined;
         while (this.#runsBySession.size > MAX_CHAT_RUNTIME_SESSIONS) {
             const oldestSessionKey = oldestEvictableSessionKey(
                 this.#runsBySession,
-                protectedSessionKey
+                storageProtectedSessionKey
             );
             if (!oldestSessionKey) {
                 break;
@@ -1228,15 +1266,16 @@ export class OpenClawChatBridge {
         const indexedCandidates = matchingSessionKeys(providedSessionKey, sessions);
         const associatedCandidates = new Map<string, string>();
         if (runId) {
-            const normalizedProvidedKey = providedSessionKey.toLowerCase();
+            const normalizedProvidedKey = normalizedSessionKey(providedSessionKey);
             const associatedSessionKeys = this.#sessionsByRun.get(runId) || [];
             for (const associatedSessionKey of associatedSessionKeys) {
                 if (
-                    associatedSessionKey.toLowerCase() !== normalizedProvidedKey &&
+                    normalizedSessionKey(associatedSessionKey) !==
+                        normalizedProvidedKey &&
                     isSameSessionKey(associatedSessionKey, providedSessionKey)
                 ) {
                     associatedCandidates.set(
-                        associatedSessionKey.toLowerCase(),
+                        normalizedSessionKey(associatedSessionKey),
                         associatedSessionKey
                     );
                 }
@@ -1320,8 +1359,9 @@ export class OpenClawChatBridge {
     }
 
     #rememberRunSession(runId: string, sessionKey: string): void {
+        const storageSessionKey = normalizedSessionKey(sessionKey);
         const sessionKeys = new Set(this.#sessionsByRun.get(runId));
-        sessionKeys.add(sessionKey);
+        sessionKeys.add(storageSessionKey);
         this.#sessionsByRun.delete(runId);
         this.#sessionsByRun.set(runId, sessionKeys);
 
@@ -1335,11 +1375,12 @@ export class OpenClawChatBridge {
     }
 
     #forgetRunSession(runId: string, sessionKey: string): void {
+        const storageSessionKey = normalizedSessionKey(sessionKey);
         const sessionKeys = this.#sessionsByRun.get(runId);
         if (!sessionKeys) {
             return;
         }
-        sessionKeys.delete(sessionKey);
+        sessionKeys.delete(storageSessionKey);
         if (sessionKeys.size === 0) {
             this.#sessionsByRun.delete(runId);
         }
@@ -1373,6 +1414,7 @@ export class OpenClawChatBridge {
         provisionalRunId: string,
         providerRunId: string
     ): void {
+        const storageSessionKey = normalizedSessionKey(sessionKey);
         const events = run.events.flatMap((envelope) => {
             const payload = asRecord(envelope.payload);
             const payloadRunId = stringField(runtimePayloadView(payload), "runId");
@@ -1400,7 +1442,7 @@ export class OpenClawChatBridge {
                 payload: compactTerminalPayload(
                     asRecord(rewritten.payload),
                     providerRunId,
-                    sessionKey
+                    storageSessionKey
                 ),
             };
             return Buffer.byteLength(JSON.stringify(compact)) <= MAX_BYTES_PER_RUN
@@ -1416,19 +1458,20 @@ export class OpenClawChatBridge {
         provisionalRunId: string,
         providerRunId: string
     ): RetainedRun | undefined {
+        const storageSessionKey = normalizedSessionKey(sessionKey);
         const provisional = runs.get(provisionalRunId);
         if (!provisional || provisionalRunId === providerRunId) {
             return provisional;
         }
 
         this.#rewriteProvisionalPayloads(
-            sessionKey,
+            storageSessionKey,
             provisional,
             provisionalRunId,
             providerRunId
         );
         runs.delete(provisionalRunId);
-        this.#forgetRunSession(provisionalRunId, sessionKey);
+        this.#forgetRunSession(provisionalRunId, storageSessionKey);
         const existing = runs.get(providerRunId);
         if (existing) {
             this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
@@ -1452,25 +1495,26 @@ export class OpenClawChatBridge {
         preferredProvisionalRunId?: string,
         requestBoundary?: number
     ): void {
-        let runs = this.#runsBySession.get(sessionKey);
+        const storageSessionKey = normalizedSessionKey(sessionKey);
+        let runs = this.#runsBySession.get(storageSessionKey);
         if (
             preferredProvisionalRunId &&
             !runs?.has(preferredProvisionalRunId) &&
-            isAgentSessionKey(sessionKey)
+            isAgentSessionKey(storageSessionKey)
         ) {
             const aliasEntries = [...this.#runsBySession].filter(
                 ([candidateSessionKey, candidateRuns]) =>
                     !isAgentSessionKey(candidateSessionKey) &&
-                    isSameSessionKey(candidateSessionKey, sessionKey) &&
+                    isSameSessionKey(candidateSessionKey, storageSessionKey) &&
                     candidateRuns.has(preferredProvisionalRunId)
             );
             if (aliasEntries.length === 1) {
                 this.#promoteSessionEntry(
                     aliasEntries[0]![0],
-                    sessionKey,
+                    storageSessionKey,
                     preferredProvisionalRunId
                 );
-                runs = this.#runsBySession.get(sessionKey);
+                runs = this.#runsBySession.get(storageSessionKey);
             }
         }
         if (!runs) {
@@ -1482,12 +1526,12 @@ export class OpenClawChatBridge {
             : undefined;
         if (preferredProvisionalRunId && preferred) {
             this.#promoteRunEntry(
-                sessionKey,
+                storageSessionKey,
                 runs,
                 preferredProvisionalRunId,
                 providerRunId
             );
-            this.#flushSessionPersistence(sessionKey);
+            this.#flushSessionPersistence(storageSessionKey);
             return;
         }
 
@@ -1508,8 +1552,13 @@ export class OpenClawChatBridge {
             return;
         }
 
-        this.#promoteRunEntry(sessionKey, runs, provisionalEntries[0]![0], providerRunId);
-        this.#flushSessionPersistence(sessionKey);
+        this.#promoteRunEntry(
+            storageSessionKey,
+            runs,
+            provisionalEntries[0]![0],
+            providerRunId
+        );
+        this.#flushSessionPersistence(storageSessionKey);
     }
 
     #retain(envelope: OpenClawRuntimeEnvelope, shouldPersist = true): void {
@@ -1526,14 +1575,17 @@ export class OpenClawChatBridge {
         if (!sessionKey) {
             return;
         }
+        const storageSessionKey = normalizedSessionKey(sessionKey);
 
         const explicitRunId = stringField(payloadView, "runId");
         const isTerminal = isTerminalEvent(envelope.event, envelope.payload);
         const associationBytes = explicitRunId
-            ? Buffer.byteLength(JSON.stringify({ runId: explicitRunId, sessionKey }))
+            ? Buffer.byteLength(
+                  JSON.stringify({ runId: explicitRunId, sessionKey: storageSessionKey })
+              )
             : 0;
         if (explicitRunId && associationBytes <= MAX_BYTES_PER_RUN) {
-            this.#rememberRunSession(explicitRunId, sessionKey);
+            this.#rememberRunSession(explicitRunId, storageSessionKey);
         }
         if (!shouldRetainRuntimeEvent(envelope.event, payloadView)) {
             return;
@@ -1548,7 +1600,7 @@ export class OpenClawChatBridge {
                         payload: compactTerminalPayload(
                             payload,
                             explicitRunId,
-                            sessionKey
+                            storageSessionKey
                         ),
                     }
                   : undefined;
@@ -1565,10 +1617,10 @@ export class OpenClawChatBridge {
         }
 
         if (shouldPersist) {
-            this.#pruneStaleActiveRuns(sessionKey);
+            this.#pruneStaleActiveRuns(storageSessionKey);
         }
         const runs =
-            this.#runsBySession.get(sessionKey) || new Map<string, RetainedRun>();
+            this.#runsBySession.get(storageSessionKey) || new Map<string, RetainedRun>();
         if (explicitRunId && !runs.has(explicitRunId)) {
             const pendingUserRuns = runs
                 .values()
@@ -1576,7 +1628,7 @@ export class OpenClawChatBridge {
                 .toArray();
             if (pendingUserRuns.length === 1) {
                 this.#promoteRunEntry(
-                    sessionKey,
+                    storageSessionKey,
                     runs,
                     pendingUserRuns[0]!.runId,
                     explicitRunId
@@ -1725,16 +1777,16 @@ export class OpenClawChatBridge {
                 break;
             }
             runs.delete(oldestRunId);
-            this.#forgetRunSession(oldestRunId, sessionKey);
+            this.#forgetRunSession(oldestRunId, storageSessionKey);
         }
 
-        this.#runsBySession.set(sessionKey, runs);
+        this.#runsBySession.set(storageSessionKey, runs);
         this.#enforceSessionLimit();
         if (shouldPersist) {
             if (isTerminal) {
-                this.#flushSessionPersistence(sessionKey);
+                this.#flushSessionPersistence(storageSessionKey);
             } else {
-                this.#queuePersistence(sessionKey);
+                this.#queuePersistence(storageSessionKey);
             }
         }
     }
@@ -1837,24 +1889,25 @@ export class OpenClawChatBridge {
 
     /** Clears replay state associated with one reset, aborted, or deleted session. */
     clearSession(sessionKey: string): void {
-        const sessionKeys = new Set([sessionKey]);
+        const storageSessionKey = normalizedSessionKey(sessionKey);
+        const sessionKeys = new Set([storageSessionKey]);
         for (const candidateSessionKey of this.#runsBySession.keys()) {
-            if (isSameSessionKey(candidateSessionKey, sessionKey)) {
+            if (isSameSessionKey(candidateSessionKey, storageSessionKey)) {
                 sessionKeys.add(candidateSessionKey);
             }
         }
         for (const candidateSessionKey of this.#pendingPersistence) {
-            if (isSameSessionKey(candidateSessionKey, sessionKey)) {
+            if (isSameSessionKey(candidateSessionKey, storageSessionKey)) {
                 sessionKeys.add(candidateSessionKey);
             }
         }
         if (this.#store) {
-            this.#pendingSessionClears.add(sessionKey);
+            this.#pendingSessionClears.add(storageSessionKey);
         }
         const storedSessionKeys = this.#storedSessionKeys();
         if (storedSessionKeys) {
             for (const candidateSessionKey of storedSessionKeys) {
-                if (isSameSessionKey(candidateSessionKey, sessionKey)) {
+                if (isSameSessionKey(candidateSessionKey, storageSessionKey)) {
                     sessionKeys.add(candidateSessionKey);
                 }
             }
@@ -1874,17 +1927,17 @@ export class OpenClawChatBridge {
         }
         if (didClearAll) {
             for (const pendingKey of this.#pendingDeleteKeys) {
-                if (isSameSessionKey(pendingKey, sessionKey)) {
+                if (isSameSessionKey(pendingKey, storageSessionKey)) {
                     this.#pendingDeleteKeys.delete(pendingKey);
                 }
             }
             for (const pendingClear of this.#pendingSessionClears) {
-                if (isSameSessionKey(pendingClear, sessionKey)) {
+                if (isSameSessionKey(pendingClear, storageSessionKey)) {
                     this.#pendingSessionClears.delete(pendingClear);
                 }
             }
         } else {
-            this.#pendingSessionClears.add(sessionKey);
+            this.#pendingSessionClears.add(storageSessionKey);
         }
     }
 

@@ -1930,8 +1930,12 @@ describe("shared component helpers", () => {
         fireEvent.pointerDown(messagesContainerReference.current!, { clientX: 95 });
         fireEvent.wheel(messagesContainerReference.current!);
         fireEvent.touchMove(messagesContainerReference.current!);
-        fireEvent.keyDown(messagesContainerReference.current!, { key: "PageUp" });
-        await user.click(screen.getByRole("button", { name: /delete your message/i }));
+        const deleteMessageButton = screen.getByRole("button", {
+            name: /delete your message/i,
+        });
+        deleteMessageButton.focus();
+        fireEvent.keyDown(deleteMessageButton, { key: "PageUp" });
+        await user.click(deleteMessageButton);
         await user.click(
             screen.getByRole("button", { name: /open chat image 1 preview/i })
         );
