@@ -1765,6 +1765,20 @@ export class OpenClawChatBridge {
         return true;
     }
 
+    /** Restores persisted run associations before a Gateway scope resumes events. */
+    hydratePersistedSessions(): void {
+        const storedKeys = this.#storedSessionKeys();
+        if (!storedKeys) {
+            return;
+        }
+        this.#withDeferredSessionLimit(() => {
+            for (const sessionKey of storedKeys) {
+                this.#ensureSessionLoaded(sessionKey);
+            }
+        });
+        this.#enforceSessionLimit();
+    }
+
     /** Clears all replay state, for example after credentials change. */
     clear(): void {
         this.#cancelPersistenceTimer();

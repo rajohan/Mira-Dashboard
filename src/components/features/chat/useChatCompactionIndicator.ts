@@ -84,10 +84,7 @@ export function projectChatActivityRows({
             (row) =>
                 row.kind === "typing" ||
                 (row.kind === "stream" &&
-                    Boolean(
-                        row.message.runId &&
-                        activeRuns.some((run) => run.runId === row.message.runId)
-                    ))
+                    activeRuns.some((run) => run.runId === row.message.runId))
         )
     ) {
         return rows;

@@ -425,7 +425,6 @@ describe("OpenClaw adapter variants", () => {
             envelope(
                 "session.compaction",
                 {
-                    completed: true,
                     operation: "compact",
                     operationId: "compact-operation",
                     phase: "end",

@@ -341,6 +341,78 @@ describe("gateway behavior", () => {
         expect(gateway.isConnected()).toBe(false);
     });
 
+    it("rehydrates run associations before reconnect events resume", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("OPENCLAW_GATEWAY_URL");
+        const root = createTemporaryRoot("mira-gateway-reconnect-replay-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+        process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-reconnect.test";
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+        const socket = new FakeDashboardSocket();
+        gateway.handleDashboardClient(socket);
+
+        gateway.init("reconnect-replay-token");
+        const firstClient = fakeClients.at(-1);
+        firstClient?.options.onHelloOk?.({ type: "hello-ok" });
+        firstClient?.options.onEvent?.({
+            event: "session.tool",
+            payload: {
+                name: "before-reconnect",
+                runId: "reconnect-run",
+                sessionKey: "agent:main:main",
+            },
+        });
+        gateway.shutdown();
+
+        socket.sent.length = 0;
+        gateway.init("reconnect-replay-token");
+        const reconnectedClient = fakeClients.at(-1);
+        expect(reconnectedClient).not.toBe(firstClient);
+        reconnectedClient?.options.onHelloOk?.({ type: "hello-ok" });
+        reconnectedClient?.options.onEvent?.({
+            event: "session.tool",
+            payload: { name: "after-reconnect", runId: "reconnect-run" },
+        });
+
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"name":"after-reconnect"'))
+        );
+        expect(
+            socket.sent
+                .map(
+                    (raw) =>
+                        JSON.parse(raw) as {
+                            event?: string;
+                            payload?: { name?: string; sessionKey?: string };
+                        }
+                )
+                .find((message) => message.payload?.name === "after-reconnect")
+        ).toMatchObject({
+            event: "session.tool",
+            payload: {
+                name: "after-reconnect",
+                sessionKey: "agent:main:main",
+            },
+        });
+    });
+
     it("normalizes sessions, enriches events, and hydrates omitted chat images without a real gateway", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");

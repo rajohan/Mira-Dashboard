@@ -229,6 +229,7 @@ function chatReplayGatewayScope(endpoint: string, token: string): string {
 function didSelectChatReplayScope(endpoint: string, token: string): boolean {
     const gatewayScope = chatReplayGatewayScope(endpoint, token);
     if (gatewayScope === chatReplayState.scope) {
+        chatReplayState.bridge.hydratePersistedSessions();
         return true;
     }
     if (!chatReplayState.bridge.flush()) {
@@ -238,6 +239,7 @@ function didSelectChatReplayScope(endpoint: string, token: string): boolean {
         new SqliteOpenClawChatSnapshotStore(gatewayScope)
     );
     chatReplayState.scope = gatewayScope;
+    chatReplayState.bridge.hydratePersistedSessions();
     return true;
 }
 
@@ -852,7 +854,6 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        chatReplayState.bridge.clearMemory();
         gatewayState.isConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         /** Subscribes to Gateway session index events for live session updates. */
@@ -913,7 +914,7 @@ function init(token: string): void {
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
-        chatReplayState.bridge.clearMemory();
+        chatReplayState.bridge.flush();
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }

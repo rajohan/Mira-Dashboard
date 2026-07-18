@@ -250,6 +250,7 @@ export function openClawProgress(
         const isSuccessful =
             !isFailure &&
             (data.completed === true ||
+                (eventName === "session.compaction" && normalizedPhase === "end") ||
                 ["complete", "completed", "finished"].includes(normalizedPhase) ||
                 ["complete", "completed", "finished"].includes(status));
         const isRetrying = isTerminal && data.willRetry === true;
