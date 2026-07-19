@@ -461,6 +461,23 @@ function completedDiagnosticStart(
     return segment.start;
 }
 
+function isMatchingFinalEvidence(
+    message: ChatHistoryMessage | undefined,
+    assistantText: string,
+    assistantMediaIdentity: string | undefined
+): boolean {
+    if (!message) {
+        return false;
+    }
+    if (assistantText && !isRecoveredAssistantText(message.text, assistantText)) {
+        return false;
+    }
+    return (
+        !assistantMediaIdentity ||
+        messageMediaIdentity(message) === assistantMediaIdentity
+    );
+}
+
 function hasUnambiguousFinalEvidence(
     messages: ChatHistoryMessage[],
     run: ChatRunState,
@@ -483,25 +500,19 @@ function hasUnambiguousFinalEvidence(
     if (!assistantText && !assistantMediaIdentity) {
         return false;
     }
+    if (!isMatchingFinalEvidence(canonicalFinal, assistantText, assistantMediaIdentity)) {
+        return false;
+    }
     let matchingFinals = 0;
     for (let index = segment.start; index < segment.end; index += 1) {
         const message = messages[index];
         const role = message?.role.toLowerCase();
-        const isTextMatching = Boolean(
-            !assistantText ||
-            (message && isRecoveredAssistantText(message.text, assistantText))
-        );
-        const isMediaMatching = Boolean(
-            !assistantMediaIdentity ||
-            (message && messageMediaIdentity(message) === assistantMediaIdentity)
-        );
         const isMatchingFinal = Boolean(
             message &&
             !message.runId &&
             (role === "assistant" || role === "system") &&
             !isStandaloneDiagnostic(message) &&
-            isTextMatching &&
-            isMediaMatching
+            isMatchingFinalEvidence(message, assistantText, assistantMediaIdentity)
         );
         if (isMatchingFinal) {
             matchingFinals += 1;

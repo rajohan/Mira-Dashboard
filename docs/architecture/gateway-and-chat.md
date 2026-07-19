@@ -183,8 +183,9 @@ previous primary answer and that matched final adopt the completed run ID.
 Scoping requires an explicit run match or primary assistant output whose final is
 timestamp/diagnostic anchored or has one unique text match in the response
 segment. Media-only finals use the same unique-match rule with their media
-identity. Metadata-only and diagnostic-only completions cannot claim a canonical
-answer, and identical unanchored finals remain unscoped. Projection exposes both
+identity, and the selected canonical final must itself match that evidence.
+Metadata-only and diagnostic-only completions cannot claim a canonical answer,
+and identical unanchored finals remain unscoped. Projection exposes both
 the scoped row key and previous unscoped history key as delete aliases; the
 delete action persists every alias. This keeps tool row keys stable when
 transcript-backed runtime events are compacted, avoids claiming diagnostics from

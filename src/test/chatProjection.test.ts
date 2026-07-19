@@ -3074,6 +3074,45 @@ describe("chat projection", () => {
         ).toEqual(["question", "tool", "thinking", "final"]);
     });
 
+    it("does not scope a later text answer to a media-only final", () => {
+        const mediaFinal: ChatHistoryMessage = {
+            attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+            content: "",
+            role: "assistant",
+            text: "",
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: thinkingMessage("run-1"),
+                runId: "run-1",
+            }),
+            event(48, {
+                kind: "finish",
+                message: { ...mediaFinal, runId: "run-1" },
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                message("user", "question"),
+                mediaFinal,
+                message("assistant", "unrelated later answer"),
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            projection.rows.find((row) => row.message.text === "unrelated later answer")
+                ?.message.runId
+        ).toBeUndefined();
+    });
+
     it("hides compacted thinking for each overlapping completed run", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             eventAt(32, "2026-07-16T12:00:03.000Z", {
