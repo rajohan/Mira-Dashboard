@@ -2670,13 +2670,65 @@ describe("backend route and service behavior", () => {
         );
         expect(oversizedPreview.status).toBe(413);
 
+        const activeSvg =
+            '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+        gatewayFetch.mockResolvedValueOnce(
+            new Response(activeSvg, {
+                headers: {
+                    "Content-Disposition": 'inline; filename="generated.svg"',
+                    "Content-Type": "image/svg+xml; charset=utf-8",
+                },
+            })
+        );
+        const svgDownload = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}`)
+        );
+        expect(svgDownload.headers.get("Content-Type")).toBe("application/octet-stream");
+        expect(svgDownload.headers.get("Content-Disposition")).toBe(
+            'attachment; filename="generated.svg"'
+        );
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response(activeSvg, {
+                headers: {
+                    "Content-Disposition": 'inline; filename="generated.svg"',
+                    "Content-Type": "image/svg+xml; charset=utf-8",
+                },
+            })
+        );
+        const svgPreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=image`)
+        );
+        expect(svgPreview.status).toBe(200);
+        expect(svgPreview.headers.get("Content-Type")).toBe("image/svg+xml");
+        expect(svgPreview.headers.get("Content-Security-Policy")).toBe(
+            "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+        );
+        expect(await svgPreview.text()).toBe(activeSvg);
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("<html><script>alert(1)</script></html>", {
+                headers: {
+                    "Content-Disposition": 'inline; filename="page.html"',
+                    "Content-Type": "text/html; charset=utf-8",
+                },
+            })
+        );
+        const htmlDownload = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}`)
+        );
+        expect(htmlDownload.headers.get("Content-Type")).toBe("application/octet-stream");
+        expect(htmlDownload.headers.get("Content-Disposition")).toBe(
+            'attachment; filename="page.html"'
+        );
+
         const rejected = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
             new Request(
                 "https://dashboard.test/api/chat/media/outgoing/agent%3Amain%3Amain/not-a-uuid/full"
             )
         );
         expect(rejected.status).toBe(404);
-        expect(gatewayFetch).toHaveBeenCalledTimes(3);
+        expect(gatewayFetch).toHaveBeenCalledTimes(6);
     });
 
     it("starts manual WAL-G backups through the backup route using fake Docker", async () => {

@@ -4,17 +4,16 @@ import { formatSize } from "../../../utils/format";
 import { Modal } from "../../ui/Modal";
 import { JsonPreview } from "../files/viewers/JsonPreview";
 import { MarkdownPreview } from "../files/viewers/MarkdownPreview";
-import type { ChatPreviewItem } from "./chatTypes";
+import { type ChatPreviewItem, normalizeChatMimeType } from "./chatTypes";
 
-function localPreviewUrl(url: string, mode: "image" | "text"): string {
+function attachmentPreviewUrl(url: string, mode: "image" | "text"): string | undefined {
     const isLocalMedia = url === "/api/media" || url.startsWith("/api/media?");
-    const isManagedTextMedia =
-        mode === "text" && url.startsWith("/api/chat/media/outgoing/");
-    if (!isLocalMedia && !isManagedTextMedia) {
-        return url;
+    const isManagedMedia = url.startsWith("/api/chat/media/outgoing/");
+    if (isLocalMedia || isManagedMedia) {
+        return `${url}${url.includes("?") ? "&" : "?"}preview=${mode}`;
     }
 
-    return `${url}${url.includes("?") ? "&" : "?"}preview=${mode}`;
+    return mode === "image" ? url : undefined;
 }
 
 /** Provides props for attachment preview modal. */
@@ -45,10 +44,14 @@ export function AttachmentPreviewModal({
         ) {
             return;
         }
+        const previewUrl = attachmentPreviewUrl(previewItem.url, "text");
+        if (!previewUrl) {
+            return;
+        }
 
         const abortController = new AbortController();
         setIsLoadingTextPreview(true);
-        void fetch(localPreviewUrl(previewItem.url, "text"), {
+        void fetch(previewUrl, {
             headers: { Accept: "text/plain" },
             signal: abortController.signal,
         })
@@ -78,13 +81,13 @@ export function AttachmentPreviewModal({
     }, [previewItem]);
 
     const textPreview = previewItem?.text ?? remoteText;
+    const normalizedMimeType = normalizeChatMimeType(previewItem?.mimeType || "");
     const imagePreviewUrl =
         previewItem?.kind === "image" && previewItem.url
-            ? previewItem.mimeType === "image/svg+xml"
-                ? localPreviewUrl(previewItem.url, "image")
+            ? normalizedMimeType === "image/svg+xml"
+                ? attachmentPreviewUrl(previewItem.url, "image")
                 : previewItem.url
             : undefined;
-    const normalizedMimeType = previewItem?.mimeType?.split(";", 1)[0]?.toLowerCase();
     const shouldRenderJson =
         normalizedMimeType === "application/json" ||
         previewItem?.title.toLowerCase().endsWith(".json");

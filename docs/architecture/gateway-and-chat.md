@@ -129,7 +129,9 @@ History normalization accepts OpenClaw `image`, `image_url`, and `input_image`
 blocks plus generic attachment and `MediaPath` records. Every attachment keeps a
 download action. Images render inline; JSON and Markdown use the existing
 structured viewers; CSV and plain text use a bounded text preview; other files
-remain downloadable.
+remain downloadable. MIME parameters are normalized before the viewer is chosen.
+External HTTP(S) text references remain download-only because Dashboard cannot
+enforce the bounded preview policy on cross-origin responses.
 
 Managed Gateway image URLs stay authenticated without exposing the Gateway token
 to the browser. The browser requests the same managed path from Dashboard under
@@ -140,13 +142,21 @@ token server-side, and does not follow redirects.
 Managed TXT, JSON, CSV, and Markdown previews use the same Dashboard proxy with
 an explicit `preview=text` query. The backend validates the upstream media type
 or filename and stops reading after 1 MiB; the original managed URL remains the
-download target.
+download target. Managed SVG preview uses `preview=image`, a bounded response,
+and the same restrictive sandbox CSP as local SVG. Managed SVG, HTML, XHTML, and
+XML downloads are downgraded to `application/octet-stream` with attachment
+disposition so active provider content cannot render as a same-origin document.
 
 Local OpenClaw media continues through `/api/media`. Text preview is opt-in and
 limited to `.txt`, `.json`, `.csv`, and `.md` files no larger than 1 MiB. SVG is
 downloaded as `application/octet-stream` by default and rendered only through an
 explicit sandboxed image preview with a restrictive CSP. These preview rules do
 not remove the original download action.
+
+An attachment-only optimistic user row reconciles with its canonical managed
+Gateway URL by the send run ID when its local base64 identity necessarily differs
+from the persisted media identity. Matching remains role- and run-scoped so
+separate attachment turns are not collapsed.
 
 ### Transcript And Runtime Authority
 
@@ -376,6 +386,11 @@ When changing chat event handling, test these cases:
   query-less chat keeps default selection;
 - local and managed Gateway attachments preserve inline previews and an original
   download path without exposing Gateway credentials;
+- active managed documents are forced to download instead of rendering in the
+  Dashboard origin, SVG previews stay sandboxed, and external text references
+  remain download-only;
+- attachment-only optimistic rows reconcile with their canonical managed URL by
+  the shared send run without collapsing separate turns;
 - compaction blocks all send paths and releases its lock after both success and
   failure;
 - completed thinking remains grouped and follows the keep-after-final preference;

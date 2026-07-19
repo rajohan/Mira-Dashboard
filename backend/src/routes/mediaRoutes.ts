@@ -16,6 +16,14 @@ const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 const MAX_TEXT_PREVIEW_SIZE = 1024 * 1024;
 const GATEWAY_MEDIA_REQUEST_TIMEOUT_MS = 30_000;
 const GATEWAY_WEBSOCKET_PROTOCOLS = new Set(["ws:", "wss:"]);
+const ACTIVE_DOCUMENT_EXTENSIONS = new Set([".htm", ".html", ".svg", ".xhtml"]);
+const ACTIVE_DOCUMENT_MIME_TYPES = new Set([
+    "application/xhtml+xml",
+    "application/xml",
+    "image/svg+xml",
+    "text/html",
+    "text/xml",
+]);
 const TEXT_PREVIEW_EXTENSIONS = new Set([".csv", ".json", ".md", ".txt"]);
 const GATEWAY_TEXT_PREVIEW_MIME_TYPES = new Set([
     "application/json",
@@ -25,6 +33,8 @@ const GATEWAY_TEXT_PREVIEW_MIME_TYPES = new Set([
 ]);
 const MANAGED_GATEWAY_MEDIA_PATH =
     /^\/api\/chat\/media\/outgoing\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/full$/iu;
+const SVG_PREVIEW_CONTENT_SECURITY_POLICY =
+    "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 const mediaRouteState: {
     cachedMediaRoot?: string;
     cachedOpenclawRoot?: string;
@@ -105,9 +115,74 @@ function gatewayMediaUrl(request: Request): URL | undefined {
     return gatewayUrl;
 }
 
+function gatewayMediaMetadata(response: Response): {
+    contentDisposition: string;
+    contentType: string;
+    fileExtension: string;
+} {
+    const contentDisposition = response.headers.get("content-disposition") || "";
+    const contentType =
+        response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ||
+        "";
+    const fileNameMatch = /filename\*?=(?:UTF-8''|")?([^";]+)/iu.exec(contentDisposition);
+    const fileExtension = fileNameMatch
+        ? path.extname(fileNameMatch[1]!.trim()).toLowerCase()
+        : "";
+    return { contentDisposition, contentType, fileExtension };
+}
+
+function downloadContentDisposition(contentDisposition: string): string {
+    const parametersIndex = contentDisposition.indexOf(";");
+    return parametersIndex === -1
+        ? "attachment"
+        : `attachment${contentDisposition.slice(parametersIndex)}`;
+}
+
+async function readGatewayBodyUpTo(
+    response: Response,
+    maximumBytes: number
+): Promise<Uint8Array | undefined> {
+    const declaredLength = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+        await response.body?.cancel();
+        return undefined;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+        return new Uint8Array();
+    }
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+            totalBytes += value.byteLength;
+            if (totalBytes > maximumBytes) {
+                await reader.cancel();
+                return undefined;
+            }
+            chunks.push(value);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    const body = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+        body.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return body;
+}
+
 async function proxyGatewayMedia(request: Request): Promise<Response> {
     const previewMode = new URL(request.url).searchParams.get("preview");
-    if (previewMode && previewMode !== "text") {
+    if (previewMode && !["image", "text"].includes(previewMode)) {
         return json({ error: "Invalid preview mode" }, { status: 400 });
     }
     const gatewayUrl = gatewayMediaUrl(request);
@@ -133,62 +208,20 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
         return json({ error: "Media not found" }, { status });
     }
 
+    const { contentDisposition, contentType, fileExtension } =
+        gatewayMediaMetadata(response);
     if (previewMode === "text") {
-        const contentType = response.headers
-            .get("content-type")
-            ?.split(";", 1)[0]
-            ?.trim()
-            .toLowerCase();
-        const contentDisposition = response.headers.get("content-disposition") || "";
-        const fileNameMatch = /filename\*?=(?:UTF-8''|")?([^";]+)/iu.exec(
-            contentDisposition
-        );
-        const fileExtension = fileNameMatch
-            ? path.extname(fileNameMatch[1]!.trim()).toLowerCase()
-            : "";
         if (
-            !GATEWAY_TEXT_PREVIEW_MIME_TYPES.has(contentType || "") &&
+            !GATEWAY_TEXT_PREVIEW_MIME_TYPES.has(contentType) &&
             !TEXT_PREVIEW_EXTENSIONS.has(fileExtension)
         ) {
             await response.body?.cancel();
             return json({ error: "Text preview is not available" }, { status: 415 });
         }
 
-        const declaredLength = Number(response.headers.get("content-length"));
-        if (Number.isFinite(declaredLength) && declaredLength > MAX_TEXT_PREVIEW_SIZE) {
-            await response.body?.cancel();
+        const body = await readGatewayBodyUpTo(response, MAX_TEXT_PREVIEW_SIZE);
+        if (!body) {
             return json({ error: "Text preview is too large" }, { status: 413 });
-        }
-
-        const reader = response.body?.getReader();
-        const chunks: Uint8Array[] = [];
-        let totalBytes = 0;
-        if (reader) {
-            try {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) {
-                        break;
-                    }
-                    totalBytes += value.byteLength;
-                    if (totalBytes > MAX_TEXT_PREVIEW_SIZE) {
-                        await reader.cancel();
-                        return json(
-                            { error: "Text preview is too large" },
-                            { status: 413 }
-                        );
-                    }
-                    chunks.push(value);
-                }
-            } finally {
-                reader.releaseLock();
-            }
-        }
-        const body = new Uint8Array(totalBytes);
-        let offset = 0;
-        for (const chunk of chunks) {
-            body.set(chunk, offset);
-            offset += chunk.byteLength;
         }
         return new Response(body, {
             headers: {
@@ -200,17 +233,47 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
         });
     }
 
+    if (previewMode === "image") {
+        if (contentType !== "image/svg+xml" && fileExtension !== ".svg") {
+            await response.body?.cancel();
+            return json({ error: "Image preview is not available" }, { status: 415 });
+        }
+        const body = await readGatewayBodyUpTo(response, MAX_MEDIA_SIZE);
+        if (!body) {
+            return json({ error: "Media file too large" }, { status: 413 });
+        }
+        return new Response(body, {
+            headers: {
+                "Cache-Control":
+                    response.headers.get("cache-control") || "private, max-age=3600",
+                "Content-Security-Policy": SVG_PREVIEW_CONTENT_SECURITY_POLICY,
+                "Content-Type": "image/svg+xml",
+                "X-Content-Type-Options": "nosniff",
+            },
+        });
+    }
+
+    const isActiveDocument =
+        ACTIVE_DOCUMENT_MIME_TYPES.has(contentType) ||
+        ACTIVE_DOCUMENT_EXTENSIONS.has(fileExtension);
     const headers = new Headers({
         "Cache-Control": response.headers.get("cache-control") || "private, max-age=3600",
-        "Content-Type":
-            response.headers.get("content-type") || "application/octet-stream",
+        "Content-Type": isActiveDocument
+            ? "application/octet-stream"
+            : response.headers.get("content-type") || "application/octet-stream",
         "X-Content-Type-Options": "nosniff",
     });
-    for (const header of ["content-disposition", "content-length"] as const) {
-        const value = response.headers.get(header);
-        if (value) {
-            headers.set(header, value);
-        }
+    if (isActiveDocument) {
+        headers.set(
+            "Content-Disposition",
+            downloadContentDisposition(contentDisposition)
+        );
+    } else if (contentDisposition) {
+        headers.set("Content-Disposition", contentDisposition);
+    }
+    const contentLength = response.headers.get("content-length");
+    if (contentLength) {
+        headers.set("Content-Length", contentLength);
     }
     return new Response(response.body, { headers });
 }
@@ -415,7 +478,7 @@ export const mediaRoutes = {
             if (previewMode === "image") {
                 responseHeaders.set(
                     "Content-Security-Policy",
-                    "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+                    SVG_PREVIEW_CONTENT_SECURITY_POLICY
                 );
             }
             return new Response(buffer, {

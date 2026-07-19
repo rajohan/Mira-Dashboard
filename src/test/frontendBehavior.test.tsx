@@ -4034,6 +4034,8 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(normalizeText([managedImage])).toBe("[image]");
         expect(attachmentKind("image/png")).toBe("image");
         expect(attachmentKind("application/json")).toBe("text");
+        expect(attachmentKind("application/json; charset=utf-8")).toBe("text");
+        expect(attachmentKind("IMAGE/SVG+XML; charset=utf-8")).toBe("image");
         expect(attachmentKind("application/pdf")).toBe("file");
 
         const sendAttachment = {

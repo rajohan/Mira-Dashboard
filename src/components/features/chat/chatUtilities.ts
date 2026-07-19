@@ -721,6 +721,7 @@ export function mergeWithRecentOptimisticMessages(
     );
     const nextIdentityCounts = new Map<string, number>();
     const unmatchedNextMediaCounts = new Map<string, number>();
+    const unmatchedNextDashboardUserMediaRunCounts = new Map<string, number>();
     const recoveredPreviousMessages = new Set<ChatHistoryMessage>();
     for (const message of enrichedNextMessages) {
         const identity = messageIdentity(message);
@@ -734,6 +735,16 @@ export function mergeWithRecentOptimisticMessages(
                 mediaKey,
                 (unmatchedNextMediaCounts.get(mediaKey) || 0) + 1
             );
+            if (
+                role === "user" &&
+                !message.text.trim() &&
+                message.runId?.startsWith("dashboard-chat-")
+            ) {
+                unmatchedNextDashboardUserMediaRunCounts.set(
+                    message.runId,
+                    (unmatchedNextDashboardUserMediaRunCounts.get(message.runId) || 0) + 1
+                );
+            }
         }
     }
     for (const message of previousMessages) {
@@ -760,6 +771,14 @@ export function mergeWithRecentOptimisticMessages(
         const mediaKey = `${role}::${mediaIdentity}`;
         const mediaCount = unmatchedNextMediaCounts.get(mediaKey) || 0;
         unmatchedNextMediaCounts.set(mediaKey, Math.max(0, mediaCount - 1));
+        if (role === "user" && message.runId?.startsWith("dashboard-chat-")) {
+            const mediaRunCount =
+                unmatchedNextDashboardUserMediaRunCounts.get(message.runId) || 0;
+            unmatchedNextDashboardUserMediaRunCounts.set(
+                message.runId,
+                Math.max(0, mediaRunCount - 1)
+            );
+        }
     }
     const nextToolCallRowsByIdentity = new Map<string, ChatHistoryMessage>();
     for (const message of enrichedNextMessages) {
@@ -809,14 +828,29 @@ export function mergeWithRecentOptimisticMessages(
         const unmatchedMediaCount = mediaIdentity
             ? unmatchedNextMediaCounts.get(mediaKey) || 0
             : 0;
+        const dashboardUserMediaRunId =
+            role === "user" && message.runId?.startsWith("dashboard-chat-")
+                ? message.runId
+                : undefined;
+        const unmatchedMediaRunCount = dashboardUserMediaRunId
+            ? unmatchedNextDashboardUserMediaRunCounts.get(dashboardUserMediaRunId) || 0
+            : 0;
         if (
             (role === "user" || role === "assistant") &&
             isLocalMessage &&
             !message.text.trim() &&
             mediaIdentity &&
-            unmatchedMediaCount > 0
+            (unmatchedMediaCount > 0 || unmatchedMediaRunCount > 0)
         ) {
-            unmatchedNextMediaCounts.set(mediaKey, unmatchedMediaCount - 1);
+            if (unmatchedMediaCount > 0) {
+                unmatchedNextMediaCounts.set(mediaKey, unmatchedMediaCount - 1);
+            }
+            if (dashboardUserMediaRunId && unmatchedMediaRunCount > 0) {
+                unmatchedNextDashboardUserMediaRunCounts.set(
+                    dashboardUserMediaRunId,
+                    unmatchedMediaRunCount - 1
+                );
+            }
             return false;
         }
 

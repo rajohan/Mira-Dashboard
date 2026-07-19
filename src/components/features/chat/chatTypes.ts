@@ -61,6 +61,11 @@ export interface ChatSendAttachment {
     kind: "image" | "text" | "file";
 }
 
+/** Returns a lowercase MIME type without optional parameters. */
+export function normalizeChatMimeType(mimeType: string): string {
+    return mimeType.split(";", 1)[0]?.trim().toLowerCase() || "";
+}
+
 /** Returns a compact fingerprint that incorporates every character. */
 export function chatContentFingerprint(content: string): string {
     let firstHash = 2_166_136_261;
@@ -327,11 +332,15 @@ export function extractToolCalls(content: unknown): ChatToolCallDisplay[] {
 
 /** Performs attachment kind. */
 export function attachmentKind(mimeType: string): ChatAttachmentDisplay["kind"] {
-    if (mimeType.startsWith("image/")) {
+    const normalizedMimeType = normalizeChatMimeType(mimeType);
+    if (normalizedMimeType.startsWith("image/")) {
         return "image";
     }
 
-    if (mimeType.startsWith("text/") || mimeType === "application/json") {
+    if (
+        normalizedMimeType.startsWith("text/") ||
+        normalizedMimeType === "application/json"
+    ) {
         return "text";
     }
 

@@ -599,6 +599,31 @@ describe("shared component helpers", () => {
             );
         });
 
+        const previewFetchCallCount = previewFetch.mock.calls.length;
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "text/csv",
+                    title: "external.csv",
+                    url: "https://files.example.test/external.csv",
+                }}
+                onClose={onClose}
+            />
+        );
+        await waitFor(() => {
+            expect(previewFetch).toHaveBeenCalledTimes(previewFetchCallCount);
+            expect(
+                screen.getByText(
+                    "Preview is not available for this file type yet. Use the download link above to open it locally."
+                )
+            ).toBeInTheDocument();
+        });
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
+            "href",
+            "https://files.example.test/external.csv"
+        );
+
         rerender(
             <AttachmentPreviewModal
                 previewItem={{
@@ -620,7 +645,7 @@ describe("shared component helpers", () => {
             <AttachmentPreviewModal
                 previewItem={{
                     kind: "image",
-                    mimeType: "image/svg+xml",
+                    mimeType: "image/svg+xml; charset=utf-8",
                     title: "logo.svg",
                     url: "/api/media?path=logo.svg",
                 }}
@@ -634,6 +659,22 @@ describe("shared component helpers", () => {
         expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
             "href",
             "/api/media?path=logo.svg"
+        );
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "image",
+                    mimeType: "image/svg+xml; charset=utf-8",
+                    title: "managed-logo.svg",
+                    url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(screen.getByAltText("managed-logo.svg")).toHaveAttribute(
+            "src",
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full?preview=image"
         );
 
         rerender(
@@ -1527,6 +1568,78 @@ describe("shared component helpers", () => {
         expect(reconciledTransientAttachmentId).toHaveLength(1);
         expect(reconciledTransientAttachmentId[0]?.attachments).toHaveLength(1);
         expect(reconciledTransientAttachmentId[0]?.local).toBeUndefined();
+        const managedAttachmentUrl =
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full";
+        const optimisticManagedAttachment = {
+            attachments: [
+                {
+                    contentBase64: "aW1hZ2UtYnl0ZXM=",
+                    dataUrl: "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
+                    fileName: "photo.png",
+                    id: "local-photo",
+                    kind: "image" as const,
+                    mimeType: "image/png",
+                    sizeBytes: 11,
+                },
+            ],
+            content: "",
+            local: true,
+            role: "user",
+            runId: "dashboard-chat-attachment-run",
+            text: "",
+            timestamp: "2026-07-10T15:03:00.000Z",
+        };
+        const persistedManagedAttachment = {
+            attachments: [
+                {
+                    dataUrl: managedAttachmentUrl,
+                    fileName: "photo.png",
+                    id: `content-${managedAttachmentUrl}-0`,
+                    kind: "image" as const,
+                    mimeType: "image/png",
+                    url: managedAttachmentUrl,
+                },
+            ],
+            content: "",
+            role: "user",
+            runId: "dashboard-chat-attachment-run",
+            text: "",
+            timestamp: "2026-07-10T15:03:01.000Z",
+        };
+        const reconciledManagedAttachment = mergeWithRecentOptimisticMessages(
+            [optimisticManagedAttachment],
+            [persistedManagedAttachment]
+        );
+        expect(reconciledManagedAttachment).toHaveLength(1);
+        expect(reconciledManagedAttachment[0]).toMatchObject({
+            attachments: [{ url: managedAttachmentUrl }],
+        });
+        expect(reconciledManagedAttachment[0]?.local).toBeUndefined();
+        const distinctAssistantMediaInOneRun = mergeWithRecentOptimisticMessages(
+            [
+                {
+                    ...optimisticManagedAttachment,
+                    role: "assistant",
+                },
+            ],
+            [
+                {
+                    ...persistedManagedAttachment,
+                    attachments: [
+                        {
+                            dataUrl: `${managedAttachmentUrl}?variant=second`,
+                            fileName: "second-photo.png",
+                            id: "second-photo",
+                            kind: "image" as const,
+                            mimeType: "image/png",
+                            url: `${managedAttachmentUrl}?variant=second`,
+                        },
+                    ],
+                    role: "assistant",
+                },
+            ]
+        );
+        expect(distinctAssistantMediaInOneRun).toHaveLength(2);
         expect(messageIdentity(repeatedAttachmentOnlyTurns[0]!)).not.toBe(
             messageIdentity(repeatedAttachmentOnlyTurns[1]!)
         );

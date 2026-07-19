@@ -145,8 +145,12 @@ File routes reject hidden paths and paths outside their configured roots.
 `/api/media` accepts `preview=text` only for bounded TXT, JSON, CSV, and Markdown
 files, and `preview=image` only for sandboxed SVG display.
 `/api/chat/media/outgoing/*?preview=text` applies the same 1 MiB bound to managed
-Gateway text media after validating its upstream type or filename. Responses
-without a preview query remain the original downloadable media response.
+Gateway text media after validating its upstream type or filename.
+`preview=image` is restricted to bounded SVG content and returns the same
+restrictive sandbox CSP as local SVG preview. Without a preview query, active
+document types such as SVG and HTML are forced to an attachment download with
+`application/octet-stream`; other managed media retain their upstream download
+metadata.
 
 ## Docker
 
