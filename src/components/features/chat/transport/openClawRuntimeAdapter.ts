@@ -24,6 +24,12 @@ import {
 
 type WithoutSequence<Event> = Event extends unknown ? Omit<Event, "sequence"> : never;
 type ChatRuntimeEventDraft = WithoutSequence<ChatRuntimeEvent>;
+interface RuntimeDraftLimitContext {
+    eventName: string;
+    runId?: string;
+    runtimeSequence: number;
+    sessionKey: string;
+}
 const MAX_DRAFTS_PER_ENVELOPE = 15;
 
 function isToolFailureError(value: string | undefined): boolean {
@@ -314,34 +320,53 @@ export function adaptOpenClawRuntimeEvent(
     }
     const common = { runId, sessionKey, timestamp };
     const eventPayload = openClawPayloadView(payload);
-    const sequence = openClawSequence(raw, fallbackSequence) * 16;
+    const runtimeSequence = openClawSequence(raw, fallbackSequence);
+    const sequence = runtimeSequence * 16;
     const drafts =
         eventName === "chat"
             ? chatEventDrafts(stringValue(eventPayload.state), eventPayload, common)
             : eventName === "session.message"
               ? sessionMessageDrafts(eventPayload, common, sequence)
               : runtimeStreamDrafts(eventName, eventPayload, common);
-    return boundedRuntimeDrafts(drafts).map((draft, index) => ({
+    return boundedRuntimeDrafts(drafts, {
+        eventName,
+        runId,
+        runtimeSequence,
+        sessionKey,
+    }).map((draft, index) => ({
         ...draft,
         sequence: sequence + index,
     })) as ChatRuntimeEvent[];
 }
 
-function boundedRuntimeDrafts(drafts: ChatRuntimeEventDraft[]): ChatRuntimeEventDraft[] {
+function boundedRuntimeDrafts(
+    drafts: ChatRuntimeEventDraft[],
+    context: RuntimeDraftLimitContext
+): ChatRuntimeEventDraft[] {
     if (drafts.length <= MAX_DRAFTS_PER_ENVELOPE) {
         return drafts;
     }
     const finishIndex = drafts.findLastIndex((draft) => draft.kind === "finish");
-    if (finishIndex === -1) {
-        return drafts.slice(0, MAX_DRAFTS_PER_ENVELOPE);
+    let boundedDrafts = drafts.slice(0, MAX_DRAFTS_PER_ENVELOPE);
+    if (finishIndex !== -1) {
+        const terminalStart =
+            drafts[finishIndex - 1]?.kind === "assistant" ? finishIndex - 1 : finishIndex;
+        const terminalDrafts = drafts.slice(terminalStart, finishIndex + 1);
+        boundedDrafts = [
+            ...drafts.slice(0, MAX_DRAFTS_PER_ENVELOPE - terminalDrafts.length),
+            ...terminalDrafts,
+        ];
     }
-    const terminalStart =
-        drafts[finishIndex - 1]?.kind === "assistant" ? finishIndex - 1 : finishIndex;
-    const terminalDrafts = drafts.slice(terminalStart, finishIndex + 1);
-    return [
-        ...drafts.slice(0, MAX_DRAFTS_PER_ENVELOPE - terminalDrafts.length),
-        ...terminalDrafts,
-    ];
+    if (process.env.NODE_ENV !== "production") {
+        console.warn(
+            "[openClawRuntimeAdapter] Dropped runtime drafts above the per-envelope limit",
+            {
+                ...context,
+                droppedDrafts: drafts.length - boundedDrafts.length,
+            }
+        );
+    }
+    return boundedDrafts;
 }
 
 function sessionMessageDrafts(

@@ -280,8 +280,8 @@ function runFinalAnchorIndex(
     let diagnosticBoundaryIndex = messages.findLastIndex(
         (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
     );
-    if (!Number.isNaN(startedAt)) {
-        const causalBoundaryIndex = messages.findLastIndex((message) => {
+    if (diagnosticBoundaryIndex === -1 && !Number.isNaN(startedAt)) {
+        diagnosticBoundaryIndex = messages.findLastIndex((message) => {
             const timestamp = messageTimestamp(message);
             return (
                 isUserMessage(message) &&
@@ -289,7 +289,6 @@ function runFinalAnchorIndex(
                 timestamp <= startedAt
             );
         });
-        diagnosticBoundaryIndex = Math.max(diagnosticBoundaryIndex, causalBoundaryIndex);
         if (diagnosticBoundaryIndex === -1) {
             diagnosticBoundaryIndex = messages.findLastIndex((message) => {
                 const timestamp = messageTimestamp(message);

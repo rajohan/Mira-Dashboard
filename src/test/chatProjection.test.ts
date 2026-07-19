@@ -3226,6 +3226,73 @@ describe("chat projection", () => {
         ).toEqual(["question", "tool", "thinking", "final", "follow-up"]);
     });
 
+    it("prefers an explicit run user over a later timestamp boundary", () => {
+        const mediaFinal: ChatHistoryMessage = {
+            attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: "2026-07-16T12:00:02.000Z",
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:04.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            eventAt(32, "2026-07-16T12:00:05.000Z", {
+                kind: "finish",
+                message: { ...mediaFinal, runId: "run-1" },
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                {
+                    ...message("user", "question", "run-1"),
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+                {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    timestamp: "2026-07-16T12:00:01.000Z",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                mediaFinal,
+                {
+                    ...message("user", "follow-up"),
+                    timestamp: "2026-07-16T12:00:03.000Z",
+                },
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const finalRows = projection.rows.filter(
+            (row) => row.message.attachments?.[0]?.id === "report"
+        );
+        const finalIndex = projection.rows.findIndex(
+            (row) => row.message.attachments?.[0]?.id === "report"
+        );
+        const followUpIndex = projection.rows.findIndex(
+            (row) => row.message.text === "follow-up"
+        );
+
+        expect(finalRows).toHaveLength(1);
+        expect(finalRows[0]?.message.runId).toBe("run-1");
+        expect(finalIndex).toBeLessThan(followUpIndex);
+    });
+
     it("does not scope a later text answer to a media-only final", () => {
         const mediaFinal: ChatHistoryMessage = {
             attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],

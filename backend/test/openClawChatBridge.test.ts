@@ -3264,6 +3264,67 @@ describe("OpenClaw chat bridge", () => {
         ]);
     });
 
+    it("promotes a completed runless Synthetic turn across global sequence gaps", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "session.message",
+            {
+                content: "question",
+                role: "user",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.message",
+            {
+                message: {
+                    content: "SYNTHETIC_OK",
+                    role: "assistant",
+                    stopReason: "stop",
+                },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent("session.ended", { status: "completed" }, []);
+        bridge.recordEvent(
+            "session.message",
+            {
+                content: "unrelated session work",
+                role: "user",
+                sessionKey: "agent:other:main",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "model.completed",
+            {
+                runId: "synthetic-provider-run",
+                sessionKey: MAIN,
+                status: "completed",
+            },
+            []
+        );
+
+        expect(bridge.clearMemory()).toBe(true);
+        const snapshot = bridge.snapshot(MAIN);
+        expect(snapshot.completed).toBe(true);
+        expect(snapshot.events.map((event) => event.event)).toEqual([
+            "session.message",
+            "session.message",
+            "model.completed",
+        ]);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual([
+            "synthetic-provider-run",
+            "synthetic-provider-run",
+            "synthetic-provider-run",
+        ]);
+    });
+
     it("promotes a runless user session message when provider work starts", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

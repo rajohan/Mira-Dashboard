@@ -210,15 +210,20 @@ Synthetic assistant message with `stopReason: "toolUse"` remains nonterminal;
 replay bridge. Split id-less thinking blocks receive stable per-message identities
 so separate provider messages cannot concatenate unrelated reasoning. If one
 provider envelope exceeds the adapter event-slot limit, the primary assistant and
-terminal finish events are retained ahead of excess diagnostics. Oversized
+terminal finish events are retained ahead of excess diagnostics; development
+builds warn with envelope identity when that bound discards drafts. Oversized
 terminal replay payloads retain a compact assistant-role/stop marker so refresh
-still settles the completed run. A completed runless user/stop pair can adopt only
-the immediately following provider run ID, backed by terminal metadata or the
-same final signature; this preserves the complete replay without attaching an old
-turn to unrelated work. Top-level tool-result messages retain their call ID and
-tool name before normalization so they merge into the matching live tool row. The
-final primary assistant event never inherits tool fields from the preceding
-runtime buffer.
+still settles the completed run. A completed runless user/stop pair can adopt a
+later provider run ID only while it remains the latest retained run in its own
+session, backed by terminal metadata or the same final signature. Bridge-global,
+unretained, and other-session sequence gaps therefore do not split the replay,
+while newer work in the same session prevents stale adoption. The frontend also
+coalesces an immediately repeated, identity-matching Synthetic final into that
+completed runless turn. Top-level tool-result messages retain their call ID and
+tool name before normalization so they merge into the matching live tool row. An
+explicitly run-scoped user boundary takes precedence over timestamp fallback when
+locating exact tool evidence. The final primary assistant event never inherits
+tool fields from the preceding runtime buffer.
 
 ### Virtualized Sticky Bottom
 
@@ -300,9 +305,13 @@ When changing chat event handling, test these cases:
 - mixed Synthetic session messages split into tool/thinking/final rows, and only
   `stopReason: "stop"` completes their replay run;
 - large Synthetic messages retain their primary final and terminal event, compact
-  replay keeps the stop marker, and id-less thinking stays as separate blocks;
-- an immediately acknowledged runless Synthetic completion preserves its complete
-  replay, and top-level tool results retain the identity of their matching calls;
+  replay keeps the stop marker, id-less thinking stays as separate blocks, and
+  bounded draft loss emits development diagnostics;
+- a runless Synthetic completion preserves one live and refreshed run when its
+  provider ID arrives across unrelated sequence gaps, while top-level tool results
+  retain the identity of their matching calls;
+- explicit run-scoped user boundaries keep delayed exact tool evidence and
+  media-only finals in their original turn;
 - hard-refresh history loads and post-final structural changes settle at the
   virtualized bottom without repeated per-frame scroll writes;
 - completed thinking remains grouped and follows the keep-after-final preference;

@@ -709,7 +709,8 @@ function isRunlessUserLedRun(run: RetainedRun): boolean {
 
 function isPromotableRunlessUserLedRun(
     run: RetainedRun,
-    envelope: OpenClawRuntimeEnvelope
+    envelope: OpenClawRuntimeEnvelope,
+    runs: ReadonlyMap<string, RetainedRun>
 ): boolean {
     if (isRunlessUserLedRun(run)) {
         return true;
@@ -718,7 +719,10 @@ function isPromotableRunlessUserLedRun(
     const terminalEvent = run.events.find(
         (event) => event.runtimeSequence === run.terminalSequence
     );
-    const isAdjacentCompletedSyntheticTurn = Boolean(
+    const isLatestSessionRun = runs
+        .values()
+        .every((candidate) => lastSequence(candidate) <= lastSequence(run));
+    const isLatestCompletedSyntheticTurn = Boolean(
         run.completed &&
         isRunlessRunId(run.runId) &&
         firstEvent?.event === "session.message" &&
@@ -726,9 +730,10 @@ function isPromotableRunlessUserLedRun(
         terminalEvent?.event === "session.message" &&
         sessionMessageRole(terminalEvent.payload) === "assistant" &&
         sessionMessageStopReason(terminalEvent.payload) === "stop" &&
-        envelope.runtimeSequence === run.terminalSequence + 1
+        envelope.runtimeSequence > run.terminalSequence &&
+        isLatestSessionRun
     );
-    if (!isAdjacentCompletedSyntheticTurn || !terminalEvent) {
+    if (!isLatestCompletedSyntheticTurn || !terminalEvent) {
         return false;
     }
     if (isMetadataOnlyCompletionEnvelope(envelope)) {
@@ -1952,7 +1957,9 @@ export class OpenClawChatBridge {
         if (explicitRunId && !runs.has(explicitRunId)) {
             const pendingUserRuns = runs
                 .values()
-                .filter((run) => isPromotableRunlessUserLedRun(run, retainedEnvelope))
+                .filter((run) =>
+                    isPromotableRunlessUserLedRun(run, retainedEnvelope, runs)
+                )
                 .toArray();
             if (pendingUserRuns.length === 1) {
                 this.#promoteRunEntry(

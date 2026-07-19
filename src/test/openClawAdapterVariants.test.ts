@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, jest } from "bun:test";
 
 import {
     createChatVisibility,
@@ -195,38 +195,118 @@ describe("OpenClaw adapter variants", () => {
     });
 
     it("preserves the Synthetic terminal event when one message has many tools", () => {
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
         const adapter = new OpenClawChatAdapter();
-        const events = adapter.event(
-            envelope(
-                "session.message",
-                {
-                    message: {
-                        content: [
-                            { thinking: "inspect repository", type: "thinking" },
-                            ...Array.from({ length: 13 }, (_, index) => ({
-                                arguments: { command: `step-${index}` },
-                                id: `functions.exec:${index}`,
-                                name: "exec",
-                                type: "toolCall",
-                            })),
-                            { text: "SYNTHETIC_OK", type: "text" },
-                        ],
-                        role: "assistant",
-                        stopReason: "stop",
+        try {
+            adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: "question",
+                            role: "user",
+                        },
                     },
-                },
-                32
-            )
-        );
+                    31
+                )
+            );
+            expect(warning).not.toHaveBeenCalled();
+            const events = adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: [
+                                { thinking: "inspect repository", type: "thinking" },
+                                ...Array.from({ length: 13 }, (_, index) => ({
+                                    arguments: { command: `step-${index}` },
+                                    id: `functions.exec:${index}`,
+                                    name: "exec",
+                                    type: "toolCall",
+                                })),
+                                { text: "SYNTHETIC_OK", type: "text" },
+                            ],
+                            role: "assistant",
+                            stopReason: "stop",
+                        },
+                    },
+                    32
+                )
+            );
 
-        expect(events).toHaveLength(15);
-        expect(events.at(-2)).toMatchObject({
-            kind: "assistant",
-            message: { text: "SYNTHETIC_OK" },
-        });
-        expect(events.at(-1)).toMatchObject({
-            kind: "finish",
-            outcome: "completed",
+            expect(events).toHaveLength(15);
+            expect(events.at(-2)).toMatchObject({
+                kind: "assistant",
+                message: { text: "SYNTHETIC_OK" },
+            });
+            expect(events.at(-1)).toMatchObject({
+                kind: "finish",
+                outcome: "completed",
+            });
+            expect(warning).toHaveBeenCalledTimes(1);
+            expect(warning).toHaveBeenCalledWith(
+                "[openClawRuntimeAdapter] Dropped runtime drafts above the per-envelope limit",
+                {
+                    droppedDrafts: 1,
+                    eventName: "session.message",
+                    runId: "run-variants",
+                    runtimeSequence: 32,
+                    sessionKey: SESSION,
+                }
+            );
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("coalesces a completed runless Synthetic final when its run id arrives", () => {
+        const adapter = new OpenClawChatAdapter();
+        const finalMessage = {
+            content: [{ text: "SYNTHETIC_OK", type: "text" }],
+            role: "assistant",
+            stopReason: "stop",
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: "question",
+                            role: "user",
+                        },
+                        runId: undefined,
+                    },
+                    33
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    { message: finalMessage, runId: undefined },
+                    34
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    { message: finalMessage, runId: "synthetic-provider-run" },
+                    35
+                )
+            ),
+        ]);
+        const runs = Object.values(runtime.sessions[SESSION]?.runs || {});
+
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            aliases: expect.arrayContaining(["synthetic-provider-run"]),
+            assistant: { text: "SYNTHETIC_OK" },
+            phase: "completed",
+            userMessages: [
+                expect.objectContaining({
+                    message: expect.objectContaining({ text: "question" }),
+                }),
+            ],
         });
     });
 
