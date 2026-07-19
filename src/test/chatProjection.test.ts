@@ -3018,6 +3018,62 @@ describe("chat projection", () => {
         expect(toolKey(compactProjection)).toBe(toolKey(fullProjection));
     });
 
+    it("keeps compacted tools before thinking for a media-only final", () => {
+        const mediaFinal: ChatHistoryMessage = {
+            attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+            content: "",
+            role: "assistant",
+            text: "",
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "reasoning", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "reasoning" }],
+                },
+                runId: "run-1",
+            }),
+            event(48, {
+                kind: "finish",
+                message: { ...mediaFinal, runId: "run-1" },
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                message("user", "question"),
+                {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                mediaFinal,
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            projection.rows.map((row) =>
+                row.message.toolCalls?.length
+                    ? "tool"
+                    : row.message.thinking?.length
+                      ? "thinking"
+                      : row.message.attachments?.length
+                        ? "final"
+                        : row.message.text
+            )
+        ).toEqual(["question", "tool", "thinking", "final"]);
+    });
+
     it("hides compacted thinking for each overlapping completed run", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             eventAt(32, "2026-07-16T12:00:03.000Z", {

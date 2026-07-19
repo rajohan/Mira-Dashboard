@@ -182,10 +182,11 @@ completed final is matched, only unscoped canonical diagnostics after the
 previous primary answer and that matched final adopt the completed run ID.
 Scoping requires an explicit run match or primary assistant output whose final is
 timestamp/diagnostic anchored or has one unique text match in the response
-segment. Metadata-only and diagnostic-only completions cannot claim a canonical
+segment. Media-only finals use the same unique-match rule with their media
+identity. Metadata-only and diagnostic-only completions cannot claim a canonical
 answer, and identical unanchored finals remain unscoped. Projection exposes both
-the scoped row key and previous unscoped history key as delete aliases; the delete
-action persists every alias. This keeps tool row keys stable when
+the scoped row key and previous unscoped history key as delete aliases; the
+delete action persists every alias. This keeps tool row keys stable when
 transcript-backed runtime events are compacted, avoids claiming diagnostics from
 overlapping runs, keeps hidden tool media with the final, and keeps retained
 thinking after the canonical tools but before the final answer.
@@ -252,6 +253,7 @@ When changing chat event handling, test these cases:
 - final and diagnostic reconciliation preserve persisted history delete keys;
 - scoped deletions remain hidden after completed replay is cleared;
 - hidden tool media remains attached to its completed final after compaction;
+- media-only finals keep compacted tools before retained thinking;
 - completed thinking remains grouped and follows the keep-after-final preference;
 - hiding diagnostics does not remove them from cached client state;
 - the global tool-detail setting updates existing bubbles and the default for

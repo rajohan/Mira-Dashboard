@@ -479,19 +479,29 @@ function hasUnambiguousFinalEvidence(
         return true;
     }
     const assistantText = run.assistant.text;
-    if (!assistantText) {
+    const assistantMediaIdentity = messageMediaIdentity(run.assistant);
+    if (!assistantText && !assistantMediaIdentity) {
         return false;
     }
     let matchingFinals = 0;
     for (let index = segment.start; index < segment.end; index += 1) {
         const message = messages[index];
         const role = message?.role.toLowerCase();
+        const isTextMatching = Boolean(
+            !assistantText ||
+            (message && isRecoveredAssistantText(message.text, assistantText))
+        );
+        const isMediaMatching = Boolean(
+            !assistantMediaIdentity ||
+            (message && messageMediaIdentity(message) === assistantMediaIdentity)
+        );
         const isMatchingFinal = Boolean(
             message &&
             !message.runId &&
             (role === "assistant" || role === "system") &&
             !isStandaloneDiagnostic(message) &&
-            isRecoveredAssistantText(message.text, assistantText)
+            isTextMatching &&
+            isMediaMatching
         );
         if (isMatchingFinal) {
             matchingFinals += 1;
