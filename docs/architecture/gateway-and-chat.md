@@ -104,6 +104,41 @@ The runtime combines several event sources into one visible conversation:
 - tool result diagnostics;
 - terminal chat state events.
 
+### Session URL State
+
+The selected chat session is stored in the `/chat?session=<session-key>` query.
+Refreshing, opening a copied URL, and browser back/forward navigation therefore
+restore the same session. A plain `/chat` URL keeps the existing default-session
+selection behavior. Session changes from the picker replace the query value so
+routine navigation does not add one browser-history entry per selection.
+
+### Attachments And Media
+
+Dashboard delegates attachment delivery and persistence to OpenClaw through the
+provider-independent `ChatTransport`. The composer only prepares the Gateway
+attachment contract; it does not maintain a second Dashboard upload store.
+Images, audio, PDFs, text/data files, archives, and common Office formats are
+accepted. Video is rejected before encoding because OpenClaw chat does not
+support it in this flow.
+
+History normalization accepts OpenClaw `image`, `image_url`, and `input_image`
+blocks plus generic attachment and `MediaPath` records. Every attachment keeps a
+download action. Images render inline; JSON and Markdown use the existing
+structured viewers; CSV and plain text use a bounded text preview; other files
+remain downloadable.
+
+Managed Gateway image URLs stay authenticated without exposing the Gateway token
+to the browser. The browser requests the same managed path from Dashboard under
+`/api/chat/media/outgoing/*`; the backend validates the exact UUID-shaped path,
+converts the configured Gateway WebSocket origin to HTTP(S), adds the bearer
+token server-side, and does not follow redirects.
+
+Local OpenClaw media continues through `/api/media`. Text preview is opt-in and
+limited to `.txt`, `.json`, `.csv`, and `.md` files no larger than 1 MiB. SVG is
+downloaded as `application/octet-stream` by default and rendered only through an
+explicit sandboxed image preview with a restrictive CSP. These preview rules do
+not remove the original download action.
+
 ### Transcript And Runtime Authority
 
 Dashboard uses two complementary history sources:
@@ -236,6 +271,11 @@ per-frame writes are avoided because they can cycle different virtual windows
 through the viewport and appear as flashing tool rows. Real wheel or touch intent
 cancels any queued correction immediately.
 
+When the document is hidden, Chat remembers whether the viewport was sticky at
+the bottom. Returning to a background tab restores the stable bottom only when
+it was sticky before deactivation; a tab the user intentionally scrolled upward
+keeps its position.
+
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
 - model selection patches the selected session;
@@ -244,6 +284,12 @@ Session controls are Gateway-backed rather than Dashboard-only preferences:
 - compact context invokes the Gateway compaction flow for that session;
 - sparse session records inherit matching Gateway defaults instead of being
   treated as unsupported.
+
+Both the send button and the send handler reject messages while the selected
+session is compacting. Dashboard tracks locally initiated compaction RPCs in
+addition to provider runtime status and releases the local lock in a `finally`
+path, so success, provider failure, disconnect, or a later terminal phase cannot
+leave sending permanently disabled.
 
 Thinking/reasoning, tool diagnostics, keeping thinking after final, and the
 default tool-detail expansion state are grouped in the composer's Chat display
@@ -262,6 +308,7 @@ Tool-call failures should render as tool diagnostics, not as the global chat
 error banner. The global error banner is reserved for send failures, Gateway
 disconnects, and non-tool terminal chat/runtime failures. A tool terminal error
 stays out of the global banner even when it arrives before its diagnostic row.
+The user can dismiss a visible global error without clearing chat state.
 
 When changing chat event handling, test these cases:
 
@@ -314,6 +361,14 @@ When changing chat event handling, test these cases:
   media-only finals in their original turn;
 - hard-refresh history loads and post-final structural changes settle at the
   virtualized bottom without repeated per-frame scroll writes;
+- a background tab restores the bottom only when it was sticky before becoming
+  hidden;
+- URL session selection survives refresh and follows browser navigation while a
+  query-less chat keeps default selection;
+- local and managed Gateway attachments preserve inline previews and an original
+  download path without exposing Gateway credentials;
+- compaction blocks all send paths and releases its lock after both success and
+  failure;
 - completed thinking remains grouped and follows the keep-after-final preference;
 - hiding diagnostics does not remove them from cached client state;
 - the global tool-detail setting updates existing bubbles and the default for

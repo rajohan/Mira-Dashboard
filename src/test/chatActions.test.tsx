@@ -258,6 +258,54 @@ describe("chat actions", () => {
         expect(result.current.canSend).toBe(true);
     });
 
+    it("re-enables sending after a compaction request fails", async () => {
+        const compactDeferred = Promise.withResolvers<void>();
+        const transport = fakeTransport();
+        transport.compact = jest.fn(() => compactDeferred.promise);
+        const setSendError = jest.fn();
+        const { result } = renderHook(() =>
+            useChatActions({
+                activeRunCount: 0,
+                attachments: [],
+                attachmentsReference: { current: [] },
+                clearAttachments: jest.fn(),
+                confirmResetSession: jest.fn(async () => true),
+                draft: "send after failure",
+                isCompacting: false,
+                isConnected: true,
+                isRecording: false,
+                isTranscribing: false,
+                runtime: fakeRuntime(),
+                scheduleBottomFollow: jest.fn(),
+                selectedSession: selectedSession(),
+                selectedSessionKey: SESSION_A,
+                selectedSessionKeyReference: { current: SESSION_A },
+                setDraft: jest.fn(),
+                setIsAtBottom: jest.fn(),
+                setMessages: jest.fn(),
+                setSendError,
+                shouldStickToBottomReference: { current: true },
+                transport,
+            })
+        );
+
+        let compactPromise: Promise<void> | undefined;
+        act(() => {
+            compactPromise = result.current.compactSelectedSession();
+        });
+        await waitFor(() => expect(result.current.canSend).toBe(false));
+        await act(async () => {
+            compactDeferred.reject(new Error("compaction unavailable"));
+            await compactPromise;
+        });
+
+        expect(setSendError).toHaveBeenCalledWith("compaction unavailable");
+        expect(result.current.isCompactingSession).toBe(false);
+        expect(result.current.canSend).toBe(true);
+        await act(async () => result.current.handleSend());
+        expect(transport.send).toHaveBeenCalledTimes(1);
+    });
+
     it("tracks concurrent compaction requests per session", async () => {
         const compactA = Promise.withResolvers<void>();
         const compactB = Promise.withResolvers<void>();

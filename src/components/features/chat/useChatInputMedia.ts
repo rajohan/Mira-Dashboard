@@ -14,6 +14,7 @@ import {
     chatErrorMessage,
     dataUrlToBase64,
     displayMimeType,
+    isVideoAttachment,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     readFileAsDataUrl,
@@ -89,6 +90,16 @@ export function useChatInputMedia({
             return;
         }
         onError(undefined);
+        const unsupportedVideo = [...files].find((file) => isVideoAttachment(file));
+        if (unsupportedVideo) {
+            onError(
+                `${unsupportedVideo.name} is a video. OpenClaw chat supports images and non-video files.`
+            );
+            if (fileInputReference.current) {
+                fileInputReference.current.value = "";
+            }
+            return;
+        }
         const operationEpoch = mediaEpochReference.current;
         const remainingSlots = Math.max(
             0,

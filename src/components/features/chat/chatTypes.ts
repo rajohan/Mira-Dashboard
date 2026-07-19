@@ -4,16 +4,26 @@ export const TOOL_ROLE_VARIANTS: readonly string[] = [
     "tool_result",
     "toolresult",
 ];
+const CHAT_IMAGE_URL_PROTOCOLS = new Set(["http:", "https:"]);
 
 /** Represents chat image block. */
 export interface ChatImageBlock {
-    type: "image";
+    type: "image" | "image_url" | "input_image";
+    alt?: string;
     mimeType?: string;
     data?: string;
+    url?: string;
+    openUrl?: string;
+    image_url?:
+        | string
+        | {
+              url?: string;
+          };
     source?: {
         type?: string;
         media_type?: string;
         data?: string;
+        url?: string;
     };
 }
 
@@ -24,6 +34,7 @@ export interface ChatAttachmentDisplay {
     mimeType?: string;
     sizeBytes?: number;
     dataUrl?: string;
+    url?: string;
     contentBase64?: string;
     kind: "image" | "text" | "file";
 }
@@ -66,13 +77,64 @@ export function chatContentFingerprint(content: string): string {
 
 /** Returns attachment content identity independent of transient row IDs. */
 export function chatAttachmentIdentity(attachment: ChatAttachmentDisplay): string {
-    const content = attachment.contentBase64 || attachment.dataUrl || "";
+    const content =
+        attachment.contentBase64 || attachment.dataUrl || attachment.url || "";
     return [
         attachment.fileName,
         attachment.mimeType || "unknown",
         attachment.sizeBytes ?? "unknown",
         content ? chatContentFingerprint(content) : attachment.id,
     ].join("::");
+}
+
+function safeChatImageUrl(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const candidate = value.trim();
+    if (!candidate) {
+        return undefined;
+    }
+    if (candidate.startsWith("/") && !candidate.startsWith("//")) {
+        return candidate;
+    }
+    if (candidate.startsWith("data:image/")) {
+        return candidate;
+    }
+    try {
+        const url = new URL(candidate);
+        return CHAT_IMAGE_URL_PROTOCOLS.has(url.protocol) ? candidate : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Returns an embeddable URL from every OpenClaw image block variant. */
+export function chatImageUrl(image: ChatImageBlock): string | undefined {
+    const imageUrl =
+        typeof image.image_url === "string" ? image.image_url : image.image_url?.url;
+    const directUrl = [image.url, image.openUrl, image.source?.url, imageUrl]
+        .map((value) => safeChatImageUrl(value))
+        .find(Boolean);
+    if (directUrl) {
+        return directUrl;
+    }
+
+    const imageData = image.source?.data || image.data;
+    if (!imageData) {
+        return undefined;
+    }
+    const embeddedUrl = safeChatImageUrl(imageData);
+    if (embeddedUrl) {
+        return embeddedUrl;
+    }
+    const mimeType = image.source?.media_type || image.mimeType || "image/png";
+    return `data:${mimeType};base64,${imageData}`;
+}
+
+/** Returns the declared image MIME type with a safe display fallback. */
+export function chatImageMimeType(image: ChatImageBlock): string {
+    return image.source?.media_type || image.mimeType || "image/png";
 }
 
 /** Represents one attachment in the provider-independent transport contract. */
@@ -208,7 +270,7 @@ export function extractImages(content: unknown): ChatImageBlock[] {
             return false;
         }
 
-        return item.type === "image";
+        return ["image", "image_url", "input_image"].includes(String(item.type));
     });
 }
 
@@ -325,7 +387,7 @@ export function normalizeText(content: unknown): string {
                     return block.text;
                 }
 
-                if (block.type === "image") {
+                if (["image", "image_url", "input_image"].includes(String(block.type))) {
                     return "[image]";
                 }
 

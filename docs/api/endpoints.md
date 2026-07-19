@@ -128,19 +128,23 @@ Create body:
 
 ## Files, Config Files, Logs, Media
 
-| Method | Path                  | Purpose                                       |
-| ------ | --------------------- | --------------------------------------------- |
-| `GET`  | `/api/files`          | Lists workspace files.                        |
-| `GET`  | `/api/files/*`        | Reads workspace file/media metadata/content.  |
-| `PUT`  | `/api/files/*`        | Writes workspace file content.                |
-| `GET`  | `/api/config-files`   | Lists OpenClaw config files.                  |
-| `GET`  | `/api/config-files/*` | Reads a config file under OpenClaw root.      |
-| `PUT`  | `/api/config-files/*` | Writes a config file under OpenClaw root.     |
-| `GET`  | `/api/logs/info`      | Lists log files/metadata.                     |
-| `GET`  | `/api/logs/content`   | Reads log content.                            |
-| `GET`  | `/api/media`          | Serves media bytes from OpenClaw media roots. |
+| Method | Path                         | Purpose                                                             |
+| ------ | ---------------------------- | ------------------------------------------------------------------- |
+| `GET`  | `/api/files`                 | Lists workspace files.                                              |
+| `GET`  | `/api/files/*`               | Reads workspace file/media metadata/content.                        |
+| `PUT`  | `/api/files/*`               | Writes workspace file content.                                      |
+| `GET`  | `/api/config-files`          | Lists OpenClaw config files.                                        |
+| `GET`  | `/api/config-files/*`        | Reads a config file under OpenClaw root.                            |
+| `PUT`  | `/api/config-files/*`        | Writes a config file under OpenClaw root.                           |
+| `GET`  | `/api/logs/info`             | Lists log files/metadata.                                           |
+| `GET`  | `/api/logs/content`          | Reads log content.                                                  |
+| `GET`  | `/api/media`                 | Serves or safely previews media bytes from OpenClaw media roots.    |
+| `GET`  | `/api/chat/media/outgoing/*` | Proxies an exact managed Gateway media path with backend-held auth. |
 
 File routes reject hidden paths and paths outside their configured roots.
+`/api/media` accepts `preview=text` only for bounded TXT, JSON, CSV, and Markdown
+files, and `preview=image` only for sandboxed SVG display. The response without a
+preview query remains the original downloadable media response.
 
 ## Docker
 

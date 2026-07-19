@@ -28,7 +28,10 @@ import {
     ChatMessagesList,
     previewFromAttachment,
 } from "../components/features/chat/ChatMessagesList";
-import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
+import {
+    CHAT_ATTACHMENT_ACCEPT,
+    chatThinkingOptions,
+} from "../components/features/chat/chatUtilities";
 import {
     mergeWithRecentOptimisticMessages,
     messageIdentity,
@@ -505,7 +508,7 @@ describe("shared component helpers", () => {
         );
     });
 
-    it("renders chat attachment previews, header status, and diagnostic details", () => {
+    it("renders chat attachment previews, header status, and diagnostic details", async () => {
         const onClose = jest.fn();
         const onToggleThinking = jest.fn();
         const onToggleTools = jest.fn();
@@ -528,6 +531,10 @@ describe("shared component helpers", () => {
             />
         );
         expect(screen.getByAltText("Preview image")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
+            "download",
+            "Preview image"
+        );
 
         rerender(
             <AttachmentPreviewModal
@@ -541,6 +548,75 @@ describe("shared component helpers", () => {
             />
         );
         expect(screen.getByText("hello attachment")).toBeInTheDocument();
+
+        const previewFetch = jest.fn(
+            async () =>
+                new Response('{"name":"Mira","items":[1,2]}', {
+                    headers: { "Content-Type": "text/plain; charset=utf-8" },
+                })
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: previewFetch,
+            writable: true,
+        });
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "application/json",
+                    title: "data.json",
+                    url: "/api/media?path=data.json",
+                }}
+                onClose={onClose}
+            />
+        );
+        await waitFor(() => {
+            expect(screen.getByRole("dialog", { name: "data.json" })).toHaveTextContent(
+                "Mira"
+            );
+        });
+        expect(previewFetch).toHaveBeenCalledWith(
+            "/api/media?path=data.json&preview=text",
+            expect.objectContaining({ headers: { Accept: "text/plain" } })
+        );
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "text/markdown",
+                    text: "# Attachment heading\n\n| A | B |\n| - | - |\n| 1 | 2 |",
+                    title: "readme.md",
+                    url: "data:text/markdown;base64,IyBBdHRhY2htZW50IGhlYWRpbmc=",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(
+            screen.getByRole("heading", { name: "Attachment heading" })
+        ).toBeInTheDocument();
+        expect(screen.getByRole("table")).toBeInTheDocument();
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "image",
+                    mimeType: "image/svg+xml",
+                    title: "logo.svg",
+                    url: "/api/media?path=logo.svg",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(screen.getByAltText("logo.svg")).toHaveAttribute(
+            "src",
+            "/api/media?path=logo.svg&preview=image"
+        );
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
+            "href",
+            "/api/media?path=logo.svg"
+        );
 
         rerender(
             <AttachmentPreviewModal
@@ -1010,6 +1086,47 @@ describe("shared component helpers", () => {
         expect(toggle).toHaveAttribute("aria-pressed", "true");
         await user.click(toggle);
         expect(onToggleKeepThinkingAfterFinal).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps attachment support and stop controls visually distinct", () => {
+        const view = render(
+            <ChatComposer
+                attachments={[]}
+                canSend={false}
+                canStop={true}
+                draft=""
+                fileInputReference={{ current: undefined }}
+                isConnected={true}
+                isRecording={true}
+                isSending={false}
+                isTranscribing={false}
+                selectedSessionKey="agent:main:main"
+                slashCommandSuggestions={[]}
+                onApplySlashSuggestion={jest.fn()}
+                onAttachFiles={jest.fn()}
+                onChangeDraft={jest.fn()}
+                onPreview={jest.fn()}
+                onRemoveAttachment={jest.fn()}
+                onSend={jest.fn()}
+                onStop={jest.fn()}
+                onToggleRecording={jest.fn()}
+            />
+        );
+
+        const recordingButton = screen.getByRole("button", {
+            name: "Stop recording",
+        });
+        const responseStopButton = screen.getByRole("button", { name: "Stop" });
+        expect(recordingButton).toHaveTextContent("Recording");
+        expect(recordingButton).toHaveClass("bg-red-500");
+        expect(responseStopButton).toHaveClass(
+            "border-red-500/65",
+            "bg-transparent",
+            "text-red-500/85"
+        );
+        expect(
+            view.container.querySelector('input[type="file"][multiple]')
+        ).toHaveAttribute("accept", CHAT_ATTACHMENT_ACCEPT);
     });
 
     it("submits an exact slash command on the first Enter", () => {
@@ -2001,7 +2118,15 @@ describe("shared component helpers", () => {
                                     },
                                 ],
                                 content: "answer",
-                                images: [{ data: "a", type: "image" }],
+                                images: [
+                                    {
+                                        image_url: {
+                                            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+                                        },
+                                        mimeType: "image/png",
+                                        type: "image_url",
+                                    },
+                                ],
                                 role: "assistant",
                                 text: "answer",
                                 timestamp: "2026-06-24T10:01:00.000Z",
@@ -2067,7 +2192,11 @@ describe("shared component helpers", () => {
         expect(onFollow).toHaveBeenCalledTimes(1);
         expect(onDeleteMessage).toHaveBeenCalledWith("user", ["user", "user-history"]);
         expect(onPreview).toHaveBeenCalledWith(
-            expect.objectContaining({ kind: "image", title: "Chat image" })
+            expect.objectContaining({
+                kind: "image",
+                title: "Chat image",
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+            })
         );
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({ kind: "text", title: "readme.txt" })

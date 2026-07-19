@@ -8,6 +8,7 @@ import type {
     ChatToolResultDisplay,
     ChatVisibilitySettings,
 } from "./chatTypes";
+import { chatImageUrl } from "./chatTypes";
 
 /** Formats tool arguments for display. */
 function formatToolArguments(toolCall: ChatToolCallDisplay): string {
@@ -84,21 +85,10 @@ function isMatchingToolResult(
     );
 }
 
-/** Returns an embeddable image URL for chat image blocks. */
-function toolImageUrl(image: ChatImageBlock): string | undefined {
-    const imageData = image.source?.data || image.data;
-    if (!imageData) {
-        return undefined;
-    }
-
-    const imageMime = image.source?.media_type || image.mimeType || "image/png";
-    return `data:${imageMime};base64,${imageData}`;
-}
-
 /** Renders tool result images. */
 function ToolResultImages({ images = [] }: { images?: ChatImageBlock[] }) {
     const imageUrls = images
-        .map((image) => toolImageUrl(image))
+        .map((image) => chatImageUrl(image))
         .filter((imageUrl): imageUrl is string => Boolean(imageUrl));
     if (imageUrls.length === 0) {
         return;

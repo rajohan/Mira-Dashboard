@@ -28,7 +28,7 @@ import type {
     ChatRow,
     ChatVisibilitySettings,
 } from "./chatTypes";
-import { TOOL_ROLE_VARIANTS } from "./chatTypes";
+import { chatImageMimeType, chatImageUrl, TOOL_ROLE_VARIANTS } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
 
 const SCROLL_KEYS = new Set([
@@ -106,13 +106,15 @@ export function base64ToText(base64: string): string | undefined {
 export function previewFromAttachment(
     attachment: ChatAttachmentDisplay
 ): ChatPreviewItem | undefined {
-    if (!attachment.dataUrl && !attachment.contentBase64) {
+    if (!attachment.dataUrl && !attachment.url && !attachment.contentBase64) {
         return undefined;
     }
 
     const mimeType = attachment.mimeType || "application/octet-stream";
     const url =
-        attachment.dataUrl || `data:${mimeType};base64,${attachment.contentBase64!}`;
+        attachment.dataUrl ||
+        attachment.url ||
+        `data:${mimeType};base64,${attachment.contentBase64!}`;
 
     return {
         title: attachment.fileName,
@@ -577,19 +579,14 @@ export function ChatMessagesList({
                                             <div className="mb-1.5 flex flex-wrap gap-1.5">
                                                 {row.message.images.map(
                                                     (image, imageIndex) => {
-                                                        const imageData =
-                                                            image.source?.data ||
-                                                            image.data;
-                                                        if (!imageData) {
+                                                        const imageUrl =
+                                                            chatImageUrl(image);
+                                                        if (!imageUrl) {
                                                             return;
                                                         }
 
                                                         const imageMime =
-                                                            image.source?.media_type ||
-                                                            image.mimeType ||
-                                                            "image/png";
-
-                                                        const imageUrl = `data:${imageMime};base64,${imageData}`;
+                                                            chatImageMimeType(image);
                                                         const imagePreviewLabel = `Open chat image ${imageIndex + 1} preview`;
 
                                                         return (

@@ -39,6 +39,7 @@ import {
 import {
     attachmentKind,
     type ChatHistoryMessage,
+    chatImageUrl,
     chatTransportAttachments,
     extractImages,
     extractThinkingBlocks,
@@ -601,18 +602,27 @@ describe("Mira Dashboard frontend behavior", () => {
     });
 
     it("loads the app shell, router, login route, and local devtools modules", async () => {
-        const [{ default: App }, { router }, { Login }, { default: DashboardDevtools }] =
-            await Promise.all([
-                import("../App"),
-                import("../router"),
-                import("../pages/Login"),
-                import("../components/devtools/DashboardDevtools"),
-            ]);
+        const [
+            { default: App },
+            { normalizeChatSearch, router },
+            { Login },
+            { default: DashboardDevtools },
+        ] = await Promise.all([
+            import("../App"),
+            import("../router"),
+            import("../pages/Login"),
+            import("../components/devtools/DashboardDevtools"),
+        ]);
 
         expect(App).toBeTypeOf("function");
         expect(Login).toBeTypeOf("function");
         expect(DashboardDevtools).toBeTypeOf("function");
         expect(router.navigate).toBeTypeOf("function");
+        expect(normalizeChatSearch({ session: " agent:ops:main:heartbeat " })).toEqual({
+            session: "agent:ops:main:heartbeat",
+        });
+        expect(normalizeChatSearch({ session: " ".repeat(3) })).toEqual({});
+        expect(normalizeChatSearch({ session: 42 })).toEqual({});
 
         const originalFetch = fetch;
         Object.defineProperty(globalThis, "fetch", {
@@ -4005,6 +4015,16 @@ describe("Mira Dashboard frontend behavior", () => {
             { id: "call-1", name: "exec", arguments: { cmd: "pwd" } },
         ]);
         expect(normalizeText(contentBlocks)).toBe("hello\n\n[image]");
+        const managedImage = {
+            image_url: {
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+            },
+            mimeType: "image/png",
+            type: "image_url",
+        } as const;
+        expect(chatImageUrl(managedImage)).toBe(managedImage.image_url.url);
+        expect(extractImages([managedImage])).toEqual([managedImage]);
+        expect(normalizeText([managedImage])).toBe("[image]");
         expect(attachmentKind("image/png")).toBe("image");
         expect(attachmentKind("application/json")).toBe("text");
         expect(attachmentKind("application/pdf")).toBe("file");
@@ -4043,6 +4063,50 @@ describe("Mira Dashboard frontend behavior", () => {
             "result.png",
             "note.txt",
         ]);
+
+        const normalizedMediaReferences = normalizeOpenClawHistoryMessage({
+            MediaPaths: ["/tmp/data.csv", "/tmp/readme.md", "/tmp/logo.svg"],
+            content: "",
+            role: "user",
+        });
+        expect(normalizedMediaReferences.attachments).toMatchObject([
+            {
+                fileName: "data.csv",
+                kind: "text",
+                mimeType: "text/csv",
+                url: "/api/media?path=%2Ftmp%2Fdata.csv",
+            },
+            {
+                fileName: "readme.md",
+                kind: "text",
+                mimeType: "text/markdown",
+            },
+            {
+                dataUrl: "/api/media?path=%2Ftmp%2Flogo.svg",
+                fileName: "logo.svg",
+                kind: "image",
+                mimeType: "image/svg+xml",
+            },
+        ]);
+
+        const normalizedManagedAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        label: "report.csv",
+                        mimeType: "text/csv",
+                        url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedManagedAttachment.attachments?.[0]).toMatchObject({
+            fileName: "report.csv",
+            kind: "text",
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+        });
 
         expect(formatDatabaseNumber(123_456)).toBe("123,456");
         expect(formatDatabaseNumber(NaN)).toBe("0");

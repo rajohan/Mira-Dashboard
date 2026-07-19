@@ -1,6 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
-import { AlertCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { AlertCircle, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
@@ -80,18 +81,25 @@ function formatChatSessionLabel(session: Session, agentId: string): string {
 
 /** Renders the chat UI. */
 export function Chat() {
+    const navigate = useNavigate();
+    const search = useSearch({ strict: false }) as { session?: string };
+    const requestedSessionKey = search.session?.trim() || "";
     const transport = useOpenClawChatTransport();
     const { error, isConnected } = transport;
     const selectedSessionKeyReference = useRef("");
+    const previousRequestedSessionKeyReference = useRef(requestedSessionKey);
     const shouldStickToBottomReference = useRef(true);
     const resetConfirmResolverReference = useRef<
         ((wasConfirmed: boolean) => void) | undefined
     >(undefined);
 
-    const [selectedSessionKey, setSelectedSessionKey] = useState("");
+    const [selectedSessionKey, setSelectedSessionKey] = useState(requestedSessionKey);
     const [draft, setDraft] = useState("");
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [sendError, setSendError] = useState<string | undefined>(undefined);
+    const [dismissedTransportError, setDismissedTransportError] = useState<
+        string | undefined
+    >(undefined);
     const [deletedMessageKeys, setDeletedMessageKeys] = useState<Set<string>>(
         () => new Set()
     );
@@ -117,6 +125,21 @@ export function Chat() {
     const [keepThinkingAfterFinal, setKeepThinkingAfterFinal] = useState(
         () => readStoredChatDiagnosticVisibility().keepThinkingAfterFinal
     );
+    const visibleError =
+        sendError || (error === dismissedTransportError ? undefined : error);
+
+    useEffect(() => {
+        if (!error) {
+            setDismissedTransportError(undefined);
+        }
+    }, [error]);
+
+    const dismissVisibleError = () => {
+        setSendError(undefined);
+        if (error) {
+            setDismissedTransportError(error);
+        }
+    };
 
     const inputMedia = useChatInputMedia({
         onError: setSendError,
@@ -195,7 +218,8 @@ export function Chat() {
         chatRows,
         selectedSessionKey,
         setIsAtBottom,
-        shouldStickToBottomReference
+        shouldStickToBottomReference,
+        isLoadingHistory
     );
     const {
         handleDynamicContentLoad: handleDynamicRowContentLoad,
@@ -207,9 +231,38 @@ export function Chat() {
         virtualizer: messagesVirtualizer,
     } = scroll;
 
+    const selectSession = useCallback(
+        (sessionKey: string) => {
+            setSelectedSessionKey(sessionKey);
+            void navigate({
+                to: "/chat",
+                search: sessionKey ? { session: sessionKey } : {},
+                replace: true,
+            });
+        },
+        [navigate]
+    );
+
+    useEffect(() => {
+        const previousRequestedSessionKey = previousRequestedSessionKeyReference.current;
+        previousRequestedSessionKeyReference.current = requestedSessionKey;
+        if (requestedSessionKey) {
+            if (requestedSessionKey !== selectedSessionKey) {
+                setSelectedSessionKey(requestedSessionKey);
+            }
+            return;
+        }
+        if (
+            previousRequestedSessionKey &&
+            selectedSessionKey === previousRequestedSessionKey
+        ) {
+            setSelectedSessionKey("");
+        }
+    }, [requestedSessionKey, selectedSessionKey]);
+
     useEffect(() => {
         if (sortedSessions.length === 0) {
-            if (selectedSessionKey) {
+            if (selectedSessionKey && !requestedSessionKey) {
                 setSelectedSessionKey("");
             }
             return;
@@ -220,8 +273,11 @@ export function Chat() {
                 (session) => session.key && sessionMap.has(session.key)
             );
             setSelectedSessionKey(fallbackSession?.key || "");
+            if (requestedSessionKey) {
+                void navigate({ to: "/chat", search: {}, replace: true });
+            }
         }
-    }, [selectedSessionKey, sessionMap, sortedSessions]);
+    }, [navigate, requestedSessionKey, selectedSessionKey, sessionMap, sortedSessions]);
 
     useEffect(() => {
         setDeletedMessageKeys(
@@ -303,7 +359,7 @@ export function Chat() {
                 (session) => hasSessionKey(session) && getChatAgentId(session) === agentId
             );
         if (nextSession) {
-            setSelectedSessionKey(nextSession.key);
+            selectSession(nextSession.key);
         }
     };
 
@@ -405,7 +461,7 @@ export function Chat() {
                         sessionOptions={sessionOptions}
                         agentOptions={agentOptions}
                         onSelectAgent={handleSelectAgent}
-                        onSelectSession={setSelectedSessionKey}
+                        onSelectSession={selectSession}
                     />
 
                     <ChatMessagesList
@@ -430,12 +486,21 @@ export function Chat() {
                         onToggleToolDetails={handleToggleToolDetails}
                     />
 
-                    {(sendError || error) && (
+                    {visibleError && (
                         <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200 sm:mt-4 sm:text-sm">
                             <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                            <span className="min-w-0 wrap-break-word">
-                                {sendError || error}
+                            <span className="min-w-0 flex-1 wrap-break-word">
+                                {visibleError}
                             </span>
+                            <button
+                                type="button"
+                                onClick={dismissVisibleError}
+                                className="-m-1 shrink-0 rounded p-1 text-red-200/70 transition hover:bg-red-500/15 hover:text-red-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
+                                aria-label="Dismiss error"
+                                title="Dismiss error"
+                            >
+                                <X className="size-4" />
+                            </button>
                         </div>
                     )}
 

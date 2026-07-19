@@ -13,10 +13,21 @@ import {
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 /** Defines max attachments. */
 export const MAX_ATTACHMENTS = 10;
+/** Mirrors OpenClaw Control UI's supported image and non-video file picker. */
+export const CHAT_ATTACHMENT_ACCEPT =
+    "image/*,audio/*,application/pdf,text/*,.csv,.json,.md,.txt,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx";
 /** Defines chat history limit. */
 export const CHAT_HISTORY_LIMIT = 1000;
 /** Defines optimistic message retention milliseconds. */
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
+
+/** Returns whether OpenClaw intentionally excludes this video attachment. */
+export function isVideoAttachment(file: Pick<File, "name" | "type">): boolean {
+    return (
+        file.type.toLowerCase().startsWith("video/") ||
+        /\.(?:avi|m4v|mkv|mov|mp4|mpeg|mpg|webm)$/iu.test(file.name)
+    );
+}
 
 function canonicalChatValue(value: unknown, ancestors: Set<object>): unknown {
     if (value === null) {

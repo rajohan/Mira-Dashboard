@@ -10,6 +10,7 @@ import {
     ArrowUp,
     Brain,
     Mic,
+    MicOff,
     Minimize2,
     Paperclip,
     Pin,
@@ -38,6 +39,7 @@ import { Textarea } from "../../ui/Textarea";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 import {
     base64ToText,
+    CHAT_ATTACHMENT_ACCEPT,
     type ChatModelOption,
     chatSpeedOptions,
     chatThinkingOptions,
@@ -393,6 +395,7 @@ export function ChatComposer({
                         fileInputReference.current = element ?? undefined;
                     }}
                     type="file"
+                    accept={CHAT_ATTACHMENT_ACCEPT}
                     multiple
                     className="hidden"
                     onChange={(event) => onAttachFiles(event.target.files ?? undefined)}
@@ -779,7 +782,7 @@ export function ChatComposer({
                             </Popover>
                             <Button
                                 type="button"
-                                variant={isRecording ? "primary" : "ghost"}
+                                variant="ghost"
                                 size="sm"
                                 onClick={onToggleRecording}
                                 disabled={
@@ -794,10 +797,21 @@ export function ChatComposer({
                                 aria-label={
                                     isRecording ? "Stop recording" : "Record voice input"
                                 }
-                                className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100"
+                                className={[
+                                    "h-8 rounded-full border",
+                                    isRecording
+                                        ? "gap-1.5 border-red-500 bg-red-500 px-2.5 text-white shadow-sm shadow-red-950/40 hover:border-red-400 hover:bg-red-600 hover:text-white"
+                                        : "border-transparent px-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100",
+                                ].join(" ")}
                             >
                                 {isRecording ? (
-                                    <Square className="size-4" />
+                                    <>
+                                        <span className="size-2 animate-pulse rounded-full bg-white" />
+                                        <MicOff className="size-4" />
+                                        <span className="hidden text-xs font-medium sm:inline">
+                                            Recording
+                                        </span>
+                                    </>
                                 ) : (
                                     <Mic className="size-4" />
                                 )}
@@ -823,13 +837,13 @@ export function ChatComposer({
                             {(canStop || isStopping) && (
                                 <Button
                                     type="button"
-                                    variant="danger"
+                                    variant="ghost"
                                     size="sm"
                                     onClick={onStop}
                                     disabled={!canStop}
                                     title="Stop"
                                     aria-label="Stop"
-                                    className="size-8 shrink-0 rounded-full p-0"
+                                    className="size-8 shrink-0 rounded-full border border-red-500/65 bg-transparent p-0 text-red-500/85 hover:border-red-500 hover:bg-transparent hover:text-red-400"
                                 >
                                     <Square className="size-3.5 fill-current" />
                                 </Button>

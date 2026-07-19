@@ -8,8 +8,11 @@ import {
     extractImages,
     extractThinkingBlocks,
     extractToolCalls,
+    mergeChatAttachments,
     normalizeText,
 } from "../chatTypes";
+
+const REMOTE_MEDIA_PROTOCOLS = new Set(["http:", "https:"]);
 
 export interface RawOpenClawHistoryMessage {
     __openclaw?: unknown;
@@ -54,25 +57,69 @@ function fileNameFromPath(path: string): string {
 function mimeTypeFromPath(path: string): string {
     const extension = path.split(".").pop()?.toLowerCase() || "";
     const mimeTypes: Record<string, string> = {
+        aac: "audio/aac",
         bmp: "image/bmp",
+        csv: "text/csv",
+        doc: "application/msword",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        flac: "audio/flac",
         gif: "image/gif",
         jpeg: "image/jpeg",
         jpg: "image/jpeg",
         json: "application/json",
+        m4a: "audio/mp4",
+        md: "text/markdown",
         mp3: "audio/mpeg",
         mp4: "video/mp4",
+        oga: "audio/ogg",
+        ogg: "audio/ogg",
+        opus: "audio/opus",
+        pdf: "application/pdf",
         png: "image/png",
+        ppt: "application/vnd.ms-powerpoint",
+        pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         svg: "image/svg+xml",
         txt: "text/plain",
         wav: "audio/wav",
         webm: "video/webm",
         webp: "image/webp",
+        xls: "application/vnd.ms-excel",
+        xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        zip: "application/zip",
     };
     return mimeTypes[extension] || "application/octet-stream";
 }
 
 function mediaUrlFromPath(path: string): string {
     return `/api/media?path=${encodeURIComponent(path)}`;
+}
+
+function displayUrlFromMediaReference(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const candidate = value.trim();
+    if (!candidate) {
+        return undefined;
+    }
+    if (candidate.startsWith("/api/")) {
+        return candidate;
+    }
+    if (candidate.startsWith("/")) {
+        return mediaUrlFromPath(candidate);
+    }
+    try {
+        const url = new URL(candidate);
+        if (REMOTE_MEDIA_PROTOCOLS.has(url.protocol)) {
+            return candidate;
+        }
+        if (url.protocol === "file:") {
+            return mediaUrlFromPath(decodeURIComponent(url.pathname));
+        }
+    } catch {
+        return undefined;
+    }
+    return undefined;
 }
 
 function normalizedTimestamp(value: unknown): string | undefined {
@@ -101,6 +148,7 @@ function mediaDirectiveAttachments(text: string): ChatAttachmentDisplay[] {
             fileName: fileNameFromPath(mediaPath),
             mimeType,
             dataUrl: kind === "image" ? mediaUrlFromPath(mediaPath) : undefined,
+            url: mediaUrlFromPath(mediaPath),
             kind,
         });
     }
@@ -159,9 +207,55 @@ function mediaReferenceAttachments(
             fileName: fileNameFromPath(path),
             mimeType,
             dataUrl: kind === "image" ? mediaUrlFromPath(path) : undefined,
+            url: mediaUrlFromPath(path),
             kind,
         };
     });
+}
+
+function contentBlockAttachments(content: unknown): ChatAttachmentDisplay[] {
+    if (!Array.isArray(content)) {
+        return [];
+    }
+    const attachments: ChatAttachmentDisplay[] = [];
+    for (const block of content) {
+        if (!block || typeof block !== "object" || Array.isArray(block)) {
+            continue;
+        }
+        const record = block as Record<string, unknown>;
+        if (
+            record.type !== "attachment" ||
+            !record.attachment ||
+            typeof record.attachment !== "object" ||
+            Array.isArray(record.attachment)
+        ) {
+            continue;
+        }
+        const attachment = record.attachment as Record<string, unknown>;
+        const url = displayUrlFromMediaReference(attachment.url);
+        if (!url) {
+            continue;
+        }
+        const rawUrl = typeof attachment.url === "string" ? attachment.url : "";
+        const label =
+            typeof attachment.label === "string" && attachment.label.trim()
+                ? attachment.label.trim()
+                : fileNameFromPath(rawUrl);
+        const mimeType =
+            typeof attachment.mimeType === "string" && attachment.mimeType.trim()
+                ? attachment.mimeType.trim()
+                : mimeTypeFromPath(label || rawUrl);
+        const kind = attachmentKind(mimeType);
+        attachments.push({
+            id: `content-${url}-${attachments.length}`,
+            fileName: label || "attachment",
+            mimeType,
+            dataUrl: kind === "image" ? url : undefined,
+            url,
+            kind,
+        });
+    }
+    return attachments;
 }
 
 function stripAttachmentMarkup(text: string): string {
@@ -235,11 +329,11 @@ export function normalizeOpenClawHistoryMessage(
     const content = message.content ?? message.text ?? "";
     const primaryText = normalizeText(primaryContent(content));
     const images = extractImages(content);
-    const attachments = [
-        ...mediaReferenceAttachments(message),
+    const attachments = mergeChatAttachments(mediaReferenceAttachments(message), [
         ...mediaDirectiveAttachments(primaryText),
         ...inlineFileAttachments(primaryText),
-    ];
+        ...contentBlockAttachments(content),
+    ]);
     const text = stripGeneratedImagePlaceholder(
         stripAttachmentMarkup(primaryText),
         images,

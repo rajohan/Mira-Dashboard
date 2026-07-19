@@ -1,6 +1,18 @@
+import { useEffect, useState } from "react";
+
 import { formatSize } from "../../../utils/format";
 import { Modal } from "../../ui/Modal";
+import { JsonPreview } from "../files/viewers/JsonPreview";
+import { MarkdownPreview } from "../files/viewers/MarkdownPreview";
 import type { ChatPreviewItem } from "./chatTypes";
+
+function localPreviewUrl(url: string, mode: "image" | "text"): string {
+    if (url !== "/api/media" && !url.startsWith("/api/media?")) {
+        return url;
+    }
+
+    return `${url}${url.includes("?") ? "&" : "?"}preview=${mode}`;
+}
 
 /** Provides props for attachment preview modal. */
 interface AttachmentPreviewModalProperties {
@@ -13,6 +25,70 @@ export function AttachmentPreviewModal({
     previewItem,
     onClose,
 }: AttachmentPreviewModalProperties) {
+    const [remoteText, setRemoteText] = useState<string | undefined>(undefined);
+    const [textPreviewError, setTextPreviewError] = useState<string | undefined>(
+        undefined
+    );
+    const [isLoadingTextPreview, setIsLoadingTextPreview] = useState(false);
+
+    useEffect(() => {
+        setRemoteText(undefined);
+        setTextPreviewError(undefined);
+        setIsLoadingTextPreview(false);
+        if (
+            !previewItem?.url ||
+            previewItem.kind !== "text" ||
+            previewItem.text !== undefined
+        ) {
+            return;
+        }
+
+        const abortController = new AbortController();
+        setIsLoadingTextPreview(true);
+        void fetch(localPreviewUrl(previewItem.url, "text"), {
+            headers: { Accept: "text/plain" },
+            signal: abortController.signal,
+        })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`Text preview failed (${response.status})`);
+                }
+                return response.text();
+            })
+            .then((text) => setRemoteText(text))
+            .catch((error: unknown) => {
+                if (!abortController.signal.aborted) {
+                    setTextPreviewError(
+                        error instanceof Error
+                            ? error.message
+                            : "Text preview could not be loaded"
+                    );
+                }
+            })
+            .finally(() => {
+                if (!abortController.signal.aborted) {
+                    setIsLoadingTextPreview(false);
+                }
+            });
+
+        return () => abortController.abort();
+    }, [previewItem]);
+
+    const textPreview = previewItem?.text ?? remoteText;
+    const imagePreviewUrl =
+        previewItem?.kind === "image" && previewItem.url
+            ? previewItem.mimeType === "image/svg+xml"
+                ? localPreviewUrl(previewItem.url, "image")
+                : previewItem.url
+            : undefined;
+    const normalizedMimeType = previewItem?.mimeType?.split(";", 1)[0]?.toLowerCase();
+    const shouldRenderJson =
+        normalizedMimeType === "application/json" ||
+        previewItem?.title.toLowerCase().endsWith(".json");
+    const shouldRenderMarkdown =
+        normalizedMimeType === "text/markdown" ||
+        previewItem?.title.toLowerCase().endsWith(".md");
+
     return (
         <Modal
             isOpen={Boolean(previewItem)}
@@ -22,32 +98,57 @@ export function AttachmentPreviewModal({
         >
             {previewItem ? (
                 <div className="space-y-3">
-                    <div className="text-xs text-primary-400">
-                        {previewItem.mimeType || "application/octet-stream"}
-                        {previewItem.sizeBytes
-                            ? ` · ${formatSize(previewItem.sizeBytes)}`
-                            : ""}
-                    </div>
-                    {previewItem.kind === "image" && previewItem.url ? (
-                        <img
-                            src={previewItem.url}
-                            alt={previewItem.title}
-                            className="max-h-[70vh] w-full rounded-lg object-contain"
-                        />
-                    ) : previewItem.kind === "text" && previewItem.text ? (
-                        <pre className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950 p-4 text-sm whitespace-pre-wrap text-primary-100">
-                            {previewItem.text}
-                        </pre>
-                    ) : previewItem.url ? (
-                        <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-200">
-                            Preview is not available for this file type yet.
+                    <div className="flex items-center justify-between gap-3 text-xs text-primary-400">
+                        <span>
+                            {previewItem.mimeType || "application/octet-stream"}
+                            {previewItem.sizeBytes
+                                ? ` · ${formatSize(previewItem.sizeBytes)}`
+                                : ""}
+                        </span>
+                        {previewItem.url ? (
                             <a
                                 href={previewItem.url}
                                 download={previewItem.title}
-                                className="ml-2 text-accent-300 underline hover:text-accent-200"
+                                className="shrink-0 text-accent-300 underline hover:text-accent-200"
                             >
                                 Download file
                             </a>
+                        ) : undefined}
+                    </div>
+                    {imagePreviewUrl ? (
+                        <img
+                            src={imagePreviewUrl}
+                            alt={previewItem.title}
+                            className="max-h-[70vh] w-full rounded-lg object-contain"
+                        />
+                    ) : previewItem.kind === "text" &&
+                      textPreview !== undefined &&
+                      shouldRenderJson ? (
+                        <div className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950">
+                            <JsonPreview content={textPreview} />
+                        </div>
+                    ) : previewItem.kind === "text" &&
+                      textPreview !== undefined &&
+                      shouldRenderMarkdown ? (
+                        <div className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950">
+                            <MarkdownPreview content={textPreview} />
+                        </div>
+                    ) : previewItem.kind === "text" && textPreview !== undefined ? (
+                        <pre className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950 p-4 text-sm whitespace-pre-wrap text-primary-100">
+                            {textPreview}
+                        </pre>
+                    ) : previewItem.kind === "text" && isLoadingTextPreview ? (
+                        <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-300">
+                            Loading preview…
+                        </div>
+                    ) : previewItem.kind === "text" && textPreviewError ? (
+                        <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-300">
+                            {textPreviewError}
+                        </div>
+                    ) : previewItem.url ? (
+                        <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-200">
+                            Preview is not available for this file type yet. Use the
+                            download link above to open it locally.
                         </div>
                     ) : (
                         <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-300">

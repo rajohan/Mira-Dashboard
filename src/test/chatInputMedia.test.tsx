@@ -106,6 +106,28 @@ describe("chat input media", () => {
         ).toHaveLength(4);
     });
 
+    it("rejects video files before OpenClaw attachment encoding", async () => {
+        const onError = jest.fn();
+        const { result } = renderHook(() =>
+            useChatInputMedia({ onError, sessionKey: "session-a", setDraft: jest.fn() })
+        );
+        const input = document.createElement("input");
+        input.value = "pending-video";
+        result.current.fileInputReference.current = input;
+
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([new File(["video"], "clip.mp4", { type: "video/mp4" })])
+            );
+        });
+
+        expect(result.current.attachments).toEqual([]);
+        expect(onError).toHaveBeenLastCalledWith(
+            "clip.mp4 is a video. OpenClaw chat supports images and non-video files."
+        );
+        expect(input.value).toBe("");
+    });
+
     it("transcribes voice files and reports provider and input failures", async () => {
         const originalFetch = fetch;
         const onError = jest.fn();
