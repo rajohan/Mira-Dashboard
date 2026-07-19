@@ -452,11 +452,14 @@ function scopeCompletedResponse(
     if (run.phase !== "completed") {
         return;
     }
-    const responseLength = finalIndex - segment.start + 1;
-    const scopedResponse = messages
-        .slice(segment.start, finalIndex + 1)
-        .map((message) => (message.runId ? message : { ...message, runId: run.runId }));
-    messages.splice(segment.start, responseLength, ...scopedResponse);
+    for (let index = segment.start; index <= finalIndex; index += 1) {
+        const message = messages[index];
+        const belongsToCompletedResponse =
+            index === finalIndex || (message && isStandaloneDiagnostic(message));
+        if (message && !message.runId && belongsToCompletedResponse) {
+            messages[index] = { ...message, runId: run.runId };
+        }
+    }
 }
 
 function exactToolResultIds(message: ChatHistoryMessage): Set<string> {

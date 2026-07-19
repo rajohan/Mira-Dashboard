@@ -253,6 +253,53 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("does not claim an earlier final while scoping later run diagnostics", () => {
+        const history: ChatHistoryMessage[] = [
+            {
+                ...message("user", "parallel"),
+                timestamp: "2026-07-16T11:59:59.000Z",
+            },
+            {
+                ...message("assistant", "older answer"),
+                timestamp: "2026-07-16T12:00:01.000Z",
+            },
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-16T12:00:02.000Z",
+                toolCalls: [{ id: "call-new", name: "bash" }],
+            },
+            {
+                ...message("assistant", "newer answer"),
+                timestamp: "2026-07-16T12:00:03.000Z",
+            },
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(32, "2026-07-16T12:00:03.000Z", {
+                kind: "finish",
+                message: message("assistant", "newer answer", "run-new"),
+                outcome: "completed",
+                runId: "run-new",
+            }),
+            eventAt(48, "2026-07-16T12:00:01.000Z", {
+                kind: "finish",
+                message: message("assistant", "older answer", "run-old"),
+                outcome: "completed",
+                runId: "run-old",
+            }),
+        ]);
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+
+        expect(reconciled.map((item) => [item.text, item.runId])).toEqual([
+            ["parallel", undefined],
+            ["older answer", "run-old"],
+            ["", "run-new"],
+            ["newer answer", "run-new"],
+        ]);
+    });
+
     it("keeps identical diagnostics from distinct overlapping runs", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
