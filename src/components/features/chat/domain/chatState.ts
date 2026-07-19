@@ -265,17 +265,36 @@ function latestCompletedRunEntry(
         )[0];
 }
 
-function pendingRunlessUserEntry(
-    session: ChatSessionRuntimeState
+function promotableRunlessUserEntry(
+    session: ChatSessionRuntimeState,
+    event: ChatRuntimeEvent
 ): [string, ChatRunState] | undefined {
-    const candidates = Object.entries(session.runs).filter(
+    const activeCandidates = Object.entries(session.runs).filter(
         ([, run]) =>
             run.phase === "active" &&
             run.runId.startsWith("runtime-runless-") &&
             run.userMessages.length > 0 &&
             run.userMessages[0]?.message.timestamp === run.startedAt
     );
-    return candidates.length === 1 ? candidates[0] : undefined;
+    if (activeCandidates.length === 1) {
+        return activeCandidates[0];
+    }
+    if (activeCandidates.length > 0) {
+        return undefined;
+    }
+    if (event.kind !== "assistant" || event.source !== "session" || !event.runId) {
+        return undefined;
+    }
+    const completedCandidates = Object.entries(session.runs).filter(
+        ([, run]) =>
+            run.phase === "completed" &&
+            run.lastSequence === session.lastSequence &&
+            run.runId.startsWith("runtime-runless-") &&
+            run.userMessages.length > 0 &&
+            run.userMessages[0]?.message.timestamp === run.startedAt &&
+            isCompatibleSessionEcho(run, event.message, event.timestamp)
+    );
+    return completedCandidates.length === 1 ? completedCandidates[0] : undefined;
 }
 
 function isDedicatedCompactionStatus(event: ChatRuntimeEvent): boolean {
@@ -323,7 +342,7 @@ function resolveRun(
     }
 
     if (!run && event.runId && !isDedicatedCompactionStatus(event)) {
-        const pendingUserEntry = pendingRunlessUserEntry(session);
+        const pendingUserEntry = promotableRunlessUserEntry(session, event);
         if (pendingUserEntry) {
             [runKey, run] = pendingUserEntry;
         }
@@ -472,9 +491,17 @@ function applyAssistantEvent(
                 ? `${previousText}${incoming.text}`
                 : mergeChatStreamText(previousText, incoming.text)
         : previousText;
+    const assistant = mergeMessageDetails(run.assistant, incoming, text);
     return {
         ...run,
-        assistant: mergeMessageDetails(run.assistant, incoming, text),
+        assistant:
+            event.mode === "replace"
+                ? {
+                      ...assistant,
+                      toolCalls: incoming.toolCalls,
+                      toolResult: incoming.toolResult,
+                  }
+                : assistant,
         assistantSource: incoming.text
             ? event.mode === "replace"
                 ? event.source
@@ -786,6 +813,20 @@ function applyFinishEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "finish" }>
 ): ChatRunState {
+    const isLateToolFailureAfterCompletedFinal = Boolean(
+        run.phase === "completed" &&
+        event.outcome === "error" &&
+        event.toolFailure &&
+        !event.message
+    );
+    if (isLateToolFailureAfterCompletedFinal) {
+        return {
+            ...run,
+            error: undefined,
+            statusText: undefined,
+            toolFailure: true,
+        };
+    }
     const isMetadataCompletion =
         run.phase !== "active" &&
         event.outcome === "completed" &&

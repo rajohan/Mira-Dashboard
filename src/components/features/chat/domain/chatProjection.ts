@@ -205,13 +205,17 @@ function indexExactToolMessages(messages: ChatHistoryMessage[]): ExactToolMessag
 
 function latestExactToolMessageIndex(
     ids: ReadonlySet<string>,
-    exactToolIndex: ExactToolMessageIndex
+    exactToolIndex: ExactToolMessageIndex,
+    minimumIndex = 0,
+    maximumIndex = Infinity
 ): number {
     let latestIndex = -1;
     for (const id of ids) {
         const messageIndexes = exactToolIndex.get(id) || [];
         for (const index of messageIndexes) {
-            latestIndex = Math.max(latestIndex, index);
+            if (index >= minimumIndex && index < maximumIndex) {
+                latestIndex = Math.max(latestIndex, index);
+            }
         }
     }
     return latestIndex;
@@ -272,14 +276,47 @@ function runFinalAnchorIndex(
     if (diagnosticIds.size === 0) {
         return -1;
     }
-    const evidenceIndex = latestExactToolMessageIndex(diagnosticIds, exactToolIndex);
+    const startedAt = Date.parse(run.startedAt);
+    let diagnosticBoundaryIndex = messages.findLastIndex(
+        (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
+    );
+    if (diagnosticBoundaryIndex === -1 && !Number.isNaN(startedAt)) {
+        diagnosticBoundaryIndex = messages.findLastIndex((message) => {
+            const timestamp = messageTimestamp(message);
+            return (
+                isUserMessage(message) &&
+                timestamp !== undefined &&
+                timestamp <= startedAt
+            );
+        });
+        if (diagnosticBoundaryIndex === -1) {
+            diagnosticBoundaryIndex = messages.findLastIndex((message) => {
+                const timestamp = messageTimestamp(message);
+                return (
+                    isUserMessage(message) &&
+                    timestamp !== undefined &&
+                    timestamp <= startedAt + RUN_START_USER_SKEW_MS
+                );
+            });
+        }
+    }
+    const nextUserIndex =
+        diagnosticBoundaryIndex === -1
+            ? -1
+            : messages.findIndex(
+                  (message, index) =>
+                      index > diagnosticBoundaryIndex && isUserMessage(message)
+              );
+    const end = nextUserIndex === -1 ? messages.length : nextUserIndex;
+    const evidenceIndex = latestExactToolMessageIndex(
+        diagnosticIds,
+        exactToolIndex,
+        diagnosticBoundaryIndex + 1,
+        end
+    );
     if (evidenceIndex === -1) {
         return -1;
     }
-    const nextUserIndex = messages.findIndex(
-        (message, index) => index > evidenceIndex && isUserMessage(message)
-    );
-    const end = nextUserIndex === -1 ? messages.length : nextUserIndex;
     return messages.findIndex(
         (message, index) =>
             index > evidenceIndex &&
@@ -582,12 +619,18 @@ function mergeExactToolResult(
 function refreshExactToolResult(
     current: NonNullable<ChatHistoryMessage["toolResult"]>,
     messages: ChatHistoryMessage[],
-    exactToolIndex: ExactToolMessageIndex
+    exactToolIndex: ExactToolMessageIndex,
+    segment: ResponseSegment,
+    run: ChatRunState
 ): void {
     const matchingIndexes = exactToolIndex.get(current.id || "") || [];
     for (const index of matchingIndexes) {
         const candidate = messages[index];
-        if (!candidate) {
+        const isInResponseSegment = index >= segment.start && index < segment.end;
+        if (
+            !candidate ||
+            (!isInResponseSegment && !isRunMatchingMessage(run, candidate))
+        ) {
             continue;
         }
         const hasMatchingCall = candidate.toolCalls?.some(
@@ -617,7 +660,9 @@ function refreshExactToolResult(
 function refreshExactToolResults(
     diagnostic: ChatHistoryMessage,
     messages: ChatHistoryMessage[],
-    exactToolIndex: ExactToolMessageIndex
+    exactToolIndex: ExactToolMessageIndex,
+    segment: ResponseSegment,
+    run: ChatRunState
 ): void {
     const currentResults = [
         diagnostic.toolResult,
@@ -626,7 +671,7 @@ function refreshExactToolResults(
         Boolean(result?.id)
     );
     for (const current of currentResults) {
-        refreshExactToolResult(current, messages, exactToolIndex);
+        refreshExactToolResult(current, messages, exactToolIndex, segment, run);
     }
 }
 
@@ -749,7 +794,16 @@ function recoveredDiagnosticIndexes(
     const hasExactIdentity = hasExactToolIdentity(diagnostic);
     const diagnosticIds = hasExactIdentity ? exactToolIds(diagnostic) : new Set<string>();
     const exactCandidateIndexes = new Set(
-        [...diagnosticIds].flatMap((id) => exactToolIndex.get(id) || [])
+        [...diagnosticIds]
+            .flatMap((id) => exactToolIndex.get(id) || [])
+            .filter((index) => {
+                const candidate = messages[index];
+                const isInResponseSegment = index >= segment.start && index < segment.end;
+                return Boolean(
+                    candidate &&
+                    (isInResponseSegment || isRunMatchingMessage(run, candidate))
+                );
+            })
     );
     const shouldSearchSegment =
         !hasExactIdentity || requiresSegmentSignatureSearch(diagnostic);
@@ -947,7 +1001,13 @@ export function reconcileChatMessages(
         for (const entry of run.diagnostics) {
             const diagnostic = transientMessage(entry.message, run, entry.key);
             if (exactToolResultIds(diagnostic).size > 0) {
-                refreshExactToolResults(diagnostic, messages, exactToolIndex);
+                refreshExactToolResults(
+                    diagnostic,
+                    messages,
+                    exactToolIndex,
+                    segment,
+                    run
+                );
             }
             const recoveredIndexes = recoveredDiagnosticIndexes(
                 diagnostic,
@@ -971,10 +1031,13 @@ export function reconcileChatMessages(
             scopeCompletedResponse(messages, run, segment, finalIndex, exactToolIndex);
             const canonical = messages[finalIndex]!;
             if (run.assistant) {
-                messages[finalIndex] = mergeChatMessageDetails(
-                    canonical,
-                    transientMessage(run.assistant, run, "assistant")
-                );
+                messages[finalIndex] = {
+                    ...mergeChatMessageDetails(
+                        canonical,
+                        transientMessage(run.assistant, run, "assistant")
+                    ),
+                    isFinal: canonical.isFinal || run.phase === "completed" || undefined,
+                };
             }
             messages.splice(finalIndex, 0, ...diagnostics);
             continue;

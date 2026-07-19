@@ -439,6 +439,9 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
             ["aborted", "error", "final"].includes(
                 (stringField(record, "state") || "").toLowerCase()
             )) ||
+        (event === "session.message" &&
+            sessionMessageRole(payload) === "assistant" &&
+            sessionMessageStopReason(payload) === "stop") ||
         isTerminalCompaction ||
         isSettlingLifecycleEvent(event, payload)
     );
@@ -477,10 +480,12 @@ function compactTerminalPayload(
         operationId: stringField(payloadView, "operationId"),
         phase: stringField(payloadView, "phase"),
         promptError: stringField(payloadView, "promptError"),
+        role: sessionMessageRole(payload),
         runId,
         sessionKey,
         state: stringField(payloadView, "state"),
         status: stringField(payloadView, "status"),
+        stopReason: sessionMessageStopReason(payload),
         stream: stringField(payloadView, "stream"),
     };
 }
@@ -684,6 +689,14 @@ function sessionMessageRole(payload: unknown): string | undefined {
     )?.toLowerCase();
 }
 
+function sessionMessageStopReason(payload: unknown): string | undefined {
+    const record = runtimePayloadView(payload);
+    const message = asRecord(record?.message);
+    return (
+        stringField(message, "stopReason") || stringField(record, "stopReason")
+    )?.toLowerCase();
+}
+
 function isRunlessUserLedRun(run: RetainedRun): boolean {
     const firstEvent = run.events[0];
     return (
@@ -691,6 +704,44 @@ function isRunlessUserLedRun(run: RetainedRun): boolean {
         isRunlessRunId(run.runId) &&
         firstEvent?.event === "session.message" &&
         sessionMessageRole(firstEvent.payload) === "user"
+    );
+}
+
+function isPromotableRunlessUserLedRun(
+    run: RetainedRun,
+    envelope: OpenClawRuntimeEnvelope,
+    runs: ReadonlyMap<string, RetainedRun>
+): boolean {
+    if (isRunlessUserLedRun(run)) {
+        return true;
+    }
+    const firstEvent = run.events[0];
+    const terminalEvent = run.events.find(
+        (event) => event.runtimeSequence === run.terminalSequence
+    );
+    const isLatestSessionRun = runs
+        .values()
+        .every((candidate) => lastSequence(candidate) <= lastSequence(run));
+    const isLatestCompletedSyntheticTurn = Boolean(
+        run.completed &&
+        isRunlessRunId(run.runId) &&
+        firstEvent?.event === "session.message" &&
+        sessionMessageRole(firstEvent.payload) === "user" &&
+        terminalEvent?.event === "session.message" &&
+        sessionMessageRole(terminalEvent.payload) === "assistant" &&
+        sessionMessageStopReason(terminalEvent.payload) === "stop" &&
+        envelope.runtimeSequence > run.terminalSequence &&
+        isLatestSessionRun
+    );
+    if (!isLatestCompletedSyntheticTurn || !terminalEvent) {
+        return false;
+    }
+    if (isMetadataOnlyCompletionEnvelope(envelope)) {
+        return true;
+    }
+    const terminalSignature = messageSignature(terminalEvent.payload);
+    return Boolean(
+        terminalSignature && terminalSignature === messageSignature(envelope.payload)
     );
 }
 
@@ -1906,7 +1957,9 @@ export class OpenClawChatBridge {
         if (explicitRunId && !runs.has(explicitRunId)) {
             const pendingUserRuns = runs
                 .values()
-                .filter((run) => isRunlessUserLedRun(run))
+                .filter((run) =>
+                    isPromotableRunlessUserLedRun(run, retainedEnvelope, runs)
+                )
                 .toArray();
             if (pendingUserRuns.length === 1) {
                 this.#promoteRunEntry(

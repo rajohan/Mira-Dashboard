@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, jest } from "bun:test";
 
 import {
     createChatVisibility,
@@ -117,6 +117,306 @@ describe("OpenClaw adapter variants", () => {
         expect(thinkingIndex).toBeGreaterThan(lastToolIndex);
         expect(thinkingIndex).toBeLessThan(finalIndex);
         expect(visible[finalIndex]?.thinking).toBeUndefined();
+    });
+
+    it("splits Synthetic session messages into diagnostics and a terminal final", () => {
+        const adapter = new OpenClawChatAdapter();
+        const toolTurn = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            { thinking: "inspect repository", type: "thinking" },
+                            {
+                                arguments: { command: "pwd" },
+                                id: "functions.exec:0",
+                                name: "exec",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                        stopReason: "toolUse",
+                    },
+                },
+                30
+            )
+        );
+        const finalTurn = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            { thinking: "report result", type: "thinking" },
+                            { text: "SYNTHETIC_OK", type: "text" },
+                        ],
+                        role: "assistant",
+                        stopReason: "stop",
+                    },
+                },
+                31
+            )
+        );
+
+        expect(toolTurn.map((event) => event.kind)).toEqual(["thinking", "tool"]);
+        expect(toolTurn[1]).toMatchObject({
+            kind: "tool",
+            message: {
+                text: "",
+                toolCalls: [
+                    expect.objectContaining({
+                        id: "functions.exec:0",
+                        name: "exec",
+                    }),
+                ],
+            },
+            toolKey: "tool:functions.exec:0",
+        });
+        expect(finalTurn.map((event) => event.kind)).toEqual([
+            "thinking",
+            "assistant",
+            "finish",
+        ]);
+        expect(finalTurn[1]).toMatchObject({
+            kind: "assistant",
+            message: {
+                text: "SYNTHETIC_OK",
+                thinking: undefined,
+                toolCalls: undefined,
+            },
+            mode: "replace",
+            source: "session",
+        });
+        expect(finalTurn[2]).toMatchObject({
+            kind: "finish",
+            outcome: "completed",
+        });
+    });
+
+    it("preserves the Synthetic terminal event when one message has many tools", () => {
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const adapter = new OpenClawChatAdapter();
+        try {
+            adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: "question",
+                            role: "user",
+                        },
+                    },
+                    31
+                )
+            );
+            expect(warning).not.toHaveBeenCalled();
+            const events = adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: [
+                                { thinking: "inspect repository", type: "thinking" },
+                                ...Array.from({ length: 13 }, (_, index) => ({
+                                    arguments: { command: `step-${index}` },
+                                    id: `functions.exec:${index}`,
+                                    name: "exec",
+                                    type: "toolCall",
+                                })),
+                                { text: "SYNTHETIC_OK", type: "text" },
+                            ],
+                            role: "assistant",
+                            stopReason: "stop",
+                        },
+                    },
+                    32
+                )
+            );
+
+            expect(events).toHaveLength(15);
+            expect(events.at(-2)).toMatchObject({
+                kind: "assistant",
+                message: { text: "SYNTHETIC_OK" },
+            });
+            expect(events.at(-1)).toMatchObject({
+                kind: "finish",
+                outcome: "completed",
+            });
+            expect(warning).toHaveBeenCalledTimes(1);
+            expect(warning).toHaveBeenCalledWith(
+                "[openClawRuntimeAdapter] Dropped runtime drafts above the per-envelope limit",
+                {
+                    droppedDrafts: 1,
+                    eventName: "session.message",
+                    runId: "run-variants",
+                    runtimeSequence: 32,
+                    sessionKey: SESSION,
+                }
+            );
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("coalesces a completed runless Synthetic final when its run id arrives", () => {
+        const adapter = new OpenClawChatAdapter();
+        const finalMessage = {
+            content: [{ text: "SYNTHETIC_OK", type: "text" }],
+            role: "assistant",
+            stopReason: "stop",
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: "question",
+                            role: "user",
+                        },
+                        runId: undefined,
+                    },
+                    33
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    { message: finalMessage, runId: undefined },
+                    34
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    { message: finalMessage, runId: "synthetic-provider-run" },
+                    35
+                )
+            ),
+        ]);
+        const runs = Object.values(runtime.sessions[SESSION]?.runs || {});
+
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            aliases: expect.arrayContaining(["synthetic-provider-run"]),
+            assistant: { text: "SYNTHETIC_OK" },
+            phase: "completed",
+            userMessages: [
+                expect.objectContaining({
+                    message: expect.objectContaining({ text: "question" }),
+                }),
+            ],
+        });
+    });
+
+    it("keeps id-less Synthetic thinking blocks distinct across messages", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = [
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: [
+                                { thinking: "inspect repository", type: "thinking" },
+                                {
+                                    arguments: { command: "pwd" },
+                                    id: "functions.exec:0",
+                                    name: "exec",
+                                    type: "toolCall",
+                                },
+                            ],
+                            role: "assistant",
+                            stopReason: "toolUse",
+                        },
+                    },
+                    33
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: [
+                                { thinking: "report result", type: "thinking" },
+                                { text: "SYNTHETIC_OK", type: "text" },
+                            ],
+                            role: "assistant",
+                            stopReason: "stop",
+                        },
+                    },
+                    34
+                )
+            ),
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), events);
+        const thinkingTexts = runtime.sessions[SESSION]?.runs[
+            "run-variants"
+        ]?.diagnostics.flatMap(
+            (entry) => entry.message.thinking?.map((block) => block.text) || []
+        );
+
+        expect(thinkingTexts).toEqual(["inspect repository", "report result"]);
+    });
+
+    it("preserves top-level Synthetic tool-result identity", () => {
+        const adapter = new OpenClawChatAdapter();
+        const callEvents = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            {
+                                arguments: { command: "pwd" },
+                                id: "call-1",
+                                name: "exec",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                        stopReason: "toolUse",
+                    },
+                },
+                35
+            )
+        );
+        const resultEvents = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    content: "/home/ubuntu/projects/mira-dashboard",
+                    role: "toolResult",
+                    toolCallId: "call-1",
+                    toolName: "exec",
+                },
+                36
+            )
+        );
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            ...callEvents,
+            ...resultEvents,
+        ]);
+        const diagnostics = runtime.sessions[SESSION]?.runs["run-variants"]?.diagnostics;
+
+        expect(resultEvents[0]).toMatchObject({
+            kind: "tool",
+            message: {
+                toolResult: {
+                    id: "call-1",
+                    name: "exec",
+                },
+            },
+            toolKey: "tool:call-1",
+        });
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics?.[0]?.message.toolCalls?.[0]?.toolResult).toMatchObject({
+            content: "/home/ubuntu/projects/mira-dashboard",
+            id: "call-1",
+            name: "exec",
+        });
     });
 
     it("normalizes session, assistant, thinking and item streams", () => {

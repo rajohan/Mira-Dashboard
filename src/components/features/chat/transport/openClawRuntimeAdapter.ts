@@ -1,3 +1,5 @@
+import type { ChatHistoryMessage, ChatToolCallDisplay } from "../chatTypes";
+import { stableChatStringify } from "../chatUtilities";
 import type { ChatRuntimeEvent, ChatTextSource } from "../domain/chatState";
 import {
     asRecord,
@@ -22,6 +24,13 @@ import {
 
 type WithoutSequence<Event> = Event extends unknown ? Omit<Event, "sequence"> : never;
 type ChatRuntimeEventDraft = WithoutSequence<ChatRuntimeEvent>;
+interface RuntimeDraftLimitContext {
+    eventName: string;
+    runId?: string;
+    runtimeSequence: number;
+    sessionKey: string;
+}
+const MAX_DRAFTS_PER_ENVELOPE = 15;
 
 function isToolFailureError(value: string | undefined): boolean {
     const normalized = value?.trim() || "";
@@ -311,27 +320,68 @@ export function adaptOpenClawRuntimeEvent(
     }
     const common = { runId, sessionKey, timestamp };
     const eventPayload = openClawPayloadView(payload);
+    const runtimeSequence = openClawSequence(raw, fallbackSequence);
+    const sequence = runtimeSequence * 16;
     const drafts =
         eventName === "chat"
             ? chatEventDrafts(stringValue(eventPayload.state), eventPayload, common)
             : eventName === "session.message"
-              ? sessionMessageDrafts(eventPayload, common)
+              ? sessionMessageDrafts(eventPayload, common, sequence)
               : runtimeStreamDrafts(eventName, eventPayload, common);
-    const sequence = openClawSequence(raw, fallbackSequence) * 16;
-    return drafts.slice(0, 15).map((draft, index) => ({
+    return boundedRuntimeDrafts(drafts, {
+        eventName,
+        runId,
+        runtimeSequence,
+        sessionKey,
+    }).map((draft, index) => ({
         ...draft,
         sequence: sequence + index,
     })) as ChatRuntimeEvent[];
 }
 
+function boundedRuntimeDrafts(
+    drafts: ChatRuntimeEventDraft[],
+    context: RuntimeDraftLimitContext
+): ChatRuntimeEventDraft[] {
+    if (drafts.length <= MAX_DRAFTS_PER_ENVELOPE) {
+        return drafts;
+    }
+    const finishIndex = drafts.findLastIndex((draft) => draft.kind === "finish");
+    let boundedDrafts = drafts.slice(0, MAX_DRAFTS_PER_ENVELOPE);
+    if (finishIndex !== -1) {
+        const terminalStart =
+            drafts[finishIndex - 1]?.kind === "assistant" ? finishIndex - 1 : finishIndex;
+        const terminalDrafts = drafts.slice(terminalStart, finishIndex + 1);
+        boundedDrafts = [
+            ...drafts.slice(0, MAX_DRAFTS_PER_ENVELOPE - terminalDrafts.length),
+            ...terminalDrafts,
+        ];
+    }
+    if (process.env.NODE_ENV !== "production") {
+        console.warn(
+            "[openClawRuntimeAdapter] Dropped runtime drafts above the per-envelope limit",
+            {
+                ...context,
+                droppedDrafts: drafts.length - boundedDrafts.length,
+            }
+        );
+    }
+    return boundedDrafts;
+}
+
 function sessionMessageDrafts(
     data: Record<string, unknown>,
-    common: { runId?: string; sessionKey: string; timestamp: string }
+    common: { runId?: string; sessionKey: string; timestamp: string },
+    sequence: number
 ): ChatRuntimeEventDraft[] {
     const nestedMessage = asRecord(data.message);
+    const stopReason =
+        stringValue(nestedMessage?.stopReason) || stringValue(data.stopReason);
+    const isTerminalAssistantMessage = stopReason?.toLowerCase() === "stop";
     const topLevelRole = stringValue(data.role);
     const rawMessage = topLevelRole
         ? {
+              ...data,
               ...nestedMessage,
               content:
                   nestedMessage?.content ??
@@ -344,15 +394,35 @@ function sessionMessageDrafts(
     const message = normalizeAssistant(rawMessage, common.runId);
     const role = message.role.toLowerCase();
     if (role === "assistant") {
-        return [
-            {
+        const drafts = sessionAssistantDiagnosticDrafts(message, common, sequence);
+        const hasPrimaryContent = Boolean(
+            message.text.trim() || message.images?.length || message.attachments?.length
+        );
+        if (hasPrimaryContent) {
+            drafts.push({
                 ...common,
                 kind: "assistant",
-                message: { ...message, timestamp: common.timestamp },
-                mode: "merge",
+                message: {
+                    ...message,
+                    content: message.text,
+                    text: message.text,
+                    thinking: undefined,
+                    toolCalls: undefined,
+                    toolResult: undefined,
+                    timestamp: common.timestamp,
+                },
+                mode: isTerminalAssistantMessage ? "replace" : "merge",
                 source: "session",
-            },
-        ];
+            });
+        }
+        if (isTerminalAssistantMessage) {
+            drafts.push({
+                ...common,
+                kind: "finish",
+                outcome: "completed",
+            });
+        }
+        return drafts;
     }
     if (role === "user") {
         return [
@@ -363,5 +433,82 @@ function sessionMessageDrafts(
             },
         ];
     }
+    if (role.startsWith("tool") && message.toolResult) {
+        return [
+            {
+                ...common,
+                kind: "tool",
+                message: { ...message, timestamp: common.timestamp },
+                toolKey: sessionToolKey(
+                    message.toolResult.id,
+                    message.toolResult.name || "tool"
+                ),
+            },
+        ];
+    }
     return [];
+}
+
+function sessionToolKey(
+    id: string | undefined,
+    name: string,
+    arguments_?: unknown
+): string {
+    return id
+        ? `tool:${id}`
+        : `tool:${name}:${stableChatStringify(arguments_ ?? undefined)}`;
+}
+
+function sessionAssistantDiagnosticDrafts(
+    message: ChatHistoryMessage,
+    common: { runId?: string; sessionKey: string; timestamp: string },
+    sequence: number
+): ChatRuntimeEventDraft[] {
+    const drafts: ChatRuntimeEventDraft[] = [];
+    if (message.thinking?.length) {
+        const thinking = message.thinking.map((block, index) => ({
+            ...block,
+            id: block.id || `session-thinking:${sequence}:${index}`,
+        }));
+        drafts.push({
+            ...common,
+            kind: "thinking",
+            message: {
+                role: "assistant",
+                content: thinking.map((block) => ({
+                    id: block.id,
+                    text: block.text,
+                    type: "thinking",
+                })),
+                text: "",
+                thinking,
+                timestamp: common.timestamp,
+                runId: common.runId,
+            },
+        });
+    }
+    const toolCalls = message.toolCalls || [];
+    for (const toolCall of toolCalls) {
+        drafts.push(sessionToolCallDraft(toolCall, common));
+    }
+    return drafts;
+}
+
+function sessionToolCallDraft(
+    toolCall: ChatToolCallDisplay,
+    common: { runId?: string; sessionKey: string; timestamp: string }
+): ChatRuntimeEventDraft {
+    return {
+        ...common,
+        kind: "tool",
+        message: {
+            role: "assistant",
+            content: "",
+            text: "",
+            toolCalls: [toolCall],
+            timestamp: common.timestamp,
+            runId: common.runId,
+        },
+        toolKey: sessionToolKey(toolCall.id, toolCall.name, toolCall.arguments),
+    };
 }

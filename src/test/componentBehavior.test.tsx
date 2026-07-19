@@ -766,6 +766,29 @@ describe("shared component helpers", () => {
         expect(screen.getAllByText("Tool input")).toHaveLength(2);
     });
 
+    it("shows a write path in a collapsed tool bubble", () => {
+        render(
+            <ChatMessageDetails
+                message={{
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: { path: "/tmp/report.md" },
+                            id: "write-1",
+                            name: "write",
+                        },
+                    ],
+                }}
+                shouldExpandToolDetails={false}
+                visibility={{ shouldShowThinking: true, shouldShowTools: true }}
+            />
+        );
+
+        expect(screen.getByText("/tmp/report.md")).toBeInTheDocument();
+    });
+
     it("drives chat composer attachments, slash suggestions, emoji, and submit controls", async () => {
         const user = userEvent.setup();
         const fileInputReference = {
