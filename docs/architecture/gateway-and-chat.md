@@ -212,8 +212,13 @@ so separate provider messages cannot concatenate unrelated reasoning. If one
 provider envelope exceeds the adapter event-slot limit, the primary assistant and
 terminal finish events are retained ahead of excess diagnostics. Oversized
 terminal replay payloads retain a compact assistant-role/stop marker so refresh
-still settles the completed run. The final primary assistant event never inherits
-tool fields from the preceding runtime buffer.
+still settles the completed run. A completed runless user/stop pair can adopt only
+the immediately following provider run ID, backed by terminal metadata or the
+same final signature; this preserves the complete replay without attaching an old
+turn to unrelated work. Top-level tool-result messages retain their call ID and
+tool name before normalization so they merge into the matching live tool row. The
+final primary assistant event never inherits tool fields from the preceding
+runtime buffer.
 
 ### Virtualized Sticky Bottom
 
@@ -296,6 +301,8 @@ When changing chat event handling, test these cases:
   `stopReason: "stop"` completes their replay run;
 - large Synthetic messages retain their primary final and terminal event, compact
   replay keeps the stop marker, and id-less thinking stays as separate blocks;
+- an immediately acknowledged runless Synthetic completion preserves its complete
+  replay, and top-level tool results retain the identity of their matching calls;
 - hard-refresh history loads and post-final structural changes settle at the
   virtualized bottom without repeated per-frame scroll writes;
 - completed thinking remains grouped and follows the keep-after-final preference;

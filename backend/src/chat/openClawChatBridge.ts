@@ -707,6 +707,39 @@ function isRunlessUserLedRun(run: RetainedRun): boolean {
     );
 }
 
+function isPromotableRunlessUserLedRun(
+    run: RetainedRun,
+    envelope: OpenClawRuntimeEnvelope
+): boolean {
+    if (isRunlessUserLedRun(run)) {
+        return true;
+    }
+    const firstEvent = run.events[0];
+    const terminalEvent = run.events.find(
+        (event) => event.runtimeSequence === run.terminalSequence
+    );
+    const isAdjacentCompletedSyntheticTurn = Boolean(
+        run.completed &&
+        isRunlessRunId(run.runId) &&
+        firstEvent?.event === "session.message" &&
+        sessionMessageRole(firstEvent.payload) === "user" &&
+        terminalEvent?.event === "session.message" &&
+        sessionMessageRole(terminalEvent.payload) === "assistant" &&
+        sessionMessageStopReason(terminalEvent.payload) === "stop" &&
+        envelope.runtimeSequence === run.terminalSequence + 1
+    );
+    if (!isAdjacentCompletedSyntheticTurn || !terminalEvent) {
+        return false;
+    }
+    if (isMetadataOnlyCompletionEnvelope(envelope)) {
+        return true;
+    }
+    const terminalSignature = messageSignature(terminalEvent.payload);
+    return Boolean(
+        terminalSignature && terminalSignature === messageSignature(envelope.payload)
+    );
+}
+
 function isMatchingSessionEcho(
     run: RetainedRun,
     envelope: OpenClawRuntimeEnvelope
@@ -1919,7 +1952,7 @@ export class OpenClawChatBridge {
         if (explicitRunId && !runs.has(explicitRunId)) {
             const pendingUserRuns = runs
                 .values()
-                .filter((run) => isRunlessUserLedRun(run))
+                .filter((run) => isPromotableRunlessUserLedRun(run, retainedEnvelope))
                 .toArray();
             if (pendingUserRuns.length === 1) {
                 this.#promoteRunEntry(

@@ -356,6 +356,7 @@ function sessionMessageDrafts(
     const topLevelRole = stringValue(data.role);
     const rawMessage = topLevelRole
         ? {
+              ...data,
               ...nestedMessage,
               content:
                   nestedMessage?.content ??

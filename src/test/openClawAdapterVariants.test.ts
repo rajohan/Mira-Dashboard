@@ -281,6 +281,64 @@ describe("OpenClaw adapter variants", () => {
         expect(thinkingTexts).toEqual(["inspect repository", "report result"]);
     });
 
+    it("preserves top-level Synthetic tool-result identity", () => {
+        const adapter = new OpenClawChatAdapter();
+        const callEvents = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            {
+                                arguments: { command: "pwd" },
+                                id: "call-1",
+                                name: "exec",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                        stopReason: "toolUse",
+                    },
+                },
+                35
+            )
+        );
+        const resultEvents = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    content: "/home/ubuntu/projects/mira-dashboard",
+                    role: "toolResult",
+                    toolCallId: "call-1",
+                    toolName: "exec",
+                },
+                36
+            )
+        );
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            ...callEvents,
+            ...resultEvents,
+        ]);
+        const diagnostics = runtime.sessions[SESSION]?.runs["run-variants"]?.diagnostics;
+
+        expect(resultEvents[0]).toMatchObject({
+            kind: "tool",
+            message: {
+                toolResult: {
+                    id: "call-1",
+                    name: "exec",
+                },
+            },
+            toolKey: "tool:call-1",
+        });
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics?.[0]?.message.toolCalls?.[0]?.toolResult).toMatchObject({
+            content: "/home/ubuntu/projects/mira-dashboard",
+            id: "call-1",
+            name: "exec",
+        });
+    });
+
     it("normalizes session, assistant, thinking and item streams", () => {
         const adapter = new OpenClawChatAdapter();
         const sessionMessage = adapter.event(
