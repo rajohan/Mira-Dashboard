@@ -178,10 +178,12 @@ sequence take precedence over message timestamps when a queued user message and
 compaction final carry inverted wall-clock times. Projection indexes exact tool
 IDs once per pass and caches fallback signatures so long runs do not rescan or
 reserialize the complete transcript for every runtime diagnostic. Once a
-completed final is matched, unscoped canonical rows in that response segment
-adopt the completed run ID. This keeps tool row keys stable when transcript-backed
-runtime events are compacted and keeps retained thinking after the canonical
-tools but before the final answer.
+completed final is matched, only unscoped canonical diagnostics after the
+previous primary answer and before that final adopt the completed run ID. The
+canonical final keeps its history identity and persisted delete key. This keeps
+tool row keys stable when transcript-backed runtime events are compacted, avoids
+claiming diagnostics from overlapping runs, and keeps retained thinking after the
+canonical tools but before the final answer.
 
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
@@ -239,6 +241,8 @@ When changing chat event handling, test these cases:
   message has an earlier timestamp;
 - compacting transcript-backed runtime tools after final preserves each tool row
   key and the `tools -> thinking -> final` order;
+- overlapping completed runs cannot claim diagnostics before another run's final;
+- final reconciliation preserves a canonical assistant row's persisted delete key;
 - hiding diagnostics does not remove them from cached client state;
 - the global tool-detail setting updates existing bubbles and the default for
   new bubbles;

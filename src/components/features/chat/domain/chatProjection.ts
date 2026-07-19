@@ -443,7 +443,25 @@ function canonicalFinalIndex(
     return -1;
 }
 
-function scopeCompletedResponse(
+function completedDiagnosticStart(
+    messages: ChatHistoryMessage[],
+    segment: ResponseSegment,
+    finalIndex: number
+): number {
+    for (let index = finalIndex - 1; index >= segment.start; index -= 1) {
+        const message = messages[index];
+        if (
+            message &&
+            !isStandaloneDiagnostic(message) &&
+            hasPrimaryAnswerContent(message)
+        ) {
+            return index + 1;
+        }
+    }
+    return segment.start;
+}
+
+function scopeCompletedDiagnostics(
     messages: ChatHistoryMessage[],
     run: ChatRunState,
     segment: ResponseSegment,
@@ -452,11 +470,10 @@ function scopeCompletedResponse(
     if (run.phase !== "completed") {
         return;
     }
-    for (let index = segment.start; index <= finalIndex; index += 1) {
+    const diagnosticStart = completedDiagnosticStart(messages, segment, finalIndex);
+    for (let index = diagnosticStart; index < finalIndex; index += 1) {
         const message = messages[index];
-        const belongsToCompletedResponse =
-            index === finalIndex || (message && isStandaloneDiagnostic(message));
-        if (message && !message.runId && belongsToCompletedResponse) {
+        if (message && !message.runId && isStandaloneDiagnostic(message)) {
             messages[index] = { ...message, runId: run.runId };
         }
     }
@@ -883,7 +900,7 @@ export function reconcileChatMessages(
         }
         const finalIndex = canonicalFinalIndex(messages, run, segment, exactToolIndex);
         if (finalIndex !== -1) {
-            scopeCompletedResponse(messages, run, segment, finalIndex);
+            scopeCompletedDiagnostics(messages, run, segment, finalIndex);
             const canonical = messages[finalIndex]!;
             if (run.assistant) {
                 messages[finalIndex] = mergeChatMessageDetails(

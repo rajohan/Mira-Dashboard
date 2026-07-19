@@ -260,6 +260,13 @@ describe("chat projection", () => {
                 timestamp: "2026-07-16T11:59:59.000Z",
             },
             {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-16T12:00:00.000Z",
+                toolCalls: [{ id: "call-old", name: "bash" }],
+            },
+            {
                 ...message("assistant", "older answer"),
                 timestamp: "2026-07-16T12:00:01.000Z",
             },
@@ -294,9 +301,10 @@ describe("chat projection", () => {
 
         expect(reconciled.map((item) => [item.text, item.runId])).toEqual([
             ["parallel", undefined],
-            ["older answer", "run-old"],
+            ["", "run-old"],
+            ["older answer", undefined],
             ["", "run-new"],
-            ["newer answer", "run-new"],
+            ["newer answer", undefined],
         ]);
     });
 
@@ -2290,6 +2298,38 @@ describe("chat projection", () => {
         expect(projection.rows.some((row) => row.message.text === "question")).toBe(
             false
         );
+    });
+
+    it("keeps a persisted assistant deletion hidden after final reconciliation", () => {
+        const historyAnswer: ChatHistoryMessage = {
+            ...message("assistant", "answer"),
+            timestamp: NOW,
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                historyAnswer,
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set([messageDeleteKey(historyAnswer)])
+        );
+
+        expect(projection.rows.some((row) => row.message.text === "answer")).toBe(false);
     });
 
     it("keeps a deleted runtime diagnostic hidden by its stable row key", () => {
