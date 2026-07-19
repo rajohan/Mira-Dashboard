@@ -771,7 +771,11 @@ export function mergeWithRecentOptimisticMessages(
         const mediaKey = `${role}::${mediaIdentity}`;
         const mediaCount = unmatchedNextMediaCounts.get(mediaKey) || 0;
         unmatchedNextMediaCounts.set(mediaKey, Math.max(0, mediaCount - 1));
-        if (role === "user" && message.runId?.startsWith("dashboard-chat-")) {
+        if (
+            mediaCount > 0 &&
+            role === "user" &&
+            message.runId?.startsWith("dashboard-chat-")
+        ) {
             const mediaRunCount =
                 unmatchedNextDashboardUserMediaRunCounts.get(message.runId) || 0;
             unmatchedNextDashboardUserMediaRunCounts.set(

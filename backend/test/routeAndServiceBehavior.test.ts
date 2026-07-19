@@ -2616,12 +2616,18 @@ describe("backend route and service behavior", () => {
             value: gatewayFetch,
             writable: true,
         });
-        cleanupCallbacks.push(() =>
-            Object.defineProperty(globalThis, "fetch", {
-                configurable: true,
-                value: originalFetch,
-                writable: true,
-            })
+        const gatewayHeadersTimeoutController = new AbortController();
+        const gatewayTimeoutSpy = jest
+            .spyOn(AbortSignal, "timeout")
+            .mockReturnValue(gatewayHeadersTimeoutController.signal);
+        cleanupCallbacks.push(
+            () =>
+                Object.defineProperty(globalThis, "fetch", {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                }),
+            () => gatewayTimeoutSpy.mockRestore()
         );
 
         const { mediaRoutes } = await import("../src/routes/mediaRoutes.ts");
@@ -2644,6 +2650,9 @@ describe("backend route and service behavior", () => {
             headers: { Authorization: "Bearer environment-secret" },
             redirect: "manual",
         });
+        expect(gatewayTimeoutSpy).not.toHaveBeenCalled();
+        gatewayHeadersTimeoutController.abort();
+        expect(gatewayRequestInit?.signal?.aborted).toBe(false);
 
         gatewayFetch.mockResolvedValueOnce(
             new Response("name,value\nMira,1", {

@@ -192,14 +192,21 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
     }
 
     let response: Response;
+    const gatewayRequestController = new AbortController();
+    const gatewayRequestTimeout = setTimeout(
+        () => gatewayRequestController.abort(),
+        GATEWAY_MEDIA_REQUEST_TIMEOUT_MS
+    );
     try {
         response = await fetch(gatewayUrl, {
             headers: { Authorization: `Bearer ${token}` },
             redirect: "manual",
-            signal: AbortSignal.timeout(GATEWAY_MEDIA_REQUEST_TIMEOUT_MS),
+            signal: gatewayRequestController.signal,
         });
     } catch {
         return json({ error: "Gateway media unavailable" }, { status: 502 });
+    } finally {
+        clearTimeout(gatewayRequestTimeout);
     }
     if (!response.ok) {
         const status = [400, 401, 403, 404, 413, 429].includes(response.status)

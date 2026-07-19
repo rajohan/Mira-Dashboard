@@ -137,7 +137,8 @@ Managed Gateway image URLs stay authenticated without exposing the Gateway token
 to the browser. The browser requests the same managed path from Dashboard under
 `/api/chat/media/outgoing/*`; the backend validates the exact UUID-shaped path,
 converts the configured Gateway WebSocket origin to HTTP(S), adds the bearer
-token server-side, and does not follow redirects.
+token server-side, and does not follow redirects. The 30-second upstream timeout
+ends after response headers arrive so a valid slow download stream can finish.
 
 Managed TXT, JSON, CSV, and Markdown previews use the same Dashboard proxy with
 an explicit `preview=text` query. The backend validates the upstream media type
@@ -156,7 +157,8 @@ not remove the original download action.
 An attachment-only optimistic user row reconciles with its canonical managed
 Gateway URL by the send run ID when its local base64 identity necessarily differs
 from the persisted media identity. Matching remains role- and run-scoped so
-separate attachment turns are not collapsed.
+separate attachment turns are not collapsed, and an unrelated prior media row
+cannot consume the fallback match.
 
 ### Transcript And Runtime Authority
 

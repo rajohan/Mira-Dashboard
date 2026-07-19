@@ -1640,6 +1640,28 @@ describe("shared component helpers", () => {
             ]
         );
         expect(distinctAssistantMediaInOneRun).toHaveLength(2);
+        const unrelatedPreviousAttachment = {
+            ...persistedManagedAttachment,
+            attachments: [
+                {
+                    dataUrl: `${managedAttachmentUrl}?variant=unrelated`,
+                    fileName: "unrelated.png",
+                    id: "unrelated-photo",
+                    kind: "image" as const,
+                    mimeType: "image/png",
+                    url: `${managedAttachmentUrl}?variant=unrelated`,
+                },
+            ],
+            timestamp: "2026-07-10T15:02:59.000Z",
+        };
+        const reconciledAfterUnrelatedPreviousMedia = mergeWithRecentOptimisticMessages(
+            [unrelatedPreviousAttachment, optimisticManagedAttachment],
+            [persistedManagedAttachment]
+        );
+        expect(reconciledAfterUnrelatedPreviousMedia).toHaveLength(1);
+        expect(reconciledAfterUnrelatedPreviousMedia[0]?.attachments?.[0]?.url).toBe(
+            managedAttachmentUrl
+        );
         expect(messageIdentity(repeatedAttachmentOnlyTurns[0]!)).not.toBe(
             messageIdentity(repeatedAttachmentOnlyTurns[1]!)
         );
