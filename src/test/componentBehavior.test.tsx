@@ -2231,6 +2231,19 @@ describe("shared component helpers", () => {
         expect(
             previewFromAttachment({ fileName: "empty.bin", id: "empty", kind: "file" })
         ).toBeUndefined();
+        expect(
+            previewFromAttachment({
+                dataUrl:
+                    "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full?preview=image",
+                fileName: "diagram.svg",
+                id: "diagram",
+                kind: "image",
+                mimeType: "image/svg+xml",
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+            })
+        ).toMatchObject({
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+        });
 
         render(
             <>
