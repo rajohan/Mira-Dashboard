@@ -585,6 +585,24 @@ describe("shared component helpers", () => {
             <AttachmentPreviewModal
                 previewItem={{
                     kind: "text",
+                    mimeType: "text/csv",
+                    title: "managed.csv",
+                    url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+                }}
+                onClose={onClose}
+            />
+        );
+        await waitFor(() => {
+            expect(previewFetch).toHaveBeenLastCalledWith(
+                "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full?preview=text",
+                expect.objectContaining({ headers: { Accept: "text/plain" } })
+            );
+        });
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
                     mimeType: "text/markdown",
                     text: "# Attachment heading\n\n| A | B |\n| - | - |\n| 1 | 2 |",
                     title: "readme.md",
@@ -1120,9 +1138,9 @@ describe("shared component helpers", () => {
         expect(recordingButton).toHaveTextContent("Recording");
         expect(recordingButton).toHaveClass("bg-red-500");
         expect(responseStopButton).toHaveClass(
-            "border-red-500/65",
+            "border-red-600/70",
             "bg-transparent",
-            "text-red-500/85"
+            "text-red-600"
         );
         expect(
             view.container.querySelector('input[type="file"][multiple]')
@@ -2186,10 +2204,15 @@ describe("shared component helpers", () => {
         await user.click(
             screen.getByRole("button", { name: /open chat image 1 preview/i })
         );
+        const chatImage = screen.getByAltText("Chat attachment");
+        const dynamicContentLoadCount = onDynamicContentLoad.mock.calls.length;
+        fireEvent.load(chatImage);
+        fireEvent.error(chatImage);
         await user.click(screen.getByRole("button", { name: /readme.txt/i }));
         expect(onScroll).toHaveBeenCalledTimes(1);
         expect(onUserScrollIntent).toHaveBeenCalledTimes(4);
         expect(onFollow).toHaveBeenCalledTimes(1);
+        expect(onDynamicContentLoad).toHaveBeenCalledTimes(dynamicContentLoadCount + 2);
         expect(onDeleteMessage).toHaveBeenCalledWith("user", ["user", "user-history"]);
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({

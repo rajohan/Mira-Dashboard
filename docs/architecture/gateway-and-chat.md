@@ -110,7 +110,10 @@ The selected chat session is stored in the `/chat?session=<session-key>` query.
 Refreshing, opening a copied URL, and browser back/forward navigation therefore
 restore the same session. A plain `/chat` URL keeps the existing default-session
 selection behavior. Session changes from the picker replace the query value so
-routine navigation does not add one browser-history entry per selection.
+routine navigation does not add one browser-history entry per selection. History
+may load while a URL-selected session is being resolved, but sending, preference
+updates, and compaction remain disabled until that key exists in the Gateway
+session index.
 
 ### Attachments And Media
 
@@ -118,8 +121,9 @@ Dashboard delegates attachment delivery and persistence to OpenClaw through the
 provider-independent `ChatTransport`. The composer only prepares the Gateway
 attachment contract; it does not maintain a second Dashboard upload store.
 Images, audio, PDFs, text/data files, archives, and common Office formats are
-accepted. Video is rejected before encoding because OpenClaw chat does not
-support it in this flow.
+accepted. Selected video files are skipped before encoding because OpenClaw chat
+does not support them in this flow, while valid files from the same selection are
+kept. Audio MIME types take precedence over ambiguous extensions such as `.webm`.
 
 History normalization accepts OpenClaw `image`, `image_url`, and `input_image`
 blocks plus generic attachment and `MediaPath` records. Every attachment keeps a
@@ -132,6 +136,11 @@ to the browser. The browser requests the same managed path from Dashboard under
 `/api/chat/media/outgoing/*`; the backend validates the exact UUID-shaped path,
 converts the configured Gateway WebSocket origin to HTTP(S), adds the bearer
 token server-side, and does not follow redirects.
+
+Managed TXT, JSON, CSV, and Markdown previews use the same Dashboard proxy with
+an explicit `preview=text` query. The backend validates the upstream media type
+or filename and stops reading after 1 MiB; the original managed URL remains the
+download target.
 
 Local OpenClaw media continues through `/api/media`. Text preview is opt-in and
 limited to `.txt`, `.json`, `.csv`, and `.md` files no larger than 1 MiB. SVG is

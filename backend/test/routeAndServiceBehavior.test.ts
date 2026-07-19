@@ -2524,7 +2524,7 @@ describe("backend route and service behavior", () => {
         );
         expect(textPreview.status).toBe(200);
         expect(textPreview.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
-        await expect(textPreview.text()).resolves.toBe('{"status":"ok"}');
+        expect(await textPreview.text()).toBe('{"status":"ok"}');
 
         const svgDownload = await mediaRoutes["/api/media"].GET(
             new Request("https://test.local/api/media?path=images/dashboard.svg")
@@ -2645,13 +2645,38 @@ describe("backend route and service behavior", () => {
             redirect: "manual",
         });
 
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("name,value\nMira,1", {
+                headers: {
+                    "Content-Disposition": 'inline; filename="data.csv"',
+                    "Content-Type": "text/csv; charset=utf-8",
+                },
+            })
+        );
+        const preview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=text`)
+        );
+        expect(preview.status).toBe(200);
+        expect(preview.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+        expect(await preview.text()).toBe("name,value\nMira,1");
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("x".repeat(1024 * 1024 + 1), {
+                headers: { "Content-Type": "text/plain" },
+            })
+        );
+        const oversizedPreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=text`)
+        );
+        expect(oversizedPreview.status).toBe(413);
+
         const rejected = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
             new Request(
                 "https://dashboard.test/api/chat/media/outgoing/agent%3Amain%3Amain/not-a-uuid/full"
             )
         );
         expect(rejected.status).toBe(404);
-        expect(gatewayFetch).toHaveBeenCalledTimes(1);
+        expect(gatewayFetch).toHaveBeenCalledTimes(3);
     });
 
     it("starts manual WAL-G backups through the backup route using fake Docker", async () => {

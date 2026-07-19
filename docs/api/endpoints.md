@@ -143,8 +143,10 @@ Create body:
 
 File routes reject hidden paths and paths outside their configured roots.
 `/api/media` accepts `preview=text` only for bounded TXT, JSON, CSV, and Markdown
-files, and `preview=image` only for sandboxed SVG display. The response without a
-preview query remains the original downloadable media response.
+files, and `preview=image` only for sandboxed SVG display.
+`/api/chat/media/outgoing/*?preview=text` applies the same 1 MiB bound to managed
+Gateway text media after validating its upstream type or filename. Responses
+without a preview query remain the original downloadable media response.
 
 ## Docker
 

@@ -7,7 +7,10 @@ import { MarkdownPreview } from "../files/viewers/MarkdownPreview";
 import type { ChatPreviewItem } from "./chatTypes";
 
 function localPreviewUrl(url: string, mode: "image" | "text"): string {
-    if (url !== "/api/media" && !url.startsWith("/api/media?")) {
+    const isLocalMedia = url === "/api/media" || url.startsWith("/api/media?");
+    const isManagedTextMedia =
+        mode === "text" && url.startsWith("/api/chat/media/outgoing/");
+    if (!isLocalMedia && !isManagedTextMedia) {
         return url;
     }
 

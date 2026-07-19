@@ -17,6 +17,12 @@ const MAX_TEXT_PREVIEW_SIZE = 1024 * 1024;
 const GATEWAY_MEDIA_REQUEST_TIMEOUT_MS = 30_000;
 const GATEWAY_WEBSOCKET_PROTOCOLS = new Set(["ws:", "wss:"]);
 const TEXT_PREVIEW_EXTENSIONS = new Set([".csv", ".json", ".md", ".txt"]);
+const GATEWAY_TEXT_PREVIEW_MIME_TYPES = new Set([
+    "application/json",
+    "text/csv",
+    "text/markdown",
+    "text/plain",
+]);
 const MANAGED_GATEWAY_MEDIA_PATH =
     /^\/api\/chat\/media\/outgoing\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/full$/iu;
 const mediaRouteState: {
@@ -100,6 +106,10 @@ function gatewayMediaUrl(request: Request): URL | undefined {
 }
 
 async function proxyGatewayMedia(request: Request): Promise<Response> {
+    const previewMode = new URL(request.url).searchParams.get("preview");
+    if (previewMode && previewMode !== "text") {
+        return json({ error: "Invalid preview mode" }, { status: 400 });
+    }
     const gatewayUrl = gatewayMediaUrl(request);
     const token = configuredGatewayToken();
     if (!gatewayUrl || !token) {
@@ -121,6 +131,73 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
             ? response.status
             : 502;
         return json({ error: "Media not found" }, { status });
+    }
+
+    if (previewMode === "text") {
+        const contentType = response.headers
+            .get("content-type")
+            ?.split(";", 1)[0]
+            ?.trim()
+            .toLowerCase();
+        const contentDisposition = response.headers.get("content-disposition") || "";
+        const fileNameMatch = /filename\*?=(?:UTF-8''|")?([^";]+)/iu.exec(
+            contentDisposition
+        );
+        const fileExtension = fileNameMatch
+            ? path.extname(fileNameMatch[1]!.trim()).toLowerCase()
+            : "";
+        if (
+            !GATEWAY_TEXT_PREVIEW_MIME_TYPES.has(contentType || "") &&
+            !TEXT_PREVIEW_EXTENSIONS.has(fileExtension)
+        ) {
+            await response.body?.cancel();
+            return json({ error: "Text preview is not available" }, { status: 415 });
+        }
+
+        const declaredLength = Number(response.headers.get("content-length"));
+        if (Number.isFinite(declaredLength) && declaredLength > MAX_TEXT_PREVIEW_SIZE) {
+            await response.body?.cancel();
+            return json({ error: "Text preview is too large" }, { status: 413 });
+        }
+
+        const reader = response.body?.getReader();
+        const chunks: Uint8Array[] = [];
+        let totalBytes = 0;
+        if (reader) {
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+                    totalBytes += value.byteLength;
+                    if (totalBytes > MAX_TEXT_PREVIEW_SIZE) {
+                        await reader.cancel();
+                        return json(
+                            { error: "Text preview is too large" },
+                            { status: 413 }
+                        );
+                    }
+                    chunks.push(value);
+                }
+            } finally {
+                reader.releaseLock();
+            }
+        }
+        const body = new Uint8Array(totalBytes);
+        let offset = 0;
+        for (const chunk of chunks) {
+            body.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return new Response(body, {
+            headers: {
+                "Cache-Control":
+                    response.headers.get("cache-control") || "private, max-age=3600",
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Content-Type-Options": "nosniff",
+            },
+        });
     }
 
     const headers = new Headers({

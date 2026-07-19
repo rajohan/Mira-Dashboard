@@ -614,6 +614,9 @@ export function ChatMessagesList({
                                                                     onLoad={
                                                                         onDynamicContentLoad
                                                                     }
+                                                                    onError={
+                                                                        onDynamicContentLoad
+                                                                    }
                                                                     className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
                                                                 />
                                                             </button>
@@ -653,6 +656,9 @@ export function ChatMessagesList({
                                                                 src={attachment.dataUrl}
                                                                 alt={attachment.fileName}
                                                                 onLoad={
+                                                                    onDynamicContentLoad
+                                                                }
+                                                                onError={
                                                                     onDynamicContentLoad
                                                                 }
                                                                 className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"

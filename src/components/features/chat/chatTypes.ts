@@ -124,12 +124,12 @@ export function chatImageUrl(image: ChatImageBlock): string | undefined {
     if (!imageData) {
         return undefined;
     }
-    const embeddedUrl = safeChatImageUrl(imageData);
-    if (embeddedUrl) {
-        return embeddedUrl;
+    const normalizedImageData = imageData.trim();
+    if (normalizedImageData.startsWith("data:image/")) {
+        return safeChatImageUrl(normalizedImageData);
     }
     const mimeType = image.source?.media_type || image.mimeType || "image/png";
-    return `data:${mimeType};base64,${imageData}`;
+    return `data:${mimeType};base64,${normalizedImageData}`;
 }
 
 /** Returns the declared image MIME type with a safe display fallback. */

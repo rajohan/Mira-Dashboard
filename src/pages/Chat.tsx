@@ -135,7 +135,10 @@ export function Chat() {
     }, [error]);
 
     const dismissVisibleError = () => {
-        setSendError(undefined);
+        if (sendError) {
+            setSendError(undefined);
+            return;
+        }
         if (error) {
             setDismissedTransportError(error);
         }

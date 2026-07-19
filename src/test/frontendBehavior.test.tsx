@@ -4023,6 +4023,13 @@ describe("Mira Dashboard frontend behavior", () => {
             type: "image_url",
         } as const;
         expect(chatImageUrl(managedImage)).toBe(managedImage.image_url.url);
+        expect(
+            chatImageUrl({
+                data: "/9j/4AAQSkZJRgABAQAAAQABAAD",
+                mimeType: "image/jpeg",
+                type: "image",
+            })
+        ).toBe("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD");
         expect(extractImages([managedImage])).toEqual([managedImage]);
         expect(normalizeText([managedImage])).toBe("[image]");
         expect(attachmentKind("image/png")).toBe("image");

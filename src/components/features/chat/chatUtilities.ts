@@ -23,8 +23,12 @@ export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
 
 /** Returns whether OpenClaw intentionally excludes this video attachment. */
 export function isVideoAttachment(file: Pick<File, "name" | "type">): boolean {
+    const mimeType = file.type.trim().toLowerCase();
+    if (mimeType.startsWith("audio/")) {
+        return false;
+    }
     return (
-        file.type.toLowerCase().startsWith("video/") ||
+        mimeType.startsWith("video/") ||
         /\.(?:avi|m4v|mkv|mov|mp4|mpeg|mpg|webm)$/iu.test(file.name)
     );
 }

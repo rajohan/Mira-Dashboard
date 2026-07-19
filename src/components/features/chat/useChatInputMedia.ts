@@ -90,11 +90,23 @@ export function useChatInputMedia({
             return;
         }
         onError(undefined);
-        const unsupportedVideo = [...files].find((file) => isVideoAttachment(file));
-        if (unsupportedVideo) {
-            onError(
-                `${unsupportedVideo.name} is a video. OpenClaw chat supports images and non-video files.`
+        const unsupportedVideos: File[] = [];
+        const supportedFiles: File[] = [];
+        for (const file of files) {
+            if (isVideoAttachment(file)) {
+                unsupportedVideos.push(file);
+            } else {
+                supportedFiles.push(file);
+            }
+        }
+        const selectionErrors: string[] = [];
+        if (unsupportedVideos.length > 0) {
+            selectionErrors.push(
+                `Skipped video files: ${unsupportedVideos.map((file) => file.name).join(", ")}. OpenClaw chat supports images and non-video files.`
             );
+        }
+        if (supportedFiles.length === 0) {
+            onError(selectionErrors.join(" "));
             if (fileInputReference.current) {
                 fileInputReference.current.value = "";
             }
@@ -107,10 +119,15 @@ export function useChatInputMedia({
                 attachmentsReference.current.length -
                 pendingAttachmentSlotsReference.current
         );
-        const selectedFiles = [...files].slice(0, remainingSlots);
+        const selectedFiles = supportedFiles.slice(0, remainingSlots);
         pendingAttachmentSlotsReference.current += selectedFiles.length;
-        if (files.length > remainingSlots) {
-            onError(`Only ${MAX_ATTACHMENTS} attachments can be sent at once.`);
+        if (supportedFiles.length > remainingSlots) {
+            selectionErrors.push(
+                `Only ${MAX_ATTACHMENTS} attachments can be sent at once.`
+            );
+        }
+        if (selectionErrors.length > 0) {
+            onError(selectionErrors.join(" "));
         }
 
         try {
