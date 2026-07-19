@@ -72,7 +72,7 @@ interface ChatMessagesListProperties {
     onScroll: () => void;
     onUserScrollIntent: () => void;
     onTtsError: (error: string) => void;
-    onDeleteMessage: (messageKey: string) => void;
+    onDeleteMessage: (messageKey: string, deleteKeys?: readonly string[]) => void;
     shouldExpandToolDetails?: boolean;
     toolDetailExpansionOverrides?: ReadonlyMap<string, boolean>;
     onToggleToolDetails?: (toolKey: string) => void;
@@ -185,16 +185,18 @@ function AttachmentList({
 
 /** Renders the delete message button UI. */
 function DeleteMessageButton({
+    deleteKeys,
     messageKey,
     onDelete,
 }: {
+    deleteKeys?: readonly string[];
     messageKey: string;
-    onDelete: (messageKey: string) => void;
+    onDelete: (messageKey: string, deleteKeys?: readonly string[]) => void;
 }) {
     return (
         <button
             type="button"
-            onClick={() => onDelete(messageKey)}
+            onClick={() => onDelete(messageKey, deleteKeys)}
             className="rounded p-1 text-white/80 opacity-75 transition hover:bg-white/20 hover:text-white hover:opacity-100"
             title="Delete message from this chat view"
             aria-label="Delete your message"
@@ -550,6 +552,7 @@ export function ChatMessagesList({
                                             <div className="flex shrink-0 items-center gap-1">
                                                 {canDeleteMessage ? (
                                                     <DeleteMessageButton
+                                                        deleteKeys={row.deleteKeys}
                                                         messageKey={row.key}
                                                         onDelete={onDeleteMessage}
                                                     />

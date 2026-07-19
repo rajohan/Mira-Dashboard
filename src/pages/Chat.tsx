@@ -8,6 +8,7 @@ import { ChatComposer } from "../components/features/chat/ChatComposer";
 import { ChatHeader } from "../components/features/chat/ChatHeader";
 import { ChatMessagesList } from "../components/features/chat/ChatMessagesList";
 import {
+    addDeletedMessageKeys,
     chatFastModePatchValue,
     isSessionActive,
     readDeletedMessageKeys,
@@ -94,9 +95,9 @@ export function Chat() {
     const [deletedMessageKeys, setDeletedMessageKeys] = useState<Set<string>>(
         () => new Set()
     );
-    const [pendingDeleteMessageKey, setPendingDeleteMessageKey] = useState<
-        string | undefined
-    >(undefined);
+    const [pendingDeleteMessageKeys, setPendingDeleteMessageKeys] = useState<string[]>(
+        []
+    );
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
     const [previewItem, setPreviewItem] = useState<ChatPreviewItem | undefined>(
         undefined
@@ -226,7 +227,7 @@ export function Chat() {
         setDeletedMessageKeys(
             selectedSessionKey ? readDeletedMessageKeys(selectedSessionKey) : new Set()
         );
-        setPendingDeleteMessageKey(undefined);
+        setPendingDeleteMessageKeys([]);
         setToolDetailExpansionOverrides(new Map());
     }, [selectedSessionKey]);
 
@@ -314,23 +315,22 @@ export function Chat() {
     };
 
     /** Responds to delete message events. */
-    const handleDeleteMessage = (messageKey: string) => {
-        setPendingDeleteMessageKey(messageKey);
+    const handleDeleteMessage = (messageKey: string, deleteKeys?: readonly string[]) => {
+        setPendingDeleteMessageKeys(deleteKeys?.length ? [...deleteKeys] : [messageKey]);
     };
 
     /** Performs confirm delete message. */
     const confirmDeleteMessage = () => {
-        if (!selectedSessionKey || !pendingDeleteMessageKey) {
+        if (!selectedSessionKey || pendingDeleteMessageKeys.length === 0) {
             return;
         }
 
         setDeletedMessageKeys((wasPrevious) => {
-            const next = new Set(wasPrevious);
-            next.add(pendingDeleteMessageKey);
+            const next = addDeletedMessageKeys(wasPrevious, pendingDeleteMessageKeys);
             writeDeletedMessageKeys(selectedSessionKey, next);
             return next;
         });
-        setPendingDeleteMessageKey(undefined);
+        setPendingDeleteMessageKeys([]);
     };
 
     /** Resolves a pending reset confirmation and hides the modal. */
@@ -515,12 +515,12 @@ export function Chat() {
             />
 
             <ConfirmModal
-                isOpen={!!pendingDeleteMessageKey}
+                isOpen={pendingDeleteMessageKeys.length > 0}
                 title="Delete message"
                 message="Delete this message from your chat view?"
                 confirmLabel="Delete"
                 danger
-                onCancel={() => setPendingDeleteMessageKey(undefined)}
+                onCancel={() => setPendingDeleteMessageKeys([])}
                 onConfirm={confirmDeleteMessage}
             />
 

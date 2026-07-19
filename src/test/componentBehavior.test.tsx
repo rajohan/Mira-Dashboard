@@ -1951,6 +1951,7 @@ describe("shared component helpers", () => {
                     isLoadingHistory={false}
                     chatRows={[
                         {
+                            deleteKeys: ["user", "user-history"],
                             key: "user",
                             kind: "message",
                             message: {
@@ -2041,7 +2042,7 @@ describe("shared component helpers", () => {
         expect(onScroll).toHaveBeenCalledTimes(1);
         expect(onUserScrollIntent).toHaveBeenCalledTimes(4);
         expect(onFollow).toHaveBeenCalledTimes(1);
-        expect(onDeleteMessage).toHaveBeenCalledWith("user");
+        expect(onDeleteMessage).toHaveBeenCalledWith("user", ["user", "user-history"]);
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({ kind: "image", title: "Chat image" })
         );

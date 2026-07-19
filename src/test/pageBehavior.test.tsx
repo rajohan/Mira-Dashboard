@@ -14,6 +14,7 @@ import { createElement, type ReactNode } from "react";
 
 import { logsCollection } from "../collections/logs";
 import {
+    addDeletedMessageKeys,
     didScheduleBottomFollow,
     isSessionActive,
     nextHistoryLoadSendError,
@@ -3337,6 +3338,10 @@ describe("Mira Dashboard pages", () => {
         }
 
         expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set());
+
+        expect(
+            addDeletedMessageKeys(new Set(["current"]), ["scoped", "history"])
+        ).toEqual(new Set(["current", "scoped", "history"]));
 
         writeDeletedMessageKeys("agent:main:main", new Set(["message-1"]));
         expect(readDeletedMessageKeys("agent:main:main")).toEqual(new Set(["message-1"]));

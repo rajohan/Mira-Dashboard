@@ -461,22 +461,58 @@ function completedDiagnosticStart(
     return segment.start;
 }
 
+function hasUnambiguousFinalEvidence(
+    messages: ChatHistoryMessage[],
+    run: ChatRunState,
+    segment: ResponseSegment,
+    finalIndex: number,
+    exactToolIndex: ExactToolMessageIndex
+): boolean {
+    const canonicalFinal = messages[finalIndex];
+    if (canonicalFinal && isRunMatchingMessage(run, canonicalFinal)) {
+        return true;
+    }
+    if (!run.assistant || !hasPrimaryAnswerContent(run.assistant)) {
+        return false;
+    }
+    if (runFinalAnchorIndex(messages, run, exactToolIndex) === finalIndex) {
+        return true;
+    }
+    const assistantText = run.assistant.text;
+    if (!assistantText) {
+        return false;
+    }
+    let matchingFinals = 0;
+    for (let index = segment.start; index < segment.end; index += 1) {
+        const message = messages[index];
+        const role = message?.role.toLowerCase();
+        const isMatchingFinal = Boolean(
+            message &&
+            !message.runId &&
+            (role === "assistant" || role === "system") &&
+            !isStandaloneDiagnostic(message) &&
+            isRecoveredAssistantText(message.text, assistantText)
+        );
+        if (isMatchingFinal) {
+            matchingFinals += 1;
+        }
+    }
+    return matchingFinals === 1;
+}
+
 function scopeCompletedResponse(
     messages: ChatHistoryMessage[],
     run: ChatRunState,
     segment: ResponseSegment,
-    finalIndex: number
+    finalIndex: number,
+    exactToolIndex: ExactToolMessageIndex
 ): void {
     if (run.phase !== "completed") {
         return;
     }
-    const canonicalFinal = messages[finalIndex];
-    const hasResponseEvidence = Boolean(
-        (run.assistant && hasPrimaryAnswerContent(run.assistant)) ||
-        run.diagnostics.length > 0 ||
-        (canonicalFinal && isRunMatchingMessage(run, canonicalFinal))
-    );
-    if (!hasResponseEvidence) {
+    if (
+        !hasUnambiguousFinalEvidence(messages, run, segment, finalIndex, exactToolIndex)
+    ) {
         return;
     }
     const diagnosticStart = completedDiagnosticStart(messages, segment, finalIndex);
@@ -911,7 +947,7 @@ export function reconcileChatMessages(
         }
         const finalIndex = canonicalFinalIndex(messages, run, segment, exactToolIndex);
         if (finalIndex !== -1) {
-            scopeCompletedResponse(messages, run, segment, finalIndex);
+            scopeCompletedResponse(messages, run, segment, finalIndex, exactToolIndex);
             const canonical = messages[finalIndex]!;
             if (run.assistant) {
                 messages[finalIndex] = mergeChatMessageDetails(
@@ -1034,19 +1070,23 @@ export function projectChat(
         reconciled,
         visibility,
         shouldKeepThinkingAfterFinal
-    ).filter((message) =>
-        projectedMessageDeleteKeys(message).every((key) => !deletedMessageKeys.has(key))
     );
-    const rows: ChatRow[] = presented.map((message) => {
-        return {
-            key: projectedMessageRowKey(message),
-            kind:
-                message.local === true && message.runId && !isUserMessage(message)
-                    ? "stream"
-                    : "message",
-            message,
-        };
-    });
+    const rows: ChatRow[] = [];
+    for (const message of presented) {
+        const deleteKeys = projectedMessageDeleteKeys(message);
+        const isDeleted = deleteKeys.some((key) => deletedMessageKeys.has(key));
+        if (!isDeleted) {
+            rows.push({
+                deleteKeys,
+                key: projectedMessageRowKey(message),
+                kind:
+                    message.local === true && message.runId && !isUserMessage(message)
+                        ? "stream"
+                        : "message",
+                message,
+            });
+        }
+    }
     const activeRuns = runs.filter(
         (run) =>
             run.phase === "active" &&

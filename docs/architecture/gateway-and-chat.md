@@ -180,13 +180,15 @@ IDs once per pass and caches fallback signatures so long runs do not rescan or
 reserialize the complete transcript for every runtime diagnostic. Once a
 completed final is matched, only unscoped canonical diagnostics after the
 previous primary answer and that matched final adopt the completed run ID.
-Scoping requires concrete response evidence from assistant output, an explicit
-run match, or diagnostics; metadata-only completions cannot claim a canonical
-answer. Projection retains previous unscoped history delete keys as aliases. This
-keeps tool row keys stable when transcript-backed runtime events are compacted,
-avoids claiming diagnostics from overlapping runs, keeps hidden tool media with
-the final, and keeps retained thinking after the canonical tools but before the
-final answer.
+Scoping requires an explicit run match or primary assistant output whose final is
+timestamp/diagnostic anchored or has one unique text match in the response
+segment. Metadata-only and diagnostic-only completions cannot claim a canonical
+answer, and identical unanchored finals remain unscoped. Projection exposes both
+the scoped row key and previous unscoped history key as delete aliases; the delete
+action persists every alias. This keeps tool row keys stable when
+transcript-backed runtime events are compacted, avoids claiming diagnostics from
+overlapping runs, keeps hidden tool media with the final, and keeps retained
+thinking after the canonical tools but before the final answer.
 
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
@@ -246,7 +248,9 @@ When changing chat event handling, test these cases:
   key and the `tools -> thinking -> final` order;
 - overlapping completed runs cannot claim diagnostics before another run's final;
 - metadata-only completions cannot claim or duplicate another run's final;
+- diagnostic-only completions and identical unanchored finals remain unscoped;
 - final and diagnostic reconciliation preserve persisted history delete keys;
+- scoped deletions remain hidden after completed replay is cleared;
 - hidden tool media remains attached to its completed final after compaction;
 - completed thinking remains grouped and follows the keep-after-final preference;
 - hiding diagnostics does not remove them from cached client state;

@@ -342,6 +342,103 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("does not let diagnostic-only completion claim another run final", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:02.000Z", {
+                kind: "thinking",
+                message: thinkingMessage("diagnostic-only"),
+                runId: "diagnostic-only",
+            }),
+            eventAt(32, "2026-07-16T12:00:04.000Z", {
+                kind: "finish",
+                outcome: "completed",
+                runId: "diagnostic-only",
+            }),
+            eventAt(48, "2026-07-16T12:00:03.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer", "run-real"),
+                outcome: "completed",
+                runId: "run-real",
+            }),
+        ]);
+        const reconciled = reconcileChatMessages(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                {
+                    ...message("assistant", "answer"),
+                    timestamp: "2026-07-16T12:00:03.000Z",
+                },
+            ],
+            runtime.sessions[SESSION]
+        );
+
+        expect(
+            reconciled.filter((item) => item.text === "answer").map((item) => item.runId)
+        ).toEqual(["run-real"]);
+    });
+
+    it("leaves identical unanchored completed response blocks unscoped", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, {
+                kind: "thinking",
+                message: thinkingMessage("run-old"),
+                runId: "run-old",
+            }),
+            event(32, {
+                kind: "finish",
+                message: message("assistant", "same", "run-old"),
+                outcome: "completed",
+                runId: "run-old",
+            }),
+            event(40, {
+                kind: "thinking",
+                message: thinkingMessage("run-new"),
+                runId: "run-new",
+            }),
+            event(64, {
+                kind: "finish",
+                message: message("assistant", "same", "run-new"),
+                outcome: "completed",
+                runId: "run-new",
+            }),
+        ]);
+        const reconciled = reconcileChatMessages(
+            [
+                message("user", "parallel"),
+                {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-old", name: "read" }],
+                },
+                message("assistant", "same"),
+                {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-new", name: "read" }],
+                },
+                message("assistant", "same"),
+            ],
+            runtime.sessions[SESSION]
+        );
+
+        expect(
+            reconciled
+                .filter((item) => item.toolCalls?.length)
+                .map((item) => [item.toolCalls?.[0]?.id, item.runId])
+        ).toEqual([
+            ["call-old", undefined],
+            ["call-new", undefined],
+        ]);
+        expect(
+            reconciled.filter((item) => item.text === "same").map((item) => item.runId)
+        ).toEqual([undefined, undefined]);
+    });
+
     it("keeps identical diagnostics from distinct overlapping runs", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -2403,6 +2500,54 @@ describe("chat projection", () => {
         );
 
         expect(projection.rows.some((row) => row.message.toolCalls?.length)).toBe(false);
+    });
+
+    it("exposes both scoped and history delete keys before replay clears", () => {
+        const historyAnswer: ChatHistoryMessage = {
+            ...message("assistant", "answer"),
+            timestamp: "2026-07-16T12:00:02.000Z",
+        };
+        const history = [
+            {
+                ...message("user", "question"),
+                timestamp: "2026-07-16T11:59:59.000Z",
+            },
+            historyAnswer,
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:02.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const scoped = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const answerRow = scoped.rows.find((row) => row.message.text === "answer");
+
+        expect(answerRow).toBeDefined();
+        expect(answerRow!.deleteKeys).toEqual([
+            answerRow!.key,
+            messageDeleteKey(historyAnswer),
+        ]);
+        const afterReplayClear = projectChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(answerRow!.deleteKeys)
+        );
+        expect(afterReplayClear.rows.some((row) => row.message.text === "answer")).toBe(
+            false
+        );
     });
 
     it("keeps a deleted runtime diagnostic hidden by its stable row key", () => {
