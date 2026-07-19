@@ -175,6 +175,10 @@ transient diagnostics are inserted before the matching final answer. Runtime
 tool IDs reconcile inside the current response segment, or outside it only when
 the history row explicitly matches the run. This boundary is required because
 some providers reuse short IDs such as `functions.exec:0` in later user turns.
+Exact-ID final evidence is bounded on both sides by that response segment. A
+follow-up recorded after the run starts cannot become its lower boundary merely
+because it falls inside the timestamp-skew allowance; the allowance is only a
+fallback when no causal or explicitly matched user boundary exists.
 Name-only fallback matching is likewise bounded to the current user turn.
 Transcript order and runtime sequence take precedence over message timestamps
 when a queued user message and compaction final carry inverted wall-clock times.
@@ -203,8 +207,13 @@ Synthetic can place thinking, a tool call, and assistant text inside one
 thinking, tool, and primary assistant events before it reaches the reducer. A
 Synthetic assistant message with `stopReason: "toolUse"` remains nonterminal;
 `stopReason: "stop"` completes the run in both the frontend adapter and backend
-replay bridge. The final primary assistant event never inherits tool fields from
-the preceding runtime buffer.
+replay bridge. Split id-less thinking blocks receive stable per-message identities
+so separate provider messages cannot concatenate unrelated reasoning. If one
+provider envelope exceeds the adapter event-slot limit, the primary assistant and
+terminal finish events are retained ahead of excess diagnostics. Oversized
+terminal replay payloads retain a compact assistant-role/stop marker so refresh
+still settles the completed run. The final primary assistant event never inherits
+tool fields from the preceding runtime buffer.
 
 ### Virtualized Sticky Bottom
 
@@ -268,7 +277,10 @@ When changing chat event handling, test these cases:
 - item-stream tool call/output variants are trimmed as transcript-backed tools;
 - aggregate memory eviction can rehydrate the evicted session from SQLite;
 - reused runtime tool-call IDs do not match across user boundaries without an
-  explicit run match, and name-only matches remain turn-bounded;
+  explicit run match, exact evidence is bounded at both ends, and name-only
+  matches remain turn-bounded;
+- a fast follow-up after run start cannot move a media-only final into the later
+  turn;
 - compaction diagnostics remain before their final when the next queued user
   message has an earlier timestamp;
 - compacting transcript-backed runtime tools after final preserves each tool row
@@ -282,6 +294,8 @@ When changing chat event handling, test these cases:
 - media-only finals keep compacted tools before retained thinking;
 - mixed Synthetic session messages split into tool/thinking/final rows, and only
   `stopReason: "stop"` completes their replay run;
+- large Synthetic messages retain their primary final and terminal event, compact
+  replay keeps the stop marker, and id-less thinking stays as separate blocks;
 - hard-refresh history loads and post-final structural changes settle at the
   virtualized bottom without repeated per-frame scroll writes;
 - completed thinking remains grouped and follows the keep-after-final preference;

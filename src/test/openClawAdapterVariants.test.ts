@@ -194,6 +194,93 @@ describe("OpenClaw adapter variants", () => {
         });
     });
 
+    it("preserves the Synthetic terminal event when one message has many tools", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            { thinking: "inspect repository", type: "thinking" },
+                            ...Array.from({ length: 13 }, (_, index) => ({
+                                arguments: { command: `step-${index}` },
+                                id: `functions.exec:${index}`,
+                                name: "exec",
+                                type: "toolCall",
+                            })),
+                            { text: "SYNTHETIC_OK", type: "text" },
+                        ],
+                        role: "assistant",
+                        stopReason: "stop",
+                    },
+                },
+                32
+            )
+        );
+
+        expect(events).toHaveLength(15);
+        expect(events.at(-2)).toMatchObject({
+            kind: "assistant",
+            message: { text: "SYNTHETIC_OK" },
+        });
+        expect(events.at(-1)).toMatchObject({
+            kind: "finish",
+            outcome: "completed",
+        });
+    });
+
+    it("keeps id-less Synthetic thinking blocks distinct across messages", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = [
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: [
+                                { thinking: "inspect repository", type: "thinking" },
+                                {
+                                    arguments: { command: "pwd" },
+                                    id: "functions.exec:0",
+                                    name: "exec",
+                                    type: "toolCall",
+                                },
+                            ],
+                            role: "assistant",
+                            stopReason: "toolUse",
+                        },
+                    },
+                    33
+                )
+            ),
+            ...adapter.event(
+                envelope(
+                    "session.message",
+                    {
+                        message: {
+                            content: [
+                                { thinking: "report result", type: "thinking" },
+                                { text: "SYNTHETIC_OK", type: "text" },
+                            ],
+                            role: "assistant",
+                            stopReason: "stop",
+                        },
+                    },
+                    34
+                )
+            ),
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), events);
+        const thinkingTexts = runtime.sessions[SESSION]?.runs[
+            "run-variants"
+        ]?.diagnostics.flatMap(
+            (entry) => entry.message.thinking?.map((block) => block.text) || []
+        );
+
+        expect(thinkingTexts).toEqual(["inspect repository", "report result"]);
+    });
+
     it("normalizes session, assistant, thinking and item streams", () => {
         const adapter = new OpenClawChatAdapter();
         const sessionMessage = adapter.event(

@@ -1870,6 +1870,75 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("does not let a delayed run claim a reused tool in a later Dashboard turn", () => {
+        const firstFinal: ChatHistoryMessage = {
+            attachments: [{ fileName: "first.txt", id: "first", kind: "text" }],
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: "2026-07-18T16:35:32.000Z",
+        };
+        const laterFinal: ChatHistoryMessage = {
+            attachments: [{ fileName: "later.txt", id: "later", kind: "text" }],
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: "2026-07-18T16:36:02.000Z",
+        };
+        const history: ChatHistoryMessage[] = [
+            { ...message("user", "first"), timestamp: "2026-07-18T16:35:29.000Z" },
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-18T16:35:31.000Z",
+                toolCalls: [{ id: "functions.exec:0", name: "exec" }],
+            },
+            firstFinal,
+            {
+                ...message("user", "later", "dashboard-chat-later"),
+                local: true,
+                timestamp: "2026-07-18T16:36:00.000Z",
+            },
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-18T16:36:01.000Z",
+                toolCalls: [{ id: "functions.exec:0", name: "exec" }],
+            },
+            laterFinal,
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-18T16:35:30.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "functions.exec:0", name: "exec" }],
+                },
+                runId: "delayed-run",
+                toolKey: "tool:functions.exec:0",
+            }),
+            eventAt(48, "2026-07-18T16:36:03.000Z", {
+                kind: "finish",
+                message: { ...firstFinal, runId: "delayed-run" },
+                outcome: "completed",
+                runId: "delayed-run",
+            }),
+        ]);
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+
+        expect(
+            reconciled.find((item) => item.attachments?.[0]?.id === "first")?.runId
+        ).toBe("delayed-run");
+        expect(
+            reconciled.find((item) => item.attachments?.[0]?.id === "later")?.runId
+        ).toBeUndefined();
+    });
+
     it("reconciles a large exact-id run without reserializing every tool payload", () => {
         const toolCount = 250;
         const payload = "x".repeat(20_000);
@@ -3084,6 +3153,77 @@ describe("chat projection", () => {
                         : row.message.text
             )
         ).toEqual(["question", "tool", "thinking", "final"]);
+    });
+
+    it("keeps a media-only final before a follow-up sent within the start skew", () => {
+        const mediaFinal: ChatHistoryMessage = {
+            attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: "2026-07-16T12:00:02.000Z",
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:00.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            eventAt(32, "2026-07-16T12:00:01.000Z", {
+                kind: "thinking",
+                message: thinkingMessage("run-1"),
+                runId: "run-1",
+            }),
+            eventAt(48, "2026-07-16T12:00:02.000Z", {
+                kind: "finish",
+                message: { ...mediaFinal, runId: "run-1" },
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.900Z",
+                },
+                {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    timestamp: "2026-07-16T12:00:00.200Z",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                mediaFinal,
+                {
+                    ...message("user", "follow-up"),
+                    timestamp: "2026-07-16T12:00:00.500Z",
+                },
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            projection.rows.map((row) =>
+                row.message.toolCalls?.length
+                    ? "tool"
+                    : row.message.thinking?.length
+                      ? "thinking"
+                      : row.message.attachments?.length
+                        ? "final"
+                        : row.message.text
+            )
+        ).toEqual(["question", "tool", "thinking", "final", "follow-up"]);
     });
 
     it("does not scope a later text answer to a media-only final", () => {

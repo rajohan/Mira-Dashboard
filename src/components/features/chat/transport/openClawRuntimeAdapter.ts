@@ -24,6 +24,7 @@ import {
 
 type WithoutSequence<Event> = Event extends unknown ? Omit<Event, "sequence"> : never;
 type ChatRuntimeEventDraft = WithoutSequence<ChatRuntimeEvent>;
+const MAX_DRAFTS_PER_ENVELOPE = 15;
 
 function isToolFailureError(value: string | undefined): boolean {
     const normalized = value?.trim() || "";
@@ -313,22 +314,40 @@ export function adaptOpenClawRuntimeEvent(
     }
     const common = { runId, sessionKey, timestamp };
     const eventPayload = openClawPayloadView(payload);
+    const sequence = openClawSequence(raw, fallbackSequence) * 16;
     const drafts =
         eventName === "chat"
             ? chatEventDrafts(stringValue(eventPayload.state), eventPayload, common)
             : eventName === "session.message"
-              ? sessionMessageDrafts(eventPayload, common)
+              ? sessionMessageDrafts(eventPayload, common, sequence)
               : runtimeStreamDrafts(eventName, eventPayload, common);
-    const sequence = openClawSequence(raw, fallbackSequence) * 16;
-    return drafts.slice(0, 15).map((draft, index) => ({
+    return boundedRuntimeDrafts(drafts).map((draft, index) => ({
         ...draft,
         sequence: sequence + index,
     })) as ChatRuntimeEvent[];
 }
 
+function boundedRuntimeDrafts(drafts: ChatRuntimeEventDraft[]): ChatRuntimeEventDraft[] {
+    if (drafts.length <= MAX_DRAFTS_PER_ENVELOPE) {
+        return drafts;
+    }
+    const finishIndex = drafts.findLastIndex((draft) => draft.kind === "finish");
+    if (finishIndex === -1) {
+        return drafts.slice(0, MAX_DRAFTS_PER_ENVELOPE);
+    }
+    const terminalStart =
+        drafts[finishIndex - 1]?.kind === "assistant" ? finishIndex - 1 : finishIndex;
+    const terminalDrafts = drafts.slice(terminalStart, finishIndex + 1);
+    return [
+        ...drafts.slice(0, MAX_DRAFTS_PER_ENVELOPE - terminalDrafts.length),
+        ...terminalDrafts,
+    ];
+}
+
 function sessionMessageDrafts(
     data: Record<string, unknown>,
-    common: { runId?: string; sessionKey: string; timestamp: string }
+    common: { runId?: string; sessionKey: string; timestamp: string },
+    sequence: number
 ): ChatRuntimeEventDraft[] {
     const nestedMessage = asRecord(data.message);
     const stopReason =
@@ -349,7 +368,7 @@ function sessionMessageDrafts(
     const message = normalizeAssistant(rawMessage, common.runId);
     const role = message.role.toLowerCase();
     if (role === "assistant") {
-        const drafts = sessionAssistantDiagnosticDrafts(message, common);
+        const drafts = sessionAssistantDiagnosticDrafts(message, common, sequence);
         const hasPrimaryContent = Boolean(
             message.text.trim() || message.images?.length || message.attachments?.length
         );
@@ -416,22 +435,27 @@ function sessionToolKey(
 
 function sessionAssistantDiagnosticDrafts(
     message: ChatHistoryMessage,
-    common: { runId?: string; sessionKey: string; timestamp: string }
+    common: { runId?: string; sessionKey: string; timestamp: string },
+    sequence: number
 ): ChatRuntimeEventDraft[] {
     const drafts: ChatRuntimeEventDraft[] = [];
     if (message.thinking?.length) {
+        const thinking = message.thinking.map((block, index) => ({
+            ...block,
+            id: block.id || `session-thinking:${sequence}:${index}`,
+        }));
         drafts.push({
             ...common,
             kind: "thinking",
             message: {
                 role: "assistant",
-                content: message.thinking.map((block) => ({
+                content: thinking.map((block) => ({
                     id: block.id,
                     text: block.text,
                     type: "thinking",
                 })),
                 text: "",
-                thinking: message.thinking,
+                thinking,
                 timestamp: common.timestamp,
                 runId: common.runId,
             },

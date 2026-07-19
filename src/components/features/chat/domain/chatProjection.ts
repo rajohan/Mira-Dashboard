@@ -206,13 +206,14 @@ function indexExactToolMessages(messages: ChatHistoryMessage[]): ExactToolMessag
 function latestExactToolMessageIndex(
     ids: ReadonlySet<string>,
     exactToolIndex: ExactToolMessageIndex,
-    minimumIndex = 0
+    minimumIndex = 0,
+    maximumIndex = Infinity
 ): number {
     let latestIndex = -1;
     for (const id of ids) {
         const messageIndexes = exactToolIndex.get(id) || [];
         for (const index of messageIndexes) {
-            if (index >= minimumIndex) {
+            if (index >= minimumIndex && index < maximumIndex) {
                 latestIndex = Math.max(latestIndex, index);
             }
         }
@@ -276,32 +277,47 @@ function runFinalAnchorIndex(
         return -1;
     }
     const startedAt = Date.parse(run.startedAt);
-    const diagnosticBoundaryIndex = messages.findLastIndex((message) => {
-        if (!isUserMessage(message)) {
-            return false;
+    let diagnosticBoundaryIndex = messages.findLastIndex(
+        (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
+    );
+    if (!Number.isNaN(startedAt)) {
+        const causalBoundaryIndex = messages.findLastIndex((message) => {
+            const timestamp = messageTimestamp(message);
+            return (
+                isUserMessage(message) &&
+                timestamp !== undefined &&
+                timestamp <= startedAt
+            );
+        });
+        diagnosticBoundaryIndex = Math.max(diagnosticBoundaryIndex, causalBoundaryIndex);
+        if (diagnosticBoundaryIndex === -1) {
+            diagnosticBoundaryIndex = messages.findLastIndex((message) => {
+                const timestamp = messageTimestamp(message);
+                return (
+                    isUserMessage(message) &&
+                    timestamp !== undefined &&
+                    timestamp <= startedAt + RUN_START_USER_SKEW_MS
+                );
+            });
         }
-        if (isRunMatchingMessage(run, message)) {
-            return true;
-        }
-        const timestamp = messageTimestamp(message);
-        return (
-            !Number.isNaN(startedAt) &&
-            timestamp !== undefined &&
-            timestamp <= startedAt + RUN_START_USER_SKEW_MS
-        );
-    });
+    }
+    const nextUserIndex =
+        diagnosticBoundaryIndex === -1
+            ? -1
+            : messages.findIndex(
+                  (message, index) =>
+                      index > diagnosticBoundaryIndex && isUserMessage(message)
+              );
+    const end = nextUserIndex === -1 ? messages.length : nextUserIndex;
     const evidenceIndex = latestExactToolMessageIndex(
         diagnosticIds,
         exactToolIndex,
-        diagnosticBoundaryIndex + 1
+        diagnosticBoundaryIndex + 1,
+        end
     );
     if (evidenceIndex === -1) {
         return -1;
     }
-    const nextUserIndex = messages.findIndex(
-        (message, index) => index > evidenceIndex && isUserMessage(message)
-    );
-    const end = nextUserIndex === -1 ? messages.length : nextUserIndex;
     return messages.findIndex(
         (message, index) =>
             index > evidenceIndex &&

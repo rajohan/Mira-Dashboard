@@ -3181,6 +3181,38 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("retains a Synthetic stop marker when the final payload is oversized", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.message",
+            {
+                message: {
+                    content: "x".repeat(1_000_001),
+                    role: "assistant",
+                    stopReason: "stop",
+                },
+                runId: "large-synthetic-run",
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [
+                expect.objectContaining({
+                    event: "session.message",
+                    payload: expect.objectContaining({
+                        role: "assistant",
+                        runId: "large-synthetic-run",
+                        sessionKey: MAIN,
+                        stopReason: "stop",
+                    }),
+                }),
+            ],
+        });
+    });
+
     it("promotes a runless user session message when provider work starts", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

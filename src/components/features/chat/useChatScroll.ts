@@ -61,18 +61,22 @@ export function useChatScroll(
         );
     };
 
-    const cancelBottomFollow = useCallback(() => {
+    const resetStructuralFollowState = useCallback(() => {
         structuralBottomFollowReference.current = false;
         bottomFollowFramesRemainingReference.current = 0;
         bottomFollowLastHeightReference.current = undefined;
         bottomFollowNeedsPrimeReference.current = false;
         bottomFollowStableFramesReference.current = 0;
+    }, []);
+
+    const cancelBottomFollow = useCallback(() => {
+        resetStructuralFollowState();
         if (bottomFollowFrameReference.current === undefined) {
             return;
         }
         cancelAnimationFrame(bottomFollowFrameReference.current);
         bottomFollowFrameReference.current = undefined;
-    }, []);
+    }, [resetStructuralFollowState]);
 
     const handleScroll = () => {
         const container = messagesContainerReference.current;
@@ -164,11 +168,7 @@ export function useChatScroll(
             }
             scrollToBottom();
             bottomFollowFrameReference.current = undefined;
-            structuralBottomFollowReference.current = false;
-            bottomFollowFramesRemainingReference.current = 0;
-            bottomFollowLastHeightReference.current = undefined;
-            bottomFollowNeedsPrimeReference.current = false;
-            bottomFollowStableFramesReference.current = 0;
+            resetStructuralFollowState();
         };
         bottomFollowFrameReference.current = requestAnimationFrame(followBottom);
     };

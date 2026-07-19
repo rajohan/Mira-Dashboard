@@ -480,10 +480,12 @@ function compactTerminalPayload(
         operationId: stringField(payloadView, "operationId"),
         phase: stringField(payloadView, "phase"),
         promptError: stringField(payloadView, "promptError"),
+        role: sessionMessageRole(payload),
         runId,
         sessionKey,
         state: stringField(payloadView, "state"),
         status: stringField(payloadView, "status"),
+        stopReason: sessionMessageStopReason(payload),
         stream: stringField(payloadView, "stream"),
     };
 }
