@@ -253,6 +253,192 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("does not claim an earlier final while scoping later run diagnostics", () => {
+        const history: ChatHistoryMessage[] = [
+            {
+                ...message("user", "parallel"),
+                timestamp: "2026-07-16T11:59:59.000Z",
+            },
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-16T12:00:00.000Z",
+                toolCalls: [{ id: "call-old", name: "bash" }],
+            },
+            {
+                ...message("assistant", "older answer"),
+                timestamp: "2026-07-16T12:00:01.000Z",
+            },
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-16T12:00:02.000Z",
+                toolCalls: [{ id: "call-new", name: "bash" }],
+            },
+            {
+                ...message("assistant", "newer answer"),
+                timestamp: "2026-07-16T12:00:03.000Z",
+            },
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(32, "2026-07-16T12:00:03.000Z", {
+                kind: "finish",
+                message: message("assistant", "newer answer", "run-new"),
+                outcome: "completed",
+                runId: "run-new",
+            }),
+            eventAt(48, "2026-07-16T12:00:01.000Z", {
+                kind: "finish",
+                message: message("assistant", "older answer", "run-old"),
+                outcome: "completed",
+                runId: "run-old",
+            }),
+        ]);
+
+        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
+
+        expect(reconciled.map((item) => [item.text, item.runId])).toEqual([
+            ["parallel", undefined],
+            ["", "run-old"],
+            ["older answer", "run-old"],
+            ["", "run-new"],
+            ["newer answer", "run-new"],
+        ]);
+    });
+
+    it("does not let metadata-only completion claim another run final", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(32, "2026-07-16T12:00:04.000Z", {
+                kind: "finish",
+                outcome: "completed",
+                runId: "metadata-only",
+            }),
+            eventAt(48, "2026-07-16T12:00:03.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer", "run-real"),
+                outcome: "completed",
+                runId: "run-real",
+            }),
+        ]);
+        const reconciled = reconcileChatMessages(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                {
+                    ...message("assistant", "answer"),
+                    timestamp: "2026-07-16T12:00:03.000Z",
+                },
+            ],
+            runtime.sessions[SESSION]
+        );
+
+        expect(reconciled.map((item) => [item.text, item.runId])).toEqual([
+            ["question", undefined],
+            ["answer", "run-real"],
+        ]);
+    });
+
+    it("does not let diagnostic-only completion claim another run final", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:02.000Z", {
+                kind: "thinking",
+                message: thinkingMessage("diagnostic-only"),
+                runId: "diagnostic-only",
+            }),
+            eventAt(32, "2026-07-16T12:00:04.000Z", {
+                kind: "finish",
+                outcome: "completed",
+                runId: "diagnostic-only",
+            }),
+            eventAt(48, "2026-07-16T12:00:03.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer", "run-real"),
+                outcome: "completed",
+                runId: "run-real",
+            }),
+        ]);
+        const reconciled = reconcileChatMessages(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                {
+                    ...message("assistant", "answer"),
+                    timestamp: "2026-07-16T12:00:03.000Z",
+                },
+            ],
+            runtime.sessions[SESSION]
+        );
+
+        expect(
+            reconciled.filter((item) => item.text === "answer").map((item) => item.runId)
+        ).toEqual(["run-real"]);
+    });
+
+    it("leaves identical unanchored completed response blocks unscoped", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, {
+                kind: "thinking",
+                message: thinkingMessage("run-old"),
+                runId: "run-old",
+            }),
+            event(32, {
+                kind: "finish",
+                message: message("assistant", "same", "run-old"),
+                outcome: "completed",
+                runId: "run-old",
+            }),
+            event(40, {
+                kind: "thinking",
+                message: thinkingMessage("run-new"),
+                runId: "run-new",
+            }),
+            event(64, {
+                kind: "finish",
+                message: message("assistant", "same", "run-new"),
+                outcome: "completed",
+                runId: "run-new",
+            }),
+        ]);
+        const reconciled = reconcileChatMessages(
+            [
+                message("user", "parallel"),
+                {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-old", name: "read" }],
+                },
+                message("assistant", "same"),
+                {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-new", name: "read" }],
+                },
+                message("assistant", "same"),
+            ],
+            runtime.sessions[SESSION]
+        );
+
+        expect(
+            reconciled
+                .filter((item) => item.toolCalls?.length)
+                .map((item) => [item.toolCalls?.[0]?.id, item.runId])
+        ).toEqual([
+            ["call-old", undefined],
+            ["call-new", undefined],
+        ]);
+        expect(
+            reconciled.filter((item) => item.text === "same").map((item) => item.runId)
+        ).toEqual([undefined, undefined]);
+    });
+
     it("keeps identical diagnostics from distinct overlapping runs", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -2245,6 +2431,125 @@ describe("chat projection", () => {
         );
     });
 
+    it("keeps a persisted assistant deletion hidden after final reconciliation", () => {
+        const historyAnswer: ChatHistoryMessage = {
+            ...message("assistant", "answer"),
+            timestamp: NOW,
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                historyAnswer,
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set([messageDeleteKey(historyAnswer)])
+        );
+
+        expect(projection.rows.some((row) => row.message.text === "answer")).toBe(false);
+    });
+
+    it("keeps a persisted diagnostic deletion hidden after run scoping", () => {
+        const historyTool: ChatHistoryMessage = {
+            content: "",
+            role: "assistant",
+            text: "",
+            timestamp: "2026-07-16T12:00:01.000Z",
+            toolCalls: [{ id: "call-1", name: "read" }],
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:02.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+
+        const projection = projectChat(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                historyTool,
+                {
+                    ...message("assistant", "answer"),
+                    timestamp: "2026-07-16T12:00:02.000Z",
+                },
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set([messageDeleteKey(historyTool)])
+        );
+
+        expect(projection.rows.some((row) => row.message.toolCalls?.length)).toBe(false);
+    });
+
+    it("exposes both scoped and history delete keys before replay clears", () => {
+        const historyAnswer: ChatHistoryMessage = {
+            ...message("assistant", "answer"),
+            timestamp: "2026-07-16T12:00:02.000Z",
+        };
+        const history = [
+            {
+                ...message("user", "question"),
+                timestamp: "2026-07-16T11:59:59.000Z",
+            },
+            historyAnswer,
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:02.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const scoped = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const answerRow = scoped.rows.find((row) => row.message.text === "answer");
+
+        expect(answerRow).toBeDefined();
+        expect(answerRow!.deleteKeys).toEqual([
+            answerRow!.key,
+            messageDeleteKey(historyAnswer),
+        ]);
+        const afterReplayClear = projectChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set(answerRow!.deleteKeys)
+        );
+        expect(afterReplayClear.rows.some((row) => row.message.text === "answer")).toBe(
+            false
+        );
+    });
+
     it("keeps a deleted runtime diagnostic hidden by its stable row key", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
@@ -2326,6 +2631,48 @@ describe("chat projection", () => {
 
         expect(visible).toHaveLength(1);
         expect(visible[0]?.attachments?.[0]?.fileName).toBe("report.txt");
+    });
+
+    it("keeps compacted hidden tool media attached to its canonical final", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:02.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                {
+                    attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    timestamp: "2026-07-16T12:00:01.000Z",
+                    toolCalls: [{ id: "call-1", name: "write" }],
+                },
+                {
+                    ...message("assistant", "answer"),
+                    timestamp: "2026-07-16T12:00:02.000Z",
+                },
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, false),
+            true,
+            new Set()
+        );
+
+        expect(projection.rows.map((row) => row.message.text)).toEqual([
+            "question",
+            "answer",
+        ]);
+        expect(projection.rows[1]?.message.attachments?.[0]?.fileName).toBe("report.txt");
     });
 
     it("preserves media folded into a hidden assistant tool diagnostic", () => {
@@ -2557,6 +2904,314 @@ describe("chat projection", () => {
         expect(thinkingIndex).toBeGreaterThan(lastToolIndex);
         expect(thinkingIndex).toBeLessThan(finalIndex);
         expect(visible[finalIndex]?.thinking).toBeUndefined();
+    });
+
+    it("keeps canonical tools stable and before thinking after runtime tools compact", () => {
+        const history: ChatHistoryMessage[] = [
+            {
+                ...message("user", "question"),
+                timestamp: "2026-07-16T11:59:59.000Z",
+            },
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-16T12:00:01.000Z",
+                toolCalls: [
+                    {
+                        arguments: { command: "date" },
+                        id: "call-1",
+                        name: "bash",
+                        toolResult: {
+                            content: "completed",
+                            id: "call-1",
+                            name: "bash",
+                        },
+                    },
+                ],
+            },
+            {
+                ...message("assistant", "answer"),
+                timestamp: "2026-07-16T12:00:02.000Z",
+            },
+        ];
+        const thinking = event(16, {
+            kind: "thinking",
+            message: {
+                content: [{ text: "reasoning", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ id: "thought-1", text: "reasoning" }],
+            },
+            runId: "run-1",
+        });
+        const finish = event(48, {
+            kind: "finish",
+            message: message("assistant", "answer", "run-1"),
+            outcome: "completed",
+            runId: "run-1",
+        });
+        const fullRuntime = reduceChatRuntime(createChatRuntimeState(), [
+            thinking,
+            event(32, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [
+                        {
+                            arguments: { command: "date" },
+                            id: "call-1",
+                            name: "bash",
+                            toolResult: {
+                                content: "completed",
+                                id: "call-1",
+                                name: "bash",
+                            },
+                        },
+                    ],
+                },
+                runId: "run-1",
+                toolKey: "tool:call-1",
+            }),
+            finish,
+        ]);
+        const compactRuntime = reduceChatRuntime(createChatRuntimeState(), [
+            thinking,
+            finish,
+        ]);
+        const fullProjection = projectChat(
+            history,
+            fullRuntime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const compactProjection = projectChat(
+            history,
+            compactRuntime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const rowKinds = (projection: typeof fullProjection) =>
+            projection.rows.map((row) =>
+                row.message.toolCalls?.length
+                    ? "tool"
+                    : row.message.thinking?.length
+                      ? "thinking"
+                      : row.message.text
+            );
+        const toolKey = (projection: typeof fullProjection) =>
+            projection.rows.find((row) => row.message.toolCalls?.length)?.key;
+
+        expect(rowKinds(fullProjection)).toEqual([
+            "question",
+            "tool",
+            "thinking",
+            "answer",
+        ]);
+        expect(rowKinds(compactProjection)).toEqual(rowKinds(fullProjection));
+        expect(toolKey(compactProjection)).toBe(toolKey(fullProjection));
+    });
+
+    it("keeps compacted tools before thinking for a media-only final", () => {
+        const mediaFinal: ChatHistoryMessage = {
+            attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+            content: "",
+            role: "assistant",
+            text: "",
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "reasoning", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "reasoning" }],
+                },
+                runId: "run-1",
+            }),
+            event(48, {
+                kind: "finish",
+                message: { ...mediaFinal, runId: "run-1" },
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                message("user", "question"),
+                {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                mediaFinal,
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            projection.rows.map((row) =>
+                row.message.toolCalls?.length
+                    ? "tool"
+                    : row.message.thinking?.length
+                      ? "thinking"
+                      : row.message.attachments?.length
+                        ? "final"
+                        : row.message.text
+            )
+        ).toEqual(["question", "tool", "thinking", "final"]);
+    });
+
+    it("does not scope a later text answer to a media-only final", () => {
+        const mediaFinal: ChatHistoryMessage = {
+            attachments: [{ fileName: "report.txt", id: "report", kind: "text" }],
+            content: "",
+            role: "assistant",
+            text: "",
+        };
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: thinkingMessage("run-1"),
+                runId: "run-1",
+            }),
+            event(48, {
+                kind: "finish",
+                message: { ...mediaFinal, runId: "run-1" },
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                message("user", "question"),
+                mediaFinal,
+                message("assistant", "unrelated later answer"),
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            projection.rows.find((row) => row.message.text === "unrelated later answer")
+                ?.message.runId
+        ).toBeUndefined();
+    });
+
+    it("hides compacted thinking for each overlapping completed run", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(32, "2026-07-16T12:00:03.000Z", {
+                kind: "finish",
+                message: message("assistant", "newer answer", "run-new"),
+                outcome: "completed",
+                runId: "run-new",
+            }),
+            eventAt(48, "2026-07-16T12:00:01.000Z", {
+                kind: "finish",
+                message: message("assistant", "older answer", "run-old"),
+                outcome: "completed",
+                runId: "run-old",
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                {
+                    ...message("user", "parallel"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                {
+                    ...thinkingMessage(""),
+                    runId: undefined,
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+                {
+                    ...message("assistant", "older answer"),
+                    timestamp: "2026-07-16T12:00:01.000Z",
+                },
+                {
+                    ...thinkingMessage(""),
+                    runId: undefined,
+                    timestamp: "2026-07-16T12:00:02.000Z",
+                },
+                {
+                    ...message("assistant", "newer answer"),
+                    timestamp: "2026-07-16T12:00:03.000Z",
+                },
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            false,
+            new Set()
+        );
+
+        expect(projection.rows.some((row) => row.message.thinking?.length)).toBe(false);
+    });
+
+    it("groups compacted diagnostic and final thinking into one bubble", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:02.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer", "run-1"),
+                outcome: "completed",
+                runId: "run-1",
+            }),
+        ]);
+        const projection = projectChat(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                {
+                    content: [{ text: "first thought", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "first thought" }],
+                    timestamp: "2026-07-16T12:00:01.000Z",
+                    toolCalls: [{ id: "call-1", name: "read" }],
+                },
+                {
+                    content: [
+                        { text: "final thought", type: "thinking" },
+                        { text: "answer", type: "text" },
+                    ],
+                    role: "assistant",
+                    text: "answer",
+                    thinking: [{ id: "thought-2", text: "final thought" }],
+                    timestamp: "2026-07-16T12:00:02.000Z",
+                },
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const thinkingRows = projection.rows.filter(
+            (row) => row.message.thinking?.length
+        );
+
+        expect(thinkingRows).toHaveLength(1);
+        expect(thinkingRows[0]?.message.thinking?.map((block) => block.text)).toEqual([
+            "first thought",
+            "final thought",
+        ]);
     });
 
     it("keeps unfinished unscoped thinking inside its response segment", () => {

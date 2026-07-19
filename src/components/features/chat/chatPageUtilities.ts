@@ -45,6 +45,19 @@ export function readDeletedMessageKeys(sessionKey: string): Set<string> {
     }
 }
 
+export function addDeletedMessageKeys(
+    previous: ReadonlySet<string>,
+    keys: readonly string[]
+): Set<string> {
+    const next = new Set(previous);
+    for (const key of keys) {
+        if (key) {
+            next.add(key);
+        }
+    }
+    return next;
+}
+
 export function writeDeletedMessageKeys(
     sessionKey: string,
     keys: ReadonlySet<string>

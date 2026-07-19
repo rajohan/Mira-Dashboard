@@ -177,7 +177,20 @@ matching remains bounded to the current user turn. Transcript order and runtime
 sequence take precedence over message timestamps when a queued user message and
 compaction final carry inverted wall-clock times. Projection indexes exact tool
 IDs once per pass and caches fallback signatures so long runs do not rescan or
-reserialize the complete transcript for every runtime diagnostic.
+reserialize the complete transcript for every runtime diagnostic. Once a
+completed final is matched, only unscoped canonical diagnostics after the
+previous primary answer and that matched final adopt the completed run ID.
+Scoping requires an explicit run match or primary assistant output whose final is
+timestamp/diagnostic anchored or has one unique text match in the response
+segment. Media-only finals use the same unique-match rule with their media
+identity, and the selected canonical final must itself match that evidence.
+Metadata-only and diagnostic-only completions cannot claim a canonical answer,
+and identical unanchored finals remain unscoped. Projection exposes both
+the scoped row key and previous unscoped history key as delete aliases; the
+delete action persists every alias. This keeps tool row keys stable when
+transcript-backed runtime events are compacted, avoids claiming diagnostics from
+overlapping runs, keeps hidden tool media with the final, and keeps retained
+thinking after the canonical tools but before the final answer.
 
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
@@ -233,6 +246,16 @@ When changing chat event handling, test these cases:
   cannot;
 - compaction diagnostics remain before their final when the next queued user
   message has an earlier timestamp;
+- compacting transcript-backed runtime tools after final preserves each tool row
+  key and the `tools -> thinking -> final` order;
+- overlapping completed runs cannot claim diagnostics before another run's final;
+- metadata-only completions cannot claim or duplicate another run's final;
+- diagnostic-only completions and identical unanchored finals remain unscoped;
+- final and diagnostic reconciliation preserve persisted history delete keys;
+- scoped deletions remain hidden after completed replay is cleared;
+- hidden tool media remains attached to its completed final after compaction;
+- media-only finals keep compacted tools before retained thinking;
+- completed thinking remains grouped and follows the keep-after-final preference;
 - hiding diagnostics does not remove them from cached client state;
 - the global tool-detail setting updates existing bubbles and the default for
   new bubbles;

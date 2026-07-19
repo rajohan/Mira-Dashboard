@@ -115,7 +115,7 @@ function stableDiagnosticRowKey(message: ChatHistoryMessage): string | undefined
     return undefined;
 }
 
-function userMessageDeleteKey(message: ChatHistoryMessage): string {
+function historyMessageDeleteKey(message: ChatHistoryMessage): string {
     return messageDeleteKey({
         ...message,
         runId: undefined,
@@ -125,7 +125,7 @@ function userMessageDeleteKey(message: ChatHistoryMessage): string {
 
 function projectedMessageRowKey(message: ChatHistoryMessage): string {
     if (isUserMessage(message)) {
-        return userMessageDeleteKey(message);
+        return historyMessageDeleteKey(message);
     }
     return (
         stableDiagnosticRowKey(message) ||
@@ -138,10 +138,10 @@ function projectedMessageRowKey(message: ChatHistoryMessage): string {
 /** Keeps persisted delete keys valid when runtime reconciliation adds a run id. */
 function projectedMessageDeleteKeys(message: ChatHistoryMessage): string[] {
     const currentKey = projectedMessageRowKey(message);
-    if (message.role.toLowerCase() !== "user" || !message.runId) {
+    if (!message.runId || message.local === true) {
         return [currentKey];
     }
-    const persistedHistoryKey = userMessageDeleteKey(message);
+    const persistedHistoryKey = historyMessageDeleteKey(message);
     return currentKey === persistedHistoryKey
         ? [currentKey]
         : [currentKey, persistedHistoryKey];
@@ -441,6 +441,110 @@ function canonicalFinalIndex(
         }
     }
     return -1;
+}
+
+function completedDiagnosticStart(
+    messages: ChatHistoryMessage[],
+    segment: ResponseSegment,
+    finalIndex: number
+): number {
+    for (let index = finalIndex - 1; index >= segment.start; index -= 1) {
+        const message = messages[index];
+        if (
+            message &&
+            !isStandaloneDiagnostic(message) &&
+            hasPrimaryAnswerContent(message)
+        ) {
+            return index + 1;
+        }
+    }
+    return segment.start;
+}
+
+function isMatchingFinalEvidence(
+    message: ChatHistoryMessage | undefined,
+    assistantText: string,
+    assistantMediaIdentity: string | undefined
+): boolean {
+    if (!message) {
+        return false;
+    }
+    if (assistantText && !isRecoveredAssistantText(message.text, assistantText)) {
+        return false;
+    }
+    return (
+        !assistantMediaIdentity ||
+        messageMediaIdentity(message) === assistantMediaIdentity
+    );
+}
+
+function hasUnambiguousFinalEvidence(
+    messages: ChatHistoryMessage[],
+    run: ChatRunState,
+    segment: ResponseSegment,
+    finalIndex: number,
+    exactToolIndex: ExactToolMessageIndex
+): boolean {
+    const canonicalFinal = messages[finalIndex];
+    if (canonicalFinal && isRunMatchingMessage(run, canonicalFinal)) {
+        return true;
+    }
+    if (!run.assistant || !hasPrimaryAnswerContent(run.assistant)) {
+        return false;
+    }
+    if (runFinalAnchorIndex(messages, run, exactToolIndex) === finalIndex) {
+        return true;
+    }
+    const assistantText = run.assistant.text;
+    const assistantMediaIdentity = messageMediaIdentity(run.assistant);
+    if (!assistantText && !assistantMediaIdentity) {
+        return false;
+    }
+    if (!isMatchingFinalEvidence(canonicalFinal, assistantText, assistantMediaIdentity)) {
+        return false;
+    }
+    let matchingFinals = 0;
+    for (let index = segment.start; index < segment.end; index += 1) {
+        const message = messages[index];
+        const role = message?.role.toLowerCase();
+        const isMatchingFinal = Boolean(
+            message &&
+            !message.runId &&
+            (role === "assistant" || role === "system") &&
+            !isStandaloneDiagnostic(message) &&
+            isMatchingFinalEvidence(message, assistantText, assistantMediaIdentity)
+        );
+        if (isMatchingFinal) {
+            matchingFinals += 1;
+        }
+    }
+    return matchingFinals === 1;
+}
+
+function scopeCompletedResponse(
+    messages: ChatHistoryMessage[],
+    run: ChatRunState,
+    segment: ResponseSegment,
+    finalIndex: number,
+    exactToolIndex: ExactToolMessageIndex
+): void {
+    if (run.phase !== "completed") {
+        return;
+    }
+    if (
+        !hasUnambiguousFinalEvidence(messages, run, segment, finalIndex, exactToolIndex)
+    ) {
+        return;
+    }
+    const diagnosticStart = completedDiagnosticStart(messages, segment, finalIndex);
+    for (let index = diagnosticStart; index <= finalIndex; index += 1) {
+        const message = messages[index];
+        const belongsToCompletedRun =
+            index === finalIndex || (message && isStandaloneDiagnostic(message));
+        if (message && !message.runId && belongsToCompletedRun) {
+            messages[index] = { ...message, runId: run.runId };
+        }
+    }
 }
 
 function exactToolResultIds(message: ChatHistoryMessage): Set<string> {
@@ -864,6 +968,7 @@ export function reconcileChatMessages(
         }
         const finalIndex = canonicalFinalIndex(messages, run, segment, exactToolIndex);
         if (finalIndex !== -1) {
+            scopeCompletedResponse(messages, run, segment, finalIndex, exactToolIndex);
             const canonical = messages[finalIndex]!;
             if (run.assistant) {
                 messages[finalIndex] = mergeChatMessageDetails(
@@ -986,19 +1091,23 @@ export function projectChat(
         reconciled,
         visibility,
         shouldKeepThinkingAfterFinal
-    ).filter((message) =>
-        projectedMessageDeleteKeys(message).every((key) => !deletedMessageKeys.has(key))
     );
-    const rows: ChatRow[] = presented.map((message) => {
-        return {
-            key: projectedMessageRowKey(message),
-            kind:
-                message.local === true && message.runId && !isUserMessage(message)
-                    ? "stream"
-                    : "message",
-            message,
-        };
-    });
+    const rows: ChatRow[] = [];
+    for (const message of presented) {
+        const deleteKeys = projectedMessageDeleteKeys(message);
+        const isDeleted = deleteKeys.some((key) => deletedMessageKeys.has(key));
+        if (!isDeleted) {
+            rows.push({
+                deleteKeys,
+                key: projectedMessageRowKey(message),
+                kind:
+                    message.local === true && message.runId && !isUserMessage(message)
+                        ? "stream"
+                        : "message",
+                message,
+            });
+        }
+    }
     const activeRuns = runs.filter(
         (run) =>
             run.phase === "active" &&
