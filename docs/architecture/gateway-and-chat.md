@@ -177,7 +177,11 @@ matching remains bounded to the current user turn. Transcript order and runtime
 sequence take precedence over message timestamps when a queued user message and
 compaction final carry inverted wall-clock times. Projection indexes exact tool
 IDs once per pass and caches fallback signatures so long runs do not rescan or
-reserialize the complete transcript for every runtime diagnostic.
+reserialize the complete transcript for every runtime diagnostic. Once a
+completed final is matched, unscoped canonical rows in that response segment
+adopt the completed run ID. This keeps tool row keys stable when transcript-backed
+runtime events are compacted and keeps retained thinking after the canonical
+tools but before the final answer.
 
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
@@ -233,6 +237,8 @@ When changing chat event handling, test these cases:
   cannot;
 - compaction diagnostics remain before their final when the next queued user
   message has an earlier timestamp;
+- compacting transcript-backed runtime tools after final preserves each tool row
+  key and the `tools -> thinking -> final` order;
 - hiding diagnostics does not remove them from cached client state;
 - the global tool-detail setting updates existing bubbles and the default for
   new bubbles;

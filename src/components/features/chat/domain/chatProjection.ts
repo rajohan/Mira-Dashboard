@@ -443,6 +443,22 @@ function canonicalFinalIndex(
     return -1;
 }
 
+function scopeCompletedResponse(
+    messages: ChatHistoryMessage[],
+    run: ChatRunState,
+    segment: ResponseSegment,
+    finalIndex: number
+): void {
+    if (run.phase !== "completed") {
+        return;
+    }
+    const responseLength = finalIndex - segment.start + 1;
+    const scopedResponse = messages
+        .slice(segment.start, finalIndex + 1)
+        .map((message) => (message.runId ? message : { ...message, runId: run.runId }));
+    messages.splice(segment.start, responseLength, ...scopedResponse);
+}
+
 function exactToolResultIds(message: ChatHistoryMessage): Set<string> {
     return new Set(
         [
@@ -864,6 +880,7 @@ export function reconcileChatMessages(
         }
         const finalIndex = canonicalFinalIndex(messages, run, segment, exactToolIndex);
         if (finalIndex !== -1) {
+            scopeCompletedResponse(messages, run, segment, finalIndex);
             const canonical = messages[finalIndex]!;
             if (run.assistant) {
                 messages[finalIndex] = mergeChatMessageDetails(
