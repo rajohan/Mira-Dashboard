@@ -119,6 +119,81 @@ describe("OpenClaw adapter variants", () => {
         expect(visible[finalIndex]?.thinking).toBeUndefined();
     });
 
+    it("splits Synthetic session messages into diagnostics and a terminal final", () => {
+        const adapter = new OpenClawChatAdapter();
+        const toolTurn = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            { thinking: "inspect repository", type: "thinking" },
+                            {
+                                arguments: { command: "pwd" },
+                                id: "functions.exec:0",
+                                name: "exec",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                        stopReason: "toolUse",
+                    },
+                },
+                30
+            )
+        );
+        const finalTurn = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            { thinking: "report result", type: "thinking" },
+                            { text: "SYNTHETIC_OK", type: "text" },
+                        ],
+                        role: "assistant",
+                        stopReason: "stop",
+                    },
+                },
+                31
+            )
+        );
+
+        expect(toolTurn.map((event) => event.kind)).toEqual(["thinking", "tool"]);
+        expect(toolTurn[1]).toMatchObject({
+            kind: "tool",
+            message: {
+                text: "",
+                toolCalls: [
+                    expect.objectContaining({
+                        id: "functions.exec:0",
+                        name: "exec",
+                    }),
+                ],
+            },
+            toolKey: "tool:functions.exec:0",
+        });
+        expect(finalTurn.map((event) => event.kind)).toEqual([
+            "thinking",
+            "assistant",
+            "finish",
+        ]);
+        expect(finalTurn[1]).toMatchObject({
+            kind: "assistant",
+            message: {
+                text: "SYNTHETIC_OK",
+                thinking: undefined,
+                toolCalls: undefined,
+            },
+            mode: "replace",
+            source: "session",
+        });
+        expect(finalTurn[2]).toMatchObject({
+            kind: "finish",
+            outcome: "completed",
+        });
+    });
+
     it("normalizes session, assistant, thinking and item streams", () => {
         const adapter = new OpenClawChatAdapter();
         const sessionMessage = adapter.event(

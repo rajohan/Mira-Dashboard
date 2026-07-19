@@ -3126,6 +3126,61 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("treats only Synthetic stop session messages as terminal", () => {
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "session.message",
+            {
+                message: {
+                    content: [
+                        { thinking: "inspect repository", type: "thinking" },
+                        {
+                            arguments: { command: "pwd" },
+                            id: "functions.exec:0",
+                            name: "exec",
+                            type: "toolCall",
+                        },
+                    ],
+                    role: "assistant",
+                    stopReason: "toolUse",
+                },
+                runId: "synthetic-run",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        expect(bridge.snapshot(MAIN).completed).toBe(false);
+
+        bridge.recordEvent(
+            "session.message",
+            {
+                message: {
+                    content: [
+                        { thinking: "report result", type: "thinking" },
+                        { text: "SYNTHETIC_OK", type: "text" },
+                    ],
+                    role: "assistant",
+                    stopReason: "stop",
+                },
+                runId: "synthetic-run",
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(bridge.snapshot(MAIN)).toMatchObject({
+            completed: true,
+            events: [
+                expect.objectContaining({
+                    payload: expect.objectContaining({ runId: "synthetic-run" }),
+                }),
+                expect.objectContaining({
+                    payload: expect.objectContaining({ runId: "synthetic-run" }),
+                }),
+            ],
+        });
+    });
+
     it("promotes a runless user session message when provider work starts", () => {
         const bridge = new OpenClawChatBridge();
         bridge.recordEvent(

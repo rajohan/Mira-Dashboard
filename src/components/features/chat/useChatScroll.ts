@@ -11,6 +11,8 @@ import {
 import type { ChatRow } from "./chatTypes";
 
 const BOTTOM_THRESHOLD_PX = 32;
+const STRUCTURAL_BOTTOM_STABLE_FRAMES = 2;
+const STRUCTURAL_BOTTOM_MAX_WAIT_FRAMES = 12;
 const ESTIMATED_MESSAGE_ROW_HEIGHT_PX = 160;
 const ESTIMATED_TYPING_ROW_HEIGHT_PX = 76;
 const NO_SCROLL_ELEMENT = JSON.parse("null") as HTMLDivElement | null;
@@ -24,6 +26,10 @@ export function useChatScroll(
 ) {
     const messagesContainerReference = useRef<HTMLDivElement | undefined>(undefined);
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
+    const bottomFollowFramesRemainingReference = useRef(0);
+    const bottomFollowLastHeightReference = useRef<number | undefined>(undefined);
+    const bottomFollowNeedsPrimeReference = useRef(false);
+    const bottomFollowStableFramesReference = useRef(0);
     const structuralBottomFollowReference = useRef(false);
     const previousRowKeysReference = useRef<string[]>([]);
     const previousScrollTopReference = useRef(0);
@@ -57,6 +63,10 @@ export function useChatScroll(
 
     const cancelBottomFollow = useCallback(() => {
         structuralBottomFollowReference.current = false;
+        bottomFollowFramesRemainingReference.current = 0;
+        bottomFollowLastHeightReference.current = undefined;
+        bottomFollowNeedsPrimeReference.current = false;
+        bottomFollowStableFramesReference.current = 0;
         if (bottomFollowFrameReference.current === undefined) {
             return;
         }
@@ -104,18 +114,63 @@ export function useChatScroll(
         setIsAtBottom(true);
     };
 
-    const scheduleBottomFollow = (isStructuralCorrection = false) => {
-        structuralBottomFollowReference.current ||= isStructuralCorrection;
+    const scheduleBottomFollow = (
+        isStructuralCorrection = false,
+        shouldPrimeBottom = false
+    ) => {
+        if (isStructuralCorrection) {
+            structuralBottomFollowReference.current = true;
+            bottomFollowFramesRemainingReference.current =
+                STRUCTURAL_BOTTOM_MAX_WAIT_FRAMES;
+            bottomFollowLastHeightReference.current = undefined;
+            bottomFollowNeedsPrimeReference.current ||= shouldPrimeBottom;
+            bottomFollowStableFramesReference.current = 0;
+        }
         if (bottomFollowFrameReference.current !== undefined) {
             return;
         }
-        bottomFollowFrameReference.current = requestAnimationFrame(() => {
+        const followBottom = () => {
+            if (!shouldStickToBottomReference.current) {
+                cancelBottomFollow();
+                return;
+            }
+            if (bottomFollowNeedsPrimeReference.current) {
+                bottomFollowNeedsPrimeReference.current = false;
+                scrollToBottom();
+                bottomFollowLastHeightReference.current = undefined;
+                bottomFollowStableFramesReference.current = 0;
+                bottomFollowFrameReference.current = requestAnimationFrame(followBottom);
+                return;
+            }
+            if (structuralBottomFollowReference.current) {
+                const currentHeight = messagesContainerReference.current?.scrollHeight;
+                const previousHeight = bottomFollowLastHeightReference.current;
+                bottomFollowLastHeightReference.current = currentHeight;
+                bottomFollowStableFramesReference.current =
+                    currentHeight !== undefined && currentHeight === previousHeight
+                        ? bottomFollowStableFramesReference.current + 1
+                        : 0;
+                bottomFollowFramesRemainingReference.current -= 1;
+            }
+            const shouldWaitForStableHeight = Boolean(
+                structuralBottomFollowReference.current &&
+                bottomFollowStableFramesReference.current <
+                    STRUCTURAL_BOTTOM_STABLE_FRAMES &&
+                bottomFollowFramesRemainingReference.current > 0
+            );
+            if (shouldWaitForStableHeight) {
+                bottomFollowFrameReference.current = requestAnimationFrame(followBottom);
+                return;
+            }
+            scrollToBottom();
             bottomFollowFrameReference.current = undefined;
             structuralBottomFollowReference.current = false;
-            if (shouldStickToBottomReference.current) {
-                scrollToBottom();
-            }
-        });
+            bottomFollowFramesRemainingReference.current = 0;
+            bottomFollowLastHeightReference.current = undefined;
+            bottomFollowNeedsPrimeReference.current = false;
+            bottomFollowStableFramesReference.current = 0;
+        };
+        bottomFollowFrameReference.current = requestAnimationFrame(followBottom);
     };
 
     const handleUserScrollIntent = () => {
@@ -155,7 +210,7 @@ export function useChatScroll(
             shouldStickToBottomReference.current &&
             (isSessionChanged || isInitialHistoryLoad || needsStructuralBottomFollow)
         ) {
-            scheduleBottomFollow(true);
+            scheduleBottomFollow(true, isSessionChanged || isInitialHistoryLoad);
         }
     }, [rows, selectedSessionKey]);
 

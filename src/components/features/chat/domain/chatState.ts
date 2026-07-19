@@ -472,9 +472,17 @@ function applyAssistantEvent(
                 ? `${previousText}${incoming.text}`
                 : mergeChatStreamText(previousText, incoming.text)
         : previousText;
+    const assistant = mergeMessageDetails(run.assistant, incoming, text);
     return {
         ...run,
-        assistant: mergeMessageDetails(run.assistant, incoming, text),
+        assistant:
+            event.mode === "replace"
+                ? {
+                      ...assistant,
+                      toolCalls: incoming.toolCalls,
+                      toolResult: incoming.toolResult,
+                  }
+                : assistant,
         assistantSource: incoming.text
             ? event.mode === "replace"
                 ? event.source
@@ -786,6 +794,20 @@ function applyFinishEvent(
     run: ChatRunState,
     event: Extract<ChatRuntimeEvent, { kind: "finish" }>
 ): ChatRunState {
+    const isLateToolFailureAfterCompletedFinal = Boolean(
+        run.phase === "completed" &&
+        event.outcome === "error" &&
+        event.toolFailure &&
+        !event.message
+    );
+    if (isLateToolFailureAfterCompletedFinal) {
+        return {
+            ...run,
+            error: undefined,
+            statusText: undefined,
+            toolFailure: true,
+        };
+    }
     const isMetadataCompletion =
         run.phase !== "active" &&
         event.outcome === "completed" &&

@@ -439,6 +439,9 @@ function isTerminalEvent(event: unknown, payload: unknown): boolean {
             ["aborted", "error", "final"].includes(
                 (stringField(record, "state") || "").toLowerCase()
             )) ||
+        (event === "session.message" &&
+            sessionMessageRole(payload) === "assistant" &&
+            sessionMessageStopReason(payload) === "stop") ||
         isTerminalCompaction ||
         isSettlingLifecycleEvent(event, payload)
     );
@@ -681,6 +684,14 @@ function sessionMessageRole(payload: unknown): string | undefined {
     const record = runtimePayloadView(payload);
     return (
         stringField(record, "role") || stringField(asRecord(record?.message), "role")
+    )?.toLowerCase();
+}
+
+function sessionMessageStopReason(payload: unknown): string | undefined {
+    const record = runtimePayloadView(payload);
+    const message = asRecord(record?.message);
+    return (
+        stringField(message, "stopReason") || stringField(record, "stopReason")
     )?.toLowerCase();
 }
 

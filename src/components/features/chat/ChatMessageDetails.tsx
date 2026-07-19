@@ -55,7 +55,7 @@ function toolCallSummary(toolCall: ChatToolCallDisplay): string | undefined {
               ? record.cmd
               : undefined;
     if (!command) {
-        return undefined;
+        return typeof record.path === "string" ? record.path : undefined;
     }
 
     const cwd = typeof record.cwd === "string" ? record.cwd : undefined;

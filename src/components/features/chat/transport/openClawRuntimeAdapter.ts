@@ -1,3 +1,5 @@
+import type { ChatHistoryMessage, ChatToolCallDisplay } from "../chatTypes";
+import { stableChatStringify } from "../chatUtilities";
 import type { ChatRuntimeEvent, ChatTextSource } from "../domain/chatState";
 import {
     asRecord,
@@ -329,6 +331,9 @@ function sessionMessageDrafts(
     common: { runId?: string; sessionKey: string; timestamp: string }
 ): ChatRuntimeEventDraft[] {
     const nestedMessage = asRecord(data.message);
+    const stopReason =
+        stringValue(nestedMessage?.stopReason) || stringValue(data.stopReason);
+    const isTerminalAssistantMessage = stopReason?.toLowerCase() === "stop";
     const topLevelRole = stringValue(data.role);
     const rawMessage = topLevelRole
         ? {
@@ -344,15 +349,35 @@ function sessionMessageDrafts(
     const message = normalizeAssistant(rawMessage, common.runId);
     const role = message.role.toLowerCase();
     if (role === "assistant") {
-        return [
-            {
+        const drafts = sessionAssistantDiagnosticDrafts(message, common);
+        const hasPrimaryContent = Boolean(
+            message.text.trim() || message.images?.length || message.attachments?.length
+        );
+        if (hasPrimaryContent) {
+            drafts.push({
                 ...common,
                 kind: "assistant",
-                message: { ...message, timestamp: common.timestamp },
-                mode: "merge",
+                message: {
+                    ...message,
+                    content: message.text,
+                    text: message.text,
+                    thinking: undefined,
+                    toolCalls: undefined,
+                    toolResult: undefined,
+                    timestamp: common.timestamp,
+                },
+                mode: isTerminalAssistantMessage ? "replace" : "merge",
                 source: "session",
-            },
-        ];
+            });
+        }
+        if (isTerminalAssistantMessage) {
+            drafts.push({
+                ...common,
+                kind: "finish",
+                outcome: "completed",
+            });
+        }
+        return drafts;
     }
     if (role === "user") {
         return [
@@ -363,5 +388,77 @@ function sessionMessageDrafts(
             },
         ];
     }
+    if (role.startsWith("tool") && message.toolResult) {
+        return [
+            {
+                ...common,
+                kind: "tool",
+                message: { ...message, timestamp: common.timestamp },
+                toolKey: sessionToolKey(
+                    message.toolResult.id,
+                    message.toolResult.name || "tool"
+                ),
+            },
+        ];
+    }
     return [];
+}
+
+function sessionToolKey(
+    id: string | undefined,
+    name: string,
+    arguments_?: unknown
+): string {
+    return id
+        ? `tool:${id}`
+        : `tool:${name}:${stableChatStringify(arguments_ ?? undefined)}`;
+}
+
+function sessionAssistantDiagnosticDrafts(
+    message: ChatHistoryMessage,
+    common: { runId?: string; sessionKey: string; timestamp: string }
+): ChatRuntimeEventDraft[] {
+    const drafts: ChatRuntimeEventDraft[] = [];
+    if (message.thinking?.length) {
+        drafts.push({
+            ...common,
+            kind: "thinking",
+            message: {
+                role: "assistant",
+                content: message.thinking.map((block) => ({
+                    id: block.id,
+                    text: block.text,
+                    type: "thinking",
+                })),
+                text: "",
+                thinking: message.thinking,
+                timestamp: common.timestamp,
+                runId: common.runId,
+            },
+        });
+    }
+    const toolCalls = message.toolCalls || [];
+    for (const toolCall of toolCalls) {
+        drafts.push(sessionToolCallDraft(toolCall, common));
+    }
+    return drafts;
+}
+
+function sessionToolCallDraft(
+    toolCall: ChatToolCallDisplay,
+    common: { runId?: string; sessionKey: string; timestamp: string }
+): ChatRuntimeEventDraft {
+    return {
+        ...common,
+        kind: "tool",
+        message: {
+            role: "assistant",
+            content: "",
+            text: "",
+            toolCalls: [toolCall],
+            timestamp: common.timestamp,
+            runId: common.runId,
+        },
+        toolKey: sessionToolKey(toolCall.id, toolCall.name, toolCall.arguments),
+    };
 }

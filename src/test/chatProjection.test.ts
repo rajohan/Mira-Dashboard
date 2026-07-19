@@ -1792,7 +1792,7 @@ describe("chat projection", () => {
         expect(projection.activeRuns).toEqual([]);
     });
 
-    it("reconciles an exact-id tool across a later user boundary", () => {
+    it("keeps reused exact tool ids isolated across later user boundaries", () => {
         const history: ChatHistoryMessage[] = [
             { ...message("user", "question"), timestamp: "2026-07-18T16:35:30.000Z" },
             {
@@ -1803,11 +1803,11 @@ describe("chat projection", () => {
                 toolCalls: [
                     {
                         arguments: { command: "date" },
-                        id: "call-1",
+                        id: "functions.exec:0",
                         name: "bash",
                         toolResult: {
                             content: "completed",
-                            id: "call-1",
+                            id: "functions.exec:0",
                             name: "bash",
                         },
                     },
@@ -1832,13 +1832,13 @@ describe("chat projection", () => {
                     toolCalls: [
                         {
                             arguments: { cmd: "date" },
-                            id: "call-1",
+                            id: "functions.exec:0",
                             name: "Bash",
                         },
                     ],
                 },
                 runId: "late-runtime-run",
-                toolKey: "tool:call-1",
+                toolKey: "tool:functions.exec:0",
             }),
         ]);
 
@@ -1851,16 +1851,23 @@ describe("chat projection", () => {
             new Set()
         );
 
-        expect(
-            projection.rows.filter((row) => row.message.toolCalls?.length)
-        ).toHaveLength(1);
-        expect(projection.rows.map((row) => row.message.text)).toEqual([
-            "question",
-            "",
-            "answer",
-            "next question",
+        const toolRows = projection.rows.filter((row) => row.message.toolCalls?.length);
+        expect(toolRows).toHaveLength(2);
+        expect(toolRows[0]?.message.toolCalls?.[0]?.toolResult?.content).toBe(
+            "completed"
+        );
+        expect(toolRows[1]?.message).toMatchObject({
+            runId: "late-runtime-run",
+            toolCalls: [
+                expect.objectContaining({
+                    id: "functions.exec:0",
+                }),
+            ],
+        });
+        expect(toolRows[1]?.message.toolCalls?.[0]?.toolResult).toBeUndefined();
+        expect(projection.activeRuns.map((run) => run.runId)).toEqual([
+            "late-runtime-run",
         ]);
-        expect(projection.activeRuns).toEqual([]);
     });
 
     it("reconciles a large exact-id run without reserializing every tool payload", () => {
@@ -3016,6 +3023,11 @@ describe("chat projection", () => {
         ]);
         expect(rowKinds(compactProjection)).toEqual(rowKinds(fullProjection));
         expect(toolKey(compactProjection)).toBe(toolKey(fullProjection));
+        const compactFinal = compactProjection.rows.find(
+            (row) => row.message.text === "answer"
+        );
+        expect(compactFinal?.message.isFinal).toBe(true);
+        expect(compactFinal?.message.toolCalls).toBeUndefined();
     });
 
     it("keeps compacted tools before thinking for a media-only final", () => {

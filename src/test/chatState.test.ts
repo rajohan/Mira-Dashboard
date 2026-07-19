@@ -517,6 +517,18 @@ describe("chat runtime state", () => {
                     content: "runtime draft",
                     role: "assistant",
                     text: "runtime draft",
+                    toolCalls: [
+                        {
+                            arguments: { cmd: "pwd" },
+                            id: "tool-1",
+                            name: "bash",
+                        },
+                    ],
+                    toolResult: {
+                        content: "stale runtime output",
+                        id: "tool-1",
+                        name: "bash",
+                    },
                 },
                 mode: "replace",
                 runId: "run-1",
@@ -537,6 +549,8 @@ describe("chat runtime state", () => {
         const run = state.sessions[SESSION]?.runs["run-1"];
         expect(run?.assistant?.text).toBe("canonical final");
         expect(run?.assistant?.isFinal).toBe(true);
+        expect(run?.assistant?.toolCalls).toBeUndefined();
+        expect(run?.assistant?.toolResult).toBeUndefined();
         expect(run?.assistantSource).toBe("chat");
         expect(run?.phase).toBe("completed");
 
@@ -1352,6 +1366,38 @@ describe("chat runtime state", () => {
         expect(state.sessions[SESSION]?.runs["run-tool-failure"]).toMatchObject({
             error: undefined,
             phase: "error",
+            toolFailure: true,
+        });
+    });
+
+    it("does not downgrade a completed final from a late metadata-only tool failure", () => {
+        const state = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "finish",
+                message: {
+                    content: "canonical final",
+                    role: "assistant",
+                    text: "canonical final",
+                },
+                outcome: "completed",
+                runId: "run-completed",
+            }),
+            event(32, {
+                error: "late tool recovery failure",
+                kind: "finish",
+                outcome: "error",
+                runId: "run-completed",
+                toolFailure: true,
+            }),
+        ]);
+
+        expect(state.sessions[SESSION]?.runs["run-completed"]).toMatchObject({
+            assistant: expect.objectContaining({
+                isFinal: true,
+                text: "canonical final",
+            }),
+            error: undefined,
+            phase: "completed",
             toolFailure: true,
         });
     });

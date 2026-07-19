@@ -171,13 +171,16 @@ The canonical reducer is ordered and idempotent. Run identifiers and aliases are
 always session-scoped. Snapshot gating applies only to the selected session, so
 off-screen terminal events continue to clean up their own runs while a snapshot
 is in flight. Canonical history wins reconciliation after a terminal refresh;
-transient diagnostics are inserted before the matching final answer. Exact tool
-call IDs may match results across a later user boundary, while name-only fallback
-matching remains bounded to the current user turn. Transcript order and runtime
-sequence take precedence over message timestamps when a queued user message and
-compaction final carry inverted wall-clock times. Projection indexes exact tool
-IDs once per pass and caches fallback signatures so long runs do not rescan or
-reserialize the complete transcript for every runtime diagnostic. Once a
+transient diagnostics are inserted before the matching final answer. Runtime
+tool IDs reconcile inside the current response segment, or outside it only when
+the history row explicitly matches the run. This boundary is required because
+some providers reuse short IDs such as `functions.exec:0` in later user turns.
+Name-only fallback matching is likewise bounded to the current user turn.
+Transcript order and runtime sequence take precedence over message timestamps
+when a queued user message and compaction final carry inverted wall-clock times.
+Projection indexes exact tool IDs once per pass and caches fallback signatures so
+long runs do not rescan or reserialize the complete transcript for every runtime
+diagnostic. Once a
 completed final is matched, only unscoped canonical diagnostics after the
 previous primary answer and that matched final adopt the completed run ID.
 Scoping requires an explicit run match or primary assistant output whose final is
@@ -191,6 +194,28 @@ delete action persists every alias. This keeps tool row keys stable when
 transcript-backed runtime events are compacted, avoids claiming diagnostics from
 overlapping runs, keeps hidden tool media with the final, and keeps retained
 thinking after the canonical tools but before the final answer.
+
+### Provider Session Messages
+
+OpenClaw providers do not all emit the same live assistant shape. In particular,
+Synthetic can place thinking, a tool call, and assistant text inside one
+`session.message`. The OpenClaw adapter splits that message into independent
+thinking, tool, and primary assistant events before it reaches the reducer. A
+Synthetic assistant message with `stopReason: "toolUse"` remains nonterminal;
+`stopReason: "stop"` completes the run in both the frontend adapter and backend
+replay bridge. The final primary assistant event never inherits tool fields from
+the preceding runtime buffer.
+
+### Virtualized Sticky Bottom
+
+Chat uses TanStack Virtual, so a structural row change can alter `scrollHeight`
+again after React commits while row measurements settle. Initial/session history
+loads first prime the viewport to the bottom, then wait for a stable measured
+height before one final correction. Post-final and reorder corrections wait
+passively for the same stability and perform a single bottom write. Repeated
+per-frame writes are avoided because they can cycle different virtual windows
+through the viewport and appear as flashing tool rows. Real wheel or touch intent
+cancels any queued correction immediately.
 
 Session controls are Gateway-backed rather than Dashboard-only preferences:
 
@@ -242,8 +267,8 @@ When changing chat event handling, test these cases:
 - tool trimming above the per-run byte limit preserves thinking;
 - item-stream tool call/output variants are trimmed as transcript-backed tools;
 - aggregate memory eviction can rehydrate the evicted session from SQLite;
-- exact tool-call IDs can match across user boundaries, while name-only matches
-  cannot;
+- reused runtime tool-call IDs do not match across user boundaries without an
+  explicit run match, and name-only matches remain turn-bounded;
 - compaction diagnostics remain before their final when the next queued user
   message has an earlier timestamp;
 - compacting transcript-backed runtime tools after final preserves each tool row
@@ -255,6 +280,10 @@ When changing chat event handling, test these cases:
 - scoped deletions remain hidden after completed replay is cleared;
 - hidden tool media remains attached to its completed final after compaction;
 - media-only finals keep compacted tools before retained thinking;
+- mixed Synthetic session messages split into tool/thinking/final rows, and only
+  `stopReason: "stop"` completes their replay run;
+- hard-refresh history loads and post-final structural changes settle at the
+  virtualized bottom without repeated per-frame scroll writes;
 - completed thinking remains grouped and follows the keep-after-final preference;
 - hiding diagnostics does not remove them from cached client state;
 - the global tool-detail setting updates existing bubbles and the default for

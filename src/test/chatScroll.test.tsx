@@ -16,6 +16,22 @@ const cancelFrame = jest.fn((frameId: number) => {
     animationFrameState.frames.delete(frameId);
 });
 
+function runNextAnimationFrame(): void {
+    const frame = animationFrameState.frames.entries().next().value;
+    if (!frame) {
+        throw new Error("Expected a queued animation frame");
+    }
+    const [frameId, callback] = frame;
+    animationFrameState.frames.delete(frameId);
+    act(() => callback(0));
+}
+
+function runAnimationFrames(count: number): void {
+    for (let index = 0; index < count; index += 1) {
+        runNextAnimationFrame();
+    }
+}
+
 function chatRow(key: string, role: string): ChatRow {
     return {
         key,
@@ -178,15 +194,22 @@ describe("chat scroll", () => {
         );
         const container = document.createElement("div");
         let scrollHeight = 500;
+        let scrollTop = 0;
+        const scrollWrites: number[] = [];
         Object.defineProperties(container, {
             clientHeight: { configurable: true, value: 100 },
             scrollHeight: { configurable: true, get: () => scrollHeight },
+            scrollTop: {
+                configurable: true,
+                get: () => scrollTop,
+                set: (value: number) => {
+                    scrollTop = value;
+                    scrollWrites.push(value);
+                },
+            },
         });
         result.current.messagesContainerReference.current = container;
-        const initialFrameId = animationFrameState.nextFrameId;
-        const initialFrame = animationFrameState.frames.get(initialFrameId);
-        animationFrameState.frames.delete(initialFrameId);
-        act(() => initialFrame?.(0));
+        runAnimationFrames(4);
 
         scrollHeight = 700;
         rerender({
@@ -194,13 +217,18 @@ describe("chat scroll", () => {
         });
 
         expect(animationFrameState.frames.size).toBe(1);
+        scrollTop = 500;
+        scrollWrites.length = 0;
         act(() => result.current.handleScroll());
         expect(stickToBottomReference.current).toBe(true);
-        const followFrame = animationFrameState.frames.get(
-            animationFrameState.nextFrameId
-        );
-        act(() => followFrame?.(0));
-        expect(container.scrollTop).toBe(700);
+        runNextAnimationFrame();
+        expect(scrollWrites).toEqual([]);
+        runNextAnimationFrame();
+        expect(scrollWrites).toEqual([]);
+        runNextAnimationFrame();
+        expect(scrollWrites).toEqual([700]);
+        expect(scrollTop).toBe(700);
+        expect(animationFrameState.frames.size).toBe(0);
 
         container.scrollTop = 500;
         act(() => result.current.handleScroll());
@@ -208,7 +236,7 @@ describe("chat scroll", () => {
         unmount();
     });
 
-    it("schedules one bottom follow after a hard-refresh history load", () => {
+    it("primes and settles the bottom after a hard-refresh history load", () => {
         const row: ChatRow = {
             key: "answer",
             kind: "message",
@@ -221,22 +249,41 @@ describe("chat scroll", () => {
             { initialProps: { rows: [] as ChatRow[] } }
         );
         let scrollHeight = 400;
+        let scrollTop = 0;
+        const scrollWrites: number[] = [];
         const container = document.createElement("div");
         Object.defineProperties(container, {
             clientHeight: { configurable: true, value: 100 },
             scrollHeight: { configurable: true, get: () => scrollHeight },
+            scrollTop: {
+                configurable: true,
+                get: () => scrollTop,
+                set: (value: number) => {
+                    scrollTop = value;
+                    scrollWrites.push(value);
+                },
+            },
         });
         result.current.messagesContainerReference.current = container;
 
         rerender({ rows: [row] });
         expect(animationFrameState.frames.size).toBe(1);
+        scrollWrites.length = 0;
 
         scrollHeight = 700;
-        const firstFrameId = animationFrameState.nextFrameId;
-        const firstFrame = animationFrameState.frames.get(firstFrameId);
-        animationFrameState.frames.delete(firstFrameId);
-        act(() => firstFrame?.(0));
-        expect(container.scrollTop).toBe(700);
+        runNextAnimationFrame();
+        expect(scrollWrites).toEqual([700]);
+
+        scrollHeight = 900;
+        runNextAnimationFrame();
+        scrollHeight = 1100;
+        runNextAnimationFrame();
+        runNextAnimationFrame();
+        expect(scrollWrites).toEqual([700]);
+
+        runNextAnimationFrame();
+        expect(scrollTop).toBe(1100);
+        expect(scrollWrites).toEqual([700, 1100]);
         expect(animationFrameState.frames.size).toBe(0);
 
         unmount();
@@ -258,14 +305,13 @@ describe("chat scroll", () => {
         result.current.messagesContainerReference.current = container;
 
         act(() => result.current.scheduleBottomFollow());
-        const queuedFrameId = animationFrameState.nextFrameId;
         rerender({ rows: [row] });
         expect(animationFrameState.frames.size).toBe(1);
 
-        const queuedFrame = animationFrameState.frames.get(queuedFrameId);
-        animationFrameState.frames.delete(queuedFrameId);
-        act(() => queuedFrame?.(0));
+        runNextAnimationFrame();
         expect(container.scrollTop).toBe(700);
+        runAnimationFrames(3);
+        expect(animationFrameState.frames.size).toBe(0);
         unmount();
     });
 
