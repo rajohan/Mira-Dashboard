@@ -461,13 +461,22 @@ function completedDiagnosticStart(
     return segment.start;
 }
 
-function scopeCompletedDiagnostics(
+function scopeCompletedResponse(
     messages: ChatHistoryMessage[],
     run: ChatRunState,
     segment: ResponseSegment,
     finalIndex: number
 ): void {
     if (run.phase !== "completed") {
+        return;
+    }
+    const canonicalFinal = messages[finalIndex];
+    const hasResponseEvidence = Boolean(
+        (run.assistant && hasPrimaryAnswerContent(run.assistant)) ||
+        run.diagnostics.length > 0 ||
+        (canonicalFinal && isRunMatchingMessage(run, canonicalFinal))
+    );
+    if (!hasResponseEvidence) {
         return;
     }
     const diagnosticStart = completedDiagnosticStart(messages, segment, finalIndex);
@@ -902,7 +911,7 @@ export function reconcileChatMessages(
         }
         const finalIndex = canonicalFinalIndex(messages, run, segment, exactToolIndex);
         if (finalIndex !== -1) {
-            scopeCompletedDiagnostics(messages, run, segment, finalIndex);
+            scopeCompletedResponse(messages, run, segment, finalIndex);
             const canonical = messages[finalIndex]!;
             if (run.assistant) {
                 messages[finalIndex] = mergeChatMessageDetails(

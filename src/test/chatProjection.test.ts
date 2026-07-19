@@ -308,6 +308,40 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("does not let metadata-only completion claim another run final", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(32, "2026-07-16T12:00:04.000Z", {
+                kind: "finish",
+                outcome: "completed",
+                runId: "metadata-only",
+            }),
+            eventAt(48, "2026-07-16T12:00:03.000Z", {
+                kind: "finish",
+                message: message("assistant", "answer", "run-real"),
+                outcome: "completed",
+                runId: "run-real",
+            }),
+        ]);
+        const reconciled = reconcileChatMessages(
+            [
+                {
+                    ...message("user", "question"),
+                    timestamp: "2026-07-16T11:59:59.000Z",
+                },
+                {
+                    ...message("assistant", "answer"),
+                    timestamp: "2026-07-16T12:00:03.000Z",
+                },
+            ],
+            runtime.sessions[SESSION]
+        );
+
+        expect(reconciled.map((item) => [item.text, item.runId])).toEqual([
+            ["question", undefined],
+            ["answer", "run-real"],
+        ]);
+    });
+
     it("keeps identical diagnostics from distinct overlapping runs", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(16, {
