@@ -115,7 +115,7 @@ function stableDiagnosticRowKey(message: ChatHistoryMessage): string | undefined
     return undefined;
 }
 
-function userMessageDeleteKey(message: ChatHistoryMessage): string {
+function historyMessageDeleteKey(message: ChatHistoryMessage): string {
     return messageDeleteKey({
         ...message,
         runId: undefined,
@@ -125,7 +125,7 @@ function userMessageDeleteKey(message: ChatHistoryMessage): string {
 
 function projectedMessageRowKey(message: ChatHistoryMessage): string {
     if (isUserMessage(message)) {
-        return userMessageDeleteKey(message);
+        return historyMessageDeleteKey(message);
     }
     return (
         stableDiagnosticRowKey(message) ||
@@ -138,10 +138,10 @@ function projectedMessageRowKey(message: ChatHistoryMessage): string {
 /** Keeps persisted delete keys valid when runtime reconciliation adds a run id. */
 function projectedMessageDeleteKeys(message: ChatHistoryMessage): string[] {
     const currentKey = projectedMessageRowKey(message);
-    if (message.role.toLowerCase() !== "user" || !message.runId) {
+    if (!message.runId || message.local === true) {
         return [currentKey];
     }
-    const persistedHistoryKey = userMessageDeleteKey(message);
+    const persistedHistoryKey = historyMessageDeleteKey(message);
     return currentKey === persistedHistoryKey
         ? [currentKey]
         : [currentKey, persistedHistoryKey];
@@ -471,9 +471,11 @@ function scopeCompletedDiagnostics(
         return;
     }
     const diagnosticStart = completedDiagnosticStart(messages, segment, finalIndex);
-    for (let index = diagnosticStart; index < finalIndex; index += 1) {
+    for (let index = diagnosticStart; index <= finalIndex; index += 1) {
         const message = messages[index];
-        if (message && !message.runId && isStandaloneDiagnostic(message)) {
+        const belongsToCompletedRun =
+            index === finalIndex || (message && isStandaloneDiagnostic(message));
+        if (message && !message.runId && belongsToCompletedRun) {
             messages[index] = { ...message, runId: run.runId };
         }
     }
