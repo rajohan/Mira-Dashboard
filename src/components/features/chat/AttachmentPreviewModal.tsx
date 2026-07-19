@@ -4,17 +4,11 @@ import { formatSize } from "../../../utils/format";
 import { Modal } from "../../ui/Modal";
 import { JsonPreview } from "../files/viewers/JsonPreview";
 import { MarkdownPreview } from "../files/viewers/MarkdownPreview";
-import { type ChatPreviewItem, normalizeChatMimeType } from "./chatTypes";
-
-function attachmentPreviewUrl(url: string, mode: "image" | "text"): string | undefined {
-    const isLocalMedia = url === "/api/media" || url.startsWith("/api/media?");
-    const isManagedMedia = url.startsWith("/api/chat/media/outgoing/");
-    if (isLocalMedia || isManagedMedia) {
-        return `${url}${url.includes("?") ? "&" : "?"}preview=${mode}`;
-    }
-
-    return mode === "image" ? url : undefined;
-}
+import {
+    chatAttachmentPreviewUrl,
+    type ChatPreviewItem,
+    normalizeChatMimeType,
+} from "./chatTypes";
 
 /** Provides props for attachment preview modal. */
 interface AttachmentPreviewModalProperties {
@@ -44,7 +38,7 @@ export function AttachmentPreviewModal({
         ) {
             return;
         }
-        const previewUrl = attachmentPreviewUrl(previewItem.url, "text");
+        const previewUrl = chatAttachmentPreviewUrl(previewItem.url, "text");
         if (!previewUrl) {
             return;
         }
@@ -85,7 +79,7 @@ export function AttachmentPreviewModal({
     const imagePreviewUrl =
         previewItem?.kind === "image" && previewItem.url
             ? normalizedMimeType === "image/svg+xml"
-                ? attachmentPreviewUrl(previewItem.url, "image")
+                ? chatAttachmentPreviewUrl(previewItem.url, "image")
                 : previewItem.url
             : undefined;
     const shouldRenderJson =
@@ -137,7 +131,7 @@ export function AttachmentPreviewModal({
                       textPreview !== undefined &&
                       shouldRenderMarkdown ? (
                         <div className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950">
-                            <MarkdownPreview content={textPreview} />
+                            <MarkdownPreview content={textPreview} renderImages={false} />
                         </div>
                     ) : previewItem.kind === "text" && textPreview !== undefined ? (
                         <pre className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950 p-4 text-sm whitespace-pre-wrap text-primary-100">

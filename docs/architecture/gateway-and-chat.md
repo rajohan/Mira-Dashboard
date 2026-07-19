@@ -131,7 +131,9 @@ download action. Images render inline; JSON and Markdown use the existing
 structured viewers; CSV and plain text use a bounded text preview; other files
 remain downloadable. MIME parameters are normalized before the viewer is chosen.
 External HTTP(S) text references remain download-only because Dashboard cannot
-enforce the bounded preview policy on cross-origin responses.
+enforce the bounded preview policy on cross-origin responses. Attachment Markdown
+renders image references as plain labels so opening a preview cannot fetch remote
+resources.
 
 Managed Gateway image URLs stay authenticated without exposing the Gateway token
 to the browser. The browser requests the same managed path from Dashboard under
@@ -147,6 +149,8 @@ download target. Managed SVG preview uses `preview=image`, a bounded response,
 and the same restrictive sandbox CSP as local SVG. Managed SVG, HTML, XHTML, and
 XML downloads are downgraded to `application/octet-stream` with attachment
 disposition so active provider content cannot render as a same-origin document.
+Inline SVG thumbnails use the sandboxed preview URL while their download action
+retains the original managed URL.
 
 Local OpenClaw media continues through `/api/media`. Text preview is opt-in and
 limited to `.txt`, `.json`, `.csv`, and `.md` files no larger than 1 MiB. SVG is
@@ -158,7 +162,8 @@ An attachment-only optimistic user row reconciles with its canonical managed
 Gateway URL by the send run ID when its local base64 identity necessarily differs
 from the persisted media identity. Matching remains role- and run-scoped so
 separate attachment turns are not collapsed, and an unrelated prior media row
-cannot consume the fallback match.
+cannot consume the fallback match. URL-only image blocks include their safe source
+URL in media identity so distinct generated images in one run remain distinct.
 
 ### Transcript And Runtime Authority
 

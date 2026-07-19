@@ -4,6 +4,7 @@ import {
     type ChatAttachmentDisplay,
     type ChatHistoryMessage,
     type ChatImageBlock,
+    chatImageDisplayUrl,
     type ChatToolResultDisplay,
     extractImages,
     extractThinkingBlocks,
@@ -147,7 +148,10 @@ function mediaDirectiveAttachments(text: string): ChatAttachmentDisplay[] {
             id: `media-${mediaPath}-${attachments.length}`,
             fileName: fileNameFromPath(mediaPath),
             mimeType,
-            dataUrl: kind === "image" ? mediaUrlFromPath(mediaPath) : undefined,
+            dataUrl:
+                kind === "image"
+                    ? chatImageDisplayUrl(mediaUrlFromPath(mediaPath), mimeType)
+                    : undefined,
             url: mediaUrlFromPath(mediaPath),
             kind,
         });
@@ -206,7 +210,10 @@ function mediaReferenceAttachments(
             id: `${path}-${index}`,
             fileName: fileNameFromPath(path),
             mimeType,
-            dataUrl: kind === "image" ? mediaUrlFromPath(path) : undefined,
+            dataUrl:
+                kind === "image"
+                    ? chatImageDisplayUrl(mediaUrlFromPath(path), mimeType)
+                    : undefined,
             url: mediaUrlFromPath(path),
             kind,
         };
@@ -250,7 +257,7 @@ function contentBlockAttachments(content: unknown): ChatAttachmentDisplay[] {
             id: `content-${url}-${attachments.length}`,
             fileName: label || "attachment",
             mimeType,
-            dataUrl: kind === "image" ? url : undefined,
+            dataUrl: kind === "image" ? chatImageDisplayUrl(url, mimeType) : undefined,
             url,
             kind,
         });

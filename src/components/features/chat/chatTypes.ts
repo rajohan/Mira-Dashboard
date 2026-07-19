@@ -114,8 +114,28 @@ function safeChatImageUrl(value: unknown): string | undefined {
     }
 }
 
-/** Returns an embeddable URL from every OpenClaw image block variant. */
-export function chatImageUrl(image: ChatImageBlock): string | undefined {
+/** Returns a bounded preview URL for Dashboard-managed media. */
+export function chatAttachmentPreviewUrl(
+    url: string,
+    mode: "image" | "text"
+): string | undefined {
+    const isLocalMedia = url === "/api/media" || url.startsWith("/api/media?");
+    const isManagedMedia = url.startsWith("/api/chat/media/outgoing/");
+    if (isLocalMedia || isManagedMedia) {
+        if (/[?&]preview=(?:image|text)(?=&|$)/u.test(url)) {
+            return url.replace(
+                /[?&]preview=(?:image|text)(?=&|$)/u,
+                (match) => `${match[0]}preview=${mode}`
+            );
+        }
+        return `${url}${url.includes("?") ? "&" : "?"}preview=${mode}`;
+    }
+
+    return mode === "image" ? safeChatImageUrl(url) : undefined;
+}
+
+/** Returns the original safe URL from every OpenClaw image block variant. */
+export function chatImageDownloadUrl(image: ChatImageBlock): string | undefined {
     const imageUrl =
         typeof image.image_url === "string" ? image.image_url : image.image_url?.url;
     const directUrl = [image.url, image.openUrl, image.source?.url, imageUrl]
@@ -135,6 +155,25 @@ export function chatImageUrl(image: ChatImageBlock): string | undefined {
     }
     const mimeType = image.source?.media_type || image.mimeType || "image/png";
     return `data:${mimeType};base64,${normalizedImageData}`;
+}
+
+/** Returns a safe inline image URL while preserving the original download URL. */
+export function chatImageDisplayUrl(url: string, mimeType: string): string | undefined {
+    const safeUrl = safeChatImageUrl(url);
+    if (!safeUrl) {
+        return undefined;
+    }
+    return normalizeChatMimeType(mimeType) === "image/svg+xml"
+        ? chatAttachmentPreviewUrl(safeUrl, "image")
+        : safeUrl;
+}
+
+/** Returns an embeddable URL from every OpenClaw image block variant. */
+export function chatImageUrl(image: ChatImageBlock): string | undefined {
+    const downloadUrl = chatImageDownloadUrl(image);
+    return downloadUrl
+        ? chatImageDisplayUrl(downloadUrl, chatImageMimeType(image))
+        : undefined;
 }
 
 /** Returns the declared image MIME type with a safe display fallback. */

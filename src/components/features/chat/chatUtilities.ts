@@ -4,6 +4,7 @@ import {
     chatAttachmentIdentity,
     chatContentFingerprint,
     type ChatHistoryMessage,
+    chatImageDownloadUrl,
     mergeChatAttachments,
     mergeChatImages,
     TOOL_ROLE_VARIANTS,
@@ -228,7 +229,8 @@ export function messageMediaIdentity(message: ChatHistoryMessage): string | unde
     return [
         "media",
         ...(message.images || []).map((image) => {
-            const data = image.data || image.source?.data || "";
+            const data =
+                image.data || image.source?.data || chatImageDownloadUrl(image) || "";
             return [
                 image.mimeType || image.source?.media_type || "image",
                 chatContentFingerprint(data),

@@ -629,7 +629,7 @@ describe("shared component helpers", () => {
                 previewItem={{
                     kind: "text",
                     mimeType: "text/markdown",
-                    text: "# Attachment heading\n\n| A | B |\n| - | - |\n| 1 | 2 |",
+                    text: "# Attachment heading\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n![tracking pixel](https://files.example.test/pixel.png)",
                     title: "readme.md",
                     url: "data:text/markdown;base64,IyBBdHRhY2htZW50IGhlYWRpbmc=",
                 }}
@@ -640,6 +640,10 @@ describe("shared component helpers", () => {
             screen.getByRole("heading", { name: "Attachment heading" })
         ).toBeInTheDocument();
         expect(screen.getByRole("table")).toBeInTheDocument();
+        expect(
+            screen.queryByRole("img", { name: "tracking pixel" })
+        ).not.toBeInTheDocument();
+        expect(screen.getByText("[Image: tracking pixel]")).toBeInTheDocument();
 
         rerender(
             <AttachmentPreviewModal
@@ -2276,7 +2280,7 @@ describe("shared component helpers", () => {
                                         image_url: {
                                             url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
                                         },
-                                        mimeType: "image/png",
+                                        mimeType: "image/svg+xml",
                                         type: "image_url",
                                     },
                                 ],
@@ -2340,6 +2344,10 @@ describe("shared component helpers", () => {
             screen.getByRole("button", { name: /open chat image 1 preview/i })
         );
         const chatImage = screen.getByAltText("Chat attachment");
+        expect(chatImage).toHaveAttribute(
+            "src",
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full?preview=image"
+        );
         const dynamicContentLoadCount = onDynamicContentLoad.mock.calls.length;
         fireEvent.load(chatImage);
         fireEvent.error(chatImage);

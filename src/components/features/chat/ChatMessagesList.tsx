@@ -28,7 +28,12 @@ import type {
     ChatRow,
     ChatVisibilitySettings,
 } from "./chatTypes";
-import { chatImageMimeType, chatImageUrl, TOOL_ROLE_VARIANTS } from "./chatTypes";
+import {
+    chatImageDownloadUrl,
+    chatImageMimeType,
+    chatImageUrl,
+    TOOL_ROLE_VARIANTS,
+} from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
 
 const SCROLL_KEYS = new Set([
@@ -587,6 +592,9 @@ export function ChatMessagesList({
 
                                                         const imageMime =
                                                             chatImageMimeType(image);
+                                                        const imageDownloadUrl =
+                                                            chatImageDownloadUrl(image) ||
+                                                            imageUrl;
                                                         const imagePreviewLabel = `Open chat image ${imageIndex + 1} preview`;
 
                                                         return (
@@ -599,7 +607,7 @@ export function ChatMessagesList({
                                                                         mimeType:
                                                                             imageMime,
                                                                         kind: "image",
-                                                                        url: imageUrl,
+                                                                        url: imageDownloadUrl,
                                                                     })
                                                                 }
                                                                 className="rounded-lg text-left hover:opacity-90 focus:ring-2 focus:ring-accent-400 focus:outline-none"

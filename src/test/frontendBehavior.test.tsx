@@ -3848,6 +3848,34 @@ describe("Mira Dashboard frontend behavior", () => {
             "different",
         ]);
 
+        const distinctUrlOnlyImages = dedupeMessages([
+            chatMessage({
+                images: [
+                    {
+                        image_url: { url: "https://files.example.test/first.png" },
+                        mimeType: "image/png",
+                        type: "image_url",
+                    },
+                ],
+                role: "assistant",
+                runId: "run-images",
+                text: "",
+            }),
+            chatMessage({
+                images: [
+                    {
+                        image_url: { url: "https://files.example.test/second.png" },
+                        mimeType: "image/png",
+                        type: "image_url",
+                    },
+                ],
+                role: "assistant",
+                runId: "run-images",
+                text: "",
+            }),
+        ]);
+        expect(distinctUrlOnlyImages).toHaveLength(2);
+
         const duplicateUserMessages = dedupeMessages([
             chatMessage({ role: "user", text: "same question" }),
             chatMessage({ local: true, role: "user", text: "same question" }),
@@ -4023,6 +4051,16 @@ describe("Mira Dashboard frontend behavior", () => {
             type: "image_url",
         } as const;
         expect(chatImageUrl(managedImage)).toBe(managedImage.image_url.url);
+        const managedSvgImage = {
+            ...managedImage,
+            image_url: {
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174001/full",
+            },
+            mimeType: "image/svg+xml; charset=utf-8",
+        } as const;
+        expect(chatImageUrl(managedSvgImage)).toBe(
+            `${managedSvgImage.image_url.url}?preview=image`
+        );
         expect(
             chatImageUrl({
                 data: "/9j/4AAQSkZJRgABAQAAAQABAAD",
@@ -4091,7 +4129,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 mimeType: "text/markdown",
             },
             {
-                dataUrl: "/api/media?path=%2Ftmp%2Flogo.svg",
+                dataUrl: "/api/media?path=%2Ftmp%2Flogo.svg&preview=image",
                 fileName: "logo.svg",
                 kind: "image",
                 mimeType: "image/svg+xml",
@@ -4115,6 +4153,26 @@ describe("Mira Dashboard frontend behavior", () => {
             fileName: "report.csv",
             kind: "text",
             url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+        });
+        const normalizedManagedSvgAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        label: "logo.svg",
+                        mimeType: "image/svg+xml; charset=utf-8",
+                        url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174002/full",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedManagedSvgAttachment.attachments?.[0]).toMatchObject({
+            dataUrl:
+                "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174002/full?preview=image",
+            fileName: "logo.svg",
+            kind: "image",
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174002/full",
         });
 
         expect(formatDatabaseNumber(123_456)).toBe("123,456");
