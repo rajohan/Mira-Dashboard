@@ -2331,16 +2331,39 @@ describe("Mira Dashboard pages", () => {
 
         await user.click(screen.getByLabelText("Enabled"));
         expect(screen.getByRole("heading", { name: "Disable job" })).toBeInTheDocument();
-        const disabledUntilInput = screen.getByLabelText("Disabled until");
-        const disableCommentInput = screen.getByLabelText("Comment");
-        fireEvent.change(disabledUntilInput, {
-            target: { value: "2020-01-01T00:00" },
+        const disabledUntilGroup = screen.getByRole("group", {
+            name: "Disabled until",
         });
+        const disabledUntilDateButton = within(disabledUntilGroup).getByRole("button", {
+            name: /choose disabled until date, selected \d{2}\/\d{2}\/\d{4}/i,
+        });
+        const disableCommentInput = screen.getByLabelText("Comment");
+        expect(disabledUntilDateButton).toHaveTextContent(/^\d{2}\/\d{2}\/\d{4}$/u);
+        expect(screen.getByTestId("date-time-picker-fields")).toHaveClass(
+            "min-w-0",
+            "grid-cols-1"
+        );
+        expect(
+            screen.getByRole("button", { name: /disabled until hour: \d{2}/i })
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: /disabled until minute: \d{2}/i })
+        ).toBeInTheDocument();
+        await user.click(disabledUntilDateButton);
+        const calendar = screen.getByTestId("date-picker-calendar");
+        const previousMonthButton = calendar.querySelector<HTMLButtonElement>(
+            ":scope .rdp-button_previous"
+        );
+        expect(previousMonthButton).not.toBeNull();
+        await user.click(previousMonthButton as HTMLButtonElement);
+        const pastDayButton = calendar.querySelector<HTMLButtonElement>(
+            ":scope .rdp-day:not(.rdp-outside) .rdp-day_button:not(:disabled)"
+        );
+        expect(pastDayButton).not.toBeNull();
+        await user.click(pastDayButton as HTMLButtonElement);
         await user.type(disableCommentInput, "Paused Dashboard maintenance");
         await user.click(screen.getByRole("button", { name: "Disable job" }));
-        expect(disabledUntilInput.parentElement).toHaveTextContent(
-            "Choose a future date and time."
-        );
+        expect(disabledUntilGroup).toHaveTextContent("Choose a future date and time.");
         expect(disableCommentInput.parentElement).not.toHaveTextContent(
             "Choose a future date and time."
         );

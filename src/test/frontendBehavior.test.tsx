@@ -215,6 +215,7 @@ import {
     isMarkdownFile,
 } from "../utils/fileUtilities";
 import {
+    appDateTimeToTimestamp,
     appTimeOfDayToUtcTimeOfDay,
     formatDate,
     formatDateStamp,
@@ -3784,6 +3785,11 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(appTimeOfDayToUtcTimeOfDay("13:30", "2026-01-15T00:00:00.000Z")).toBe(
             "12:30"
         );
+        expect(appDateTimeToTimestamp(2026, 6, 23, 14, 34)).toBe(
+            Date.parse("2026-06-23T12:34:00.000Z")
+        );
+        expect(appDateTimeToTimestamp(2026, 2, 30, 14, 34)).toBeUndefined();
+        expect(appDateTimeToTimestamp(2026, 3, 29, 2, 30)).toBeUndefined();
     });
 
     it("keeps chat utility behavior stable for slash commands, diagnostics, and optimistic messages", async () => {
