@@ -46,6 +46,7 @@ interface RetainedRun {
     completed: boolean;
     eventBytes: number[];
     events: OpenClawRuntimeEnvelope[];
+    restored: boolean;
     runId: string;
     terminalSequence: number;
     totalBytes: number;
@@ -60,6 +61,7 @@ const MAX_BYTES_ACROSS_REPLAY = MAX_BYTES_PER_ACTIVE_RUN * MAX_RUNS_PER_SESSION;
 export const MAX_CHAT_RUNTIME_SESSIONS = 50;
 const MAX_RUN_ASSOCIATIONS = 200;
 const ACTIVE_RUN_TTL_MS = 6 * 60 * 60_000;
+const INTERRUPTED_RUN_PROMOTION_WINDOW_MS = 15 * 60_000;
 const PERSIST_DEBOUNCE_MS = 250;
 const SESSION_ECHO_WINDOW_MS = 60_000;
 const TERMINAL_FAILURE_STATES = new Set(["aborted", "error", "failed"]);
@@ -396,6 +398,9 @@ function isSettlingLifecycleEvent(event: unknown, payload: unknown): boolean {
 }
 
 function isStartingLifecycleEvent(event: unknown, payload: unknown): boolean {
+    if (event === "session.started") {
+        return true;
+    }
     const record = runtimePayloadView(payload);
     const stream = (stringField(record, "stream") || "").toLowerCase();
     const phase = (stringField(record, "phase") || "").toLowerCase();
@@ -555,6 +560,14 @@ function isAuxiliaryOnlyCompletion(run: RetainedRun): boolean {
 
 function lastSequence(run: RetainedRun): number {
     return run.events.at(-1)?.runtimeSequence ?? -1;
+}
+
+function firstSequence(run: RetainedRun): number {
+    let earliest = Infinity;
+    for (const event of run.events) {
+        earliest = Math.min(earliest, event.runtimeSequence);
+    }
+    return earliest;
 }
 
 function latestRunUpdatedAt(runs: Iterable<RetainedRun>): number {
@@ -759,16 +772,22 @@ function isPromotableRunlessUserLedRun(
 function isPromotableInterruptedDashboardRun(
     run: RetainedRun,
     envelope: OpenClawRuntimeEnvelope,
-    runs: ReadonlyMap<string, RetainedRun>
+    runs: ReadonlyMap<string, RetainedRun>,
+    requestBoundary?: number
 ): boolean {
     const providerRunId = stringField(runtimePayloadView(envelope.payload), "runId");
+    const resumeDelay = envelope.runtimeRecordedAt - run.updatedAt;
     if (
-        run.completed ||
-        !run.runId.startsWith("dashboard-chat-") ||
         !providerRunId ||
+        resumeDelay < -5000 ||
+        resumeDelay > INTERRUPTED_RUN_PROMOTION_WINDOW_MS ||
+        run.completed ||
+        !run.restored ||
+        !run.runId.startsWith("dashboard-chat-") ||
         isProvisionalRunId(providerRunId) ||
         !isStartingLifecycleEvent(envelope.event, envelope.payload) ||
-        envelope.runtimeSequence <= lastSequence(run)
+        envelope.runtimeSequence <= lastSequence(run) ||
+        (requestBoundary !== undefined && firstSequence(run) <= requestBoundary)
     ) {
         return false;
     }
@@ -814,6 +833,7 @@ function isMatchingSessionEcho(
  */
 export class OpenClawChatBridge {
     readonly #hydratedSessionLookups = new Set<string>();
+    readonly #latestRequestBoundaries = new Map<string, number>();
     readonly #loadedStoreKeys = new Set<string>();
     readonly #pendingDeleteKeys = new Set<string>();
     readonly #pendingPersistence = new Set<string>();
@@ -1512,6 +1532,7 @@ export class OpenClawChatBridge {
                     ...sourceRun.events,
                 ]);
                 existing.completed ||= sourceRun.completed;
+                existing.restored ||= sourceRun.restored;
                 existing.terminalSequence = Math.max(
                     existing.terminalSequence,
                     sourceRun.terminalSequence
@@ -1843,6 +1864,7 @@ export class OpenClawChatBridge {
         if (existing) {
             this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
             existing.completed ||= provisional.completed;
+            existing.restored ||= provisional.restored;
             existing.terminalSequence = Math.max(
                 existing.terminalSequence,
                 provisional.terminalSequence
@@ -1996,16 +2018,24 @@ export class OpenClawChatBridge {
                 .filter(
                     (run) =>
                         isPromotableRunlessUserLedRun(run, retainedEnvelope, runs) ||
-                        isPromotableInterruptedDashboardRun(run, retainedEnvelope, runs)
+                        isPromotableInterruptedDashboardRun(
+                            run,
+                            retainedEnvelope,
+                            runs,
+                            this.#latestRequestBoundaries.get(storageSessionKey)
+                        )
                 )
                 .toArray();
             if (pendingUserRuns.length === 1) {
-                this.#promoteRunEntry(
+                const promotedRun = this.#promoteRunEntry(
                     storageSessionKey,
                     runs,
                     pendingUserRuns[0]!.runId,
                     explicitRunId
                 );
+                if (promotedRun && !shouldPersist) {
+                    this.#queuePersistence(storageSessionKey);
+                }
             }
         }
         const activeRuns = runs
@@ -2090,6 +2120,7 @@ export class OpenClawChatBridge {
                 completed: false,
                 eventBytes: [],
                 events: [],
+                restored: !shouldPersist,
                 runId,
                 terminalSequence: -1,
                 totalBytes: 0,
@@ -2177,6 +2208,7 @@ export class OpenClawChatBridge {
         this.#runsBySession.clear();
         this.#sessionsByRun.clear();
         this.#hydratedSessionLookups.clear();
+        this.#latestRequestBoundaries.clear();
         this.#loadedStoreKeys.clear();
         this.#totalReplayBytes = 0;
     }
@@ -2267,6 +2299,18 @@ export class OpenClawChatBridge {
         this.#requireSequenceHydrated();
         if (sessionKey) {
             this.#ensureSessionLoaded(sessionKey);
+            const storageSessionKey = normalizedSessionKey(sessionKey);
+            this.#latestRequestBoundaries.delete(storageSessionKey);
+            this.#latestRequestBoundaries.set(storageSessionKey, this.#sequence);
+            while (this.#latestRequestBoundaries.size > MAX_CHAT_RUNTIME_SESSIONS) {
+                const oldestSessionKey = this.#latestRequestBoundaries
+                    .keys()
+                    .next().value;
+                if (!oldestSessionKey) {
+                    break;
+                }
+                this.#latestRequestBoundaries.delete(oldestSessionKey);
+            }
         }
         return this.#sequence;
     }
@@ -2283,6 +2327,11 @@ export class OpenClawChatBridge {
         for (const candidateSessionKey of this.#pendingPersistence) {
             if (isSameSessionKey(candidateSessionKey, storageSessionKey)) {
                 sessionKeys.add(candidateSessionKey);
+            }
+        }
+        for (const candidateSessionKey of this.#latestRequestBoundaries.keys()) {
+            if (isSameSessionKey(candidateSessionKey, storageSessionKey)) {
+                this.#latestRequestBoundaries.delete(candidateSessionKey);
             }
         }
         if (this.#store) {
