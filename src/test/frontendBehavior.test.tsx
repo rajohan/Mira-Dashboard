@@ -3804,6 +3804,13 @@ describe("Mira Dashboard frontend behavior", () => {
         ).resolves.toMatch(/^data:/);
         expect(displayMimeType(new File(["hello"], "hello.txt"))).toBe("text/plain");
         expect(displayMimeType(new File(["image"], "photo.PNG"))).toBe("image/png");
+        expect(
+            displayMimeType(
+                new File(["image"], "photo.png", {
+                    type: "application/octet-stream",
+                })
+            )
+        ).toBe("image/png");
         expect(displayMimeType(new File(["vector"], "diagram.svg"))).toBe(
             "image/svg+xml"
         );

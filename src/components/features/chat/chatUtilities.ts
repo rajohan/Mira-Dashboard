@@ -18,6 +18,7 @@ export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS = 10;
 const CHAT_ATTACHMENT_MIME_PREFIXES = ["image/", "audio/", "text/"] as const;
 const CHAT_ATTACHMENT_EXACT_MIME_TYPES = new Set(["application/pdf"]);
+const GENERIC_ATTACHMENT_MIME_TYPE = "application/octet-stream";
 const CHAT_ATTACHMENT_EXTENSION_MIME_TYPES = new Map<string, string>([
     [".png", "image/png"],
     [".jpg", "image/jpeg"],
@@ -73,6 +74,11 @@ function chatAttachmentExtension(fileName: string): string {
     return extensionIndex === -1 ? "" : normalizedName.slice(extensionIndex);
 }
 
+/** Returns the browser-declared MIME without optional parameters. */
+function declaredChatAttachmentMimeType(type: string): string {
+    return type.split(";", 1)[0]?.trim().toLowerCase() || "";
+}
+
 /** Returns whether OpenClaw intentionally excludes this video attachment. */
 export function isVideoAttachment(file: Pick<File, "name" | "type">): boolean {
     const mimeType = file.type.trim().toLowerCase();
@@ -87,14 +93,22 @@ export function isVideoAttachment(file: Pick<File, "name" | "type">): boolean {
 
 /** Returns whether a selected or dropped file matches the chat picker policy. */
 export function isSupportedChatAttachment(file: Pick<File, "name" | "type">): boolean {
-    const mimeType = file.type.split(";", 1)[0]?.trim().toLowerCase() || "";
+    const mimeType = declaredChatAttachmentMimeType(file.type);
     if (
         CHAT_ATTACHMENT_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix)) ||
         CHAT_ATTACHMENT_EXACT_MIME_TYPES.has(mimeType)
     ) {
         return true;
     }
-    return CHAT_ATTACHMENT_EXTENSION_MIME_TYPES.has(chatAttachmentExtension(file.name));
+    const extensionMimeType = CHAT_ATTACHMENT_EXTENSION_MIME_TYPES.get(
+        chatAttachmentExtension(file.name)
+    );
+    return Boolean(
+        extensionMimeType &&
+        (!mimeType ||
+            mimeType === GENERIC_ATTACHMENT_MIME_TYPE ||
+            mimeType === extensionMimeType)
+    );
 }
 
 function canonicalChatValue(value: unknown, ancestors: Set<object>): unknown {
@@ -1003,10 +1017,12 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 
 /** Performs display MIME type. */
 export function displayMimeType(file: File): string {
-    const declaredMimeType = file.type.trim().toLowerCase();
+    const declaredMimeType = declaredChatAttachmentMimeType(file.type);
+    if (declaredMimeType && declaredMimeType !== GENERIC_ATTACHMENT_MIME_TYPE) {
+        return declaredMimeType;
+    }
     return (
-        declaredMimeType ||
         CHAT_ATTACHMENT_EXTENSION_MIME_TYPES.get(chatAttachmentExtension(file.name)) ||
-        "application/octet-stream"
+        GENERIC_ATTACHMENT_MIME_TYPE
     );
 }

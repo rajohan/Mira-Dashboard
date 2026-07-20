@@ -170,10 +170,16 @@ describe("chat input media", () => {
                     new File(["data"], "payload.bin", {
                         type: "application/octet-stream",
                     }),
+                    new File(["app"], "spoofed.txt", {
+                        type: "application/x-msdownload",
+                    }),
                     new File(["report"], "report.pdf", {
                         type: "application/pdf",
                     }),
                     new File(["image"], "photo.png"),
+                    new File(["generic-image"], "generic.png", {
+                        type: "application/octet-stream",
+                    }),
                     new File(["vector"], "diagram.svg"),
                     new File(["audio"], "clip.mp3"),
                     new File(["pdf"], "scan.pdf"),
@@ -190,17 +196,26 @@ describe("chat input media", () => {
         ).toEqual([
             { fileName: "report.pdf", kind: "file", mimeType: "application/pdf" },
             { fileName: "photo.png", kind: "image", mimeType: "image/png" },
+            { fileName: "generic.png", kind: "image", mimeType: "image/png" },
             { fileName: "diagram.svg", kind: "image", mimeType: "image/svg+xml" },
             { fileName: "clip.mp3", kind: "file", mimeType: "audio/mpeg" },
             { fileName: "scan.pdf", kind: "file", mimeType: "application/pdf" },
         ]);
         const errorMessage =
-            "Skipped unsupported files: installer.exe, payload.bin. Choose images, audio, PDFs, text, ZIP, or Office documents.";
+            "Skipped unsupported files: installer.exe, payload.bin, spoofed.txt. Choose images, audio, PDFs, text, ZIP, or Office documents.";
         expect(result.current.attachmentError).toEqual({
             message: errorMessage,
             source: "composer",
         });
         expect(onError).not.toHaveBeenCalledWith(errorMessage);
+        expect(
+            result.current.attachments.find(({ fileName }) => fileName === "photo.png")
+                ?.dataUrl
+        ).toStartWith("data:image/png;base64,");
+        expect(
+            result.current.attachments.find(({ fileName }) => fileName === "generic.png")
+                ?.dataUrl
+        ).toStartWith("data:image/png;base64,");
 
         await act(async () => {
             await result.current.handleFilesSelected(

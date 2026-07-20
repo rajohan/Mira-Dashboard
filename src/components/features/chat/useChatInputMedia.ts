@@ -166,16 +166,17 @@ export function useChatInputMedia({
                             `${file.name} is too large (${formatSize(file.size)}). Max is ${formatSize(MAX_ATTACHMENT_BYTES)}.`
                         );
                     }
-                    const dataUrl = await readFileAsDataUrl(file);
+                    const readDataUrl = await readFileAsDataUrl(file);
                     const mimeType = displayMimeType(file);
+                    const contentBase64 = dataUrlToBase64(readDataUrl);
                     return {
                         id: `${file.name}-${file.lastModified}-${file.size}-${Math.random().toString(36).slice(2, 8)}`,
                         file,
                         fileName: file.name,
                         mimeType,
                         sizeBytes: file.size,
-                        contentBase64: dataUrlToBase64(dataUrl),
-                        dataUrl,
+                        contentBase64,
+                        dataUrl: `data:${mimeType};base64,${contentBase64}`,
                         kind: attachmentKind(mimeType),
                     } satisfies ChatSendAttachment;
                 })

@@ -92,6 +92,10 @@ For destructive actions:
 - Chat composer settings own model, thinking level, speed, and context
   compaction. Thinking, tool visibility, and retaining thinking after the final
   answer are independent persisted toggles.
+- Chat attachments support direct composer drops and a dedicated picker with
+  selection, drop, preview, and removal. File-policy errors remain scoped to the
+  surface that received the files, while supported empty/generic MIME values are
+  normalized before preview and transport.
 - The quota card shows provider-specific windows. OpenAI may expose a weekly
   window with an optional five-hour window; a missing five-hour value means
   unlimited, not a parse failure.
