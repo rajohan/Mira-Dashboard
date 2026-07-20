@@ -126,24 +126,11 @@ export function Chat() {
     const [keepThinkingAfterFinal, setKeepThinkingAfterFinal] = useState(
         () => readStoredChatDiagnosticVisibility().keepThinkingAfterFinal
     );
-    const visibleError =
-        sendError || (error === dismissedTransportError ? undefined : error);
-
     useEffect(() => {
         if (!error) {
             setDismissedTransportError(undefined);
         }
     }, [error]);
-
-    const dismissVisibleError = () => {
-        if (sendError) {
-            setSendError(undefined);
-            return;
-        }
-        if (error) {
-            setDismissedTransportError(error);
-        }
-    };
 
     const inputMedia = useChatInputMedia({
         onError: setSendError,
@@ -151,8 +138,10 @@ export function Chat() {
         setDraft,
     });
     const {
+        attachmentError,
         attachments,
         attachmentsReference,
+        clearAttachmentError,
         clearAttachments,
         fileInputReference,
         handleFilesSelected,
@@ -163,6 +152,28 @@ export function Chat() {
         removeAttachment,
         voiceFileInputReference,
     } = inputMedia;
+    const composerAttachmentError =
+        attachmentError?.source === "composer" ? attachmentError.message : undefined;
+    const attachmentPickerError =
+        attachmentError?.source === "picker" ? attachmentError.message : undefined;
+    const visibleError =
+        sendError ||
+        composerAttachmentError ||
+        (error === dismissedTransportError ? undefined : error);
+
+    const dismissVisibleError = () => {
+        if (sendError) {
+            setSendError(undefined);
+            return;
+        }
+        if (composerAttachmentError) {
+            clearAttachmentError("composer");
+            return;
+        }
+        if (error) {
+            setDismissedTransportError(error);
+        }
+    };
 
     const { data: sessions } = useLiveQuery((query) =>
         query.from({ session: sessionsCollection })
@@ -551,6 +562,7 @@ export function Chat() {
                     />
 
                     <ChatComposer
+                        attachmentPickerError={attachmentPickerError}
                         attachments={attachments}
                         modelOptions={chatModelOptions}
                         canSend={canSend}
@@ -573,8 +585,13 @@ export function Chat() {
                         isCompacting={isCompactingSession}
                         slashCommandSuggestions={slashCommandSuggestions}
                         onApplySlashSuggestion={applySlashSuggestion}
-                        onAttachFiles={(files) => void handleFilesSelected(files)}
+                        onAttachFiles={(files, source) =>
+                            void handleFilesSelected(files, source)
+                        }
                         onChangeDraft={setDraft}
+                        onDismissAttachmentPickerError={() =>
+                            clearAttachmentError("picker")
+                        }
                         onPreview={setPreviewItem}
                         onRemoveAttachment={removeAttachment}
                         onSend={() => void handleSend()}

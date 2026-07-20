@@ -10,6 +10,7 @@ import {
 import { type DragEvent, useEffect, useRef, useState } from "react";
 
 import { formatSize } from "../../../utils/format";
+import { Alert } from "../../ui/Alert";
 import { Button } from "../../ui/Button";
 import { Modal } from "../../ui/Modal";
 import { AttachmentPreviewContent } from "./AttachmentPreviewModal";
@@ -27,6 +28,7 @@ export function hasFilesInDataTransfer(dataTransfer: DataTransfer): boolean {
 
 interface ChatAttachmentPickerModalProperties {
     attachments: ChatSendAttachment[];
+    error?: string;
     isDisabled?: boolean;
     isOpen: boolean;
     onChooseFiles: () => void;
@@ -62,6 +64,7 @@ function PendingAttachmentVisual({ attachment }: { attachment: ChatSendAttachmen
 /** Renders the custom file selection and drop experience for chat attachments. */
 export function ChatAttachmentPickerModal({
     attachments,
+    error,
     isDisabled = false,
     isOpen,
     onChooseFiles,
@@ -175,6 +178,13 @@ export function ChatAttachmentPickerModal({
                 </div>
             ) : (
                 <div className="min-w-0 space-y-4">
+                    {error ? (
+                        <div role="alert">
+                            <Alert variant="error" className="min-w-0 text-sm">
+                                <span className="wrap-break-word">{error}</span>
+                            </Alert>
+                        </div>
+                    ) : undefined}
                     {attachments.length > 0 ? (
                         <section aria-labelledby="selected-chat-attachments-heading">
                             <div className="mb-2 flex min-w-0 items-center justify-between gap-3">

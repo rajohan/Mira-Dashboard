@@ -9,7 +9,12 @@ import {
 
 import { formatSize } from "../../../utils/format";
 import { supportedAudioRecordingMimeType } from "./chatPageUtilities";
-import { attachmentKind, type ChatSendAttachment } from "./chatTypes";
+import {
+    attachmentKind,
+    type ChatAttachmentError,
+    type ChatAttachmentInputSource,
+    type ChatSendAttachment,
+} from "./chatTypes";
 import {
     chatErrorMessage,
     dataUrlToBase64,
@@ -43,6 +48,9 @@ export function useChatInputMedia({
     const recordingStartEpochReference = useRef<number | undefined>(undefined);
     const sessionKeyReference = useRef(sessionKey);
     const transcriptionCountReference = useRef(0);
+    const [attachmentError, setAttachmentError] = useState<
+        ChatAttachmentError | undefined
+    >(undefined);
     const [attachments, setAttachments] = useState<ChatSendAttachment[]>([]);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
@@ -78,6 +86,7 @@ export function useChatInputMedia({
             }
         }
         if (shouldUpdateState) {
+            setAttachmentError(undefined);
             setAttachments([]);
             setIsRecording(false);
             setIsTranscribing(false);
@@ -86,11 +95,21 @@ export function useChatInputMedia({
 
     const clearAttachments = () => invalidateMedia();
 
-    const handleFilesSelected = async (files: FileList | undefined) => {
+    const clearAttachmentError = (source?: ChatAttachmentInputSource) => {
+        setAttachmentError((current) =>
+            !source || current?.source === source ? undefined : current
+        );
+    };
+
+    const handleFilesSelected = async (
+        files: FileList | undefined,
+        source: ChatAttachmentInputSource = "composer"
+    ) => {
         if (!files || files.length === 0) {
             return;
         }
         onError(undefined);
+        setAttachmentError(undefined);
         const unsupportedFiles: File[] = [];
         const unsupportedVideos: File[] = [];
         const supportedFiles: File[] = [];
@@ -115,7 +134,7 @@ export function useChatInputMedia({
             );
         }
         if (supportedFiles.length === 0) {
-            onError(selectionErrors.join(" "));
+            setAttachmentError({ message: selectionErrors.join(" "), source });
             if (fileInputReference.current) {
                 fileInputReference.current.value = "";
             }
@@ -136,7 +155,7 @@ export function useChatInputMedia({
             );
         }
         if (selectionErrors.length > 0) {
-            onError(selectionErrors.join(" "));
+            setAttachmentError({ message: selectionErrors.join(" "), source });
         }
 
         try {
@@ -171,7 +190,10 @@ export function useChatInputMedia({
             });
         } catch (error) {
             if (mediaEpochReference.current === operationEpoch) {
-                onError(chatErrorMessage(error, "Failed to read attachment"));
+                setAttachmentError({
+                    message: chatErrorMessage(error, "Failed to read attachment"),
+                    source,
+                });
             }
         } finally {
             if (mediaEpochReference.current === operationEpoch) {
@@ -404,8 +426,10 @@ export function useChatInputMedia({
     );
 
     return {
+        attachmentError,
         attachments,
         attachmentsReference,
+        clearAttachmentError,
         clearAttachments,
         fileInputReference,
         handleFilesSelected,

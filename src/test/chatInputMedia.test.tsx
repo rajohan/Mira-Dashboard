@@ -54,9 +54,10 @@ describe("chat input media", () => {
             fileName: "file-0.txt",
             kind: "text",
         });
-        expect(onError).toHaveBeenCalledWith(
-            `Only ${MAX_ATTACHMENTS} attachments can be sent at once.`
-        );
+        expect(result.current.attachmentError).toEqual({
+            message: `Only ${MAX_ATTACHMENTS} attachments can be sent at once.`,
+            source: "composer",
+        });
         expect(input.value).toBe("");
 
         act(() => {
@@ -72,7 +73,10 @@ describe("chat input media", () => {
             );
         });
         expect(result.current.attachments).toEqual([]);
-        expect(onError.mock.calls.at(-1)?.[0]).toContain("large.txt is too large");
+        expect(result.current.attachmentError).toEqual({
+            message: expect.stringContaining("large.txt is too large"),
+            source: "composer",
+        });
     });
 
     it("reserves attachment capacity across concurrent selections", async () => {
@@ -130,9 +134,11 @@ describe("chat input media", () => {
             "voice.webm",
             "notes.txt",
         ]);
-        expect(onError).toHaveBeenLastCalledWith(
-            "Skipped video files: clip.mp4, movie.webm. Choose images, audio, PDFs, text, ZIP, or Office documents."
-        );
+        expect(result.current.attachmentError).toEqual({
+            message:
+                "Skipped video files: clip.mp4, movie.webm. Choose images, audio, PDFs, text, ZIP, or Office documents.",
+            source: "composer",
+        });
         expect(input.value).toBe("");
 
         act(() => result.current.clearAttachments());
@@ -142,9 +148,11 @@ describe("chat input media", () => {
             );
         });
         expect(result.current.attachments).toEqual([]);
-        expect(onError).toHaveBeenLastCalledWith(
-            "Skipped video files: only-video.mov. Choose images, audio, PDFs, text, ZIP, or Office documents."
-        );
+        expect(result.current.attachmentError).toEqual({
+            message:
+                "Skipped video files: only-video.mov. Choose images, audio, PDFs, text, ZIP, or Office documents.",
+            source: "composer",
+        });
     });
 
     it("rejects dropped file types outside the attachment picker policy", async () => {
@@ -172,9 +180,34 @@ describe("chat input media", () => {
         expect(result.current.attachments.map(({ fileName }) => fileName)).toEqual([
             "report.pdf",
         ]);
-        expect(onError).toHaveBeenLastCalledWith(
-            "Skipped unsupported files: installer.exe, payload.bin. Choose images, audio, PDFs, text, ZIP, or Office documents."
-        );
+        const errorMessage =
+            "Skipped unsupported files: installer.exe, payload.bin. Choose images, audio, PDFs, text, ZIP, or Office documents.";
+        expect(result.current.attachmentError).toEqual({
+            message: errorMessage,
+            source: "composer",
+        });
+        expect(onError).not.toHaveBeenCalledWith(errorMessage);
+
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["app"], "modal-installer.exe", {
+                        type: "application/x-msdownload",
+                    }),
+                ]),
+                "picker"
+            );
+        });
+        expect(result.current.attachmentError).toEqual({
+            message:
+                "Skipped unsupported files: modal-installer.exe. Choose images, audio, PDFs, text, ZIP, or Office documents.",
+            source: "picker",
+        });
+
+        act(() => result.current.clearAttachmentError("composer"));
+        expect(result.current.attachmentError?.source).toBe("picker");
+        act(() => result.current.clearAttachmentError("picker"));
+        expect(result.current.attachmentError).toBeUndefined();
     });
 
     it("transcribes voice files and reports provider and input failures", async () => {

@@ -41,7 +41,11 @@ import {
     ChatAttachmentPickerModal,
     hasFilesInDataTransfer,
 } from "./ChatAttachmentPickerModal";
-import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
+import type {
+    ChatAttachmentInputSource,
+    ChatPreviewItem,
+    ChatSendAttachment,
+} from "./chatTypes";
 import {
     CHAT_ATTACHMENT_ACCEPT,
     type ChatModelOption,
@@ -172,6 +176,7 @@ function shouldSendFromEnter(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
 
 /** Provides props for chat composer. */
 interface ChatComposerProperties {
+    attachmentPickerError?: string;
     attachments: ChatSendAttachment[];
     canSend: boolean;
     canStop?: boolean;
@@ -194,8 +199,12 @@ interface ChatComposerProperties {
     isCompacting?: boolean;
     slashCommandSuggestions: SlashCommandSuggestion[];
     onApplySlashSuggestion: (value: string) => void;
-    onAttachFiles: (files: FileList | undefined) => void;
+    onAttachFiles: (
+        files: FileList | undefined,
+        source: ChatAttachmentInputSource
+    ) => void;
     onChangeDraft: (value: string) => void;
+    onDismissAttachmentPickerError?: () => void;
     onPreview: (isPreview: ChatPreviewItem) => void;
     onRemoveAttachment: (attachmentId: string) => void;
     onSend: () => void;
@@ -213,6 +222,7 @@ interface ChatComposerProperties {
 
 /** Renders the chat composer UI. */
 export function ChatComposer({
+    attachmentPickerError,
     attachments,
     canSend,
     canStop = false,
@@ -237,6 +247,7 @@ export function ChatComposer({
     onApplySlashSuggestion,
     onAttachFiles,
     onChangeDraft,
+    onDismissAttachmentPickerError,
     onPreview,
     onRemoveAttachment,
     onSend,
@@ -390,7 +401,7 @@ export function ChatComposer({
         fileDragDepthReference.current = 0;
         setIsDraggingFiles(false);
         if (canAttachFiles && event.dataTransfer.files.length > 0) {
-            onAttachFiles(event.dataTransfer.files);
+            onAttachFiles(event.dataTransfer.files, "composer");
         }
     };
 
@@ -399,7 +410,7 @@ export function ChatComposer({
         if (!canAttachFiles || !files || files.length === 0) {
             return;
         }
-        onAttachFiles(files);
+        onAttachFiles(files, "picker");
     };
 
     return (
@@ -892,7 +903,10 @@ export function ChatComposer({
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => setIsAttachmentPickerOpen(true)}
+                                onClick={() => {
+                                    onDismissAttachmentPickerError?.();
+                                    setIsAttachmentPickerOpen(true);
+                                }}
                                 disabled={!canAttachFiles}
                                 title="Attach files"
                                 aria-label="Attach files"
@@ -937,10 +951,14 @@ export function ChatComposer({
             </div>
             <ChatAttachmentPickerModal
                 attachments={attachments}
+                error={attachmentPickerError}
                 isDisabled={!canAttachFiles}
                 isOpen={isAttachmentPickerOpen}
                 onChooseFiles={() => fileInputReference.current?.click()}
-                onClose={() => setIsAttachmentPickerOpen(false)}
+                onClose={() => {
+                    setIsAttachmentPickerOpen(false);
+                    onDismissAttachmentPickerError?.();
+                }}
                 onFilesSelected={handleFilesSelected}
                 onRemoveAttachment={onRemoveAttachment}
             />
