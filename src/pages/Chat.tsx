@@ -86,6 +86,7 @@ export function Chat() {
     const requestedSessionKey = search.session?.trim() || "";
     const transport = useOpenClawChatTransport();
     const { error, isConnected } = transport;
+    const availableSessionKeysReference = useRef<Set<string>>(new Set());
     const selectedSessionKeyReference = useRef("");
     const previousRequestedSessionKeyReference = useRef(requestedSessionKey);
     const shouldStickToBottomReference = useRef(true);
@@ -234,12 +235,12 @@ export function Chat() {
         isLoadingHistory
     );
     const {
+        followToBottom: followMessagesToBottom,
         handleDynamicContentLoad: handleDynamicRowContentLoad,
         handleScroll: handleMessagesScroll,
         handleUserScrollIntent,
         messagesContainerReference,
         scheduleBottomFollow,
-        scrollToBottom: scrollMessagesToBottom,
         virtualizer: messagesVirtualizer,
     } = scroll;
 
@@ -273,27 +274,42 @@ export function Chat() {
     }, [requestedSessionKey, selectedSessionKey]);
 
     useEffect(() => {
-        if (sortedSessions.length === 0) {
-            if (selectedSessionKey && !requestedSessionKey) {
+        const availableSessionKeys = new Set(
+            sortedSessions
+                .filter((session) => hasSessionKey(session))
+                .map((session) => session.key)
+        );
+        const wasSelectedSessionAvailable = Boolean(
+            selectedSessionKey &&
+            availableSessionKeysReference.current.has(selectedSessionKey)
+        );
+        availableSessionKeysReference.current = availableSessionKeys;
+        const hasSelectedSession = availableSessionKeys.has(selectedSessionKey);
+
+        if (availableSessionKeys.size === 0) {
+            if (selectedSessionKey && wasSelectedSessionAvailable) {
+                selectSession("");
+            } else if (selectedSessionKey && !requestedSessionKey) {
                 setSelectedSessionKey("");
             }
             return;
         }
 
-        if (requestedSessionKey) {
+        if (requestedSessionKey && (!wasSelectedSessionAvailable || hasSelectedSession)) {
             return;
         }
 
-        const hasSelectedSession = sortedSessions.some(
-            (session) => session.key === selectedSessionKey
-        );
         if (!selectedSessionKey || !hasSelectedSession) {
             const fallbackSession = sortedSessions.find((session) =>
                 hasSessionKey(session)
             );
-            setSelectedSessionKey(fallbackSession?.key || "");
+            if (fallbackSession) {
+                selectSession(fallbackSession.key);
+            } else if (selectedSessionKey) {
+                setSelectedSessionKey("");
+            }
         }
-    }, [requestedSessionKey, selectedSessionKey, sortedSessions]);
+    }, [requestedSessionKey, selectSession, selectedSessionKey, sortedSessions]);
 
     useEffect(() => {
         setDeletedMessageKeys(
@@ -487,7 +503,7 @@ export function Chat() {
                         messagesContainerReference={messagesContainerReference}
                         messagesVirtualizer={messagesVirtualizer}
                         onDynamicContentLoad={handleDynamicRowContentLoad}
-                        onFollow={scrollMessagesToBottom}
+                        onFollow={followMessagesToBottom}
                         onPreview={setPreviewItem}
                         visibility={createRuntimeVisibility(
                             showThinkingOutput,

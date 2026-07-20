@@ -263,13 +263,15 @@ function ActivityIndicator({
     text?: string;
 }) {
     return (
-        <div className="flex justify-start pb-3">
-            <div className="rounded-2xl border border-primary-700 bg-primary-800 px-3 py-2 text-sm text-primary-100 shadow-sm">
+        <div className="flex max-w-full min-w-0 justify-start pb-3">
+            <div className="max-w-full min-w-0 rounded-2xl border border-primary-700 bg-primary-800 px-3 py-2 text-sm text-primary-100 shadow-sm">
                 <div className="mb-0.5 text-[11px] tracking-wide uppercase opacity-70">
                     assistant
                 </div>
-                <div className="flex items-center gap-2 text-primary-300">
-                    <span className="min-w-0 wrap-break-word">{text || "Thinking"}</span>
+                <div className="flex min-w-0 items-center gap-2 text-primary-300">
+                    <span className="min-w-0 flex-1 wrap-break-word">
+                        {text || "Thinking"}
+                    </span>
                     {active ? (
                         <span
                             className="flex shrink-0 gap-1"
@@ -460,7 +462,7 @@ export function ChatMessagesList({
             onScroll={onScroll}
             onTouchMoveCapture={onUserScrollIntent}
             onWheelCapture={onUserScrollIntent}
-            className="mt-3 min-h-0 flex-1 overflow-y-auto pr-0 sm:mt-4 sm:pr-1"
+            className="mt-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-0 sm:mt-4 sm:pr-1"
             style={{ overflowAnchor: "none" }}
         >
             {!isAtBottom && chatRows.length > 0 ? (

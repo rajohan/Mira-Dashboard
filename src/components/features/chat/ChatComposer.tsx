@@ -23,6 +23,7 @@ import {
     X,
 } from "lucide-react";
 import {
+    type DragEvent as ReactDragEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type ReactNode,
     type RefObject,
@@ -36,6 +37,10 @@ import { formatSize } from "../../../utils/format";
 import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
 import { Textarea } from "../../ui/Textarea";
+import {
+    ChatAttachmentPickerModal,
+    hasFilesInDataTransfer,
+} from "./ChatAttachmentPickerModal";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 import {
     base64ToText,
@@ -43,6 +48,7 @@ import {
     type ChatModelOption,
     chatSpeedOptions,
     chatThinkingOptions,
+    MAX_ATTACHMENTS,
     selectedChatSpeed,
 } from "./chatUtilities";
 import type { SlashCommandSuggestion } from "./slashCommands";
@@ -246,7 +252,10 @@ export function ChatComposer({
     onCompact,
 }: ChatComposerProperties) {
     const [activeSlashSuggestionIndex, setActiveSlashSuggestionIndex] = useState(0);
+    const [isAttachmentPickerOpen, setIsAttachmentPickerOpen] = useState(false);
+    const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const [slashSuggestionsDismissed, setSlashSuggestionsDismissed] = useState(false);
+    const fileDragDepthReference = useRef(0);
     const textareaReference = useRef<HTMLTextAreaElement | undefined>(undefined);
     const slashOptionsReference = useRef<HTMLDivElement | null>(null);
     const shouldShowSlashSuggestions =
@@ -260,6 +269,13 @@ export function ChatComposer({
         label: option.label || option.name || option.id || "Unknown",
     }));
     const currentModel = selectedSession?.model || "";
+    const canAttachFiles = Boolean(
+        isConnected &&
+        selectedSessionKey &&
+        !isSending &&
+        !isRecording &&
+        attachments.length < MAX_ATTACHMENTS
+    );
 
     useEffect(() => {
         if (!shouldShowSlashSuggestions) {
@@ -332,8 +348,69 @@ export function ChatComposer({
         requestAnimationFrame(() => textareaReference.current?.focus());
     };
 
+    /** Shows a drop affordance while files are dragged over the composer. */
+    const handleFileDragEnter = (event: ReactDragEvent<HTMLDivElement>) => {
+        if (!hasFilesInDataTransfer(event.dataTransfer)) {
+            return;
+        }
+        event.preventDefault();
+        fileDragDepthReference.current += 1;
+        if (canAttachFiles) {
+            setIsDraggingFiles(true);
+        }
+    };
+
+    /** Keeps operating-system file drops inside the composer. */
+    const handleFileDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+        if (!hasFilesInDataTransfer(event.dataTransfer)) {
+            return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = canAttachFiles ? "copy" : "none";
+    };
+
+    /** Clears the drop affordance once the drag leaves the composer. */
+    const handleFileDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+        if (!hasFilesInDataTransfer(event.dataTransfer)) {
+            return;
+        }
+        event.preventDefault();
+        fileDragDepthReference.current = Math.max(0, fileDragDepthReference.current - 1);
+        if (fileDragDepthReference.current === 0) {
+            setIsDraggingFiles(false);
+        }
+    };
+
+    /** Attaches files dropped directly onto the composer. */
+    const handleFileDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+        if (!hasFilesInDataTransfer(event.dataTransfer)) {
+            return;
+        }
+        event.preventDefault();
+        fileDragDepthReference.current = 0;
+        setIsDraggingFiles(false);
+        if (canAttachFiles && event.dataTransfer.files.length > 0) {
+            onAttachFiles(event.dataTransfer.files);
+        }
+    };
+
+    /** Attaches a file-picker selection and closes the custom picker. */
+    const handleFilesSelected = (files: FileList | undefined) => {
+        if (!canAttachFiles || !files || files.length === 0) {
+            return;
+        }
+        onAttachFiles(files);
+        setIsAttachmentPickerOpen(false);
+    };
+
     return (
-        <div className="mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4">
+        <div
+            onDragEnter={handleFileDragEnter}
+            onDragOver={handleFileDragOver}
+            onDragLeave={handleFileDragLeave}
+            onDrop={handleFileDrop}
+            className="relative mt-3 border-t border-primary-700 pt-3 sm:mt-4 sm:pt-4"
+        >
             {attachments.length > 0 ? (
                 <div className="mb-3 flex flex-wrap gap-2">
                     {attachments.map((attachment) => (
@@ -398,8 +475,15 @@ export function ChatComposer({
                     accept={CHAT_ATTACHMENT_ACCEPT}
                     multiple
                     className="hidden"
-                    onChange={(event) => onAttachFiles(event.target.files ?? undefined)}
+                    onChange={(event) =>
+                        handleFilesSelected(event.target.files ?? undefined)
+                    }
                 />
+                {isDraggingFiles ? (
+                    <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-accent-400 bg-primary-950/90 px-4 text-center text-sm font-medium text-accent-200 shadow-xl">
+                        Drop files to attach
+                    </div>
+                ) : undefined}
                 <Combobox
                     value={undefined as SlashCommandSuggestion | undefined}
                     onChange={(suggestion: SlashCommandSuggestion | null | undefined) => {
@@ -820,14 +904,8 @@ export function ChatComposer({
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => fileInputReference.current?.click()}
-                                disabled={
-                                    !isConnected ||
-                                    !selectedSessionKey ||
-                                    isSending ||
-                                    isRecording ||
-                                    attachments.length >= 10
-                                }
+                                onClick={() => setIsAttachmentPickerOpen(true)}
+                                disabled={!canAttachFiles}
                                 title="Attach files"
                                 aria-label="Attach files"
                                 className="rounded-full p-2 text-primary-400 hover:bg-primary-600 hover:text-primary-100"
@@ -869,6 +947,14 @@ export function ChatComposer({
                     </div>
                 </Combobox>
             </div>
+            <ChatAttachmentPickerModal
+                attachmentCount={attachments.length}
+                isDisabled={!canAttachFiles}
+                isOpen={isAttachmentPickerOpen}
+                onChooseFiles={() => fileInputReference.current?.click()}
+                onClose={() => setIsAttachmentPickerOpen(false)}
+                onFilesSelected={handleFilesSelected}
+            />
         </div>
     );
 }

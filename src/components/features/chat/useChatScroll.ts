@@ -176,10 +176,12 @@ export function useChatScroll(
         };
         bottomFollowFrameReference.current = requestAnimationFrame(followBottom);
     };
-    resumeStickyBottomReference.current = () => {
+    const followToBottom = () => {
         shouldStickToBottomReference.current = true;
+        setIsAtBottom(true);
         scheduleBottomFollow(true, true);
     };
+    resumeStickyBottomReference.current = followToBottom;
 
     const handleUserScrollIntent = () => {
         cancelBottomFollow();
@@ -263,7 +265,7 @@ export function useChatScroll(
         handleUserScrollIntent,
         messagesContainerReference,
         scheduleBottomFollow,
-        scrollToBottom,
+        followToBottom,
         virtualizer,
     };
 }

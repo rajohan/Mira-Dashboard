@@ -532,6 +532,8 @@ describe("shared component helpers", () => {
             />
         );
         expect(screen.getByAltText("Preview image")).toBeInTheDocument();
+        expect(screen.getByText("File type")).toBeInTheDocument();
+        expect(screen.getByText("image/png")).toBeInTheDocument();
         expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
             "download",
             "Preview image"
@@ -1075,6 +1077,20 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: /remove note.txt/i }));
         expect(onRemoveAttachment).toHaveBeenCalledWith("a1");
         const textarea = screen.getByRole("combobox");
+        const directlyDroppedFiles = [
+            new File(["direct"], "direct-drop.txt", { type: "text/plain" }),
+        ] as unknown as FileList;
+        const directDropData = {
+            dropEffect: "none",
+            files: directlyDroppedFiles,
+            types: ["Files"],
+        };
+        fireEvent.dragEnter(textarea, { dataTransfer: directDropData });
+        expect(screen.getByText("Drop files to attach")).toBeInTheDocument();
+        fireEvent.dragOver(textarea, { dataTransfer: directDropData });
+        fireEvent.drop(textarea, { dataTransfer: directDropData });
+        expect(onAttachFiles).toHaveBeenCalledWith(directlyDroppedFiles);
+        expect(screen.queryByText("Drop files to attach")).not.toBeInTheDocument();
         fireEvent.change(textarea, { target: { value: "/hel" } });
         await user.click(await screen.findByRole("option", { name: /help/i }));
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/help");
@@ -1169,8 +1185,23 @@ describe("shared component helpers", () => {
 
         await user.click(screen.getByRole("button", { name: /voice/i }));
         await user.click(screen.getByRole("button", { name: /attach/i }));
+        expect(screen.getByRole("dialog", { name: "Attach files" })).toBeInTheDocument();
+        const modalDroppedFiles = [
+            new File(["modal"], "modal-drop.txt", { type: "text/plain" }),
+        ] as unknown as FileList;
+        const modalDropData = {
+            dropEffect: "none",
+            files: modalDroppedFiles,
+            types: ["Files"],
+        };
+        const dropZone = screen.getByTestId("chat-attachment-drop-zone");
+        fireEvent.dragEnter(dropZone, { dataTransfer: modalDropData });
+        expect(dropZone).toHaveClass("border-accent-400");
+        fireEvent.drop(dropZone, { dataTransfer: modalDropData });
+        expect(onAttachFiles).toHaveBeenLastCalledWith(modalDroppedFiles);
         await user.click(screen.getByRole("button", { name: /send/i }));
         expect(onToggleRecording).toHaveBeenCalledTimes(1);
+        expect(onAttachFiles).toHaveBeenCalledTimes(2);
         expect(onSend).toHaveBeenCalledTimes(2);
     });
 
@@ -2326,6 +2357,7 @@ describe("shared component helpers", () => {
 
     it("renders chat messages list helpers and primary row actions", async () => {
         const user = userEvent.setup();
+        const longActivityText = `Bash ${"very-long-status-segment".repeat(12)}`;
         const onDynamicContentLoad = jest.fn();
         const onFollow = jest.fn();
         const onPreview = jest.fn();
@@ -2447,7 +2479,7 @@ describe("shared component helpers", () => {
                                 content: "",
                                 images: [],
                                 role: "assistant",
-                                text: "Working",
+                                text: longActivityText,
                             },
                         },
                     ]}
@@ -2522,6 +2554,9 @@ describe("shared component helpers", () => {
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({ kind: "text", title: "readme.txt" })
         );
+        const activityText = screen.getByText(longActivityText);
+        expect(activityText).toHaveClass("min-w-0", "flex-1", "wrap-break-word");
+        expect(messagesContainerReference.current).toHaveClass("overflow-x-hidden");
         expect(screen.getByLabelText("Assistant is working")).toBeInTheDocument();
     });
 

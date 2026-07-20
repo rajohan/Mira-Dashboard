@@ -46,7 +46,7 @@ import {
 import { validateJsonString } from "../utils/json";
 
 const CLEAR_SCHEDULE_FIELD = JSON.parse("null") as null;
-const DEFAULT_DISABLE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_DISABLE_FALLBACK_MS = 60 * 60 * 1000;
 
 type JobsView = "scheduled" | "openclaw";
 type DisableMode = JobDisableIntent["mode"];
@@ -99,6 +99,22 @@ function parseDisableUntilDraft(draft: DateTimePickerValue): number | undefined 
         Number(draft.hour),
         Number(draft.minute)
     );
+}
+
+/** Starts a new temporary disable at the end of today's app-time-zone date. */
+function defaultDisableUntilDraft(now = Date.now()): DateTimePickerValue {
+    const today = appTimeZoneParts(new Date(now));
+    const endOfToday = {
+        day: today.day,
+        hour: "23",
+        minute: "59",
+        month: today.month,
+        year: today.year,
+    };
+    const endOfTodayTimestamp = parseDisableUntilDraft(endOfToday);
+    return endOfTodayTimestamp !== undefined && endOfTodayTimestamp > now
+        ? endOfToday
+        : toDisableUntilDraft(now + DEFAULT_DISABLE_FALLBACK_MS);
 }
 
 function formatScheduledJobSchedule(job: ScheduledJob): string {
@@ -573,7 +589,7 @@ export function Jobs() {
     const [disableMode, setDisableMode] = useState<DisableMode>("until");
     const [disableComment, setDisableComment] = useState("");
     const [disableUntil, setDisableUntil] = useState<DateTimePickerValue>(() =>
-        toDisableUntilDraft(Date.now() + DEFAULT_DISABLE_DURATION_MS)
+        defaultDisableUntilDraft()
     );
     const [disableCommentError, setDisableCommentError] = useState<string | undefined>(
         undefined
@@ -721,14 +737,18 @@ export function Jobs() {
         setDisableCandidate(candidate);
         setDisableMode(existingIntent?.mode ?? "until");
         setDisableComment(existingIntent?.comment ?? "");
-        let untilTimestamp = Date.now() + DEFAULT_DISABLE_DURATION_MS;
+        let untilTimestamp: number | undefined;
         if (existingIntent?.mode === "until" && existingIntent.until) {
             const parsedUntilTimestamp = Date.parse(existingIntent.until);
             if (Number.isFinite(parsedUntilTimestamp)) {
                 untilTimestamp = parsedUntilTimestamp;
             }
         }
-        setDisableUntil(toDisableUntilDraft(untilTimestamp));
+        setDisableUntil(
+            untilTimestamp === undefined
+                ? defaultDisableUntilDraft()
+                : toDisableUntilDraft(untilTimestamp)
+        );
         setDisableCommentError(undefined);
         setDisableUntilError(undefined);
     }

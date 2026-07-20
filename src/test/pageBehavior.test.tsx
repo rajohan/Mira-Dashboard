@@ -59,6 +59,7 @@ import {
 } from "../pages/Terminal";
 import { normalizeChatSearch } from "../router";
 import { authActions } from "../stores/authStore";
+import { appTimeZoneParts } from "../utils/date";
 import { parseLogLine } from "../utils/logUtilities";
 
 type FakeWebSocketListener = (event?: { data?: string }) => void;
@@ -2365,7 +2366,10 @@ describe("Mira Dashboard pages", () => {
             name: /choose disabled until date, selected \d{2}\/\d{2}\/\d{4}/i,
         });
         const disableCommentInput = screen.getByLabelText("Comment");
-        expect(disabledUntilDateButton).toHaveTextContent(/^\d{2}\/\d{2}\/\d{4}$/u);
+        const today = appTimeZoneParts(new Date());
+        expect(disabledUntilDateButton).toHaveTextContent(
+            `${String(today.day).padStart(2, "0")}/${String(today.month).padStart(2, "0")}/${today.year}`
+        );
         expect(screen.getByTestId("date-time-picker-fields")).toHaveClass(
             "min-w-0",
             "grid-cols-1"
@@ -2955,6 +2959,11 @@ describe("Mira Dashboard pages", () => {
                 screen.getByText(/MAIN · codex · Context: 0.5k \/ 1k \(53%\)/)
             ).toBeInTheDocument();
         });
+        await waitFor(() => {
+            expect(view.router.state.location.search).toEqual({
+                session: "agent:main:main",
+            });
+        });
 
         await user.click(screen.getByLabelText("Model and response settings"));
         await user.click(screen.getByRole("button", { name: "Thinking: medium" }));
@@ -3192,6 +3201,7 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(screen.queryByText(/Loading chat/)).not.toBeInTheDocument();
         });
+        expect(view.router.state.location.search).toEqual({});
 
         view.unmount();
         view.queryClient.clear();

@@ -432,6 +432,52 @@ describe("chat scroll", () => {
         unmount();
     });
 
+    it("settles an explicit follow after the virtualized tail grows", () => {
+        const stickToBottomReference = { current: true };
+        const { result, unmount } = renderHook(() =>
+            useChatScroll(
+                [chatRow("answer", "assistant")],
+                "agent:main:main",
+                jest.fn(),
+                stickToBottomReference
+            )
+        );
+        let scrollHeight = 500;
+        let scrollTop = 0;
+        const scrollWrites: number[] = [];
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, get: () => scrollHeight },
+            scrollTop: {
+                configurable: true,
+                get: () => scrollTop,
+                set: (value: number) => {
+                    scrollTop = value;
+                    scrollWrites.push(value);
+                },
+            },
+        });
+        result.current.messagesContainerReference.current = container;
+        runAnimationFrames(4);
+
+        scrollTop = 150;
+        scrollWrites.length = 0;
+        stickToBottomReference.current = false;
+        act(() => result.current.followToBottom());
+        expect(stickToBottomReference.current).toBe(true);
+
+        runNextAnimationFrame();
+        expect(scrollWrites).toEqual([500]);
+        scrollHeight = 760;
+        runAnimationFrames(3);
+        expect(scrollWrites).toEqual([500, 760]);
+        expect(scrollTop).toBe(760);
+        expect(animationFrameState.frames.size).toBe(0);
+
+        unmount();
+    });
+
     it("delegates same-row growth to the virtualizer without a second scroll", () => {
         const stickToBottomReference = { current: true };
         const { result, rerender, unmount } = renderHook(

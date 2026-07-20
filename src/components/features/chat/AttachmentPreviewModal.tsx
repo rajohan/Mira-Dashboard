@@ -1,3 +1,4 @@
+import { Download, FileText, Image as ImageIcon, Paperclip } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { formatSize } from "../../../utils/format";
@@ -15,6 +16,17 @@ import {
 interface AttachmentPreviewModalProperties {
     previewItem: ChatPreviewItem | undefined;
     onClose: () => void;
+}
+
+/** Renders the attachment kind inside the preview toolbar. */
+function PreviewFileIcon({ kind }: { kind: ChatPreviewItem["kind"] }) {
+    if (kind === "image") {
+        return <ImageIcon className="size-5" />;
+    }
+    if (kind === "text") {
+        return <FileText className="size-5" />;
+    }
+    return <Paperclip className="size-5" />;
 }
 
 /** Renders the attachment preview modal UI. */
@@ -102,19 +114,32 @@ export function AttachmentPreviewModal({
         >
             {previewItem ? (
                 <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3 text-xs text-primary-400">
-                        <span>
-                            {previewItem.mimeType || "application/octet-stream"}
-                            {previewItem.sizeBytes
-                                ? ` · ${formatSize(previewItem.sizeBytes)}`
-                                : ""}
-                        </span>
+                    <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-primary-700 bg-primary-900/55 p-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary-700 text-accent-300">
+                                <PreviewFileIcon kind={previewItem.kind} />
+                            </div>
+                            <div className="min-w-0">
+                                <div className="text-[11px] font-medium tracking-wide text-primary-500 uppercase">
+                                    File type
+                                </div>
+                                <div className="text-sm break-all text-primary-100">
+                                    {previewItem.mimeType || "application/octet-stream"}
+                                </div>
+                                {previewItem.sizeBytes ? (
+                                    <div className="mt-0.5 text-xs text-primary-400">
+                                        {formatSize(previewItem.sizeBytes)}
+                                    </div>
+                                ) : undefined}
+                            </div>
+                        </div>
                         {previewItem.url ? (
                             <a
                                 href={previewItem.url}
                                 download={previewItem.title}
-                                className="shrink-0 text-accent-300 underline hover:text-accent-200"
+                                className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 self-stretch rounded-lg border border-primary-600 bg-primary-700 px-3 text-sm font-medium text-primary-100 transition hover:border-primary-500 hover:bg-primary-600 sm:self-center"
                             >
+                                <Download className="size-4" />
                                 Download file
                             </a>
                         ) : undefined}
