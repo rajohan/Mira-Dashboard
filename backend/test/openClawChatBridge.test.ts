@@ -2715,7 +2715,7 @@ describe("OpenClaw chat bridge", () => {
             providerRunId,
             now,
             undefined,
-            2
+            3
         );
         providerSnapshot.events[0]!.payload = {
             data: { phase: "start" },
@@ -2724,10 +2724,35 @@ describe("OpenClaw chat bridge", () => {
             stream: "lifecycle",
         };
         store.snapshots.set(MAIN, providerSnapshot);
-        store.snapshots.set(
-            "main",
-            persistedSnapshot("main", provisionalRunId, now - 1, undefined, 1)
-        );
+        store.snapshots.set("main", {
+            completed: false,
+            events: [
+                {
+                    event: "agent",
+                    payload: {
+                        runId: provisionalRunId,
+                        sessionKey: "main",
+                        stream: "thinking",
+                    },
+                    runtimeRecordedAt: now - 2,
+                    runtimeSequence: 1,
+                    type: "event",
+                },
+                {
+                    event: "chat",
+                    payload: {
+                        message: "older completed work",
+                        runId: "completed-short-key-run",
+                        sessionKey: "main",
+                        state: "final",
+                    },
+                    runtimeRecordedAt: now - 1,
+                    runtimeSequence: 2,
+                    type: "event",
+                },
+            ],
+            throughSequence: 2,
+        });
         const restarted = new OpenClawChatBridge(store);
 
         restarted.hydratePersistedSessions();
@@ -2743,6 +2768,13 @@ describe("OpenClaw chat bridge", () => {
                 .get(MAIN)
                 ?.events.map((event) => (event.payload as { runId?: string }).runId)
         ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
+        expect(
+            restarted.recordEvent(
+                "agent",
+                { runId: provisionalRunId, stream: "thinking" },
+                []
+            ).payload
+        ).not.toHaveProperty("sessionKey");
     });
 
     it("keeps concurrent persisted alias runs separate from a provider run", () => {

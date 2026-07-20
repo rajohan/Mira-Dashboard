@@ -53,6 +53,11 @@ interface RetainedRun {
     updatedAt: number;
 }
 
+interface RepairedInterruptedRun {
+    providerRunId: string;
+    provisionalRunId: string;
+}
+
 const MAX_EVENTS_PER_ACTIVE_RUN = 20_000;
 const MAX_BYTES_PER_ACTIVE_RUN = 64_000_000;
 const MAX_BYTES_PER_EVENT = 1_000_000;
@@ -563,7 +568,11 @@ function lastSequence(run: RetainedRun): number {
 }
 
 function firstSequence(run: RetainedRun): number {
-    let earliest = Infinity;
+    const firstEvent = run.events[0];
+    if (!firstEvent) {
+        return -1;
+    }
+    let earliest = firstEvent.runtimeSequence;
     for (const event of run.events) {
         earliest = Math.min(earliest, event.runtimeSequence);
     }
@@ -1548,10 +1557,9 @@ export class OpenClawChatBridge {
             nextSourceRuns.delete(runId);
         }
 
-        const repairedProviderRunId =
+        const repairedRunIdentity =
             nextSourceRuns.size === 0
                 ? this.#repairInterruptedRunSplit(canonicalStorageKey, nextCanonicalRuns)
-                      ?.runId
                 : undefined;
 
         const evictedCanonicalRunIds = new Set<string>();
@@ -1597,8 +1605,15 @@ export class OpenClawChatBridge {
                 this.#rememberRunSession(runId, canonicalStorageKey);
             }
         }
-        if (repairedProviderRunId) {
-            this.#rememberRunSession(repairedProviderRunId, canonicalStorageKey);
+        if (repairedRunIdentity) {
+            this.#forgetRunSession(
+                repairedRunIdentity.provisionalRunId,
+                canonicalStorageKey
+            );
+            this.#rememberRunSession(
+                repairedRunIdentity.providerRunId,
+                canonicalStorageKey
+            );
         }
         for (const runId of evictedCanonicalRunIds) {
             this.#forgetRunSession(runId, canonicalStorageKey);
@@ -1913,7 +1928,7 @@ export class OpenClawChatBridge {
     #repairInterruptedRunSplit(
         sessionKey: string,
         runs: Map<string, RetainedRun>
-    ): RetainedRun | undefined {
+    ): RepairedInterruptedRun | undefined {
         const candidates: Array<{
             providerRunId: string;
             provisionalRunId: string;
@@ -1958,12 +1973,18 @@ export class OpenClawChatBridge {
             return undefined;
         }
         const candidate = candidates[0]!;
-        return this.#mergeRunEntry(
+        const repairedRun = this.#mergeRunEntry(
             sessionKey,
             runs,
             candidate.provisionalRunId,
             candidate.providerRunId
         );
+        return repairedRun
+            ? {
+                  providerRunId: repairedRun.runId,
+                  provisionalRunId: candidate.provisionalRunId,
+              }
+            : undefined;
     }
 
     #promoteProvisionalRun(
