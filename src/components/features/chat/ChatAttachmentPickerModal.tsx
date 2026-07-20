@@ -92,6 +92,7 @@ export function ChatAttachmentPickerModal({
                 return;
             }
             event.preventDefault();
+            event.stopPropagation();
             event.dataTransfer.dropEffect = "none";
             if (event.type === "drop") {
                 setIsDraggingFiles(false);
@@ -99,9 +100,11 @@ export function ChatAttachmentPickerModal({
         };
 
         const listenerOptions = { capture: true };
+        addEventListener("dragenter", preventFileDropOutsideZone, listenerOptions);
         addEventListener("dragover", preventFileDropOutsideZone, listenerOptions);
         addEventListener("drop", preventFileDropOutsideZone, listenerOptions);
         return () => {
+            removeEventListener("dragenter", preventFileDropOutsideZone, listenerOptions);
             removeEventListener("dragover", preventFileDropOutsideZone, listenerOptions);
             removeEventListener("drop", preventFileDropOutsideZone, listenerOptions);
         };
@@ -251,7 +254,8 @@ export function ChatAttachmentPickerModal({
                             Drop files here
                         </p>
                         <p className="mt-1 max-w-sm text-sm wrap-break-word text-primary-400">
-                            Images, documents and audio are supported. Videos are skipped.
+                            Images, audio, PDFs, text, ZIP and Office documents are
+                            supported.
                         </p>
                         <Button
                             type="button"

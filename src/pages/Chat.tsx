@@ -232,7 +232,8 @@ export function Chat() {
         selectedSessionKey,
         setIsAtBottom,
         shouldStickToBottomReference,
-        isLoadingHistory
+        isLoadingHistory,
+        attachments.length
     );
     const {
         followToBottom: followMessagesToBottom,

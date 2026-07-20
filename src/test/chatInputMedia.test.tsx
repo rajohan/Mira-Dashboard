@@ -68,11 +68,11 @@ describe("chat input media", () => {
 
         await act(async () => {
             await result.current.handleFilesSelected(
-                fileList([fakeLargeFile("large.bin")])
+                fileList([fakeLargeFile("large.txt")])
             );
         });
         expect(result.current.attachments).toEqual([]);
-        expect(onError.mock.calls.at(-1)?.[0]).toContain("large.bin is too large");
+        expect(onError.mock.calls.at(-1)?.[0]).toContain("large.txt is too large");
     });
 
     it("reserves attachment capacity across concurrent selections", async () => {
@@ -131,7 +131,7 @@ describe("chat input media", () => {
             "notes.txt",
         ]);
         expect(onError).toHaveBeenLastCalledWith(
-            "Skipped video files: clip.mp4, movie.webm. OpenClaw chat supports images and non-video files."
+            "Skipped video files: clip.mp4, movie.webm. Choose images, audio, PDFs, text, ZIP, or Office documents."
         );
         expect(input.value).toBe("");
 
@@ -143,7 +143,37 @@ describe("chat input media", () => {
         });
         expect(result.current.attachments).toEqual([]);
         expect(onError).toHaveBeenLastCalledWith(
-            "Skipped video files: only-video.mov. OpenClaw chat supports images and non-video files."
+            "Skipped video files: only-video.mov. Choose images, audio, PDFs, text, ZIP, or Office documents."
+        );
+    });
+
+    it("rejects dropped file types outside the attachment picker policy", async () => {
+        const onError = jest.fn();
+        const { result } = renderHook(() =>
+            useChatInputMedia({ onError, sessionKey: "session-a", setDraft: jest.fn() })
+        );
+
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["app"], "installer.exe", {
+                        type: "application/x-msdownload",
+                    }),
+                    new File(["data"], "payload.bin", {
+                        type: "application/octet-stream",
+                    }),
+                    new File(["report"], "report.pdf", {
+                        type: "application/pdf",
+                    }),
+                ])
+            );
+        });
+
+        expect(result.current.attachments.map(({ fileName }) => fileName)).toEqual([
+            "report.pdf",
+        ]);
+        expect(onError).toHaveBeenLastCalledWith(
+            "Skipped unsupported files: installer.exe, payload.bin. Choose images, audio, PDFs, text, ZIP, or Office documents."
         );
     });
 

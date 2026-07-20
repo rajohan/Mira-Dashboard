@@ -16,9 +16,30 @@ import {
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 /** Defines max attachments. */
 export const MAX_ATTACHMENTS = 10;
-/** Mirrors OpenClaw Control UI's supported image and non-video file picker. */
-export const CHAT_ATTACHMENT_ACCEPT =
-    "image/*,audio/*,application/pdf,text/*,.csv,.json,.md,.txt,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx";
+const CHAT_ATTACHMENT_MIME_PREFIXES = ["image/", "audio/", "text/"] as const;
+const CHAT_ATTACHMENT_EXACT_MIME_TYPES = new Set(["application/pdf"]);
+const CHAT_ATTACHMENT_EXTENSIONS = [
+    ".csv",
+    ".json",
+    ".md",
+    ".txt",
+    ".zip",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+] as const;
+const CHAT_ATTACHMENT_EXTENSION_SET = new Set<string>(CHAT_ATTACHMENT_EXTENSIONS);
+/** Mirrors OpenClaw Control UI's supported attachment picker. */
+export const CHAT_ATTACHMENT_ACCEPT = [
+    "image/*",
+    "audio/*",
+    "application/pdf",
+    "text/*",
+    ...CHAT_ATTACHMENT_EXTENSIONS,
+].join(",");
 /** Defines chat history limit. */
 export const CHAT_HISTORY_LIMIT = 1000;
 /** Defines optimistic message retention milliseconds. */
@@ -34,6 +55,21 @@ export function isVideoAttachment(file: Pick<File, "name" | "type">): boolean {
         mimeType.startsWith("video/") ||
         /\.(?:avi|m4v|mkv|mov|mp4|mpeg|mpg|webm)$/iu.test(file.name)
     );
+}
+
+/** Returns whether a selected or dropped file matches the chat picker policy. */
+export function isSupportedChatAttachment(file: Pick<File, "name" | "type">): boolean {
+    const mimeType = file.type.split(";", 1)[0]?.trim().toLowerCase() || "";
+    if (
+        CHAT_ATTACHMENT_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix)) ||
+        CHAT_ATTACHMENT_EXACT_MIME_TYPES.has(mimeType)
+    ) {
+        return true;
+    }
+    const normalizedName = file.name.trim().toLowerCase();
+    const extensionIndex = normalizedName.lastIndexOf(".");
+    const extension = extensionIndex === -1 ? "" : normalizedName.slice(extensionIndex);
+    return CHAT_ATTACHMENT_EXTENSION_SET.has(extension);
 }
 
 function canonicalChatValue(value: unknown, ancestors: Set<object>): unknown {

@@ -14,6 +14,7 @@ import {
     chatErrorMessage,
     dataUrlToBase64,
     displayMimeType,
+    isSupportedChatAttachment,
     isVideoAttachment,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
@@ -90,19 +91,27 @@ export function useChatInputMedia({
             return;
         }
         onError(undefined);
+        const unsupportedFiles: File[] = [];
         const unsupportedVideos: File[] = [];
         const supportedFiles: File[] = [];
         for (const file of files) {
             if (isVideoAttachment(file)) {
                 unsupportedVideos.push(file);
-            } else {
+            } else if (isSupportedChatAttachment(file)) {
                 supportedFiles.push(file);
+            } else {
+                unsupportedFiles.push(file);
             }
         }
         const selectionErrors: string[] = [];
         if (unsupportedVideos.length > 0) {
             selectionErrors.push(
-                `Skipped video files: ${unsupportedVideos.map((file) => file.name).join(", ")}. OpenClaw chat supports images and non-video files.`
+                `Skipped video files: ${unsupportedVideos.map((file) => file.name).join(", ")}. Choose images, audio, PDFs, text, ZIP, or Office documents.`
+            );
+        }
+        if (unsupportedFiles.length > 0) {
+            selectionErrors.push(
+                `Skipped unsupported files: ${unsupportedFiles.map((file) => file.name).join(", ")}. Choose images, audio, PDFs, text, ZIP, or Office documents.`
             );
         }
         if (supportedFiles.length === 0) {

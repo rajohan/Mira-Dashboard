@@ -1197,7 +1197,12 @@ describe("shared component helpers", () => {
             files: modalDroppedFiles,
             types: ["Files"],
         };
-        expect(fireEvent.drop(document.body, { dataTransfer: modalDropData })).toBe(
+        const attachmentDialog = screen.getByRole("dialog", {
+            name: "Attach files",
+        });
+        fireEvent.dragEnter(attachmentDialog, { dataTransfer: modalDropData });
+        expect(screen.queryByText("Drop files to attach")).not.toBeInTheDocument();
+        expect(fireEvent.drop(attachmentDialog, { dataTransfer: modalDropData })).toBe(
             false
         );
         expect(onAttachFiles).toHaveBeenCalledTimes(1);
@@ -1206,9 +1211,6 @@ describe("shared component helpers", () => {
         expect(dropZone).toHaveClass("border-accent-400");
         fireEvent.drop(dropZone, { dataTransfer: modalDropData });
         expect(onAttachFiles).toHaveBeenLastCalledWith(modalDroppedFiles);
-        const attachmentDialog = screen.getByRole("dialog", {
-            name: "Attach files",
-        });
         expect(within(attachmentDialog).getByText("Selected files")).toBeInTheDocument();
         expect(within(attachmentDialog).getByText("note.txt")).toBeInTheDocument();
         expect(within(attachmentDialog).getByText("image.png")).toBeInTheDocument();
