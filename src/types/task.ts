@@ -20,6 +20,13 @@ export interface TaskAutomation {
     source?: "cron" | "stored";
 }
 
+/** Represents editable task automation metadata. */
+export interface TaskAutomationInput {
+    cronJobId: string;
+    scheduleSummary?: string;
+    sessionTarget?: string;
+}
+
 /** Represents task. */
 export interface Task {
     number: number;

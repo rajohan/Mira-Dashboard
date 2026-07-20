@@ -274,6 +274,7 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
     cron_expression TEXT,
     action_key TEXT NOT NULL,
     action_payload_json TEXT NOT NULL DEFAULT '{}',
+    disable_intent_json TEXT,
     next_run_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -281,6 +282,13 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due
     ON scheduled_jobs(enabled, next_run_at);
+
+CREATE TABLE IF NOT EXISTS openclaw_cron_job_metadata (
+    job_id TEXT PRIMARY KEY,
+    disable_intent_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS scheduled_job_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

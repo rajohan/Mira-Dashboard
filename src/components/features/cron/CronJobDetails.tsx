@@ -16,6 +16,7 @@ import { Card, CardTitle } from "../../ui/Card";
 import { Input } from "../../ui/Input";
 import { Switch } from "../../ui/Switch";
 import { Textarea } from "../../ui/Textarea";
+import { JobDisableIntentStatus } from "../jobs/JobDisableIntentStatus";
 
 /** Represents JSON valIDation state. */
 interface JsonValidationState {
@@ -32,6 +33,7 @@ interface CronJobDetailsProperties {
     updatePending: boolean;
     deletePending: boolean;
     onToggle: (job: CronJob, isEnabled: boolean) => void;
+    onConfigureDisable: (job: CronJob) => void;
     onRunNow: (job: CronJob) => void;
     onDelete: (job: CronJob) => void;
     isEditMode: boolean;
@@ -62,6 +64,7 @@ export function CronJobDetails({
     updatePending,
     deletePending,
     onToggle,
+    onConfigureDisable,
     onRunNow,
     onDelete,
     isEditMode,
@@ -117,6 +120,14 @@ export function CronJobDetails({
                         disabled={togglePending}
                         className="rounded-lg border border-primary-700 bg-primary-800/60 px-3 py-2 sm:border-0 sm:bg-transparent sm:p-0"
                     />
+                    {job.enabled === false ? (
+                        <JobDisableIntentStatus
+                            disableIntent={job.disableIntent}
+                            disabled={togglePending}
+                            onConfigureDisable={() => onConfigureDisable(job)}
+                            taskLinks={job.taskLinks}
+                        />
+                    ) : undefined}
                     <Button
                         size="sm"
                         variant="primary"

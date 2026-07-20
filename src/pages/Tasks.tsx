@@ -37,7 +37,7 @@ import {
     useUpdateTask,
     useUpdateTaskUpdate,
 } from "../hooks";
-import type { ColumnId, Task, TaskAutomation } from "../types/task";
+import type { ColumnId, Task, TaskAutomationInput } from "../types/task";
 import {
     getPriority,
     getTaskUpdatedAtMs,
@@ -241,10 +241,7 @@ export function Tasks() {
             title?: string;
             body?: string;
             labels?: string[];
-            automation?:
-                | Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
-                | null
-                | undefined;
+            automation?: TaskAutomationInput | null | undefined;
         }
     ) => {
         const updated = await updateTask.mutateAsync({

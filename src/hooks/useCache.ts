@@ -19,10 +19,17 @@ export interface CacheEnvelope<T> {
 
 /** Represents the cache heartbeat API response. */
 export interface CacheHeartbeatResponse {
+    cronJobs: {
+        dataAvailable: boolean;
+        error?: string | undefined;
+        items: Array<Record<string, unknown>>;
+    };
+    dashboardJobs: Array<Record<string, unknown>>;
     generatedAt: string;
     count: number;
     entries: CacheEnvelope<unknown>[];
-    schemaVersion: 2;
+    schemaVersion: 3;
+    tasks: Array<Record<string, unknown>>;
 }
 
 /** Represents the lightweight cache status API response. */

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { TaskAssigneeId } from "../constants/taskActors";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
-import type { Task, TaskAutomation, TaskUpdate } from "../types/task";
+import type { Task, TaskAutomationInput, TaskUpdate } from "../types/task";
 import { apiDelete, apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
 
 /** Defines task keys. */
@@ -23,7 +23,7 @@ async function createTask(
     body: string,
     labels: string[],
     assignee: TaskAssigneeId,
-    automation?: Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
+    automation?: TaskAutomationInput
 ): Promise<Task> {
     return apiPostRequired<Task>("/tasks", { title, body, labels, assignee, automation });
 }
@@ -35,10 +35,7 @@ async function updateTask(
         title?: string;
         body?: string;
         labels?: string[];
-        automation?:
-            | Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
-            | null
-            | undefined;
+        automation?: TaskAutomationInput | null | undefined;
     }
 ): Promise<Task> {
     return apiPatchRequired<Task>(`/tasks/${number}`, updates);
@@ -115,10 +112,7 @@ export function useCreateTask() {
             body: string;
             labels: string[];
             assignee: TaskAssigneeId;
-            automation?: Pick<
-                TaskAutomation,
-                "cronJobId" | "scheduleSummary" | "sessionTarget"
-            >;
+            automation?: TaskAutomationInput;
         }) => createTask(title, body, labels, assignee, automation),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
@@ -140,13 +134,7 @@ export function useUpdateTask() {
                 title?: string;
                 body?: string;
                 labels?: string[];
-                automation?:
-                    | Pick<
-                          TaskAutomation,
-                          "cronJobId" | "scheduleSummary" | "sessionTarget"
-                      >
-                    | null
-                    | undefined;
+                automation?: TaskAutomationInput | null | undefined;
             };
         }) => updateTask(number, updates),
         onSuccess: () => {

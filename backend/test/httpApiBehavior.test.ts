@@ -1086,7 +1086,7 @@ describe("Mira Dashboard backend integration", () => {
             }>;
         }>("/api/cache/heartbeat");
         expect(heartbeat.status).toBe(200);
-        expect(heartbeat.body.schemaVersion).toBe(2);
+        expect(heartbeat.body.schemaVersion).toBe(3);
         expect(heartbeat.body.count).toBeGreaterThanOrEqual(2);
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "moltbook.home")

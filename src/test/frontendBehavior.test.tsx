@@ -1766,7 +1766,13 @@ describe("Mira Dashboard frontend behavior", () => {
 
                 if (url === "/api/jobs/job-1" && method === "PATCH") {
                     expect(JSON.parse(String(init?.body))).toEqual({
-                        patch: { enabled: false },
+                        patch: {
+                            enabled: false,
+                            disableIntent: {
+                                mode: "indefinite",
+                                comment: "Paused for hook coverage",
+                            },
+                        },
                     });
                     return Response.json({ isOk: true, job: { id: "job-1" } });
                 }
@@ -1937,7 +1943,13 @@ describe("Mira Dashboard frontend behavior", () => {
         const updateJob = renderHookWithQueryClient(() => useUpdateScheduledJob());
         await updateJob.result.current.mutateAsync({
             id: "job-1",
-            patch: { enabled: false },
+            patch: {
+                enabled: false,
+                disableIntent: {
+                    mode: "indefinite",
+                    comment: "Paused for hook coverage",
+                },
+            },
         });
 
         const runJob = renderHookWithQueryClient(() => useRunScheduledJobNow());
@@ -2417,7 +2429,13 @@ describe("Mira Dashboard frontend behavior", () => {
                 }
 
                 if (url === "/api/cron/jobs/cron-1/toggle" && method === "POST") {
-                    expect(JSON.parse(String(init?.body))).toEqual({ enabled: false });
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        enabled: false,
+                        disableIntent: {
+                            mode: "indefinite",
+                            comment: "Paused for hook coverage",
+                        },
+                    });
                     return Response.json({ isOk: true });
                 }
 
@@ -2449,7 +2467,14 @@ describe("Mira Dashboard frontend behavior", () => {
         await waitFor(() => expect(cronJobs.result.current.data?.[0]?.id).toBe("cron-1"));
 
         const toggleCron = renderHookWithQueryClient(() => useToggleCronJob());
-        await toggleCron.result.current.mutateAsync({ id: "cron-1", enabled: false });
+        await toggleCron.result.current.mutateAsync({
+            id: "cron-1",
+            enabled: false,
+            disableIntent: {
+                mode: "indefinite",
+                comment: "Paused for hook coverage",
+            },
+        });
 
         const updateCron = renderHookWithQueryClient(() => useUpdateCronJob());
         await updateCron.result.current.mutateAsync({
@@ -3369,6 +3394,13 @@ describe("Mira Dashboard frontend behavior", () => {
                 type: "success",
                 occurredAt: "2026-06-23T09:00:00.000Z",
             }),
+            notification({
+                id: 3,
+                title: "Workspace sync failed",
+                isRead: true,
+                type: "error",
+                occurredAt: "2026-06-23T08:00:00.000Z",
+            }),
         ];
         const fetchMock = createNotificationsApi(notifications);
         Object.defineProperty(globalThis, "fetch", {
@@ -3387,6 +3419,8 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         expect(await screen.findByText("Cache refresh failed")).toBeInTheDocument();
         expect(screen.getByText("Backup complete")).toBeInTheDocument();
+        expect(screen.getByText("Workspace sync failed")).toBeInTheDocument();
+        expect(screen.getByText("error")).toHaveClass("bg-red-500/20", "text-red-400");
         expect(screen.getByText("Open report").closest("a")?.getAttribute("href")).toBe(
             "/reports?reportId=42"
         );
@@ -4391,7 +4425,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 cronJobId: "cron-7",
                 scheduleSummary: "Every hour",
                 sessionTarget: "agent:main:main",
-                enabled: true,
+                enabled: false,
                 lastRunStatus: "success",
                 lastRunAtMs: Date.UTC(2026, 5, 23, 8),
                 nextRunAtMs: Date.UTC(2026, 5, 23, 9),
@@ -4445,7 +4479,9 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(onUpdate).toHaveBeenCalledWith(
             expect.objectContaining({
                 title: "Edited detail task",
-                automation: expect.objectContaining({ cronJobId: "cron-edited" }),
+                automation: expect.objectContaining({
+                    cronJobId: "cron-edited",
+                }),
             })
         );
 
