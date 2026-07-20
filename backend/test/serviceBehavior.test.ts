@@ -4568,7 +4568,7 @@ fi
 
         try {
             let capError: unknown;
-            for (let index = 0; index < 120 && !capError; index += 1) {
+            for (let index = 0; !capError && index < 120; index += 1) {
                 try {
                     startExecJob({
                         command: "__mira_dashboard_shell_smoke_test__",

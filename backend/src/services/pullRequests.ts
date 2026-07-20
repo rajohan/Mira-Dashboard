@@ -395,7 +395,7 @@ function trimOutput(value: string): string {
 function parseRepoParts(repo: string): { owner: string; name: string } {
     const parts = repo.split("/");
     const [owner, name] = parts;
-    if (parts.length !== 2 || !owner || !name) {
+    if (!owner || !name || parts.length !== 2) {
         throw new Error("Dashboard repository must be configured as owner/name");
     }
     return { owner, name };
@@ -407,8 +407,8 @@ function buildGithubCommandEnvironment(githubToken: string): NodeJS.ProcessEnv {
     for (const key of Object.keys(environment)) {
         if (
             key === "MIRA_GITHUB_TOKEN" ||
-            key.startsWith("MIRA_GITHUB_TOKEN_") ||
             key === "RAJOHAN_GITHUB_TOKEN" ||
+            key.startsWith("MIRA_GITHUB_TOKEN_") ||
             key.startsWith("RAJOHAN_GITHUB_TOKEN_")
         ) {
             delete environment[key];
@@ -576,7 +576,7 @@ function clearForceKillTimerIfAllowed(
     shouldPreserveForceKillTimer: boolean,
     clearTimer: (timer: NodeJS.Timeout) => void = clearTimeout
 ): NodeJS.Timeout | undefined {
-    if (!forceKillTimer || options.keepForceKillTimer || shouldPreserveForceKillTimer) {
+    if (!forceKillTimer || shouldPreserveForceKillTimer || options.keepForceKillTimer) {
         return forceKillTimer;
     }
     clearTimer(forceKillTimer);

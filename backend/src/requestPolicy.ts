@@ -215,7 +215,7 @@ function secureHandler(routePath: string, handler: BunHandler | Response): BunHa
 }
 
 function secureEntry(routePath: string, entry: BunRouteEntry): BunRouteEntry {
-    if (entry instanceof Response || typeof entry === "function") {
+    if (typeof entry === "function" || entry instanceof Response) {
         return secureHandler(routePath, entry);
     }
 

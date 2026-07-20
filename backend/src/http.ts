@@ -210,8 +210,8 @@ function isSecureRequest(request: Request, server: Server<unknown>): boolean {
     const forwardedProtocol = request.headers.get("x-forwarded-proto");
     const peerAddress = requestIp(request, server);
     return Boolean(
-        isTrustedProxyAddress(peerAddress) &&
         forwardedProtocol &&
+        isTrustedProxyAddress(peerAddress) &&
         forwardedProtocol.split(",", 1)[0]?.trim() === "https"
     );
 }

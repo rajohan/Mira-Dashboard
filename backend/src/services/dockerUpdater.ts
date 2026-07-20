@@ -947,7 +947,7 @@ function isGhcrRepo(repo: string): boolean {
 function imageRegistry(repo: string): string {
     const first = repo.split("/", 1)[0] || "";
     const registry =
-        first.includes(".") || first.includes(":") || first === "localhost"
+        first === "localhost" || first.includes(".") || first.includes(":")
             ? first
             : "docker.io";
     return registry === "index.docker.io" ? "docker.io" : registry;
@@ -1116,7 +1116,7 @@ function servicePlatform(service: ManagedServiceRow): string {
 }
 
 function isImageMatchPlatform(image: JsonRecord, platform: string): boolean {
-    const [os = "linux", architecture = "", variant] = platform.split("/");
+    const [os = "linux", architecture = "", variant] = platform.split("/", 3);
     const imageOs = typeof image.os === "string" ? image.os : "linux";
     if (imageOs !== os || image.architecture !== architecture) return false;
     if (!variant) {
@@ -2298,8 +2298,10 @@ async function applyServiceUpdate(
                     targetComposeImageRef: target,
                 }
             );
-            const [os = "linux", architecture] =
-                servicePlatform(lockedService).split("/");
+            const [os = "linux", architecture] = servicePlatform(lockedService).split(
+                "/",
+                2
+            );
             createNotificationBestEffort(
                 `Docker ${eventPrefix} update failed`,
                 `${serviceLabel(lockedService)}: ${message}`,
@@ -2368,8 +2370,10 @@ async function applyServiceUpdate(
                     targetComposeImageRef: target,
                 }
             );
-            const [os = "linux", architecture] =
-                servicePlatform(lockedService).split("/");
+            const [os = "linux", architecture] = servicePlatform(lockedService).split(
+                "/",
+                2
+            );
             createNotificationBestEffort(
                 `Docker ${eventPrefix} update needs reconciliation`,
                 `${serviceLabel(lockedService)} updated to ${target}, but state persistence failed: ${message}`,

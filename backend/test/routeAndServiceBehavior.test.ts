@@ -463,7 +463,7 @@ describe("backend route and service behavior", () => {
             server
         );
 
-        for (let attempt = 0; attempt < 50 && !isGatewayValidationStarted; attempt += 1) {
+        for (let attempt = 0; !isGatewayValidationStarted && attempt < 50; attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 10));
         }
         expect(isGatewayValidationStarted).toBe(true);
@@ -576,7 +576,7 @@ describe("backend route and service behavior", () => {
             }),
             server
         );
-        for (let attempt = 0; attempt < 50 && !isGatewayValidationStarted; attempt += 1) {
+        for (let attempt = 0; !isGatewayValidationStarted && attempt < 50; attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 10));
         }
         expect(isGatewayValidationStarted).toBe(true);
@@ -631,7 +631,7 @@ describe("backend route and service behavior", () => {
             }),
             server
         );
-        for (let attempt = 0; attempt < 50 && !isGatewayValidationStarted; attempt += 1) {
+        for (let attempt = 0; !isGatewayValidationStarted && attempt < 50; attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 10));
         }
         expect(isGatewayValidationStarted).toBe(true);

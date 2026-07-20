@@ -190,7 +190,7 @@ async function logContentResponse(request: Request): Promise<Response> {
     const query = new URL(request.url).searchParams;
     let logFile = query.get("file") || undefined;
     const lines = parsePositiveLineCount(query.get("lines"));
-    if (query.has("lines") && lines === undefined) {
+    if (lines === undefined && query.has("lines")) {
         return json({ error: "Invalid lines" }, { status: 400 });
     }
 
