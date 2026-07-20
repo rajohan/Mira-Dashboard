@@ -8,6 +8,10 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
+import {
+    DateTimePicker,
+    type DateTimePickerValue,
+} from "../components/ui/DateTimePicker";
 import { Input } from "../components/ui/Input";
 import { LoadingState } from "../components/ui/LoadingState";
 import { Modal } from "../components/ui/Modal";
@@ -32,7 +36,9 @@ import {
     isCronExpressionValid,
     sortCronJobs,
 } from "../utils/cronUtilities";
+import { appTimeZoneParts } from "../utils/date";
 import {
+    appDateTimeToTimestamp,
     appTimeOfDayToUtcTimeOfDay,
     formatDate,
     formatUtcTimeOfDayInAppTimeZone,
@@ -40,6 +46,7 @@ import {
 import { validateJsonString } from "../utils/json";
 
 const CLEAR_SCHEDULE_FIELD = JSON.parse("null") as null;
+const DEFAULT_DISABLE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 type JobsView = "scheduled" | "openclaw";
 type DisableMode = JobDisableIntent["mode"];
@@ -73,10 +80,25 @@ const disableModeOptions = [
     },
 ];
 
-function toDateTimeLocal(timestamp: number): string {
-    const date = new Date(timestamp);
-    const localTimestamp = timestamp - date.getTimezoneOffset() * 60_000;
-    return new Date(localTimestamp).toISOString().slice(0, 16);
+function toDisableUntilDraft(timestamp: number): DateTimePickerValue {
+    const parts = appTimeZoneParts(new Date(timestamp));
+    return {
+        day: parts.day,
+        hour: String(parts.hour).padStart(2, "0"),
+        minute: String(parts.minute).padStart(2, "0"),
+        month: parts.month,
+        year: parts.year,
+    };
+}
+
+function parseDisableUntilDraft(draft: DateTimePickerValue): number | undefined {
+    return appDateTimeToTimestamp(
+        draft.year,
+        draft.month,
+        draft.day,
+        Number(draft.hour),
+        Number(draft.minute)
+    );
 }
 
 function formatScheduledJobSchedule(job: ScheduledJob): string {
@@ -550,8 +572,8 @@ export function Jobs() {
     >(undefined);
     const [disableMode, setDisableMode] = useState<DisableMode>("until");
     const [disableComment, setDisableComment] = useState("");
-    const [disableUntil, setDisableUntil] = useState(() =>
-        toDateTimeLocal(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    const [disableUntil, setDisableUntil] = useState<DateTimePickerValue>(() =>
+        toDisableUntilDraft(Date.now() + DEFAULT_DISABLE_DURATION_MS)
     );
     const [disableCommentError, setDisableCommentError] = useState<string | undefined>(
         undefined
@@ -699,11 +721,14 @@ export function Jobs() {
         setDisableCandidate(candidate);
         setDisableMode(existingIntent?.mode ?? "until");
         setDisableComment(existingIntent?.comment ?? "");
-        const untilTimestamp =
-            existingIntent?.mode === "until" && existingIntent.until
-                ? Date.parse(existingIntent.until)
-                : Date.now() + 7 * 24 * 60 * 60 * 1000;
-        setDisableUntil(toDateTimeLocal(untilTimestamp));
+        let untilTimestamp = Date.now() + DEFAULT_DISABLE_DURATION_MS;
+        if (existingIntent?.mode === "until" && existingIntent.until) {
+            const parsedUntilTimestamp = Date.parse(existingIntent.until);
+            if (Number.isFinite(parsedUntilTimestamp)) {
+                untilTimestamp = parsedUntilTimestamp;
+            }
+        }
+        setDisableUntil(toDisableUntilDraft(untilTimestamp));
         setDisableCommentError(undefined);
         setDisableUntilError(undefined);
     }
@@ -752,8 +777,8 @@ export function Jobs() {
                 comment,
             };
         } else {
-            const untilTimestamp = Date.parse(disableUntil);
-            if (Number.isNaN(untilTimestamp) || untilTimestamp <= Date.now()) {
+            const untilTimestamp = parseDisableUntilDraft(disableUntil);
+            if (untilTimestamp === undefined || untilTimestamp <= Date.now()) {
                 setDisableUntilError("Choose a future date and time.");
                 return;
             }
@@ -1033,12 +1058,11 @@ export function Jobs() {
                             width="w-full"
                         />
                         {disableMode === "until" ? (
-                            <Input
+                            <DateTimePicker
                                 label="Disabled until"
-                                type="datetime-local"
                                 value={disableUntil}
-                                onChange={(event) => setDisableUntil(event.target.value)}
                                 error={disableUntilError}
+                                onChange={setDisableUntil}
                             />
                         ) : undefined}
                         <Textarea

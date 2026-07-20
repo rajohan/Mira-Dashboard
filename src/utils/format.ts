@@ -112,6 +112,25 @@ function zonedDateTimeToUtcDate(
     return new Date(candidate);
 }
 
+/** Converts app-timezone calendar fields to a timestamp when that local time exists. */
+export function appDateTimeToTimestamp(
+    year: number,
+    month: number,
+    day: number,
+    hour: number,
+    minute: number
+): number | undefined {
+    const date = zonedDateTimeToUtcDate(year, month, day, hour, minute);
+    const parts = appTimeZoneParts(date);
+    const isSameLocalTime =
+        parts.year === year &&
+        parts.month === month &&
+        parts.day === day &&
+        parts.hour === hour &&
+        parts.minute === minute;
+    return isSameLocalTime ? date.getTime() : undefined;
+}
+
 function referenceDateParts(referenceDate?: Date | string | number) {
     const reference = new Date(referenceDate ?? Date.now());
     return appTimeZoneParts(Number.isNaN(reference.getTime()) ? new Date() : reference);
