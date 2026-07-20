@@ -2397,6 +2397,499 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("promotes an interrupted provisional chat run when the provider resumes after restart", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-interrupted";
+        const providerRunId = "provider-after-restart";
+        const bridge = new OpenClawChatBridge(store);
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.message",
+            {
+                message: { content: "question", role: "user" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "before restart" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        expect(bridge.flush()).toBe(true);
+
+        const restarted = new OpenClawChatBridge(store);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { delta: "after restart" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+
+        const snapshot = restarted.snapshot(MAIN);
+        expect(snapshot.completed).toBe(false);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
+        expect(
+            snapshot.events
+                .map(
+                    (event) =>
+                        (event.payload as { data?: { delta?: string } }).data?.delta
+                )
+                .filter(Boolean)
+        ).toEqual(["before restart", "after restart"]);
+    });
+
+    it("repairs a persisted snapshot that was split across an interrupted restart", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-before-restart";
+        const providerRunId = "provider-after-restart";
+        const now = Date.now();
+        store.snapshots.set(MAIN, {
+            completed: false,
+            events: [
+                {
+                    event: "agent",
+                    payload: {
+                        data: { phase: "start" },
+                        runId: provisionalRunId,
+                        sessionKey: MAIN,
+                        stream: "lifecycle",
+                    },
+                    runtimeRecordedAt: now - 3,
+                    runtimeSequence: 1,
+                    type: "event",
+                },
+                {
+                    event: "agent",
+                    payload: {
+                        data: { delta: "before restart" },
+                        runId: provisionalRunId,
+                        sessionKey: MAIN,
+                        stream: "thinking",
+                    },
+                    runtimeRecordedAt: now - 2,
+                    runtimeSequence: 2,
+                    type: "event",
+                },
+                {
+                    event: "agent",
+                    payload: {
+                        data: { phase: "start" },
+                        runId: providerRunId,
+                        sessionKey: MAIN,
+                        stream: "lifecycle",
+                    },
+                    runtimeRecordedAt: now - 1,
+                    runtimeSequence: 3,
+                    type: "event",
+                },
+                {
+                    event: "agent",
+                    payload: {
+                        data: { delta: "after restart" },
+                        runId: providerRunId,
+                        sessionKey: MAIN,
+                        stream: "thinking",
+                    },
+                    runtimeRecordedAt: now,
+                    runtimeSequence: 4,
+                    type: "event",
+                },
+            ],
+            throughSequence: 4,
+        });
+
+        const repairedBridge = new OpenClawChatBridge(store);
+        const snapshot = repairedBridge.snapshot(MAIN);
+
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
+        expect(
+            snapshot.events
+                .map(
+                    (event) =>
+                        (event.payload as { data?: { delta?: string } }).data?.delta
+                )
+                .filter(Boolean)
+        ).toEqual(["before restart", "after restart"]);
+        expect(repairedBridge.flush()).toBe(true);
+        expect(
+            store.snapshots
+                .get(MAIN)
+                ?.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
+    });
+
+    it("promotes an interrupted provisional run from a provider session start", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-session-start";
+        const providerRunId = "provider-session-start";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "before restart" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        expect(bridge.flush()).toBe(true);
+
+        const restarted = new OpenClawChatBridge(store);
+        restarted.recordEvent(
+            "session.started",
+            { runId: providerRunId, sessionKey: MAIN },
+            []
+        );
+
+        const snapshot = restarted.snapshot(MAIN);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
+    });
+
+    it("waits for the chat.send acknowledgment before promoting a live provisional run", () => {
+        const provisionalRunId = "dashboard-chat-live-send";
+        const providerRunId = "provider-live-send";
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "live work" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            new Set(
+                bridge
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            { idempotencyKey: provisionalRunId, sessionKey: MAIN },
+            { runId: providerRunId }
+        );
+
+        const acknowledgedSnapshot = bridge.snapshot(MAIN);
+        expect(
+            acknowledgedSnapshot.events.map(
+                (event) => (event.payload as { runId?: string }).runId
+            )
+        ).toEqual(
+            Array.from(
+                { length: acknowledgedSnapshot.events.length },
+                () => providerRunId
+            )
+        );
+    });
+
+    it("does not promote a hydrated provisional run across a new send boundary", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-before-new-send";
+        const providerRunId = "provider-new-send";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "abandoned work" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        expect(bridge.flush()).toBe(true);
+
+        const restarted = new OpenClawChatBridge(store);
+        restarted.captureRequestBoundary(MAIN);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            new Set(
+                restarted
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
+    it("preserves a short-key send boundary after session canonicalization", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-short-key-send";
+        const providerRunId = "provider-after-canonicalization";
+        store.snapshots.set(
+            "main",
+            persistedSnapshot("main", provisionalRunId, Date.now())
+        );
+        const restarted = new OpenClawChatBridge(store);
+
+        restarted.captureRequestBoundary("main");
+        restarted.reconcileSessions([{ id: "main", key: MAIN }]);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            new Set(
+                restarted
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
+    it("repairs an interrupted run split across persisted session aliases", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-short-key-restart";
+        const providerRunId = "provider-canonical-restart";
+        const now = Date.now();
+        const providerSnapshot = persistedSnapshot(
+            MAIN,
+            providerRunId,
+            now,
+            undefined,
+            3
+        );
+        providerSnapshot.events[0]!.payload = {
+            data: { phase: "start" },
+            runId: providerRunId,
+            sessionKey: MAIN,
+            stream: "lifecycle",
+        };
+        store.snapshots.set(MAIN, providerSnapshot);
+        store.snapshots.set("main", {
+            completed: false,
+            events: [
+                {
+                    event: "agent",
+                    payload: {
+                        runId: provisionalRunId,
+                        sessionKey: "main",
+                        stream: "thinking",
+                    },
+                    runtimeRecordedAt: now - 2,
+                    runtimeSequence: 1,
+                    type: "event",
+                },
+                {
+                    event: "chat",
+                    payload: {
+                        message: "older completed work",
+                        runId: "completed-short-key-run",
+                        sessionKey: "main",
+                        state: "final",
+                    },
+                    runtimeRecordedAt: now - 1,
+                    runtimeSequence: 2,
+                    type: "event",
+                },
+            ],
+            throughSequence: 2,
+        });
+        const restarted = new OpenClawChatBridge(store);
+
+        restarted.hydratePersistedSessions();
+        restarted.reconcileSessions([{ id: "main", key: MAIN }]);
+
+        const snapshot = restarted.snapshot(MAIN);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
+        expect(store.snapshots.has("main")).toBe(false);
+        expect(
+            store.snapshots
+                .get(MAIN)
+                ?.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
+        expect(
+            restarted.recordEvent(
+                "agent",
+                { runId: provisionalRunId, stream: "thinking" },
+                []
+            ).payload
+        ).not.toHaveProperty("sessionKey");
+    });
+
+    it("keeps concurrent persisted alias runs separate from a provider run", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunIds = [
+            "dashboard-chat-short-key-first",
+            "dashboard-chat-short-key-second",
+        ];
+        const providerRunId = "provider-canonical-concurrent";
+        const now = Date.now();
+        const providerSnapshot = persistedSnapshot(
+            MAIN,
+            providerRunId,
+            now,
+            undefined,
+            3
+        );
+        providerSnapshot.events[0]!.payload = {
+            data: { phase: "start" },
+            runId: providerRunId,
+            sessionKey: MAIN,
+            stream: "lifecycle",
+        };
+        store.snapshots.set(MAIN, providerSnapshot);
+        store.snapshots.set("main", {
+            completed: false,
+            events: provisionalRunIds.map((runId, index) => ({
+                event: "agent",
+                payload: { runId, sessionKey: "main", stream: "thinking" },
+                runtimeRecordedAt: now - 2 + index,
+                runtimeSequence: index + 1,
+                type: "event" as const,
+            })),
+            throughSequence: 2,
+        });
+        const restarted = new OpenClawChatBridge(store);
+
+        restarted.hydratePersistedSessions();
+        restarted.reconcileSessions([{ id: "main", key: MAIN }]);
+
+        expect(
+            new Set(
+                restarted
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([...provisionalRunIds, providerRunId]));
+    });
+
+    it("does not promote a provisional run long after an interrupted restart", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-stale-interruption";
+        const providerRunId = "provider-much-later";
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, provisionalRunId, Date.now() - 30 * 60_000)
+        );
+
+        const restarted = new OpenClawChatBridge(store);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            new Set(
+                restarted
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
+    it("keeps concurrent provisional chat runs separate from a new provider run", () => {
+        const bridge = new OpenClawChatBridge();
+        const provisionalRunIds = ["dashboard-chat-first", "dashboard-chat-second"];
+        for (const runId of provisionalRunIds) {
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId,
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+        }
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: "provider-concurrent",
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            new Set(
+                bridge
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([...provisionalRunIds, "provider-concurrent"]));
+    });
+
     it("rewrites nested run identities when a provisional run is promoted", () => {
         const store = new MemorySnapshotStore();
         const bridge = new OpenClawChatBridge(store);
