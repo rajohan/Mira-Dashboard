@@ -2022,7 +2022,7 @@ export class OpenClawChatBridge {
                             run,
                             retainedEnvelope,
                             runs,
-                            this.#latestRequestBoundaries.get(storageSessionKey)
+                            this.#latestRequestBoundary(storageSessionKey)
                         )
                 )
                 .toArray();
@@ -2213,6 +2213,27 @@ export class OpenClawChatBridge {
         this.#totalReplayBytes = 0;
     }
 
+    #forgetRequestBoundaries(sessionKey: string): void {
+        for (const candidateSessionKey of this.#latestRequestBoundaries.keys()) {
+            if (isSameSessionKey(candidateSessionKey, sessionKey)) {
+                this.#latestRequestBoundaries.delete(candidateSessionKey);
+            }
+        }
+    }
+
+    #latestRequestBoundary(sessionKey: string): number | undefined {
+        let latestBoundary: number | undefined;
+        for (const [candidateSessionKey, boundary] of this.#latestRequestBoundaries) {
+            if (
+                isSameSessionKey(candidateSessionKey, sessionKey) &&
+                (latestBoundary === undefined || boundary > latestBoundary)
+            ) {
+                latestBoundary = boundary;
+            }
+        }
+        return latestBoundary;
+    }
+
     /** Flushes all coalesced replay writes at lifecycle boundaries. */
     flush(): boolean {
         this.#cancelPersistenceTimer();
@@ -2300,7 +2321,7 @@ export class OpenClawChatBridge {
         if (sessionKey) {
             this.#ensureSessionLoaded(sessionKey);
             const storageSessionKey = normalizedSessionKey(sessionKey);
-            this.#latestRequestBoundaries.delete(storageSessionKey);
+            this.#forgetRequestBoundaries(storageSessionKey);
             this.#latestRequestBoundaries.set(storageSessionKey, this.#sequence);
             while (this.#latestRequestBoundaries.size > MAX_CHAT_RUNTIME_SESSIONS) {
                 const oldestSessionKey = this.#latestRequestBoundaries
@@ -2329,11 +2350,7 @@ export class OpenClawChatBridge {
                 sessionKeys.add(candidateSessionKey);
             }
         }
-        for (const candidateSessionKey of this.#latestRequestBoundaries.keys()) {
-            if (isSameSessionKey(candidateSessionKey, storageSessionKey)) {
-                this.#latestRequestBoundaries.delete(candidateSessionKey);
-            }
-        }
+        this.#forgetRequestBoundaries(storageSessionKey);
         if (this.#store) {
             this.#pendingSessionClears.add(storageSessionKey);
         }

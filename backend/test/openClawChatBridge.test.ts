@@ -2673,6 +2673,38 @@ describe("OpenClaw chat bridge", () => {
         ).toEqual(new Set([provisionalRunId, providerRunId]));
     });
 
+    it("preserves a short-key send boundary after session canonicalization", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-short-key-send";
+        const providerRunId = "provider-after-canonicalization";
+        store.snapshots.set(
+            "main",
+            persistedSnapshot("main", provisionalRunId, Date.now())
+        );
+        const restarted = new OpenClawChatBridge(store);
+
+        restarted.captureRequestBoundary("main");
+        restarted.reconcileSessions([{ id: "main", key: MAIN }]);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            new Set(
+                restarted
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
     it("does not promote a provisional run long after an interrupted restart", () => {
         const store = new MemorySnapshotStore();
         const provisionalRunId = "dashboard-chat-stale-interruption";
