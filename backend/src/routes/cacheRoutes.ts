@@ -184,6 +184,7 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
 function compactDashboardJobs() {
     return listScheduledJobs().map((job) => ({
         actionKey: job.actionKey,
+        disableIntent: job.disableIntent,
         enabled: job.enabled,
         id: job.id,
         isRunning: job.isRunning,
@@ -273,7 +274,7 @@ export const cacheRoutes = {
                 dashboardJobs,
                 entries,
                 generatedAt: new Date().toISOString(),
-                schemaVersion: 2,
+                schemaVersion: 3,
                 tasks: automation.tasks,
             });
         },

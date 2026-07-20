@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { JobDisableIntent } from "../types/job";
 import { apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
 
 /** Represents a backend-native scheduled job. */
@@ -14,6 +15,7 @@ export interface ScheduledJob {
     cronExpression?: string | undefined;
     actionKey: string;
     actionPayload: Record<string, unknown>;
+    disableIntent?: JobDisableIntent | undefined;
     nextRunAt?: string | undefined;
     createdAt: string;
     updatedAt: string;
@@ -36,6 +38,7 @@ export interface ScheduledJobRun {
 export type ScheduledJobPatch = Partial<
     Omit<Pick<ScheduledJob, "enabled" | "intervalSeconds" | "scheduleType">, never> & {
         cronExpression?: string | null | undefined;
+        disableIntent?: JobDisableIntent | undefined;
         timeOfDay?: string | null | undefined;
     }
 >;

@@ -4034,16 +4034,10 @@ describe("shared component helpers", () => {
         const disabledJob = {
             ...job,
             enabled: false,
-            taskLinks: [
-                {
-                    number: 8,
-                    title: "Chat improvements",
-                    disableIntent: {
-                        mode: "indefinite" as const,
-                        comment: "Paused during chat work",
-                    },
-                },
-            ],
+            disableIntent: {
+                mode: "indefinite" as const,
+                comment: "Paused during chat work",
+            },
         };
         rerender(
             <CronJobDetails

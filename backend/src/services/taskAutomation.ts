@@ -1,17 +1,13 @@
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors.ts";
 import { database } from "../database.ts";
 import gateway from "../gateway.ts";
-import { HttpError } from "../http.ts";
 import { errorMessage } from "../lib/errors.ts";
-
-export type CronDisableIntent =
-    | { mode: "indefinite"; comment: string }
-    | { mode: "until"; comment: string; until: string };
+import type { JobDisableIntent } from "./jobDisableIntent.ts";
+import { openClawCronDisableIntentsByJobId } from "./openClawCronMetadata.ts";
 
 export interface CronTaskLink {
     number: number;
     title: string;
-    disableIntent?: CronDisableIntent;
 }
 
 interface TaskAutomationRow {
@@ -39,14 +35,8 @@ interface CronListResponse {
 
 interface HeartbeatTaskAutomation {
     cronJobId: string;
-    disableIntent?: CronDisableIntent;
-    enabled?: boolean;
-    lastRunAtMs?: number;
-    lastRunStatus?: string;
     missing?: boolean;
-    nextRunAtMs?: number;
     recurring: boolean;
-    runningAtMs?: number;
 }
 
 interface HeartbeatTask {
@@ -59,6 +49,7 @@ interface HeartbeatTask {
 }
 
 interface HeartbeatCronJob {
+    disableIntent?: JobDisableIntent;
     enabled?: boolean;
     id: string;
     lastDurationMs?: number;
@@ -67,7 +58,6 @@ interface HeartbeatCronJob {
     name?: string;
     nextRunAtMs?: number;
     runningAtMs?: number;
-    taskNumbers: number[];
 }
 
 export interface HeartbeatAutomationSnapshot {
@@ -76,8 +66,6 @@ export interface HeartbeatAutomationSnapshot {
     cronJobs: HeartbeatCronJob[];
     tasks: HeartbeatTask[];
 }
-
-const disableIntentCommentMaxLength = 1000;
 
 function parseRecordJson(value: string): Record<string, unknown> {
     try {
@@ -136,62 +124,6 @@ function openTaskAutomationRows(): TaskAutomationRow[] {
         .all() as unknown as TaskAutomationRow[];
 }
 
-/** Validates and normalizes an intentional cron disable annotation. */
-export function normalizeCronDisableIntent(
-    value: unknown
-): CronDisableIntent | undefined {
-    if (value === undefined || value === null) return;
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-        throw new HttpError("disableIntent must be an object", 400);
-    }
-
-    const input = value as Record<string, unknown>;
-    if (input.mode !== "until" && input.mode !== "indefinite") {
-        throw new HttpError("disableIntent.mode must be until or indefinite", 400);
-    }
-    if (typeof input.comment !== "string" || !input.comment.trim()) {
-        throw new HttpError("disableIntent.comment is required", 400);
-    }
-    const comment = input.comment.trim();
-    if (comment.length > disableIntentCommentMaxLength) {
-        throw new HttpError(
-            `disableIntent.comment must be at most ${disableIntentCommentMaxLength} characters`,
-            400
-        );
-    }
-    if (input.mode === "indefinite") {
-        return { mode: "indefinite", comment };
-    }
-    if (typeof input.until !== "string" || !input.until.trim()) {
-        throw new HttpError("disableIntent.until is required for until mode", 400);
-    }
-    const untilTimestamp = Date.parse(input.until);
-    if (Number.isNaN(untilTimestamp)) {
-        throw new HttpError("disableIntent.until must be a valid timestamp", 400);
-    }
-    return {
-        mode: "until",
-        comment,
-        until: new Date(untilTimestamp).toISOString(),
-    };
-}
-
-/** Reads stored intent defensively without turning malformed legacy data into API errors. */
-export function readCronDisableIntent(value: unknown): CronDisableIntent | undefined {
-    try {
-        return normalizeCronDisableIntent(value);
-    } catch {
-        return;
-    }
-}
-
-/** Ensures a newly submitted time-bounded disable has not already expired. */
-export function assertCronDisableIntentIsCurrent(intent: CronDisableIntent): void {
-    if (intent.mode === "until" && Date.parse(intent.until) <= Date.now()) {
-        throw new HttpError("disableIntent.until must be in the future", 400);
-    }
-}
-
 /** Returns open task links for each OpenClaw cron job. */
 export function cronTaskLinksByJobId(): Map<string, CronTaskLink[]> {
     const links = new Map<string, CronTaskLink[]>();
@@ -203,56 +135,35 @@ export function cronTaskLinksByJobId(): Map<string, CronTaskLink[]> {
         taskLinks.push({
             number: task.id,
             title: task.title,
-            disableIntent: readCronDisableIntent(stored.disableIntent),
         });
         links.set(id, taskLinks);
     }
     return links;
 }
 
-/** Adds task-link metadata to raw OpenClaw cron jobs for the Jobs UI. */
+/** Adds Dashboard-owned metadata to raw OpenClaw cron jobs for the Jobs UI. */
 export function withCronTaskLinks<T extends CronJob>(
     jobs: T[]
-): Array<T & { taskLinks?: CronTaskLink[] }> {
+): Array<T & { disableIntent?: JobDisableIntent; taskLinks?: CronTaskLink[] }> {
     const linksByJobId = cronTaskLinksByJobId();
+    const disableIntentsByJobId = openClawCronDisableIntentsByJobId();
     return jobs.map((job) => {
-        const taskLinks = linksByJobId.get(cronJobId(job));
-        return taskLinks && taskLinks.length > 0 ? { ...job, taskLinks } : job;
+        const id = cronJobId(job);
+        const disableIntent = disableIntentsByJobId.get(id);
+        const taskLinks = linksByJobId.get(id);
+        return {
+            ...job,
+            ...(disableIntent && { disableIntent }),
+            ...(taskLinks && taskLinks.length > 0 && { taskLinks }),
+        };
     });
-}
-
-/** Stores or clears intentional-disable metadata on open tasks linked to a cron job. */
-export function updateCronTaskDisableIntent(
-    id: string,
-    intent: CronDisableIntent | undefined
-): number {
-    const timestamp = new Date().toISOString();
-    const updates = openTaskAutomationRows()
-        .map((task) => ({
-            task,
-            automation: parseRecordJson(task.automation_json),
-        }))
-        .filter(({ automation }) => stringFromRecord(automation, "cronJobId") === id);
-
-    database.transaction(() => {
-        for (const { task, automation } of updates) {
-            if (intent) automation.disableIntent = intent;
-            else delete automation.disableIntent;
-            database
-                .prepare(
-                    "UPDATE tasks SET automation_json = ?, updated_at = ? WHERE id = ?"
-                )
-                .run(JSON.stringify(automation), timestamp, task.id);
-        }
-    })();
-    return updates.length;
 }
 
 function isHeartbeatRelevantTask(
     task: TaskAutomationRow,
-    hasRecurringAutomation: boolean
+    hasCronAutomation: boolean
 ): boolean {
-    if (hasRecurringAutomation) return true;
+    if (hasCronAutomation) return true;
     if (
         task.assignee === TASK_ASSIGNEES.mira.id &&
         (task.priority === "high" || task.priority === "medium")
@@ -280,17 +191,9 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
             .map((job) => [cronJobId(job), job] as const)
             .filter(([id]) => id.length > 0)
     );
+    const disableIntentsByJobId = openClawCronDisableIntentsByJobId();
 
     const taskRows = openTaskAutomationRows();
-    const taskNumbersByCronJobId = new Map<string, number[]>();
-    for (const task of taskRows) {
-        const id = stringFromRecord(parseRecordJson(task.automation_json), "cronJobId");
-        if (!id) continue;
-        taskNumbersByCronJobId.set(id, [
-            ...(taskNumbersByCronJobId.get(id) ?? []),
-            task.id,
-        ]);
-    }
     const heartbeatCronJobs = cronJobs
         .map((job): HeartbeatCronJob | undefined => {
             const id = cronJobId(job);
@@ -299,6 +202,7 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
             return {
                 id,
                 name: job.name,
+                disableIntent: disableIntentsByJobId.get(id),
                 enabled: job.enabled,
                 runningAtMs: numberFromRecord(state, "runningAtMs"),
                 nextRunAtMs: numberFromRecord(state, "nextRunAtMs"),
@@ -307,7 +211,6 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
                     stringFromRecord(state, "lastRunStatus") ||
                     stringFromRecord(state, "lastStatus"),
                 lastDurationMs: numberFromRecord(state, "lastDurationMs"),
-                taskNumbers: taskNumbersByCronJobId.get(id) ?? [],
             };
         })
         .filter((job): job is HeartbeatCronJob => job !== undefined);
@@ -317,8 +220,6 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
             const stored = parseRecordJson(task.automation_json);
             const id = stringFromRecord(stored, "cronJobId");
             if (!isHeartbeatRelevantTask(task, Boolean(id))) return;
-            const job = id ? cronJobsById.get(id) : undefined;
-            const state = job?.state;
             return {
                 number: task.id,
                 title: task.title,
@@ -329,15 +230,9 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
                     ? {
                           cronJobId: id,
                           recurring: booleanFromRecord(stored, "recurring") ?? true,
-                          enabled: job?.enabled,
-                          missing: isCronDataAvailable ? !job : undefined,
-                          runningAtMs: numberFromRecord(state, "runningAtMs"),
-                          nextRunAtMs: numberFromRecord(state, "nextRunAtMs"),
-                          lastRunAtMs: numberFromRecord(state, "lastRunAtMs"),
-                          lastRunStatus:
-                              stringFromRecord(state, "lastRunStatus") ||
-                              stringFromRecord(state, "lastStatus"),
-                          disableIntent: readCronDisableIntent(stored.disableIntent),
+                          missing: isCronDataAvailable
+                              ? !cronJobsById.has(id)
+                              : undefined,
                       }
                     : undefined,
             };

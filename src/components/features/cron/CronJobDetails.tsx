@@ -119,7 +119,7 @@ export function CronJobDetails({
                         disabled={togglePending}
                         className="rounded-lg border border-primary-700 bg-primary-800/60 px-3 py-2 sm:border-0 sm:bg-transparent sm:p-0"
                     />
-                    {job.enabled === false && (job.taskLinks?.length ?? 0) > 0 ? (
+                    {job.enabled === false ? (
                         <Button
                             size="sm"
                             variant="secondary"
@@ -127,7 +127,7 @@ export function CronJobDetails({
                             onClick={() => onConfigureDisable(job)}
                             className="w-full sm:w-auto"
                         >
-                            {job.taskLinks?.some((link) => link.disableIntent)
+                            {job.disableIntent
                                 ? "Edit disabled reason"
                                 : "Set disabled reason"}
                         </Button>
@@ -165,35 +165,35 @@ export function CronJobDetails({
                         </span>
                     ) : undefined}
                 </div>
-                {job.enabled === false && (job.taskLinks?.length ?? 0) > 0 ? (
+                {job.enabled === false ? (
                     <div className="mt-3 space-y-2 border-t border-primary-700 pt-3">
-                        {job.taskLinks?.map((link) => (
-                            <div
-                                key={link.number}
-                                className="rounded-lg bg-primary-800/60 px-3 py-2 text-xs text-primary-300"
-                            >
-                                <div className="font-medium text-primary-100">
-                                    Task #{link.number}: {link.title}
-                                </div>
-                                {link.disableIntent ? (
-                                    <>
-                                        <div className="mt-1">
-                                            {link.disableIntent.mode === "indefinite"
-                                                ? "Intentionally disabled indefinitely"
-                                                : `Intentionally disabled until ${formatDate(Date.parse(link.disableIntent.until))}`}
-                                        </div>
-                                        <div className="mt-1 text-primary-400">
-                                            {link.disableIntent.comment}
-                                        </div>
-                                    </>
-                                ) : (
-                                    <div className="mt-1 text-yellow-300">
-                                        No intentional-disable reason is set; heartbeat
-                                        will warn.
+                        <div className="rounded-lg bg-primary-800/60 px-3 py-2 text-xs text-primary-300">
+                            {job.disableIntent ? (
+                                <>
+                                    <div className="font-medium text-primary-100">
+                                        {job.disableIntent.mode === "indefinite"
+                                            ? "Intentionally disabled indefinitely"
+                                            : `Intentionally disabled until ${formatDate(Date.parse(job.disableIntent.until))}`}
                                     </div>
-                                )}
+                                    <div className="mt-1 text-primary-400">
+                                        {job.disableIntent.comment}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="text-yellow-300">
+                                    No intentional-disable reason is set; heartbeat will
+                                    warn.
+                                </div>
+                            )}
+                        </div>
+                        {(job.taskLinks?.length ?? 0) > 0 ? (
+                            <div className="text-xs text-primary-400">
+                                Linked open tasks:{" "}
+                                {job.taskLinks
+                                    ?.map((link) => `#${link.number} ${link.title}`)
+                                    .join(", ")}
                             </div>
-                        ))}
+                        ) : undefined}
                     </div>
                 ) : undefined}
             </div>

@@ -1,6 +1,10 @@
 import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
+    assertJobDisableIntentIsCurrent,
+    normalizeJobDisableIntent,
+} from "../services/jobDisableIntent.ts";
+import {
     getScheduledJob,
     isScheduledJobValidationError,
     listScheduledJobRuns,
@@ -15,6 +19,7 @@ type ParametersRequest<T extends string> = Request & { params: Record<T, string>
 const scheduleTypes = new Set<ScheduledJobScheduleType>(["cron", "daily", "interval"]);
 const allowedPatchFields = new Set([
     "cronExpression",
+    "disableIntent",
     "enabled",
     "intervalSeconds",
     "scheduleType",
@@ -111,6 +116,19 @@ export const jobRoutes = {
             const jobPatch = patch as Record<string, unknown>;
 
             try {
+                const hasDisableIntent = Object.hasOwn(jobPatch, "disableIntent");
+                if (hasDisableIntent && jobPatch.enabled !== false) {
+                    return json(
+                        {
+                            error: "disableIntent is only valid when disabling a job",
+                        },
+                        { status: 400 }
+                    );
+                }
+                const disableIntent = hasDisableIntent
+                    ? normalizeJobDisableIntent(jobPatch.disableIntent)
+                    : undefined;
+                if (disableIntent) assertJobDisableIntentIsCurrent(disableIntent);
                 const job = updateScheduledJob(String(request.params.id), {
                     cronExpression:
                         typeof jobPatch.cronExpression === "string" ||
@@ -118,6 +136,8 @@ export const jobRoutes = {
                         jobPatch.cronExpression === undefined
                             ? jobPatch.cronExpression
                             : undefined,
+                    clearDisableIntent: hasDisableIntent && !disableIntent,
+                    disableIntent,
                     enabled:
                         typeof jobPatch.enabled === "boolean"
                             ? jobPatch.enabled
@@ -142,6 +162,13 @@ export const jobRoutes = {
             } catch (error) {
                 if (isScheduledJobValidationError(error)) {
                     return json({ error: error.message }, { status: error.statusCode });
+                }
+                const status = httpStatusCode(error);
+                if (status !== 500) {
+                    return json(
+                        { error: errorMessage(error, "Invalid scheduled job patch") },
+                        { status }
+                    );
                 }
                 console.error("[jobsRoutes] Scheduled jobs route failed", error);
                 return json({ error: "Scheduled jobs route failed" }, { status: 500 });

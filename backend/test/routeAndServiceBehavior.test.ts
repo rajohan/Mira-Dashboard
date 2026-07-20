@@ -198,6 +198,11 @@ afterEach(() => {
     database.prepare("DELETE FROM tasks WHERE title LIKE 'Coverage %'").run();
     database
         .prepare(
+            "DELETE FROM openclaw_cron_job_metadata WHERE job_id LIKE 'coverage-%' OR job_id = 'item-cron'"
+        )
+        .run();
+    database
+        .prepare(
             "DELETE FROM notifications WHERE dedupe_key LIKE 'quota:%' OR dedupe_key LIKE 'openclaw:%'"
         )
         .run();
@@ -896,10 +901,6 @@ describe("backend route and service behavior", () => {
             jsonRequest("/api/tasks", {
                 automation: {
                     cronJobId: "cron-unit",
-                    disableIntent: {
-                        mode: "indefinite",
-                        comment: "Paused for route coverage",
-                    },
                     model: "stored-model",
                     scheduleSummary: "stored schedule",
                 },
@@ -914,10 +915,6 @@ describe("backend route and service behavior", () => {
         expect(created).toMatchObject({
             automation: {
                 cronJobId: "cron-unit",
-                disableIntent: {
-                    mode: "indefinite",
-                    comment: "Paused for route coverage",
-                },
                 model: "stored-model",
                 scheduleSummary: "stored schedule",
                 source: "stored",
@@ -932,10 +929,6 @@ describe("backend route and service behavior", () => {
         await expect(enriched.json()).resolves.toMatchObject({
             automation: {
                 enabled: true,
-                disableIntent: {
-                    mode: "indefinite",
-                    comment: "Paused for route coverage",
-                },
                 model: "codex",
                 scheduleSummary: "Every 1h",
                 source: "cron",
@@ -1277,9 +1270,10 @@ describe("backend route and service behavior", () => {
         expect(hardLinkedWrite.status).toBe(403);
     });
 
-    it("stores and clears intentional disable metadata for linked cron tasks", async () => {
+    it("stores and clears intentional disable metadata for OpenClaw cron jobs", async () => {
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
+        let shouldFailNextUpdate = false;
         const gatewayRequestSpy = jest
             .spyOn(gateway, "request")
             .mockImplementation(async (method) => {
@@ -1294,7 +1288,15 @@ describe("backend route and service behavior", () => {
                         ],
                     };
                 }
-                if (method === "cron.update") return { isOk: true };
+                if (method === "cron.update") {
+                    if (shouldFailNextUpdate) {
+                        shouldFailNextUpdate = false;
+                        throw Object.assign(new Error("Gateway update failed"), {
+                            statusCode: 502,
+                        });
+                    }
+                    return { isOk: true };
+                }
                 throw new Error(`Unexpected Gateway method: ${method}`);
             });
         cleanupCallbacks.push(() => gatewayRequestSpy.mockRestore());
@@ -1372,15 +1374,28 @@ describe("backend route and service behavior", () => {
         );
         expect(disableResponse.status).toBe(200);
         await expect(disableResponse.json()).resolves.toEqual({ isOk: true });
-        const disabledAutomation = database
-            .prepare("SELECT automation_json FROM tasks WHERE id = ?")
-            .get(taskId) as { automation_json: string };
-        expect(JSON.parse(disabledAutomation.automation_json)).toMatchObject({
-            cronJobId: "coverage-linked-cron",
-            disableIntent: {
-                mode: "indefinite",
-                comment: "Paused for maintenance",
-            },
+        const disabledMetadata = database
+            .prepare(
+                `SELECT disable_intent_json
+                 FROM openclaw_cron_job_metadata
+                 WHERE job_id = ?`
+            )
+            .get("coverage-linked-cron") as { disable_intent_json: string };
+        expect(JSON.parse(disabledMetadata.disable_intent_json)).toEqual({
+            mode: "indefinite",
+            comment: "Paused for maintenance",
+        });
+        const disabledListResponse = await cronRoutes["/api/cron/jobs"].GET();
+        await expect(disabledListResponse.json()).resolves.toMatchObject({
+            jobs: [
+                {
+                    id: "coverage-linked-cron",
+                    disableIntent: {
+                        mode: "indefinite",
+                        comment: "Paused for maintenance",
+                    },
+                },
+            ],
         });
 
         const timedDisableResponse = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
@@ -1401,15 +1416,63 @@ describe("backend route and service behavior", () => {
             )
         );
         expect(timedDisableResponse.status).toBe(200);
-        const timedAutomation = database
-            .prepare("SELECT automation_json FROM tasks WHERE id = ?")
-            .get(taskId) as { automation_json: string };
-        expect(JSON.parse(timedAutomation.automation_json)).toMatchObject({
-            disableIntent: {
-                mode: "until",
-                comment: "Pause until maintenance ends",
-                until: "2999-07-25T10:00:00.000Z",
-            },
+        const timedMetadata = database
+            .prepare(
+                `SELECT disable_intent_json
+                 FROM openclaw_cron_job_metadata
+                 WHERE job_id = ?`
+            )
+            .get("coverage-linked-cron") as { disable_intent_json: string };
+        expect(JSON.parse(timedMetadata.disable_intent_json)).toEqual({
+            mode: "until",
+            comment: "Pause until maintenance ends",
+            until: "2999-07-25T10:00:00.000Z",
+        });
+
+        const preserveResponse = await cronRoutes["/api/cron/jobs/:id/update"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/coverage-linked-cron/update",
+                { id: "coverage-linked-cron" },
+                {
+                    body: JSON.stringify({ patch: { enabled: false } }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(preserveResponse.status).toBe(200);
+        const preservedMetadata = database
+            .prepare(
+                `SELECT disable_intent_json
+                 FROM openclaw_cron_job_metadata
+                 WHERE job_id = ?`
+            )
+            .get("coverage-linked-cron") as { disable_intent_json: string };
+        expect(JSON.parse(preservedMetadata.disable_intent_json)).toEqual({
+            mode: "until",
+            comment: "Pause until maintenance ends",
+            until: "2999-07-25T10:00:00.000Z",
+        });
+
+        shouldFailNextUpdate = true;
+        const failedEnableResponse = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/coverage-linked-cron/toggle",
+                { id: "coverage-linked-cron" },
+                { body: JSON.stringify({ enabled: true }), method: "POST" }
+            )
+        );
+        expect(failedEnableResponse.status).toBe(502);
+        const restoredMetadata = database
+            .prepare(
+                `SELECT disable_intent_json
+                 FROM openclaw_cron_job_metadata
+                 WHERE job_id = ?`
+            )
+            .get("coverage-linked-cron") as { disable_intent_json: string };
+        expect(JSON.parse(restoredMetadata.disable_intent_json)).toEqual({
+            mode: "until",
+            comment: "Pause until maintenance ends",
+            until: "2999-07-25T10:00:00.000Z",
         });
 
         const enableResponse = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
@@ -1420,12 +1483,115 @@ describe("backend route and service behavior", () => {
             )
         );
         expect(enableResponse.status).toBe(200);
-        const enabledAutomation = database
-            .prepare("SELECT automation_json FROM tasks WHERE id = ?")
-            .get(taskId) as { automation_json: string };
-        expect(JSON.parse(enabledAutomation.automation_json)).not.toHaveProperty(
-            "disableIntent"
+        expect(
+            database
+                .prepare("SELECT job_id FROM openclaw_cron_job_metadata WHERE job_id = ?")
+                .get("coverage-linked-cron")
+        ).toBeNull();
+    });
+
+    it("stores and clears intentional disable metadata for Dashboard jobs", async () => {
+        const { jobRoutes } = await import("../src/routes/jobRoutes.ts");
+        const { upsertScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const jobId = `coverage-disable-${Bun.randomUUIDv7()}`;
+        cleanupCallbacks.push(() => {
+            database.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(jobId);
+        });
+        upsertScheduledJob({
+            actionKey: "coverage.disable",
+            enabled: true,
+            id: jobId,
+            intervalSeconds: 3600,
+            name: "Coverage disable job",
+            scheduleType: "interval",
+        });
+
+        const expiredResponse = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                `/api/jobs/${jobId}`,
+                { id: jobId },
+                {
+                    body: JSON.stringify({
+                        patch: {
+                            enabled: false,
+                            disableIntent: {
+                                mode: "until",
+                                comment: "Expired",
+                                until: "2020-01-01T00:00:00.000Z",
+                            },
+                        },
+                    }),
+                    method: "PATCH",
+                }
+            )
         );
+        expect(expiredResponse.status).toBe(400);
+
+        const disableResponse = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                `/api/jobs/${jobId}`,
+                { id: jobId },
+                {
+                    body: JSON.stringify({
+                        patch: {
+                            enabled: false,
+                            disableIntent: {
+                                mode: "indefinite",
+                                comment: "  Paused for maintenance  ",
+                            },
+                        },
+                    }),
+                    method: "PATCH",
+                }
+            )
+        );
+        expect(disableResponse.status).toBe(200);
+        await expect(disableResponse.json()).resolves.toMatchObject({
+            job: {
+                disableIntent: {
+                    mode: "indefinite",
+                    comment: "Paused for maintenance",
+                },
+                enabled: false,
+            },
+        });
+
+        const preserveResponse = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                `/api/jobs/${jobId}`,
+                { id: jobId },
+                {
+                    body: JSON.stringify({ patch: { intervalSeconds: 7200 } }),
+                    method: "PATCH",
+                }
+            )
+        );
+        await expect(preserveResponse.json()).resolves.toMatchObject({
+            job: {
+                disableIntent: {
+                    mode: "indefinite",
+                    comment: "Paused for maintenance",
+                },
+            },
+        });
+
+        const enableResponse = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                `/api/jobs/${jobId}`,
+                { id: jobId },
+                {
+                    body: JSON.stringify({ patch: { enabled: true } }),
+                    method: "PATCH",
+                }
+            )
+        );
+        const enabledJobResponse = await responseJson(enableResponse);
+        expect(enabledJobResponse).toMatchObject({ job: { enabled: true } });
+        expect(enabledJobResponse.job).not.toHaveProperty("disableIntent");
+        const stored = database
+            .prepare("SELECT disable_intent_json FROM scheduled_jobs WHERE id = ?")
+            .get(jobId) as { disable_intent_json: string | null };
+        expect(stored.disable_intent_json).toBeNull();
     });
 
     it("config file route allowlist, reads, writes, and backups", async () => {
@@ -1677,10 +1843,21 @@ describe("backend route and service behavior", () => {
                     type: "cron",
                     recurring: true,
                     cronJobId: "item-cron",
-                    disableIntent: {
-                        mode: "indefinite",
-                        comment: "Paused during chat work",
-                    },
+                }),
+                heartbeatTimestamp,
+                heartbeatTimestamp
+            );
+        database
+            .prepare(
+                `INSERT INTO openclaw_cron_job_metadata (
+                    job_id, disable_intent_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?)`
+            )
+            .run(
+                "item-cron",
+                JSON.stringify({
+                    mode: "indefinite",
+                    comment: "Paused during chat work",
                 }),
                 heartbeatTimestamp,
                 heartbeatTimestamp
@@ -1689,13 +1866,18 @@ describe("backend route and service behavior", () => {
             .prepare(
                 `INSERT INTO scheduled_jobs (
                     id, name, description, enabled, schedule_type, interval_seconds,
-                    action_key, action_payload_json, next_run_at, created_at, updated_at
-                ) VALUES (?, ?, '', 1, 'daily', 86400, ?, '{}', ?, ?, ?)`
+                    action_key, action_payload_json, disable_intent_json,
+                    next_run_at, created_at, updated_at
+                ) VALUES (?, ?, '', 0, 'daily', 86400, ?, '{}', ?, ?, ?, ?)`
             )
             .run(
                 "coverage.workspace-sync",
                 "OpenClaw workspace sync",
                 "workspace.sync",
+                JSON.stringify({
+                    mode: "indefinite",
+                    comment: "Paused during maintenance",
+                }),
                 "2026-07-21T02:00:00.000Z",
                 heartbeatTimestamp,
                 heartbeatTimestamp
@@ -1764,13 +1946,17 @@ describe("backend route and service behavior", () => {
                 dataAvailable: true,
                 items: [
                     expect.objectContaining({
+                        disableIntent: {
+                            mode: "indefinite",
+                            comment: "Paused during chat work",
+                        },
                         enabled: false,
                         id: "item-cron",
                         lastRunStatus: "ok",
                     }),
                 ],
             },
-            schemaVersion: 2,
+            schemaVersion: 3,
             entries: expect.arrayContaining([
                 expect.objectContaining({
                     consecutiveFailures: 2,
@@ -1784,6 +1970,10 @@ describe("backend route and service behavior", () => {
             (job) => job.id === "coverage.workspace-sync"
         );
         expect(workspaceSyncJob).toMatchObject({
+            disableIntent: {
+                mode: "indefinite",
+                comment: "Paused during maintenance",
+            },
             lastRun: {
                 message: "Refusing to push unrelated local commits",
                 status: "failed",
@@ -1795,13 +1985,11 @@ describe("backend route and service behavior", () => {
         expect(heartbeatTask).toMatchObject({
             automation: {
                 cronJobId: "item-cron",
-                disableIntent: {
-                    mode: "indefinite",
-                    comment: "Paused during chat work",
-                },
-                enabled: false,
             },
         });
+        expect(heartbeatTask?.automation).not.toHaveProperty("disableIntent");
+        expect(heartbeatTask?.automation).not.toHaveProperty("enabled");
+        expect(cacheHeartbeatJson.cronJobs.items[0]).not.toHaveProperty("taskNumbers");
         expect(heartbeatTask?.number).toEqual(expect.any(Number));
         expect(
             cacheHeartbeatJson.tasks.find(
@@ -2306,6 +2494,10 @@ describe("backend route and service behavior", () => {
         await expect(cronList.json()).resolves.toEqual({
             jobs: [
                 {
+                    disableIntent: {
+                        mode: "indefinite",
+                        comment: "Paused during chat work",
+                    },
                     enabled: false,
                     id: "item-cron",
                     name: "Coverage cron",
@@ -2317,10 +2509,6 @@ describe("backend route and service behavior", () => {
                         {
                             number: expect.any(Number),
                             title: "Coverage heartbeat task",
-                            disableIntent: {
-                                mode: "indefinite",
-                                comment: "Paused during chat work",
-                            },
                         },
                     ],
                 },

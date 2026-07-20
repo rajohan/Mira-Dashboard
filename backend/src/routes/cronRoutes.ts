@@ -2,11 +2,15 @@ import gateway from "../gateway.ts";
 import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
-    assertCronDisableIntentIsCurrent,
-    normalizeCronDisableIntent,
-    updateCronTaskDisableIntent,
-    withCronTaskLinks,
-} from "../services/taskAutomation.ts";
+    assertJobDisableIntentIsCurrent,
+    type JobDisableIntent,
+    normalizeJobDisableIntent,
+} from "../services/jobDisableIntent.ts";
+import {
+    getOpenClawCronDisableIntent,
+    setOpenClawCronDisableIntent,
+} from "../services/openClawCronMetadata.ts";
+import { withCronTaskLinks } from "../services/taskAutomation.ts";
 
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
 
@@ -41,6 +45,28 @@ function cronError(error: unknown, fallback: string): Response {
     );
 }
 
+async function updateCronWithDisableIntent(
+    jobId: string,
+    patch: Record<string, unknown>,
+    disableIntent: JobDisableIntent | undefined
+): Promise<void> {
+    const previousIntent = getOpenClawCronDisableIntent(jobId);
+    setOpenClawCronDisableIntent(jobId, disableIntent);
+    try {
+        await gateway.request("cron.update", { jobId, patch });
+    } catch (error) {
+        try {
+            setOpenClawCronDisableIntent(jobId, previousIntent);
+        } catch (rollbackError) {
+            console.error(
+                "[cronRoutes] Failed to restore OpenClaw cron metadata",
+                rollbackError
+            );
+        }
+        throw error;
+    }
+}
+
 export const cronRoutes = {
     "/api/cron/jobs": {
         GET: async () => {
@@ -57,12 +83,23 @@ export const cronRoutes = {
 
     "/api/cron/jobs/:id/delete": {
         POST: async (request: ParametersRequest<"id">) => {
+            let previousIntent: JobDisableIntent | undefined;
             try {
+                previousIntent = getOpenClawCronDisableIntent(request.params.id);
+                setOpenClawCronDisableIntent(request.params.id, undefined);
                 const payload = await gateway.request("cron.remove", {
                     jobId: request.params.id,
                 });
                 return json({ isOk: true, payload });
             } catch (error) {
+                try {
+                    setOpenClawCronDisableIntent(request.params.id, previousIntent);
+                } catch (rollbackError) {
+                    console.error(
+                        "[cronRoutes] Failed to restore deleted cron metadata",
+                        rollbackError
+                    );
+                }
                 return cronError(error, "Failed to delete cron job");
             }
         },
@@ -105,13 +142,13 @@ export const cronRoutes = {
                 }
                 const disableIntent = body.enabled
                     ? undefined
-                    : normalizeCronDisableIntent(body.disableIntent);
-                if (disableIntent) assertCronDisableIntentIsCurrent(disableIntent);
-                await gateway.request("cron.update", {
-                    jobId: request.params.id,
-                    patch: { enabled: body.enabled },
-                });
-                updateCronTaskDisableIntent(request.params.id, disableIntent);
+                    : normalizeJobDisableIntent(body.disableIntent);
+                if (disableIntent) assertJobDisableIntentIsCurrent(disableIntent);
+                await updateCronWithDisableIntent(
+                    request.params.id,
+                    { enabled: body.enabled },
+                    disableIntent
+                );
                 return json({ isOk: true });
             } catch (error) {
                 return cronError(error, "Failed to toggle cron job");
@@ -133,9 +170,18 @@ export const cronRoutes = {
                 if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
                     return json({ error: "patch must be an object" }, { status: 400 });
                 }
-                await gateway.request("cron.update", { jobId: request.params.id, patch });
-                if (typeof (patch as Record<string, unknown>).enabled === "boolean") {
-                    updateCronTaskDisableIntent(request.params.id, undefined);
+                const cronPatch = patch as Record<string, unknown>;
+                if (cronPatch.enabled === true) {
+                    await updateCronWithDisableIntent(
+                        request.params.id,
+                        cronPatch,
+                        undefined
+                    );
+                } else {
+                    await gateway.request("cron.update", {
+                        jobId: request.params.id,
+                        patch: cronPatch,
+                    });
                 }
                 return json({ isOk: true });
             } catch (error) {

@@ -81,6 +81,11 @@ const terminalApiState = {
 };
 const jobsApiState = {
     cronName: "heartbeat",
+    heartbeatDisableIntent: undefined as
+        | undefined
+        | { mode: "indefinite"; comment: string }
+        | { mode: "until"; comment: string; until: string },
+    heartbeatEnabled: true,
     heartbeatIntervalSeconds: 1800,
     heartbeatRuns: [
         {
@@ -1250,7 +1255,8 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 {
                     id: "heartbeat",
                     name: "Heartbeat",
-                    enabled: true,
+                    enabled: jobsApiState.heartbeatEnabled,
+                    disableIntent: jobsApiState.heartbeatDisableIntent,
                     scheduleType: "interval",
                     intervalSeconds: jobsApiState.heartbeatIntervalSeconds,
                     actionKey: "heartbeat",
@@ -1296,11 +1302,40 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         const body = parseRequestBody(init) as {
             patch?: {
                 cronExpression?: unknown;
+                disableIntent?:
+                    | null
+                    | { mode: "indefinite"; comment: string }
+                    | { mode: "until"; comment: string; until: string };
+                enabled?: boolean;
                 intervalSeconds?: unknown;
                 scheduleType?: unknown;
                 timeOfDay?: unknown;
             };
         };
+        if (body.patch?.enabled === false) {
+            expect(body.patch.disableIntent).toEqual({
+                mode: "indefinite",
+                comment: "Paused Dashboard maintenance",
+            });
+            jobsApiState.heartbeatEnabled = false;
+            jobsApiState.heartbeatDisableIntent = body.patch.disableIntent ?? undefined;
+            return Response.json({
+                isOk: true,
+                job: {
+                    id: "heartbeat",
+                    name: "Heartbeat",
+                    enabled: jobsApiState.heartbeatEnabled,
+                    disableIntent: jobsApiState.heartbeatDisableIntent,
+                    scheduleType: "interval",
+                    intervalSeconds: jobsApiState.heartbeatIntervalSeconds,
+                    actionKey: "heartbeat",
+                    actionPayload: {},
+                    createdAt: "2026-06-24T08:00:00.000Z",
+                    updatedAt: "2026-06-24T08:05:00.000Z",
+                    isRunning: false,
+                },
+            });
+        }
         const clearedScheduleValue = JSON.parse("null") as null;
         jobsApiState.heartbeatIntervalSeconds = Number(body.patch?.intervalSeconds);
         expect(body).toEqual({
@@ -1316,7 +1351,8 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
             job: {
                 id: "heartbeat",
                 name: "Heartbeat",
-                enabled: true,
+                enabled: jobsApiState.heartbeatEnabled,
+                disableIntent: jobsApiState.heartbeatDisableIntent,
                 scheduleType: "interval",
                 intervalSeconds: jobsApiState.heartbeatIntervalSeconds,
                 actionKey: "heartbeat",
@@ -1819,6 +1855,8 @@ describe("Mira Dashboard pages", () => {
         logsApiState.openclawHundredLineRequests = 0;
         logsApiState.simulateOpenclawTruncation = false;
         jobsApiState.cronName = "heartbeat";
+        jobsApiState.heartbeatDisableIntent = undefined;
+        jobsApiState.heartbeatEnabled = true;
         jobsApiState.heartbeatIntervalSeconds = 1800;
         jobsApiState.heartbeatRuns = [
             {
@@ -2291,6 +2329,33 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getAllByText("Schedule: Every 1h").length).toBeGreaterThan(0);
         });
 
+        await user.click(screen.getByLabelText("Enabled"));
+        expect(screen.getByRole("heading", { name: "Disable job" })).toBeInTheDocument();
+        const disabledUntilInput = screen.getByLabelText("Disabled until");
+        const disableCommentInput = screen.getByLabelText("Comment");
+        fireEvent.change(disabledUntilInput, {
+            target: { value: "2020-01-01T00:00" },
+        });
+        await user.type(disableCommentInput, "Paused Dashboard maintenance");
+        await user.click(screen.getByRole("button", { name: "Disable job" }));
+        expect(disabledUntilInput.parentElement).toHaveTextContent(
+            "Choose a future date and time."
+        );
+        expect(disableCommentInput.parentElement).not.toHaveTextContent(
+            "Choose a future date and time."
+        );
+        await user.click(
+            screen.getByRole("button", { name: /disabled duration: until a date/i })
+        );
+        await user.click(screen.getByText("Indefinitely"));
+        await user.click(screen.getByRole("button", { name: "Disable job" }));
+        await waitFor(() => {
+            expect(
+                screen.queryByRole("heading", { name: "Disable job" })
+            ).not.toBeInTheDocument();
+            expect(screen.getByText("Paused Dashboard maintenance")).toBeInTheDocument();
+        });
+
         await user.click(screen.getByRole("button", { name: /run now/i }));
         await waitFor(() => {
             expect(screen.getByText("manual run #2")).toBeInTheDocument();
@@ -2311,9 +2376,7 @@ describe("Mira Dashboard pages", () => {
         });
 
         await user.click(screen.getByLabelText("Enabled"));
-        expect(
-            screen.getByRole("heading", { name: "Disable linked cron job" })
-        ).toBeInTheDocument();
+        expect(screen.getByRole("heading", { name: "Disable job" })).toBeInTheDocument();
         await user.click(
             screen.getByRole("button", { name: /disabled duration: until a date/i })
         );
@@ -2322,7 +2385,7 @@ describe("Mira Dashboard pages", () => {
         await user.click(screen.getByRole("button", { name: "Disable job" }));
         await waitFor(() => {
             expect(
-                screen.queryByRole("heading", { name: "Disable linked cron job" })
+                screen.queryByRole("heading", { name: "Disable job" })
             ).not.toBeInTheDocument();
         });
         await user.click(screen.getByRole("button", { name: /^edit$/i }));

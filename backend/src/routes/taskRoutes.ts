@@ -8,11 +8,6 @@ import gateway from "../gateway.ts";
 import { HttpError, json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { objectFallback } from "../lib/values.ts";
-import {
-    type CronDisableIntent,
-    normalizeCronDisableIntent,
-    readCronDisableIntent,
-} from "../services/taskAutomation.ts";
 
 type Status = "todo" | "in-progress" | "blocked" | "done";
 type Assignee = TaskAssigneeId;
@@ -63,7 +58,6 @@ interface TaskAutomationInput {
     sessionTarget?: string;
     model?: string;
     thinking?: string;
-    disableIntent?: CronDisableIntent;
     [key: string]: unknown;
 }
 
@@ -162,8 +156,6 @@ function normalizeAutomationInput(value: unknown): string {
             automation[key] = keyValue.trim();
         }
     }
-    const disableIntent = normalizeCronDisableIntent(input.disableIntent);
-    if (disableIntent) automation.disableIntent = disableIntent;
     return JSON.stringify(automation);
 }
 
@@ -255,7 +247,6 @@ function toFrontendAutomation(task: DatabaseTask, cronJobsById?: Map<string, Cro
             stringFromRecord(state, "lastRunStatus") ||
             stringFromRecord(state, "lastStatus"),
         lastDurationMs: numberFromRecord(state, "lastDurationMs"),
-        disableIntent: readCronDisableIntent(stored.disableIntent),
         source: job ? "cron" : "stored",
     };
 }

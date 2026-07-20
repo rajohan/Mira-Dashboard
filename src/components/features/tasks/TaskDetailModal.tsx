@@ -246,7 +246,6 @@ export function TaskDetailModal({
                       cronJobId,
                       scheduleSummary,
                       sessionTarget,
-                      disableIntent: task.automation?.disableIntent,
                   }
                 : CLEAR_TASK_AUTOMATION,
         });

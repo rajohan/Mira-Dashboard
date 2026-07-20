@@ -1766,7 +1766,13 @@ describe("Mira Dashboard frontend behavior", () => {
 
                 if (url === "/api/jobs/job-1" && method === "PATCH") {
                     expect(JSON.parse(String(init?.body))).toEqual({
-                        patch: { enabled: false },
+                        patch: {
+                            enabled: false,
+                            disableIntent: {
+                                mode: "indefinite",
+                                comment: "Paused for hook coverage",
+                            },
+                        },
                     });
                     return Response.json({ isOk: true, job: { id: "job-1" } });
                 }
@@ -1937,7 +1943,13 @@ describe("Mira Dashboard frontend behavior", () => {
         const updateJob = renderHookWithQueryClient(() => useUpdateScheduledJob());
         await updateJob.result.current.mutateAsync({
             id: "job-1",
-            patch: { enabled: false },
+            patch: {
+                enabled: false,
+                disableIntent: {
+                    mode: "indefinite",
+                    comment: "Paused for hook coverage",
+                },
+            },
         });
 
         const runJob = renderHookWithQueryClient(() => useRunScheduledJobNow());
@@ -4414,10 +4426,6 @@ describe("Mira Dashboard frontend behavior", () => {
                 scheduleSummary: "Every hour",
                 sessionTarget: "agent:main:main",
                 enabled: false,
-                disableIntent: {
-                    mode: "indefinite",
-                    comment: "Paused during chat work",
-                },
                 lastRunStatus: "success",
                 lastRunAtMs: Date.UTC(2026, 5, 23, 8),
                 nextRunAtMs: Date.UTC(2026, 5, 23, 9),
@@ -4473,10 +4481,6 @@ describe("Mira Dashboard frontend behavior", () => {
                 title: "Edited detail task",
                 automation: expect.objectContaining({
                     cronJobId: "cron-edited",
-                    disableIntent: {
-                        mode: "indefinite",
-                        comment: "Paused during chat work",
-                    },
                 }),
             })
         );

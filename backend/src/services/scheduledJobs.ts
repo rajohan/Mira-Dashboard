@@ -1,5 +1,6 @@
 import { database, sqlNullable } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
+import { type JobDisableIntent, parseJobDisableIntent } from "./jobDisableIntent.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -73,6 +74,7 @@ export interface ScheduledJob {
     cronExpression: string | undefined;
     actionKey: string;
     actionPayload: Record<string, unknown>;
+    disableIntent: JobDisableIntent | undefined;
     nextRunAt: string | undefined;
     createdAt: string;
     updatedAt: string;
@@ -105,6 +107,8 @@ export interface ScheduledJobDefinition {
 }
 
 export interface ScheduledJobPatch {
+    clearDisableIntent?: boolean;
+    disableIntent?: JobDisableIntent | undefined;
     enabled?: boolean;
     scheduleType?: ScheduledJobScheduleType;
     intervalSeconds?: number;
@@ -123,6 +127,7 @@ interface ScheduledJobRow {
     cron_expression: string | null | undefined;
     action_key: string;
     action_payload_json: string;
+    disable_intent_json: string | null | undefined;
     next_run_at: string | null | undefined;
     created_at: string;
     updated_at: string;
@@ -491,6 +496,7 @@ function mapJob(
         cronExpression: fromSqlNullable(row.cron_expression),
         actionKey: row.action_key,
         actionPayload: parseJsonObject(row.action_payload_json),
+        disableIntent: parseJobDisableIntent(row.disable_intent_json),
         nextRunAt: fromSqlNullable(row.next_run_at),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -663,6 +669,10 @@ export function updateScheduledJob(
         return undefined;
     }
     const next = {
+        disableIntent:
+            patch.enabled === true || patch.clearDisableIntent
+                ? undefined
+                : (patch.disableIntent ?? existing.disableIntent),
         enabled: patch.enabled ?? existing.enabled,
         scheduleType: patch.scheduleType ?? existing.scheduleType,
         intervalSeconds: patch.intervalSeconds ?? existing.intervalSeconds,
@@ -695,7 +705,7 @@ export function updateScheduledJob(
         .prepare(
             `UPDATE scheduled_jobs
          SET enabled = ?, schedule_type = ?, interval_seconds = ?, time_of_day = ?, cron_expression = ?,
-             next_run_at = ?, updated_at = ?
+             disable_intent_json = ?, next_run_at = ?, updated_at = ?
          WHERE id = ?`
         )
         .run(
@@ -704,6 +714,9 @@ export function updateScheduledJob(
             next.intervalSeconds,
             sqlNullable(next.timeOfDay),
             sqlNullable(next.cronExpression),
+            sqlNullable(
+                next.disableIntent ? JSON.stringify(next.disableIntent) : undefined
+            ),
             sqlNullable(nextRunAt),
             timestamp,
             id

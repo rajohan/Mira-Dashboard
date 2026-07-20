@@ -13,6 +13,7 @@ Dashboard-local scheduled jobs are stored in SQLite:
 | -------------------- | ---------------------------------------- |
 | `scheduled_jobs`     | Job definitions.                         |
 | `scheduled_job_runs` | Run history, status, output, and errors. |
+| `openclaw_cron_job_metadata` | Dashboard-owned metadata for external OpenClaw cron jobs. |
 
 Supported schedule shapes:
 
@@ -28,6 +29,22 @@ Operational defaults:
 
 Use the Jobs page to inspect definitions and run history before editing the
 database manually.
+
+Intentional-disable metadata never belongs in `action_payload_json`, which is
+reserved for input passed to the scheduled action handler. Existing databases
+must be updated manually before deploying code that reads the new schema:
+
+```sql
+ALTER TABLE scheduled_jobs ADD COLUMN disable_intent_json TEXT;
+CREATE TABLE openclaw_cron_job_metadata (
+    job_id TEXT PRIMARY KEY,
+    disable_intent_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+```
+
+There is deliberately no runtime migration or fallback for these fields.
 
 ## Built-In Startup Jobs
 
@@ -86,28 +103,34 @@ Dashboard exposes two intentionally different aggregate cache endpoints:
 | Endpoint               | Consumer               | Payload contract                                                       |
 | ---------------------- | ---------------------- | ---------------------------------------------------------------------- |
 | `/api/cache/status`    | Dashboard UI polling   | Cache envelopes only; `data` is `null`.                                |
-| `/api/cache/heartbeat` | OpenClaw ops heartbeat | `schemaVersion: 2` plus compact cache, task, OpenClaw cron, and Dashboard-job projections. |
+| `/api/cache/heartbeat` | OpenClaw ops heartbeat | `schemaVersion: 3` plus compact cache, task, OpenClaw cron, and Dashboard-job projections. |
 
 Both responses retain every cache envelope so consumers can assess freshness,
-status, errors, timestamps, and consecutive failures. Heartbeat v2 avoids
+status, errors, timestamps, and consecutive failures. Heartbeat v3 avoids
 returning full provider payloads; consumers must use the documented compact
 fields and must not assume the original cached object is present.
 
 The heartbeat response also exposes these top-level operational projections:
 
 - `dashboardJobs`: every Dashboard scheduled job with enabled/running state,
-  next run, and the latest run status/message;
+  next run, latest run status/message, and optional disable intent;
 - `cronJobs`: one compact snapshot from a single Gateway `cron.list`, including
-  enabled/running/last/next state for every OpenClaw cron job;
+  enabled/running/last/next state and optional Dashboard-owned disable intent for
+  every OpenClaw cron job;
 - `tasks`: only open heartbeat-relevant tasks. Task automation contains its
-  linked `cronJobId` and optional intentional-disable annotation.
+  linked `cronJobId`; cron runtime and disable state remain canonical in
+  `cronJobs` rather than being duplicated on tasks.
 
 Completed tasks are excluded from the heartbeat task projection. A disabled
-linked cron remains quiet while an `indefinite` annotation with a comment is
-present, or while an `until` annotation has not expired. Missing, malformed, or
-expired intent remains actionable, as do missing or failing cron jobs regardless
-of intent. The full `/api/tasks`, `/api/jobs`, and `/api/cron/jobs` responses
-remain the UI contracts and are not required by heartbeat.
+Dashboard or OpenClaw cron job remains quiet while an `indefinite` annotation
+with a comment is present, or while an `until` annotation has not expired.
+Missing, malformed, or expired intent remains actionable, as do missing or
+failing jobs regardless of intent. Cache `entries` describe produced data and
+freshness; `dashboardJobs` describes scheduler execution, so they are related
+but not interchangeable. Heartbeat should correlate them and avoid reporting
+the same root failure twice. The full `/api/tasks`, `/api/jobs`, and
+`/api/cron/jobs` responses remain the UI contracts and are not required by
+heartbeat.
 
 Do not change heartbeat automation to `/api/cache/status`: it needs the compact
 operational data. Conversely, routine UI badge polling should not download the
