@@ -126,13 +126,17 @@ export function chatAttachmentPreviewUrl(
     const isLocalMedia = url === "/api/media" || url.startsWith("/api/media?");
     const isManagedMedia = url.startsWith("/api/chat/media/outgoing/");
     if (isLocalMedia || isManagedMedia) {
-        if (/[?&]preview=(?:image|text)(?=&|$)/u.test(url)) {
-            return url.replace(
+        const fragmentIndex = url.indexOf("#");
+        const urlWithoutFragment =
+            fragmentIndex === -1 ? url : url.slice(0, fragmentIndex);
+        const fragment = fragmentIndex === -1 ? "" : url.slice(fragmentIndex);
+        if (/[?&]preview=(?:image|text)(?=&|$)/u.test(urlWithoutFragment)) {
+            return `${urlWithoutFragment.replace(
                 /[?&]preview=(?:image|text)(?=&|$)/u,
                 (match) => `${match[0]}preview=${mode}`
-            );
+            )}${fragment}`;
         }
-        return `${url}${url.includes("?") ? "&" : "?"}preview=${mode}`;
+        return `${urlWithoutFragment}${urlWithoutFragment.includes("?") ? "&" : "?"}preview=${mode}${fragment}`;
     }
 
     return mode === "image" ? safeChatImageUrl(url) : undefined;

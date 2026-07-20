@@ -6,6 +6,7 @@ import { JsonPreview } from "../files/viewers/JsonPreview";
 import { MarkdownPreview } from "../files/viewers/MarkdownPreview";
 import {
     chatAttachmentPreviewUrl,
+    chatImageDisplayUrl,
     type ChatPreviewItem,
     normalizeChatMimeType,
 } from "./chatTypes";
@@ -82,7 +83,7 @@ export function AttachmentPreviewModal({
     const normalizedMimeType = normalizeChatMimeType(previewItem?.mimeType || "");
     const imagePreviewUrl =
         previewItem?.kind === "image" && previewItem.url
-            ? chatAttachmentPreviewUrl(previewItem.url, "image")
+            ? chatImageDisplayUrl(previewItem.url, previewItem.mimeType || "")
             : undefined;
     const shouldRenderJson =
         normalizedMimeType === "application/json" ||

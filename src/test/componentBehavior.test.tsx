@@ -650,6 +650,22 @@ describe("shared component helpers", () => {
             <AttachmentPreviewModal
                 previewItem={{
                     kind: "image",
+                    mimeType: "image/png",
+                    title: "local-photo.png",
+                    url: "/api/media?path=local-photo.png",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(screen.getByAltText("local-photo.png")).toHaveAttribute(
+            "src",
+            "/api/media?path=local-photo.png"
+        );
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "image",
                     mimeType: "image/svg+xml; charset=utf-8",
                     title: "logo.svg",
                     url: "/api/media?path=logo.svg",

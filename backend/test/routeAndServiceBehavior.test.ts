@@ -2791,6 +2791,12 @@ describe("backend route and service behavior", () => {
             'attachment; filename="page.html"'
         );
 
+        const nonV4Uuid = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(
+                "https://dashboard.test/api/chat/media/outgoing/agent%3Amain%3Amain/018f47a2-9b7c-7cc8-a123-456789abcdef/full"
+            )
+        );
+        expect(nonV4Uuid.status).toBe(404);
         const rejected = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
             new Request(
                 "https://dashboard.test/api/chat/media/outgoing/agent%3Amain%3Amain/not-a-uuid/full"

@@ -139,7 +139,7 @@ resources.
 
 Managed Gateway image URLs stay authenticated without exposing the Gateway token
 to the browser. The browser requests the same managed path from Dashboard under
-`/api/chat/media/outgoing/*`; the backend validates the exact UUID-shaped path,
+`/api/chat/media/outgoing/*`; the backend validates OpenClaw's exact UUIDv4-shaped path,
 converts the configured Gateway WebSocket origin to HTTP(S), adds the bearer
 token server-side, and does not follow redirects. The 30-second upstream timeout
 ends after response headers arrive for downloads so a valid slow stream can

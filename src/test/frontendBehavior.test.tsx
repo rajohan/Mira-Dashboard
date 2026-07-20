@@ -4053,6 +4053,13 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(chatImageUrl(managedImage)).toBe(
             `${managedImage.image_url.url}?preview=image`
         );
+        const managedImageWithFragment = {
+            ...managedImage,
+            image_url: { url: `${managedImage.image_url.url}#thumbnail` },
+        } as const;
+        expect(chatImageUrl(managedImageWithFragment)).toBe(
+            `${managedImage.image_url.url}?preview=image#thumbnail`
+        );
         expect(
             chatImageUrl({
                 image_url: { url: "/api/settings" },

@@ -31,6 +31,8 @@ const GATEWAY_TEXT_PREVIEW_MIME_TYPES = new Set([
     "text/markdown",
     "text/plain",
 ]);
+// Keep this aligned with OpenClaw's managed-image route, which creates IDs with
+// node:crypto randomUUID() and rejects non-v4 IDs before reading its media store.
 const MANAGED_GATEWAY_MEDIA_PATH =
     /^\/api\/chat\/media\/outgoing\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/full$/iu;
 const SVG_PREVIEW_CONTENT_SECURITY_POLICY =
