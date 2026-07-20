@@ -130,8 +130,8 @@ function realExistingChildDirectoryFromVerifiedParent(
         const realChild = FS.realpathSync(childPath);
         const relativeChild = Path.relative(realParent, realChild);
         if (
-            relativeChild.length === 0 ||
             relativeChild === ".." ||
+            relativeChild.length === 0 ||
             relativeChild.startsWith(`..${Path.sep}`) ||
             Path.isAbsolute(relativeChild)
         ) {
@@ -934,7 +934,7 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     if (normalizedTool === "write" && resolvedPath) {
         return `write ${resolvedPath}`;
     }
-    if (["exec", "exec_command", "bash"].includes(normalizedTool) && command) {
+    if (command && ["exec", "exec_command", "bash"].includes(normalizedTool)) {
         return `exec ${command.slice(0, 70)}`;
     }
     if (normalizedTool === "message" && message) {
@@ -1232,7 +1232,7 @@ async function getLatestActivityFromFile(
                     const message = entry.message || entry;
 
                     // First user message from end = current task
-                    if (message.role === "user" && message.content && !fileTask) {
+                    if (!fileTask && message.role === "user" && message.content) {
                         const text =
                             typeof message.content === "string"
                                 ? message.content
@@ -1252,9 +1252,9 @@ async function getLatestActivityFromFile(
 
                     // First visible tool use from end = current activity.
                     if (
+                        !fileActivity &&
                         message.role === "assistant" &&
-                        Array.isArray(message.content) &&
-                        !fileActivity
+                        Array.isArray(message.content)
                     ) {
                         const toolCall = message.content.find(
                             (c: { type?: string; name?: string }) =>
@@ -1273,7 +1273,7 @@ async function getLatestActivityFromFile(
                             fileTaskTurnId || groupTaskTurnId || pendingTaskTurnId;
                         const canUseToolCall =
                             !expectedTurnId || entryTurnId === expectedTurnId;
-                        if (toolCall?.name && canUseToolCall) {
+                        if (canUseToolCall && toolCall?.name) {
                             fileActivity = summarizeToolActivity(toolCall.name, toolCall);
                         }
                     }

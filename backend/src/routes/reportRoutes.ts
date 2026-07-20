@@ -63,7 +63,7 @@ function parseReportType(value: unknown): ReportType | Response {
 }
 
 function parseReportStatus(value: unknown): ReportStatus | Response {
-    if (value == undefined || value === "") {
+    if (value === "" || value == undefined) {
         return "ok";
     }
     if (typeof value !== "string" || !reportStatuses.has(value)) {

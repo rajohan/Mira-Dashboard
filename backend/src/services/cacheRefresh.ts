@@ -547,7 +547,7 @@ export async function refreshMoltbookCache(targetKey?: MoltbookCacheKey) {
         }
     }
 
-    if (writes.length === 0 && firstFailure !== undefined) {
+    if (firstFailure !== undefined && writes.length === 0) {
         throw createMoltbookRefreshError(
             `Moltbook refresh failed: ${errorMessage(firstFailure)}`,
             {
@@ -1312,7 +1312,7 @@ async function checkOpenRouterQuota() {
             typeof keyData.limit_reset === "string" ? keyData.limit_reset : undefined,
         usageMonthly: toNumber(keyData.usage_monthly),
         percentUsed:
-            limit !== undefined && limit > 0 && limitRemaining !== undefined
+            limit !== undefined && limitRemaining !== undefined && limit > 0
                 ? Number((((limit - limitRemaining) / limit) * 100).toFixed(1))
                 : totalCredits > 0
                   ? Math.round((usage / totalCredits) * 100)
@@ -1713,7 +1713,7 @@ tmux new-session -d -s "$SESSION" -c /home/ubuntu/.openclaw env CODEX_HOME="$MIR
                 };
             }
             const parsed = parseOpenAiQuotaOutput(stripAnsi(stdout).replaceAll("\r", ""));
-            if (parsed.status !== "error" || attempt === 1) {
+            if (attempt === 1 || parsed.status !== "error") {
                 return parsed;
             }
         }
@@ -2083,7 +2083,7 @@ export async function refreshCacheProducer(
                 inFlightKey === scopeKey || scopeKey.startsWith(`${inFlightKey}.`)
         )
         .toSorted(([left], [right]) => left.length - right.length)[0]?.[1];
-    if (!options.force && existing !== undefined) {
+    if (existing !== undefined && !options.force) {
         return await waitForExistingRefresh(key, scopeKey, existing, signal);
     }
     const childRefreshes = inFlightEntries

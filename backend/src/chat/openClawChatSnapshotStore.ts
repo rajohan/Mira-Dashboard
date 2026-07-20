@@ -473,7 +473,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                         eventFingerprint(eventRow.envelope_json)
                 );
             });
-        if (events.includes(undefined) || !hasMatchingFingerprints) {
+        if (!hasMatchingFingerprints || events.includes(undefined)) {
             this.delete(normalizedKey);
             return undefined;
         }

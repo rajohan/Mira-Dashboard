@@ -68,7 +68,7 @@ function unescapeShellToken(token: string): string {
             isEscaped = true;
             continue;
         }
-        if ((character === "'" || character === '"') && quote === undefined) {
+        if (quote === undefined && (character === "'" || character === '"')) {
             quote = character;
             continue;
         }
@@ -101,7 +101,7 @@ function completionInput(input: string): { pathPart: string; prefix: string } {
             index = nextIndex;
             continue;
         }
-        if ((characterText === "'" || characterText === '"') && quote === undefined) {
+        if (quote === undefined && (characterText === "'" || characterText === '"')) {
             quote = characterText;
             index = nextIndex;
             continue;
@@ -258,11 +258,11 @@ export const terminalRoutes = {
             const targetPath = body.path;
 
             if (
+                !targetPath ||
+                typeof targetPath !== "string" ||
                 resolvedCwd.includes("\0") ||
                 (typeof body.cwd === "string" &&
                     (!body.cwd.trim() || !body.cwd.startsWith("/"))) ||
-                !targetPath ||
-                typeof targetPath !== "string" ||
                 targetPath.includes("\0")
             ) {
                 return json(

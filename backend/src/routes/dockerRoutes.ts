@@ -549,10 +549,10 @@ function hasUpdaterCandidate(service: DockerUpdaterServiceRow): boolean {
     );
     if (service.pin_mode === "digest") return hasDigestDrift;
     return Boolean(
+        hasDigestDrift ||
         (service.current_tag &&
             service.latest_tag &&
-            service.current_tag !== service.latest_tag) ||
-        hasDigestDrift
+            service.current_tag !== service.latest_tag)
     );
 }
 
@@ -769,7 +769,7 @@ function settleDockerExecJob(containerId: string, command: string, jobId: string
             if (!current) return;
             const output = stdoutPrefix + String(data);
             const newlineIndex = output.indexOf("\n");
-            if (current.containerPid === undefined && newlineIndex === -1) {
+            if (newlineIndex === -1 && current.containerPid === undefined) {
                 stdoutPrefix = output;
                 return;
             }

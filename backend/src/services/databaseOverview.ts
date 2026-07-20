@@ -168,19 +168,19 @@ function normalizePostgresHost(value: string | undefined, fallback: string): str
     const host = trimmedEnvironmentValue(value) ?? fallback;
     const isValidIpv4 =
         /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/u.test(host);
-    if (/^(?:\d+\.){3}\d+$/u.test(host) && !isValidIpv4) {
+    if (!isValidIpv4 && /^(?:\d+\.){3}\d+$/u.test(host)) {
         throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
     }
     const validIpv6 =
         host.startsWith("[") && host.endsWith("]") && isIP(host.slice(1, -1)) === 6;
     const isRawIpv6 = isIP(host) === 6;
     if (
-        !/^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)(?:\.(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?))*$/u.test(
-            host
-        ) &&
         !validIpv6 &&
         !isValidIpv4 &&
-        !isRawIpv6
+        !isRawIpv6 &&
+        !/^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)(?:\.(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?))*$/u.test(
+            host
+        )
     ) {
         throw Object.assign(new Error("Invalid PostgreSQL host"), { code: "EINVAL" });
     }

@@ -723,6 +723,7 @@ function isPromotableRunlessUserLedRun(
         .values()
         .every((candidate) => lastSequence(candidate) <= lastSequence(run));
     const isLatestCompletedSyntheticTurn = Boolean(
+        isLatestSessionRun &&
         run.completed &&
         isRunlessRunId(run.runId) &&
         firstEvent?.event === "session.message" &&
@@ -730,8 +731,7 @@ function isPromotableRunlessUserLedRun(
         terminalEvent?.event === "session.message" &&
         sessionMessageRole(terminalEvent.payload) === "assistant" &&
         sessionMessageStopReason(terminalEvent.payload) === "stop" &&
-        envelope.runtimeSequence > run.terminalSequence &&
-        isLatestSessionRun
+        envelope.runtimeSequence > run.terminalSequence
     );
     if (!isLatestCompletedSyntheticTurn || !terminalEvent) {
         return false;
@@ -1285,7 +1285,7 @@ export class OpenClawChatBridge {
             return;
         }
         for (const [runId, run] of runs) {
-            if (!run.completed || runId === preservedRunId) {
+            if (runId === preservedRunId || !run.completed) {
                 continue;
             }
             runs.delete(runId);
@@ -1997,7 +1997,7 @@ export class OpenClawChatBridge {
         const completedRuns =
             isCompaction ||
             (!explicitRunId &&
-                (envelope.event === "session.message" || isMetadataOnlyCompletion))
+                (isMetadataOnlyCompletion || envelope.event === "session.message"))
                 ? runs
                       .values()
                       .filter((run) => run.completed)
@@ -2027,8 +2027,8 @@ export class OpenClawChatBridge {
             : undefined;
         const completedEchoRun =
             !explicitRunId &&
-            envelope.event === "session.message" &&
             latestMeaningfulCompletion &&
+            envelope.event === "session.message" &&
             hasChatFinal(latestMeaningfulCompletion) &&
             isMatchingSessionEcho(latestMeaningfulCompletion, envelope)
                 ? latestMeaningfulCompletion
@@ -2060,7 +2060,7 @@ export class OpenClawChatBridge {
             runs.set(runId, snapshot);
         }
 
-        if (snapshot.completed && isCompactionOnlyRun(snapshot) && !isCompaction) {
+        if (!isCompaction && snapshot.completed && isCompactionOnlyRun(snapshot)) {
             snapshot.completed = false;
             snapshot.terminalSequence = -1;
         }
