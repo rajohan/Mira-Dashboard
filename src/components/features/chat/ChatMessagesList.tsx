@@ -28,7 +28,12 @@ import type {
     ChatRow,
     ChatVisibilitySettings,
 } from "./chatTypes";
-import { TOOL_ROLE_VARIANTS } from "./chatTypes";
+import {
+    chatImageDownloadUrl,
+    chatImageMimeType,
+    chatImageUrl,
+    TOOL_ROLE_VARIANTS,
+} from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
 
 const SCROLL_KEYS = new Set([
@@ -106,13 +111,15 @@ export function base64ToText(base64: string): string | undefined {
 export function previewFromAttachment(
     attachment: ChatAttachmentDisplay
 ): ChatPreviewItem | undefined {
-    if (!attachment.dataUrl && !attachment.contentBase64) {
+    if (!attachment.dataUrl && !attachment.url && !attachment.contentBase64) {
         return undefined;
     }
 
     const mimeType = attachment.mimeType || "application/octet-stream";
     const url =
-        attachment.dataUrl || `data:${mimeType};base64,${attachment.contentBase64!}`;
+        attachment.url ||
+        attachment.dataUrl ||
+        `data:${mimeType};base64,${attachment.contentBase64!}`;
 
     return {
         title: attachment.fileName,
@@ -577,19 +584,16 @@ export function ChatMessagesList({
                                             <div className="mb-1.5 flex flex-wrap gap-1.5">
                                                 {row.message.images.map(
                                                     (image, imageIndex) => {
-                                                        const imageData =
-                                                            image.source?.data ||
-                                                            image.data;
-                                                        if (!imageData) {
+                                                        const imageDownloadUrl =
+                                                            chatImageDownloadUrl(image);
+                                                        if (!imageDownloadUrl) {
                                                             return;
                                                         }
 
+                                                        const imageUrl =
+                                                            chatImageUrl(image);
                                                         const imageMime =
-                                                            image.source?.media_type ||
-                                                            image.mimeType ||
-                                                            "image/png";
-
-                                                        const imageUrl = `data:${imageMime};base64,${imageData}`;
+                                                            chatImageMimeType(image);
                                                         const imagePreviewLabel = `Open chat image ${imageIndex + 1} preview`;
 
                                                         return (
@@ -602,7 +606,7 @@ export function ChatMessagesList({
                                                                         mimeType:
                                                                             imageMime,
                                                                         kind: "image",
-                                                                        url: imageUrl,
+                                                                        url: imageDownloadUrl,
                                                                     })
                                                                 }
                                                                 className="rounded-lg text-left hover:opacity-90 focus:ring-2 focus:ring-accent-400 focus:outline-none"
@@ -611,14 +615,25 @@ export function ChatMessagesList({
                                                                     imagePreviewLabel
                                                                 }
                                                             >
-                                                                <img
-                                                                    src={imageUrl}
-                                                                    alt="Chat attachment"
-                                                                    onLoad={
-                                                                        onDynamicContentLoad
-                                                                    }
-                                                                    className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
-                                                                />
+                                                                {imageUrl ? (
+                                                                    <img
+                                                                        src={imageUrl}
+                                                                        alt="Chat attachment"
+                                                                        onLoad={
+                                                                            onDynamicContentLoad
+                                                                        }
+                                                                        onError={
+                                                                            onDynamicContentLoad
+                                                                        }
+                                                                        className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
+                                                                    />
+                                                                ) : (
+                                                                    <span className="flex items-center gap-1.5 rounded-lg border border-primary-700 px-2.5 py-2 text-xs text-accent-300 underline hover:bg-primary-700/50">
+                                                                        <ImageIcon className="size-4" />
+                                                                        Open image
+                                                                        {` ${imageIndex + 1}`}
+                                                                    </span>
+                                                                )}
                                                             </button>
                                                         );
                                                     }
@@ -658,6 +673,9 @@ export function ChatMessagesList({
                                                                 onLoad={
                                                                     onDynamicContentLoad
                                                                 }
+                                                                onError={
+                                                                    onDynamicContentLoad
+                                                                }
                                                                 className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
                                                             />
                                                         </button>
@@ -681,6 +699,9 @@ export function ChatMessagesList({
                                             <ChatMessageDetails
                                                 message={row.message}
                                                 messageKey={row.key}
+                                                onDynamicContentLoad={
+                                                    onDynamicContentLoad
+                                                }
                                                 onToggleToolDetails={onToggleToolDetails}
                                                 shouldExpandToolDetails={
                                                     shouldExpandToolDetails
@@ -703,6 +724,7 @@ export function ChatMessagesList({
                                         <ChatMessageDetails
                                             message={row.message}
                                             messageKey={row.key}
+                                            onDynamicContentLoad={onDynamicContentLoad}
                                             onToggleToolDetails={onToggleToolDetails}
                                             shouldExpandToolDetails={
                                                 shouldExpandToolDetails

@@ -2451,6 +2451,15 @@ describe("backend route and service behavior", () => {
         mkdirSync(path.join(mediaRoot, "images"), { recursive: true });
         mkdirSync(path.join(mediaRoot, "folder"), { recursive: true });
         writeFileSync(path.join(mediaRoot, "images", "dashboard.txt"), "media ok");
+        writeFileSync(
+            path.join(mediaRoot, "images", "dashboard.json"),
+            '{"status":"ok"}'
+        );
+        writeFileSync(
+            path.join(mediaRoot, "images", "dashboard.svg"),
+            '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>alert(1)</script><rect width="10" height="10" /></svg>'
+        );
+        writeFileSync(path.join(mediaRoot, "images", "report.pdf"), "pdf data");
         writeFileSync(path.join(mediaRoot, "images", "linked.txt"), "linked media");
         linkSync(
             path.join(mediaRoot, "images", "linked.txt"),
@@ -2478,6 +2487,13 @@ describe("backend route and service behavior", () => {
         );
         expect(invalidPath.status).toBe(400);
 
+        const invalidPreview = await mediaRoutes["/api/media"].GET(
+            new Request(
+                "https://test.local/api/media?path=images/dashboard.txt&preview=active"
+            )
+        );
+        expect(invalidPreview.status).toBe(400);
+
         const directory = await mediaRoutes["/api/media"].GET(
             new Request("https://test.local/api/media?path=folder")
         );
@@ -2501,11 +2517,300 @@ describe("backend route and service behavior", () => {
         expect(served.headers.get("X-Content-Type-Options")).toBe("nosniff");
         await expect(served.text()).resolves.toBe("media ok");
 
+        const textPreview = await mediaRoutes["/api/media"].GET(
+            new Request(
+                "https://test.local/api/media?path=images/dashboard.json&preview=text"
+            )
+        );
+        expect(textPreview.status).toBe(200);
+        expect(textPreview.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+        expect(await textPreview.text()).toBe('{"status":"ok"}');
+
+        const svgDownload = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/dashboard.svg")
+        );
+        expect(svgDownload.status).toBe(200);
+        expect(svgDownload.headers.get("Content-Type")).toBe("application/octet-stream");
+
+        const svgPreview = await mediaRoutes["/api/media"].GET(
+            new Request(
+                "https://test.local/api/media?path=images/dashboard.svg&preview=image"
+            )
+        );
+        expect(svgPreview.status).toBe(200);
+        expect(svgPreview.headers.get("Content-Type")).toBe("image/svg+xml");
+        expect(svgPreview.headers.get("Content-Security-Policy")).toBe(
+            "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+        );
+
+        const invalidImagePreview = await mediaRoutes["/api/media"].GET(
+            new Request(
+                "https://test.local/api/media?path=images/dashboard.txt&preview=image"
+            )
+        );
+        expect(invalidImagePreview.status).toBe(415);
+
+        const invalidTextPreview = await mediaRoutes["/api/media"].GET(
+            new Request(
+                "https://test.local/api/media?path=images/report.pdf&preview=text"
+            )
+        );
+        expect(invalidTextPreview.status).toBe(415);
+
+        const pdfDownload = await mediaRoutes["/api/media"].GET(
+            new Request("https://test.local/api/media?path=images/report.pdf")
+        );
+        expect(pdfDownload.status).toBe(200);
+        expect(pdfDownload.headers.get("Content-Type")).toBe("application/pdf");
+
         process.env.OPENCLAW_HOME = createTemporaryRoot("mira-media-empty-root-");
         const missingMediaRoot = await mediaRoutes["/api/media"].GET(
             new Request("https://test.local/api/media?path=images/dashboard.txt")
         );
         expect(missingMediaRoot.status).toBe(404);
+    });
+
+    it("proxies managed Gateway media without exposing its bearer token", async () => {
+        rememberEnvironment("OPENCLAW_GATEWAY_URL");
+        rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
+        rememberEnvironment("OPENCLAW_TOKEN");
+        process.env.OPENCLAW_GATEWAY_URL = "wss://gateway.example.test/base";
+        process.env.OPENCLAW_GATEWAY_TOKEN = "environment-secret";
+        delete process.env.OPENCLAW_TOKEN;
+        const previousToken = database
+            .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
+            .get() as { value: string } | undefined;
+        cleanupCallbacks.push(() => {
+            database.prepare("DELETE FROM app_config WHERE key = 'gateway_token'").run();
+            if (previousToken) {
+                database
+                    .prepare(
+                        "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?)"
+                    )
+                    .run(previousToken.value, new Date().toISOString());
+            }
+        });
+        database
+            .prepare(
+                "INSERT INTO app_config (key, value, updated_at) VALUES ('gateway_token', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+            )
+            .run("proxy-secret", new Date().toISOString());
+
+        const originalFetch = fetch;
+        const gatewayFetch = jest.fn(
+            async (...requestArguments: Parameters<typeof fetch>) => {
+                if (requestArguments.length !== 2) {
+                    throw new Error("Expected Gateway URL and request init");
+                }
+                return new Response(Uint8Array.from([1, 2, 3]), {
+                    headers: {
+                        "Cache-Control": "public, max-age=86400",
+                        "Content-Disposition": 'inline; filename="generated.png"',
+                        "Content-Type": "image/png",
+                    },
+                });
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: gatewayFetch,
+            writable: true,
+        });
+        const gatewayHeadersTimeoutController = new AbortController();
+        const gatewayTimeoutSpy = jest
+            .spyOn(AbortSignal, "timeout")
+            .mockReturnValue(gatewayHeadersTimeoutController.signal);
+        cleanupCallbacks.push(
+            () =>
+                Object.defineProperty(globalThis, "fetch", {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                }),
+            () => gatewayTimeoutSpy.mockRestore()
+        );
+
+        const { mediaRoutes } = await import("../src/routes/mediaRoutes.ts");
+        const mediaPath =
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full";
+        const proxied = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}`)
+        );
+
+        expect(proxied.status).toBe(200);
+        expect(proxied.headers.get("Content-Type")).toBe("image/png");
+        expect(proxied.headers.get("Content-Disposition")).toBe(
+            'inline; filename="generated.png"'
+        );
+        expect(proxied.headers.get("Cache-Control")).toBe("private, no-store");
+        expect([...new Uint8Array(await proxied.arrayBuffer())]).toEqual([1, 2, 3]);
+        expect(gatewayFetch).toHaveBeenCalledTimes(1);
+        const [gatewayRequest, gatewayRequestInit] = gatewayFetch.mock.calls[0]!;
+        expect(String(gatewayRequest)).toBe(`https://gateway.example.test${mediaPath}`);
+        expect(gatewayRequestInit).toMatchObject({
+            headers: { Authorization: "Bearer environment-secret" },
+            redirect: "manual",
+        });
+        expect(gatewayTimeoutSpy).not.toHaveBeenCalled();
+        gatewayHeadersTimeoutController.abort();
+        expect(gatewayRequestInit?.signal?.aborted).toBe(false);
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("name,value\nMira,1", {
+                headers: {
+                    "Cache-Control": "public, max-age=86400",
+                    "Content-Disposition": 'inline; filename="data.csv"',
+                    "Content-Type": "text/csv; charset=utf-8",
+                },
+            })
+        );
+        const preview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=text`)
+        );
+        expect(preview.status).toBe(200);
+        expect(preview.headers.get("Cache-Control")).toBe("private, no-store");
+        expect(preview.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+        expect(await preview.text()).toBe("name,value\nMira,1");
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("x".repeat(1024 * 1024 + 1), {
+                headers: { "Content-Type": "text/plain" },
+            })
+        );
+        const oversizedPreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=text`)
+        );
+        expect(oversizedPreview.status).toBe(413);
+
+        const activeSvg =
+            '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+        gatewayFetch.mockResolvedValueOnce(
+            new Response(activeSvg, {
+                headers: {
+                    "Cache-Control": "public, max-age=86400",
+                    "Content-Disposition": 'inline; filename="generated.svg"',
+                    "Content-Type": "image/svg+xml; charset=utf-8",
+                },
+            })
+        );
+        const svgDownload = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}`)
+        );
+        expect(svgDownload.headers.get("Content-Type")).toBe("application/octet-stream");
+        expect(svgDownload.headers.get("Content-Disposition")).toBe(
+            'attachment; filename="generated.svg"'
+        );
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response(activeSvg, {
+                headers: {
+                    "Content-Disposition": 'inline; filename="generated.svg"',
+                    "Content-Type": "image/svg+xml; charset=utf-8",
+                },
+            })
+        );
+        const svgPreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=image`)
+        );
+        expect(svgPreview.status).toBe(200);
+        expect(svgPreview.headers.get("Cache-Control")).toBe("private, no-store");
+        expect(svgPreview.headers.get("Content-Type")).toBe("image/svg+xml");
+        expect(svgPreview.headers.get("Content-Security-Policy")).toBe(
+            "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+        );
+        expect(await svgPreview.text()).toBe(activeSvg);
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response(Uint8Array.from([4, 5, 6]), {
+                headers: {
+                    "Cache-Control": "public, max-age=86400",
+                    "Content-Disposition": 'inline; filename="generated.png"',
+                    "Content-Type": "image/png",
+                },
+            })
+        );
+        const rasterPreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=image`)
+        );
+        expect(rasterPreview.status).toBe(200);
+        expect(rasterPreview.headers.get("Cache-Control")).toBe("private, no-store");
+        expect(rasterPreview.headers.get("Content-Type")).toBe("image/png");
+        expect([...new Uint8Array(await rasterPreview.arrayBuffer())]).toEqual([4, 5, 6]);
+
+        const originalSetTimeout = setTimeout;
+        let didAbortStalledPreview = false;
+        gatewayFetch.mockImplementationOnce(
+            async (...requestArguments: Parameters<typeof fetch>) => {
+                const requestSignal = requestArguments[1]?.signal;
+                return new Response(
+                    new ReadableStream<Uint8Array>({
+                        start(controller) {
+                            const closeTimeout = originalSetTimeout(
+                                () => controller.close(),
+                                100
+                            );
+                            requestSignal?.addEventListener(
+                                "abort",
+                                () => {
+                                    didAbortStalledPreview = true;
+                                    clearTimeout(closeTimeout);
+                                    controller.error(
+                                        new Error("Gateway preview body timed out")
+                                    );
+                                },
+                                { once: true }
+                            );
+                        },
+                    }),
+                    {
+                        headers: {
+                            "Content-Disposition": 'inline; filename="stalled.png"',
+                            "Content-Type": "image/png",
+                        },
+                    }
+                );
+            }
+        );
+        const gatewayBodyTimeoutSpy = jest
+            .spyOn(globalThis, "setTimeout")
+            .mockImplementationOnce(((callback: () => void) =>
+                originalSetTimeout(callback, 0)) as unknown as typeof setTimeout);
+        const stalledPreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=image`)
+        );
+        gatewayBodyTimeoutSpy.mockRestore();
+        expect(stalledPreview.status).toBe(504);
+        expect(didAbortStalledPreview).toBe(true);
+
+        gatewayFetch.mockResolvedValueOnce(
+            new Response("<html><script>alert(1)</script></html>", {
+                headers: {
+                    "Content-Disposition": 'inline; filename="page.html"',
+                    "Content-Type": "text/html; charset=utf-8",
+                },
+            })
+        );
+        const htmlDownload = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}`)
+        );
+        expect(htmlDownload.headers.get("Content-Type")).toBe("application/octet-stream");
+        expect(htmlDownload.headers.get("Content-Disposition")).toBe(
+            'attachment; filename="page.html"'
+        );
+
+        const nonV4Uuid = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(
+                "https://dashboard.test/api/chat/media/outgoing/agent%3Amain%3Amain/018f47a2-9b7c-7cc8-a123-456789abcdef/full"
+            )
+        );
+        expect(nonV4Uuid.status).toBe(404);
+        const rejected = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(
+                "https://dashboard.test/api/chat/media/outgoing/agent%3Amain%3Amain/not-a-uuid/full"
+            )
+        );
+        expect(rejected.status).toBe(404);
+        expect(gatewayFetch).toHaveBeenCalledTimes(8);
     });
 
     it("starts manual WAL-G backups through the backup route using fake Docker", async () => {

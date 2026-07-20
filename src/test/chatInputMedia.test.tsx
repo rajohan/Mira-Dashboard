@@ -106,6 +106,47 @@ describe("chat input media", () => {
         ).toHaveLength(4);
     });
 
+    it("skips video files while preserving valid attachments", async () => {
+        const onError = jest.fn();
+        const { result } = renderHook(() =>
+            useChatInputMedia({ onError, sessionKey: "session-a", setDraft: jest.fn() })
+        );
+        const input = document.createElement("input");
+        input.value = "pending-video";
+        result.current.fileInputReference.current = input;
+
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["video"], "clip.mp4", { type: "video/mp4" }),
+                    new File(["video"], "movie.webm", { type: "video/webm" }),
+                    new File(["audio"], "voice.webm", { type: "audio/webm" }),
+                    new File(["notes"], "notes.txt", { type: "text/plain" }),
+                ])
+            );
+        });
+
+        expect(result.current.attachments.map(({ fileName }) => fileName)).toEqual([
+            "voice.webm",
+            "notes.txt",
+        ]);
+        expect(onError).toHaveBeenLastCalledWith(
+            "Skipped video files: clip.mp4, movie.webm. OpenClaw chat supports images and non-video files."
+        );
+        expect(input.value).toBe("");
+
+        act(() => result.current.clearAttachments());
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([new File(["video"], "only-video.mov")])
+            );
+        });
+        expect(result.current.attachments).toEqual([]);
+        expect(onError).toHaveBeenLastCalledWith(
+            "Skipped video files: only-video.mov. OpenClaw chat supports images and non-video files."
+        );
+    });
+
     it("transcribes voice files and reports provider and input failures", async () => {
         const originalFetch = fetch;
         const onError = jest.fn();
