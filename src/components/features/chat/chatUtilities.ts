@@ -18,37 +18,41 @@ export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS = 10;
 const CHAT_ATTACHMENT_MIME_PREFIXES = ["image/", "audio/", "text/"] as const;
 const CHAT_ATTACHMENT_EXACT_MIME_TYPES = new Set(["application/pdf"]);
-const CHAT_ATTACHMENT_EXTENSIONS = [
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".webp",
-    ".gif",
-    ".heic",
-    ".heif",
-    ".ogg",
-    ".oga",
-    ".mp3",
-    ".wav",
-    ".flac",
-    ".aac",
-    ".opus",
-    ".m4a",
-    ".m2a",
-    ".pdf",
-    ".csv",
-    ".json",
-    ".md",
-    ".txt",
-    ".zip",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".ppt",
-    ".pptx",
-] as const;
-const CHAT_ATTACHMENT_EXTENSION_SET = new Set<string>(CHAT_ATTACHMENT_EXTENSIONS);
+const CHAT_ATTACHMENT_EXTENSION_MIME_TYPES = new Map<string, string>([
+    [".png", "image/png"],
+    [".jpg", "image/jpeg"],
+    [".jpeg", "image/jpeg"],
+    [".webp", "image/webp"],
+    [".gif", "image/gif"],
+    [".svg", "image/svg+xml"],
+    [".heic", "image/heic"],
+    [".heif", "image/heif"],
+    [".ogg", "audio/ogg"],
+    [".oga", "audio/ogg"],
+    [".mp3", "audio/mpeg"],
+    [".wav", "audio/wav"],
+    [".flac", "audio/flac"],
+    [".aac", "audio/aac"],
+    [".opus", "audio/opus"],
+    [".m4a", "audio/mp4"],
+    [".m2a", "audio/mpeg"],
+    [".pdf", "application/pdf"],
+    [".csv", "text/csv"],
+    [".json", "application/json"],
+    [".md", "text/markdown"],
+    [".txt", "text/plain"],
+    [".zip", "application/zip"],
+    [".doc", "application/msword"],
+    [".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    [".xls", "application/vnd.ms-excel"],
+    [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    [".ppt", "application/vnd.ms-powerpoint"],
+    [
+        ".pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ],
+]);
+const CHAT_ATTACHMENT_EXTENSIONS = CHAT_ATTACHMENT_EXTENSION_MIME_TYPES.keys().toArray();
 /** Mirrors OpenClaw Control UI's supported attachment picker. */
 export const CHAT_ATTACHMENT_ACCEPT = [
     "image/*",
@@ -61,6 +65,13 @@ export const CHAT_ATTACHMENT_ACCEPT = [
 export const CHAT_HISTORY_LIMIT = 1000;
 /** Defines optimistic message retention milliseconds. */
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
+
+/** Returns a normalized filename extension for attachment policy checks. */
+function chatAttachmentExtension(fileName: string): string {
+    const normalizedName = fileName.trim().toLowerCase();
+    const extensionIndex = normalizedName.lastIndexOf(".");
+    return extensionIndex === -1 ? "" : normalizedName.slice(extensionIndex);
+}
 
 /** Returns whether OpenClaw intentionally excludes this video attachment. */
 export function isVideoAttachment(file: Pick<File, "name" | "type">): boolean {
@@ -83,10 +94,7 @@ export function isSupportedChatAttachment(file: Pick<File, "name" | "type">): bo
     ) {
         return true;
     }
-    const normalizedName = file.name.trim().toLowerCase();
-    const extensionIndex = normalizedName.lastIndexOf(".");
-    const extension = extensionIndex === -1 ? "" : normalizedName.slice(extensionIndex);
-    return CHAT_ATTACHMENT_EXTENSION_SET.has(extension);
+    return CHAT_ATTACHMENT_EXTENSION_MIME_TYPES.has(chatAttachmentExtension(file.name));
 }
 
 function canonicalChatValue(value: unknown, ancestors: Set<object>): unknown {
@@ -995,5 +1003,10 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 
 /** Performs display MIME type. */
 export function displayMimeType(file: File): string {
-    return file.type || "application/octet-stream";
+    const declaredMimeType = file.type.trim().toLowerCase();
+    return (
+        declaredMimeType ||
+        CHAT_ATTACHMENT_EXTENSION_MIME_TYPES.get(chatAttachmentExtension(file.name)) ||
+        "application/octet-stream"
+    );
 }

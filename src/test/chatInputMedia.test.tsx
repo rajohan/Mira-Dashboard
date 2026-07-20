@@ -174,17 +174,25 @@ describe("chat input media", () => {
                         type: "application/pdf",
                     }),
                     new File(["image"], "photo.png"),
+                    new File(["vector"], "diagram.svg"),
                     new File(["audio"], "clip.mp3"),
                     new File(["pdf"], "scan.pdf"),
                 ])
             );
         });
 
-        expect(result.current.attachments.map(({ fileName }) => fileName)).toEqual([
-            "report.pdf",
-            "photo.png",
-            "clip.mp3",
-            "scan.pdf",
+        expect(
+            result.current.attachments.map(({ fileName, kind, mimeType }) => ({
+                fileName,
+                kind,
+                mimeType,
+            }))
+        ).toEqual([
+            { fileName: "report.pdf", kind: "file", mimeType: "application/pdf" },
+            { fileName: "photo.png", kind: "image", mimeType: "image/png" },
+            { fileName: "diagram.svg", kind: "image", mimeType: "image/svg+xml" },
+            { fileName: "clip.mp3", kind: "file", mimeType: "audio/mpeg" },
+            { fileName: "scan.pdf", kind: "file", mimeType: "application/pdf" },
         ]);
         const errorMessage =
             "Skipped unsupported files: installer.exe, payload.bin. Choose images, audio, PDFs, text, ZIP, or Office documents.";

@@ -3802,7 +3802,12 @@ describe("Mira Dashboard frontend behavior", () => {
         await expect(
             readFileAsDataUrl(new File(["hello"], "hello.txt"))
         ).resolves.toMatch(/^data:/);
-        expect(displayMimeType(new File(["hello"], "hello.txt"))).toBe(
+        expect(displayMimeType(new File(["hello"], "hello.txt"))).toBe("text/plain");
+        expect(displayMimeType(new File(["image"], "photo.PNG"))).toBe("image/png");
+        expect(displayMimeType(new File(["vector"], "diagram.svg"))).toBe(
+            "image/svg+xml"
+        );
+        expect(displayMimeType(new File(["unknown"], "payload.bin"))).toBe(
             "application/octet-stream"
         );
         expect(
