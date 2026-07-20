@@ -168,7 +168,10 @@ export function Chat() {
     );
     const { data: agentsStatus } = useAgentsStatus();
     const agents = agentsStatus?.agents || [];
-    selectedSessionKeyReference.current = selectedSessionKey;
+
+    useEffect(() => {
+        selectedSessionKeyReference.current = selectedSessionKey;
+    }, [selectedSessionKey]);
 
     const sortedSessions = useMemo(
         () => sortSessionsByTypeAndActivity(sessions ?? []),
