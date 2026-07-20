@@ -146,7 +146,9 @@ to the browser. The browser requests the same managed path from Dashboard under
 converts the configured Gateway WebSocket origin to HTTP(S), adds the bearer
 token server-side, and does not follow redirects. The 30-second upstream timeout
 ends after response headers arrive for downloads so a valid slow stream can
-finish, while bounded preview reads keep the timeout active through the body.
+finish, while bounded preview reads keep the timeout active through the body. All
+managed responses force `Cache-Control: private, no-store` regardless of upstream
+cache headers.
 
 Managed TXT, JSON, CSV, and Markdown previews use the same Dashboard proxy with
 an explicit `preview=text` query. The backend validates the upstream media type
@@ -158,8 +160,11 @@ as local SVG. Managed SVG, HTML, XHTML, and XML downloads are downgraded to
 content cannot render as a same-origin document. Inline thumbnails and full modal
 image previews use the bounded preview URL while their download action retains
 the original managed URL. Switching attachment previews aborts the prior text
-request and ignores any stale completion. History-provided root-relative image
-URLs auto-render only through the two known Dashboard media proxy paths.
+request and ignores any stale completion. History-provided root-relative and
+absolute same-origin API image URLs are canonicalized before use. Only the two
+known Dashboard media proxy paths may auto-render; dot-segment escapes and other
+same-origin API paths are rejected, and absolute managed paths still use bounded
+previews.
 
 Local OpenClaw media continues through `/api/media`. Text preview is opt-in and
 limited to `.txt`, `.json`, `.csv`, and `.md` files no larger than 1 MiB. SVG is

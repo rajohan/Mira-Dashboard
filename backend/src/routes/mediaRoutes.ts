@@ -15,6 +15,7 @@ import { stringFallback } from "../lib/values.ts";
 const MAX_MEDIA_SIZE = 16 * 1024 * 1024;
 const MAX_TEXT_PREVIEW_SIZE = 1024 * 1024;
 const GATEWAY_MEDIA_REQUEST_TIMEOUT_MS = 30_000;
+const MANAGED_MEDIA_CACHE_CONTROL = "private, no-store";
 const GATEWAY_WEBSOCKET_PROTOCOLS = new Set(["ws:", "wss:"]);
 const ACTIVE_DOCUMENT_EXTENSIONS = new Set([".htm", ".html", ".svg", ".xhtml"]);
 const ACTIVE_DOCUMENT_MIME_TYPES = new Set([
@@ -242,8 +243,7 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
         }
         return new Response(body, {
             headers: {
-                "Cache-Control":
-                    response.headers.get("cache-control") || "private, max-age=3600",
+                "Cache-Control": MANAGED_MEDIA_CACHE_CONTROL,
                 "Content-Type": "text/plain; charset=utf-8",
                 "X-Content-Type-Options": "nosniff",
             },
@@ -274,8 +274,7 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
             return json({ error: "Media file too large" }, { status: 413 });
         }
         const previewHeaders = new Headers({
-            "Cache-Control":
-                response.headers.get("cache-control") || "private, max-age=3600",
+            "Cache-Control": MANAGED_MEDIA_CACHE_CONTROL,
             "Content-Type": previewContentType,
             "X-Content-Type-Options": "nosniff",
         });
@@ -294,7 +293,7 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
         ACTIVE_DOCUMENT_MIME_TYPES.has(contentType) ||
         ACTIVE_DOCUMENT_EXTENSIONS.has(fileExtension);
     const headers = new Headers({
-        "Cache-Control": response.headers.get("cache-control") || "private, max-age=3600",
+        "Cache-Control": MANAGED_MEDIA_CACHE_CONTROL,
         "Content-Type": isActiveDocument
             ? "application/octet-stream"
             : response.headers.get("content-type") || "application/octet-stream",

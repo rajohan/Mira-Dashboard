@@ -4030,6 +4030,42 @@ describe("Mira Dashboard frontend behavior", () => {
         ).toBe("assistant::2026-06-23T08:00:00.000Z::run-1::runtime-assistant::answer");
     });
 
+    it("rejects same-origin API images outside canonical media paths", () => {
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            expect([
+                chatImageUrl({
+                    image_url: { url: "https://dashboard.test/api/settings" },
+                    type: "image_url",
+                }),
+                chatImageUrl({
+                    image_url: { url: "/api/chat/media/outgoing/../../../settings" },
+                    type: "image_url",
+                }),
+            ]).toEqual([undefined, undefined]);
+        } finally {
+            location.assign(previousLocation);
+        }
+    });
+
+    it("bounds absolute same-origin managed image URLs", () => {
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            const managedUrl =
+                "https://dashboard.test/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full";
+            expect(
+                chatImageUrl({
+                    image_url: { url: managedUrl },
+                    type: "image_url",
+                })
+            ).toBe(`${managedUrl}?preview=image`);
+        } finally {
+            location.assign(previousLocation);
+        }
+    });
+
     it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {
         const contentBlocks = [
             { type: "text", text: "hello" },

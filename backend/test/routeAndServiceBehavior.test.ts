@@ -2604,7 +2604,7 @@ describe("backend route and service behavior", () => {
                 }
                 return new Response(Uint8Array.from([1, 2, 3]), {
                     headers: {
-                        "Cache-Control": "private, max-age=60",
+                        "Cache-Control": "public, max-age=86400",
                         "Content-Disposition": 'inline; filename="generated.png"',
                         "Content-Type": "image/png",
                     },
@@ -2642,6 +2642,7 @@ describe("backend route and service behavior", () => {
         expect(proxied.headers.get("Content-Disposition")).toBe(
             'inline; filename="generated.png"'
         );
+        expect(proxied.headers.get("Cache-Control")).toBe("private, no-store");
         expect([...new Uint8Array(await proxied.arrayBuffer())]).toEqual([1, 2, 3]);
         expect(gatewayFetch).toHaveBeenCalledTimes(1);
         const [gatewayRequest, gatewayRequestInit] = gatewayFetch.mock.calls[0]!;
@@ -2657,6 +2658,7 @@ describe("backend route and service behavior", () => {
         gatewayFetch.mockResolvedValueOnce(
             new Response("name,value\nMira,1", {
                 headers: {
+                    "Cache-Control": "public, max-age=86400",
                     "Content-Disposition": 'inline; filename="data.csv"',
                     "Content-Type": "text/csv; charset=utf-8",
                 },
@@ -2666,6 +2668,7 @@ describe("backend route and service behavior", () => {
             new Request(`https://dashboard.test${mediaPath}?preview=text`)
         );
         expect(preview.status).toBe(200);
+        expect(preview.headers.get("Cache-Control")).toBe("private, no-store");
         expect(preview.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
         expect(await preview.text()).toBe("name,value\nMira,1");
 
@@ -2684,6 +2687,7 @@ describe("backend route and service behavior", () => {
         gatewayFetch.mockResolvedValueOnce(
             new Response(activeSvg, {
                 headers: {
+                    "Cache-Control": "public, max-age=86400",
                     "Content-Disposition": 'inline; filename="generated.svg"',
                     "Content-Type": "image/svg+xml; charset=utf-8",
                 },
@@ -2709,6 +2713,7 @@ describe("backend route and service behavior", () => {
             new Request(`https://dashboard.test${mediaPath}?preview=image`)
         );
         expect(svgPreview.status).toBe(200);
+        expect(svgPreview.headers.get("Cache-Control")).toBe("private, no-store");
         expect(svgPreview.headers.get("Content-Type")).toBe("image/svg+xml");
         expect(svgPreview.headers.get("Content-Security-Policy")).toBe(
             "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
@@ -2718,6 +2723,7 @@ describe("backend route and service behavior", () => {
         gatewayFetch.mockResolvedValueOnce(
             new Response(Uint8Array.from([4, 5, 6]), {
                 headers: {
+                    "Cache-Control": "public, max-age=86400",
                     "Content-Disposition": 'inline; filename="generated.png"',
                     "Content-Type": "image/png",
                 },
@@ -2727,6 +2733,7 @@ describe("backend route and service behavior", () => {
             new Request(`https://dashboard.test${mediaPath}?preview=image`)
         );
         expect(rasterPreview.status).toBe(200);
+        expect(rasterPreview.headers.get("Cache-Control")).toBe("private, no-store");
         expect(rasterPreview.headers.get("Content-Type")).toBe("image/png");
         expect([...new Uint8Array(await rasterPreview.arrayBuffer())]).toEqual([4, 5, 6]);
 
