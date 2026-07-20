@@ -2159,6 +2159,33 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("falls back safely when a stored disabled-until timestamp is invalid", async () => {
+        jobsApiState.heartbeatEnabled = false;
+        jobsApiState.heartbeatDisableIntent = {
+            mode: "until",
+            comment: "Stored maintenance window",
+            until: "not-a-date",
+        };
+        const user = userEvent.setup();
+        const view = renderPage(createElement(Jobs));
+
+        await user.click(
+            await screen.findByRole("button", { name: "Edit disabled reason" })
+        );
+
+        expect(
+            screen.getByRole("heading", { name: "Edit disabled state" })
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", {
+                name: /choose disabled until date, selected \d{2}\/\d{2}\/\d{4}/i,
+            })
+        ).toBeInTheDocument();
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("links git workspace repositories to GitHub remotes", async () => {
         const view = renderPage(createElement(Dashboard), { withSocket: true });
 

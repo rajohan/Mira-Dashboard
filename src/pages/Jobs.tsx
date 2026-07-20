@@ -46,6 +46,7 @@ import {
 import { validateJsonString } from "../utils/json";
 
 const CLEAR_SCHEDULE_FIELD = JSON.parse("null") as null;
+const DEFAULT_DISABLE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 type JobsView = "scheduled" | "openclaw";
 type DisableMode = JobDisableIntent["mode"];
@@ -572,7 +573,7 @@ export function Jobs() {
     const [disableMode, setDisableMode] = useState<DisableMode>("until");
     const [disableComment, setDisableComment] = useState("");
     const [disableUntil, setDisableUntil] = useState<DateTimePickerValue>(() =>
-        toDisableUntilDraft(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        toDisableUntilDraft(Date.now() + DEFAULT_DISABLE_DURATION_MS)
     );
     const [disableCommentError, setDisableCommentError] = useState<string | undefined>(
         undefined
@@ -720,10 +721,13 @@ export function Jobs() {
         setDisableCandidate(candidate);
         setDisableMode(existingIntent?.mode ?? "until");
         setDisableComment(existingIntent?.comment ?? "");
-        const untilTimestamp =
-            existingIntent?.mode === "until" && existingIntent.until
-                ? Date.parse(existingIntent.until)
-                : Date.now() + 7 * 24 * 60 * 60 * 1000;
+        let untilTimestamp = Date.now() + DEFAULT_DISABLE_DURATION_MS;
+        if (existingIntent?.mode === "until" && existingIntent.until) {
+            const parsedUntilTimestamp = Date.parse(existingIntent.until);
+            if (Number.isFinite(parsedUntilTimestamp)) {
+                untilTimestamp = parsedUntilTimestamp;
+            }
+        }
         setDisableUntil(toDisableUntilDraft(untilTimestamp));
         setDisableCommentError(undefined);
         setDisableUntilError(undefined);
