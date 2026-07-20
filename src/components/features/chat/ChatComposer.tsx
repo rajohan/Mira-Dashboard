@@ -316,6 +316,27 @@ export function ChatComposer({
             );
     }, [shouldShowSlashSuggestions]);
 
+    useEffect(() => {
+        const preventPageFileDrop = (event: globalThis.DragEvent) => {
+            if (!event.dataTransfer || !hasFilesInDataTransfer(event.dataTransfer)) {
+                return;
+            }
+            event.preventDefault();
+            if (event.type === "drop") {
+                fileDragDepthReference.current = 0;
+                setIsDraggingFiles(false);
+            }
+        };
+
+        const listenerOptions = { capture: true };
+        addEventListener("dragover", preventPageFileDrop, listenerOptions);
+        addEventListener("drop", preventPageFileDrop, listenerOptions);
+        return () => {
+            removeEventListener("dragover", preventPageFileDrop, listenerOptions);
+            removeEventListener("drop", preventPageFileDrop, listenerOptions);
+        };
+    }, []);
+
     if (
         currentModel &&
         modelSelectOptions.every((option) => option.value !== currentModel)

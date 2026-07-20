@@ -238,13 +238,14 @@ export function Chat() {
         rows: projection.rows,
         sessionKey: selectedSessionKey,
     });
+    const composerLayoutKey = `${attachments.length}:${visibleError ?? ""}`;
     const scroll = useChatScroll(
         chatRows,
         selectedSessionKey,
         setIsAtBottom,
         shouldStickToBottomReference,
         isLoadingHistory,
-        attachments.length
+        composerLayoutKey
     );
     const {
         followToBottom: followMessagesToBottom,

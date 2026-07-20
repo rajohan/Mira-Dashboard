@@ -517,6 +517,45 @@ describe("chat scroll", () => {
         unmount();
     });
 
+    it("keeps sticky bottom aligned when the global error changes layout", () => {
+        const rows = [chatRow("assistant", "assistant")];
+        const stickToBottomReference = { current: true };
+        const { result, rerender, unmount } = renderHook(
+            ({ layoutKey }: { layoutKey: string }) =>
+                useChatScroll(
+                    rows,
+                    "agent:main:main",
+                    jest.fn(),
+                    stickToBottomReference,
+                    false,
+                    layoutKey
+                ),
+            { initialProps: { layoutKey: "0:" } }
+        );
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 300 },
+            scrollHeight: { configurable: true, value: 1000 },
+        });
+        act(() => result.current.handleUserScrollIntent());
+        container.scrollTop = 700;
+        result.current.messagesContainerReference.current = container;
+
+        rerender({ layoutKey: "0:Unsupported attachment" });
+
+        expect(container.scrollTop).toBe(1000);
+        expect(stickToBottomReference.current).toBe(true);
+        runAnimationFrames(3);
+
+        stickToBottomReference.current = false;
+        container.scrollTop = 250;
+        rerender({ layoutKey: "0:A longer transport error" });
+
+        expect(container.scrollTop).toBe(250);
+        expect(animationFrameState.frames.size).toBe(0);
+        unmount();
+    });
+
     it("delegates same-row growth to the virtualizer without a second scroll", () => {
         const stickToBottomReference = { current: true };
         const { result, rerender, unmount } = renderHook(

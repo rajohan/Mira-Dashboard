@@ -19,6 +19,23 @@ export const MAX_ATTACHMENTS = 10;
 const CHAT_ATTACHMENT_MIME_PREFIXES = ["image/", "audio/", "text/"] as const;
 const CHAT_ATTACHMENT_EXACT_MIME_TYPES = new Set(["application/pdf"]);
 const CHAT_ATTACHMENT_EXTENSIONS = [
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".heic",
+    ".heif",
+    ".ogg",
+    ".oga",
+    ".mp3",
+    ".wav",
+    ".flac",
+    ".aac",
+    ".opus",
+    ".m4a",
+    ".m2a",
+    ".pdf",
     ".csv",
     ".json",
     ".md",

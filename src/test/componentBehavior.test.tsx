@@ -1091,6 +1091,13 @@ describe("shared component helpers", () => {
             files: directlyDroppedFiles,
             types: ["Files"],
         };
+        expect(fireEvent.dragOver(document.body, { dataTransfer: directDropData })).toBe(
+            false
+        );
+        expect(fireEvent.drop(document.body, { dataTransfer: directDropData })).toBe(
+            false
+        );
+        expect(onAttachFiles).not.toHaveBeenCalled();
         fireEvent.dragEnter(textarea, { dataTransfer: directDropData });
         expect(screen.getByText("Drop files to attach")).toBeInTheDocument();
         fireEvent.dragOver(textarea, { dataTransfer: directDropData });

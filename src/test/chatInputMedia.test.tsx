@@ -173,12 +173,18 @@ describe("chat input media", () => {
                     new File(["report"], "report.pdf", {
                         type: "application/pdf",
                     }),
+                    new File(["image"], "photo.png"),
+                    new File(["audio"], "clip.mp3"),
+                    new File(["pdf"], "scan.pdf"),
                 ])
             );
         });
 
         expect(result.current.attachments.map(({ fileName }) => fileName)).toEqual([
             "report.pdf",
+            "photo.png",
+            "clip.mp3",
+            "scan.pdf",
         ]);
         const errorMessage =
             "Skipped unsupported files: installer.exe, payload.bin. Choose images, audio, PDFs, text, ZIP, or Office documents.";

@@ -24,7 +24,7 @@ export function useChatScroll(
     setIsAtBottom: Dispatch<SetStateAction<boolean>>,
     shouldStickToBottomReference: RefObject<boolean>,
     isLoadingHistory = false,
-    composerLayoutKey = 0
+    composerLayoutKey: number | string = 0
 ) {
     const messagesContainerReference = useRef<HTMLDivElement | undefined>(undefined);
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
