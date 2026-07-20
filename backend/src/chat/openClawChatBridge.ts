@@ -395,6 +395,17 @@ function isSettlingLifecycleEvent(event: unknown, payload: unknown): boolean {
     );
 }
 
+function isStartingLifecycleEvent(event: unknown, payload: unknown): boolean {
+    const record = runtimePayloadView(payload);
+    const stream = (stringField(record, "stream") || "").toLowerCase();
+    const phase = (stringField(record, "phase") || "").toLowerCase();
+    return (
+        event === "agent" &&
+        stream === "lifecycle" &&
+        ["start", "started"].includes(phase)
+    );
+}
+
 function isCompactionOnlyRun(run: RetainedRun): boolean {
     return (
         run.events.length > 0 &&
@@ -743,6 +754,31 @@ function isPromotableRunlessUserLedRun(
     return Boolean(
         terminalSignature && terminalSignature === messageSignature(envelope.payload)
     );
+}
+
+function isPromotableInterruptedDashboardRun(
+    run: RetainedRun,
+    envelope: OpenClawRuntimeEnvelope,
+    runs: ReadonlyMap<string, RetainedRun>
+): boolean {
+    const providerRunId = stringField(runtimePayloadView(envelope.payload), "runId");
+    if (
+        run.completed ||
+        !run.runId.startsWith("dashboard-chat-") ||
+        !providerRunId ||
+        isProvisionalRunId(providerRunId) ||
+        !isStartingLifecycleEvent(envelope.event, envelope.payload) ||
+        envelope.runtimeSequence <= lastSequence(run)
+    ) {
+        return false;
+    }
+
+    return runs
+        .values()
+        .every(
+            (candidate) =>
+                candidate === run || candidate.completed || isCompactionOnlyRun(candidate)
+        );
 }
 
 function isMatchingSessionEcho(
@@ -1957,8 +1993,10 @@ export class OpenClawChatBridge {
         if (explicitRunId && !runs.has(explicitRunId)) {
             const pendingUserRuns = runs
                 .values()
-                .filter((run) =>
-                    isPromotableRunlessUserLedRun(run, retainedEnvelope, runs)
+                .filter(
+                    (run) =>
+                        isPromotableRunlessUserLedRun(run, retainedEnvelope, runs) ||
+                        isPromotableInterruptedDashboardRun(run, retainedEnvelope, runs)
                 )
                 .toArray();
             if (pendingUserRuns.length === 1) {
