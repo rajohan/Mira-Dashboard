@@ -4187,6 +4187,23 @@ describe("Mira Dashboard frontend behavior", () => {
             mimeType: "text/csv",
             url: "https://files.example.test/report.csv?token=signed-value",
         });
+        const normalizedLocalProxyAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        url: "/api/media?path=%2Ftmp%2Fproxy-report.csv",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedLocalProxyAttachment.attachments?.[0]).toMatchObject({
+            fileName: "proxy-report.csv",
+            kind: "text",
+            mimeType: "text/csv",
+            url: "/api/media?path=%2Ftmp%2Fproxy-report.csv",
+        });
         const normalizedManagedSvgAttachment = normalizeOpenClawHistoryMessage({
             content: [
                 {

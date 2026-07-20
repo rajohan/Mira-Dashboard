@@ -131,7 +131,9 @@ download action. Images render inline; JSON and Markdown use the existing
 structured viewers; CSV and plain text use a bounded text preview; other files
 remain downloadable. MIME parameters are normalized before the viewer is chosen.
 When OpenClaw omits attachment labels or MIME metadata, Dashboard derives them
-from the URL pathname rather than signed query parameters.
+from the remote URL pathname rather than signed query parameters. The known local
+`/api/media` proxy is the exception: its encoded `path` query is the authoritative
+source filename because the proxy pathname itself contains no file metadata.
 External HTTP(S) text references remain download-only because Dashboard cannot
 enforce the bounded preview policy on cross-origin responses. Attachment Markdown
 renders image references as plain labels so opening a preview cannot fetch remote
