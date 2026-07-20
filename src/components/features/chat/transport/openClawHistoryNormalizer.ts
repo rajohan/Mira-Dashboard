@@ -5,6 +5,7 @@ import {
     type ChatHistoryMessage,
     type ChatImageBlock,
     chatImageDisplayUrl,
+    chatLocalMediaPathFromUrl,
     type ChatToolResultDisplay,
     extractImages,
     extractThinkingBlocks,
@@ -56,15 +57,12 @@ function fileNameFromPath(path: string): string {
 }
 
 function pathFromMediaReference(reference: string): string {
+    const localMediaPath = chatLocalMediaPathFromUrl(reference);
+    if (localMediaPath) {
+        return localMediaPath;
+    }
     try {
         const url = new URL(reference, "https://dashboard.invalid");
-        const localMediaPath =
-            reference.startsWith("/api/media?") && url.pathname === "/api/media"
-                ? url.searchParams.get("path")?.trim()
-                : undefined;
-        if (localMediaPath) {
-            return localMediaPath;
-        }
         if (
             reference.startsWith("/") ||
             REMOTE_MEDIA_PROTOCOLS.has(url.protocol) ||

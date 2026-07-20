@@ -175,7 +175,8 @@ function safeChatImageUrl(value: unknown): string | undefined {
         : undefined;
 }
 
-function localMediaPathFromUrl(url: string): string | undefined {
+/** Returns the original local path encoded in a canonical Dashboard media URL. */
+export function chatLocalMediaPathFromUrl(url: string): string | undefined {
     const parsedChatUrl = parseChatUrl(url);
     if (
         !parsedChatUrl?.isSameDashboardOrigin ||
@@ -257,7 +258,7 @@ export function chatImageMimeType(image: ChatImageBlock): string {
     if (declaredMimeType) {
         return declaredMimeType;
     }
-    const localMediaPath = localMediaPathFromUrl(chatImageDownloadUrl(image) || "");
+    const localMediaPath = chatLocalMediaPathFromUrl(chatImageDownloadUrl(image) || "");
     return localMediaPath?.toLowerCase().endsWith(".svg") ? "image/svg+xml" : "image/png";
 }
 

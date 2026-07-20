@@ -4264,6 +4264,34 @@ describe("Mira Dashboard frontend behavior", () => {
             mimeType: "text/csv",
             url: "/api/media?path=%2Ftmp%2Fproxy-report.csv",
         });
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            const absoluteLocalProxyUrl =
+                "https://dashboard.test/api/media?path=%2Ftmp%2Fabsolute-report.csv";
+            const normalizedAbsoluteLocalProxyAttachment =
+                normalizeOpenClawHistoryMessage({
+                    content: [
+                        {
+                            attachment: {
+                                url: absoluteLocalProxyUrl,
+                            },
+                            type: "attachment",
+                        },
+                    ],
+                    role: "assistant",
+                });
+            expect(normalizedAbsoluteLocalProxyAttachment.attachments?.[0]).toMatchObject(
+                {
+                    fileName: "absolute-report.csv",
+                    kind: "text",
+                    mimeType: "text/csv",
+                    url: absoluteLocalProxyUrl,
+                }
+            );
+        } finally {
+            location.assign(previousLocation);
+        }
         const normalizedManagedSvgAttachment = normalizeOpenClawHistoryMessage({
             content: [
                 {
