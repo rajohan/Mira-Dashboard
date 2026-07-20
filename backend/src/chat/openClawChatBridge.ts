@@ -773,7 +773,8 @@ function isPromotableInterruptedDashboardRun(
     run: RetainedRun,
     envelope: OpenClawRuntimeEnvelope,
     runs: ReadonlyMap<string, RetainedRun>,
-    requestBoundary?: number
+    requestBoundary?: number,
+    providerRun?: RetainedRun
 ): boolean {
     const providerRunId = stringField(runtimePayloadView(envelope.payload), "runId");
     const resumeDelay = envelope.runtimeRecordedAt - run.updatedAt;
@@ -796,7 +797,10 @@ function isPromotableInterruptedDashboardRun(
         .values()
         .every(
             (candidate) =>
-                candidate === run || candidate.completed || isCompactionOnlyRun(candidate)
+                candidate === run ||
+                candidate === providerRun ||
+                candidate.completed ||
+                isCompactionOnlyRun(candidate)
         );
 }
 
@@ -1544,6 +1548,12 @@ export class OpenClawChatBridge {
             nextSourceRuns.delete(runId);
         }
 
+        const repairedProviderRunId =
+            nextSourceRuns.size === 0
+                ? this.#repairInterruptedRunSplit(canonicalStorageKey, nextCanonicalRuns)
+                      ?.runId
+                : undefined;
+
         const evictedCanonicalRunIds = new Set<string>();
         while (nextCanonicalRuns.size > MAX_RUNS_PER_SESSION) {
             const oldestRunId = nextCanonicalRuns
@@ -1586,6 +1596,9 @@ export class OpenClawChatBridge {
             if (nextCanonicalRuns.has(runId)) {
                 this.#rememberRunSession(runId, canonicalStorageKey);
             }
+        }
+        if (repairedProviderRunId) {
+            this.#rememberRunSession(repairedProviderRunId, canonicalStorageKey);
         }
         for (const runId of evictedCanonicalRunIds) {
             this.#forgetRunSession(runId, canonicalStorageKey);
@@ -1840,7 +1853,7 @@ export class OpenClawChatBridge {
         this.#replaceRunEvents(run, events);
     }
 
-    #promoteRunEntry(
+    #mergeRunEntry(
         sessionKey: string,
         runs: Map<string, RetainedRun>,
         provisionalRunId: string,
@@ -1859,7 +1872,6 @@ export class OpenClawChatBridge {
             providerRunId
         );
         runs.delete(provisionalRunId);
-        this.#forgetRunSession(provisionalRunId, storageSessionKey);
         const existing = runs.get(providerRunId);
         if (existing) {
             this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
@@ -1876,6 +1888,82 @@ export class OpenClawChatBridge {
         provisional.runId = providerRunId;
         runs.set(providerRunId, provisional);
         return provisional;
+    }
+
+    #promoteRunEntry(
+        sessionKey: string,
+        runs: Map<string, RetainedRun>,
+        provisionalRunId: string,
+        providerRunId: string
+    ): RetainedRun | undefined {
+        const shouldForgetAssociation =
+            provisionalRunId !== providerRunId && runs.has(provisionalRunId);
+        const promotedRun = this.#mergeRunEntry(
+            sessionKey,
+            runs,
+            provisionalRunId,
+            providerRunId
+        );
+        if (shouldForgetAssociation && promotedRun) {
+            this.#forgetRunSession(provisionalRunId, sessionKey);
+        }
+        return promotedRun;
+    }
+
+    #repairInterruptedRunSplit(
+        sessionKey: string,
+        runs: Map<string, RetainedRun>
+    ): RetainedRun | undefined {
+        const candidates: Array<{
+            providerRunId: string;
+            provisionalRunId: string;
+        }> = [];
+        const requestBoundary = this.#latestRequestBoundary(sessionKey);
+        for (const providerRun of runs.values()) {
+            if (!providerRun.restored || isProvisionalRunId(providerRun.runId)) {
+                continue;
+            }
+            const startingEnvelope = providerRun.events.findLast((envelope) => {
+                const envelopeRunId = stringField(
+                    runtimePayloadView(envelope.payload),
+                    "runId"
+                );
+                return (
+                    envelopeRunId === providerRun.runId &&
+                    isStartingLifecycleEvent(envelope.event, envelope.payload)
+                );
+            });
+            if (!startingEnvelope) {
+                continue;
+            }
+            for (const provisionalRun of runs.values()) {
+                if (
+                    provisionalRun !== providerRun &&
+                    isPromotableInterruptedDashboardRun(
+                        provisionalRun,
+                        startingEnvelope,
+                        runs,
+                        requestBoundary,
+                        providerRun
+                    )
+                ) {
+                    candidates.push({
+                        providerRunId: providerRun.runId,
+                        provisionalRunId: provisionalRun.runId,
+                    });
+                }
+            }
+        }
+        if (candidates.length !== 1) {
+            return undefined;
+        }
+        const candidate = candidates[0]!;
+        return this.#mergeRunEntry(
+            sessionKey,
+            runs,
+            candidate.provisionalRunId,
+            candidate.providerRunId
+        );
     }
 
     #promoteProvisionalRun(
