@@ -803,6 +803,13 @@ describe("shared component helpers", () => {
                                             mimeType: "image/png",
                                             type: "image_url",
                                         },
+                                        {
+                                            image_url: {
+                                                url: "https://files.example.test/tool-output.png",
+                                            },
+                                            mimeType: "image/png",
+                                            type: "image_url",
+                                        },
                                     ],
                                     name: "run",
                                 },
@@ -865,6 +872,15 @@ describe("shared component helpers", () => {
         expect(screen.getByText("late id output")).toBeInTheDocument();
         expect(screen.getByText("No arguments")).toBeInTheDocument();
         const toolOutputImage = screen.getByAltText("Tool output 1");
+        expect(screen.getByRole("link", { name: "Open tool image 2" })).toHaveAttribute(
+            "href",
+            "https://files.example.test/tool-output.png"
+        );
+        expect(
+            document.querySelector(
+                'img[src="https://files.example.test/tool-output.png"]'
+            )
+        ).toBeNull();
         const dynamicContentLoadCount = onDynamicContentLoad.mock.calls.length;
         fireEvent.load(toolOutputImage);
         fireEvent.error(toolOutputImage);
@@ -2409,6 +2425,13 @@ describe("shared component helpers", () => {
                                         mimeType: "image/svg+xml",
                                         type: "image_url",
                                     },
+                                    {
+                                        image_url: {
+                                            url: "https://files.example.test/chat-image.png",
+                                        },
+                                        mimeType: "image/png",
+                                        type: "image_url",
+                                    },
                                 ],
                                 role: "assistant",
                                 text: "answer",
@@ -2474,6 +2497,12 @@ describe("shared component helpers", () => {
             "src",
             "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full?preview=image"
         );
+        expect(
+            document.querySelector('img[src="https://files.example.test/chat-image.png"]')
+        ).toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Open chat image 2 preview" })
+        ).toBeInTheDocument();
         const dynamicContentLoadCount = onDynamicContentLoad.mock.calls.length;
         fireEvent.load(chatImage);
         fireEvent.error(chatImage);

@@ -39,6 +39,7 @@ import {
 import {
     attachmentKind,
     type ChatHistoryMessage,
+    chatImageDownloadUrl,
     chatImageUrl,
     chatTransportAttachments,
     extractImages,
@@ -4064,6 +4065,17 @@ describe("Mira Dashboard frontend behavior", () => {
         } finally {
             location.assign(previousLocation);
         }
+    });
+
+    it("keeps external image URLs click-only", () => {
+        const externalImage = {
+            image_url: { url: "https://files.example.test/generated.png" },
+            type: "image_url" as const,
+        };
+        expect(chatImageDownloadUrl(externalImage)).toBe(
+            "https://files.example.test/generated.png"
+        );
+        expect(chatImageUrl(externalImage)).toBeUndefined();
     });
 
     it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {

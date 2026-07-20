@@ -584,17 +584,16 @@ export function ChatMessagesList({
                                             <div className="mb-1.5 flex flex-wrap gap-1.5">
                                                 {row.message.images.map(
                                                     (image, imageIndex) => {
-                                                        const imageUrl =
-                                                            chatImageUrl(image);
-                                                        if (!imageUrl) {
+                                                        const imageDownloadUrl =
+                                                            chatImageDownloadUrl(image);
+                                                        if (!imageDownloadUrl) {
                                                             return;
                                                         }
 
+                                                        const imageUrl =
+                                                            chatImageUrl(image);
                                                         const imageMime =
                                                             chatImageMimeType(image);
-                                                        const imageDownloadUrl =
-                                                            chatImageDownloadUrl(image) ||
-                                                            imageUrl;
                                                         const imagePreviewLabel = `Open chat image ${imageIndex + 1} preview`;
 
                                                         return (
@@ -616,17 +615,25 @@ export function ChatMessagesList({
                                                                     imagePreviewLabel
                                                                 }
                                                             >
-                                                                <img
-                                                                    src={imageUrl}
-                                                                    alt="Chat attachment"
-                                                                    onLoad={
-                                                                        onDynamicContentLoad
-                                                                    }
-                                                                    onError={
-                                                                        onDynamicContentLoad
-                                                                    }
-                                                                    className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
-                                                                />
+                                                                {imageUrl ? (
+                                                                    <img
+                                                                        src={imageUrl}
+                                                                        alt="Chat attachment"
+                                                                        onLoad={
+                                                                            onDynamicContentLoad
+                                                                        }
+                                                                        onError={
+                                                                            onDynamicContentLoad
+                                                                        }
+                                                                        className="max-h-48 max-w-full rounded-lg border border-primary-700 object-contain sm:max-h-56"
+                                                                    />
+                                                                ) : (
+                                                                    <span className="flex items-center gap-1.5 rounded-lg border border-primary-700 px-2.5 py-2 text-xs text-accent-300 underline hover:bg-primary-700/50">
+                                                                        <ImageIcon className="size-4" />
+                                                                        Open image
+                                                                        {` ${imageIndex + 1}`}
+                                                                    </span>
+                                                                )}
                                                             </button>
                                                         );
                                                     }

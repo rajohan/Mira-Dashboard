@@ -238,7 +238,11 @@ export function chatImageDisplayUrl(url: string, mimeType: string): string | und
     if (!safeUrl) {
         return undefined;
     }
-    const isManagedMedia = dashboardMediaKindFromUrl(safeUrl) === "managed";
+    const mediaKind = dashboardMediaKindFromUrl(safeUrl);
+    if (!safeUrl.startsWith("data:image/") && !mediaKind) {
+        return undefined;
+    }
+    const isManagedMedia = mediaKind === "managed";
     return isManagedMedia || normalizeChatMimeType(mimeType) === "image/svg+xml"
         ? chatAttachmentPreviewUrl(safeUrl, "image")
         : safeUrl;

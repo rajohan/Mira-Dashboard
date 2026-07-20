@@ -8,7 +8,7 @@ import type {
     ChatToolResultDisplay,
     ChatVisibilitySettings,
 } from "./chatTypes";
-import { chatImageUrl } from "./chatTypes";
+import { chatImageDownloadUrl, chatImageUrl } from "./chatTypes";
 
 /** Formats tool arguments for display. */
 function formatToolArguments(toolCall: ChatToolCallDisplay): string {
@@ -93,16 +93,10 @@ function ToolResultImages({
     images?: ChatImageBlock[];
     onDynamicContentLoad?: () => void;
 }) {
-    const imageUrls = images
-        .map((image) => chatImageUrl(image))
-        .filter((imageUrl): imageUrl is string => Boolean(imageUrl));
-    if (imageUrls.length === 0) {
-        return;
-    }
-
-    return (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {imageUrls.map((imageUrl, index) => (
+    const imageItems = images.flatMap((image, index) => {
+        const imageUrl = chatImageUrl(image);
+        if (imageUrl) {
+            return [
                 <img
                     key={`${imageUrl.slice(0, 48)}-${index}`}
                     src={imageUrl}
@@ -110,10 +104,31 @@ function ToolResultImages({
                     onLoad={onDynamicContentLoad}
                     onError={onDynamicContentLoad}
                     className="max-h-40 max-w-full rounded-md border border-amber-400/20 object-contain"
-                />
-            ))}
-        </div>
-    );
+                />,
+            ];
+        }
+
+        const downloadUrl = chatImageDownloadUrl(image);
+        return downloadUrl
+            ? [
+                  <a
+                      key={`${downloadUrl.slice(0, 48)}-${index}`}
+                      href={downloadUrl}
+                      download
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-md border border-amber-400/20 px-2 py-1 text-xs text-amber-200 underline hover:bg-amber-400/10"
+                  >
+                      Open tool image {index + 1}
+                  </a>,
+              ]
+            : [];
+    });
+    if (imageItems.length === 0) {
+        return;
+    }
+
+    return <div className="mt-1.5 flex flex-wrap gap-1.5">{imageItems}</div>;
 }
 
 /** Renders thinking blocks while following the bottom unless the user scrolls up. */

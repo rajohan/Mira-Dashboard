@@ -271,16 +271,17 @@ export function Chat() {
             return;
         }
 
+        if (requestedSessionKey) {
+            return;
+        }
+
         if (!selectedSessionKey || !sessionMap.has(selectedSessionKey)) {
             const fallbackSession = sortedSessions.find(
                 (session) => session.key && sessionMap.has(session.key)
             );
             setSelectedSessionKey(fallbackSession?.key || "");
-            if (requestedSessionKey) {
-                void navigate({ to: "/chat", search: {}, replace: true });
-            }
         }
-    }, [navigate, requestedSessionKey, selectedSessionKey, sessionMap, sortedSessions]);
+    }, [requestedSessionKey, selectedSessionKey, sessionMap, sortedSessions]);
 
     useEffect(() => {
         setDeletedMessageKeys(

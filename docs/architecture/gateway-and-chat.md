@@ -113,7 +113,8 @@ selection behavior. Session changes from the picker replace the query value so
 routine navigation does not add one browser-history entry per selection. History
 may load while a URL-selected session is being resolved, but sending, preference
 updates, and compaction remain disabled until that key exists in the Gateway
-session index.
+session index. The unresolved key remains selected until Gateway reports it or the
+user explicitly chooses another session; it is never replaced by a default session.
 
 ### Attachments And Media
 
@@ -164,7 +165,8 @@ request and ignores any stale completion. History-provided root-relative and
 absolute same-origin API image URLs are canonicalized before use. Only the two
 known Dashboard media proxy paths may auto-render; dot-segment escapes and other
 same-origin API paths are rejected, and absolute managed paths still use bounded
-previews.
+previews. Cross-origin HTTP(S) images remain explicit open/download controls and
+are not embedded merely because their transcript is opened.
 
 Local OpenClaw media continues through `/api/media`. Text preview is opt-in and
 limited to `.txt`, `.json`, `.csv`, and `.md` files no larger than 1 MiB. SVG is

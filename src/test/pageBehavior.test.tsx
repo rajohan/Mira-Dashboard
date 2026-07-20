@@ -3149,8 +3149,24 @@ describe("Mira Dashboard pages", () => {
             await Promise.resolve();
         });
         await respondToSocketRequest(socket, "chat.history", { messages: [] });
-        await respondToSocketRequest(socket, "sessions.list", { sessions: [] });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [
+                {
+                    agentType: "main",
+                    displayLabel: "Main chat",
+                    id: "session-main",
+                    key: "agent:main:main",
+                    model: "codex",
+                    type: "main",
+                    updatedAt: "2026-07-19T18:00:00.000Z",
+                },
+            ],
+        });
         await flushQueuedTimers();
+
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:missing:main",
+        });
 
         const composer = screen.getByPlaceholderText(
             "Message, attach files, or use / commands (try /help)"
