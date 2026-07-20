@@ -179,7 +179,7 @@ export function useChatActions({
             .some((candidate) => isSameChatSession(candidate, sessionKey));
 
     const handleSend = async () => {
-        if (!selectedSessionKey) {
+        if (!selectedSessionKey || !selectedSession) {
             return;
         }
         const pendingSessionKey = selectedSessionKey;
@@ -349,6 +349,7 @@ export function useChatActions({
     const canSend = Boolean(
         isConnected &&
         selectedSessionKey &&
+        selectedSession &&
         !isRecording &&
         !isTranscribing &&
         !isCompactingSession &&
@@ -363,9 +364,11 @@ export function useChatActions({
         !isStopping &&
         (activeRunCount > 0 || isSessionActive(selectedSession))
     );
-    const arePreferenceControlsDisabled = !isConnected || isPatchingSession;
+    const arePreferenceControlsDisabled =
+        !isConnected || !selectedSession || isPatchingSession;
     const isCompactDisabled = Boolean(
         !isConnected ||
+        !selectedSession ||
         isSending ||
         isCompactingSession ||
         isPatchingSession ||

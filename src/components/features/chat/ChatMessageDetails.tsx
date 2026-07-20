@@ -8,6 +8,7 @@ import type {
     ChatToolResultDisplay,
     ChatVisibilitySettings,
 } from "./chatTypes";
+import { chatImageDownloadUrl, chatImageUrl } from "./chatTypes";
 
 /** Formats tool arguments for display. */
 function formatToolArguments(toolCall: ChatToolCallDisplay): string {
@@ -84,38 +85,50 @@ function isMatchingToolResult(
     );
 }
 
-/** Returns an embeddable image URL for chat image blocks. */
-function toolImageUrl(image: ChatImageBlock): string | undefined {
-    const imageData = image.source?.data || image.data;
-    if (!imageData) {
-        return undefined;
-    }
-
-    const imageMime = image.source?.media_type || image.mimeType || "image/png";
-    return `data:${imageMime};base64,${imageData}`;
-}
-
 /** Renders tool result images. */
-function ToolResultImages({ images = [] }: { images?: ChatImageBlock[] }) {
-    const imageUrls = images
-        .map((image) => toolImageUrl(image))
-        .filter((imageUrl): imageUrl is string => Boolean(imageUrl));
-    if (imageUrls.length === 0) {
-        return;
-    }
-
-    return (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {imageUrls.map((imageUrl, index) => (
+function ToolResultImages({
+    images = [],
+    onDynamicContentLoad,
+}: {
+    images?: ChatImageBlock[];
+    onDynamicContentLoad?: () => void;
+}) {
+    const imageItems = images.flatMap((image, index) => {
+        const imageUrl = chatImageUrl(image);
+        if (imageUrl) {
+            return [
                 <img
                     key={`${imageUrl.slice(0, 48)}-${index}`}
                     src={imageUrl}
                     alt={`Tool output ${index + 1}`}
+                    onLoad={onDynamicContentLoad}
+                    onError={onDynamicContentLoad}
                     className="max-h-40 max-w-full rounded-md border border-amber-400/20 object-contain"
-                />
-            ))}
-        </div>
-    );
+                />,
+            ];
+        }
+
+        const downloadUrl = chatImageDownloadUrl(image);
+        return downloadUrl
+            ? [
+                  <a
+                      key={`${downloadUrl.slice(0, 48)}-${index}`}
+                      href={downloadUrl}
+                      download
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-md border border-amber-400/20 px-2 py-1 text-xs text-amber-200 underline hover:bg-amber-400/10"
+                  >
+                      Open tool image {index + 1}
+                  </a>,
+              ]
+            : [];
+    });
+    if (imageItems.length === 0) {
+        return;
+    }
+
+    return <div className="mt-1.5 flex flex-wrap gap-1.5">{imageItems}</div>;
 }
 
 /** Renders thinking blocks while following the bottom unless the user scrolls up. */
@@ -254,6 +267,7 @@ export function ChatMessageDetails({
     messageKey,
     shouldExpandToolDetails = false,
     toolDetailExpansionOverrides = new Map(),
+    onDynamicContentLoad,
     onToggleToolDetails,
     visibility,
 }: {
@@ -261,6 +275,7 @@ export function ChatMessageDetails({
     messageKey?: string;
     shouldExpandToolDetails?: boolean;
     toolDetailExpansionOverrides?: ReadonlyMap<string, boolean>;
+    onDynamicContentLoad?: () => void;
     onToggleToolDetails?: (toolKey: string) => void;
     visibility: ChatVisibilitySettings;
 }) {
@@ -348,7 +363,10 @@ export function ChatMessageDetails({
                                               No text output
                                           </span>
                                       )}
-                                      <ToolResultImages images={toolResult.images} />
+                                      <ToolResultImages
+                                          images={toolResult.images}
+                                          onDynamicContentLoad={onDynamicContentLoad}
+                                      />
                                   </ToolSection>
                               ) : undefined}
                           </ToolDetailBlock>
@@ -377,7 +395,10 @@ export function ChatMessageDetails({
                     ) : (
                         <span className="text-primary-300">No text output</span>
                     )}
-                    <ToolResultImages images={message.toolResult?.images} />
+                    <ToolResultImages
+                        images={message.toolResult?.images}
+                        onDynamicContentLoad={onDynamicContentLoad}
+                    />
                 </ToolDetailBlock>
             ) : undefined}
         </div>

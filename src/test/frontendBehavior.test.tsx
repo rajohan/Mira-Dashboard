@@ -39,6 +39,8 @@ import {
 import {
     attachmentKind,
     type ChatHistoryMessage,
+    chatImageDownloadUrl,
+    chatImageUrl,
     chatTransportAttachments,
     extractImages,
     extractThinkingBlocks,
@@ -601,18 +603,27 @@ describe("Mira Dashboard frontend behavior", () => {
     });
 
     it("loads the app shell, router, login route, and local devtools modules", async () => {
-        const [{ default: App }, { router }, { Login }, { default: DashboardDevtools }] =
-            await Promise.all([
-                import("../App"),
-                import("../router"),
-                import("../pages/Login"),
-                import("../components/devtools/DashboardDevtools"),
-            ]);
+        const [
+            { default: App },
+            { normalizeChatSearch, router },
+            { Login },
+            { default: DashboardDevtools },
+        ] = await Promise.all([
+            import("../App"),
+            import("../router"),
+            import("../pages/Login"),
+            import("../components/devtools/DashboardDevtools"),
+        ]);
 
         expect(App).toBeTypeOf("function");
         expect(Login).toBeTypeOf("function");
         expect(DashboardDevtools).toBeTypeOf("function");
         expect(router.navigate).toBeTypeOf("function");
+        expect(normalizeChatSearch({ session: " agent:ops:main:heartbeat " })).toEqual({
+            session: "agent:ops:main:heartbeat",
+        });
+        expect(normalizeChatSearch({ session: " ".repeat(3) })).toEqual({});
+        expect(normalizeChatSearch({ session: 42 })).toEqual({});
 
         const originalFetch = fetch;
         Object.defineProperty(globalThis, "fetch", {
@@ -3838,6 +3849,34 @@ describe("Mira Dashboard frontend behavior", () => {
             "different",
         ]);
 
+        const distinctUrlOnlyImages = dedupeMessages([
+            chatMessage({
+                images: [
+                    {
+                        image_url: { url: "https://files.example.test/first.png" },
+                        mimeType: "image/png",
+                        type: "image_url",
+                    },
+                ],
+                role: "assistant",
+                runId: "run-images",
+                text: "",
+            }),
+            chatMessage({
+                images: [
+                    {
+                        image_url: { url: "https://files.example.test/second.png" },
+                        mimeType: "image/png",
+                        type: "image_url",
+                    },
+                ],
+                role: "assistant",
+                runId: "run-images",
+                text: "",
+            }),
+        ]);
+        expect(distinctUrlOnlyImages).toHaveLength(2);
+
         const duplicateUserMessages = dedupeMessages([
             chatMessage({ role: "user", text: "same question" }),
             chatMessage({ local: true, role: "user", text: "same question" }),
@@ -3992,6 +4031,53 @@ describe("Mira Dashboard frontend behavior", () => {
         ).toBe("assistant::2026-06-23T08:00:00.000Z::run-1::runtime-assistant::answer");
     });
 
+    it("rejects same-origin API images outside canonical media paths", () => {
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            expect([
+                chatImageUrl({
+                    image_url: { url: "https://dashboard.test/api/settings" },
+                    type: "image_url",
+                }),
+                chatImageUrl({
+                    image_url: { url: "/api/chat/media/outgoing/../../../settings" },
+                    type: "image_url",
+                }),
+            ]).toEqual([undefined, undefined]);
+        } finally {
+            location.assign(previousLocation);
+        }
+    });
+
+    it("bounds absolute same-origin managed image URLs", () => {
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            const managedUrl =
+                "https://dashboard.test/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full";
+            expect(
+                chatImageUrl({
+                    image_url: { url: managedUrl },
+                    type: "image_url",
+                })
+            ).toBe(`${managedUrl}?preview=image`);
+        } finally {
+            location.assign(previousLocation);
+        }
+    });
+
+    it("keeps external image URLs click-only", () => {
+        const externalImage = {
+            image_url: { url: "https://files.example.test/generated.png" },
+            type: "image_url" as const,
+        };
+        expect(chatImageDownloadUrl(externalImage)).toBe(
+            "https://files.example.test/generated.png"
+        );
+        expect(chatImageUrl(externalImage)).toBeUndefined();
+    });
+
     it("normalizes chat content blocks, attachments, hidden tool media, and formatter helpers", () => {
         const contentBlocks = [
             { type: "text", text: "hello" },
@@ -4005,8 +4091,59 @@ describe("Mira Dashboard frontend behavior", () => {
             { id: "call-1", name: "exec", arguments: { cmd: "pwd" } },
         ]);
         expect(normalizeText(contentBlocks)).toBe("hello\n\n[image]");
+        const managedImage = {
+            image_url: {
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+            },
+            mimeType: "image/png",
+            type: "image_url",
+        } as const;
+        expect(chatImageUrl(managedImage)).toBe(
+            `${managedImage.image_url.url}?preview=image`
+        );
+        const managedImageWithFragment = {
+            ...managedImage,
+            image_url: { url: `${managedImage.image_url.url}#thumbnail` },
+        } as const;
+        expect(chatImageUrl(managedImageWithFragment)).toBe(
+            `${managedImage.image_url.url}?preview=image#thumbnail`
+        );
+        expect(
+            chatImageUrl({
+                image_url: { url: "/api/settings" },
+                mimeType: "image/png",
+                type: "image_url",
+            })
+        ).toBeUndefined();
+        const managedSvgImage = {
+            ...managedImage,
+            image_url: {
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174001/full",
+            },
+            mimeType: "image/svg+xml; charset=utf-8",
+        } as const;
+        expect(chatImageUrl(managedSvgImage)).toBe(
+            `${managedSvgImage.image_url.url}?preview=image`
+        );
+        expect(
+            chatImageUrl({
+                image_url: { url: "/api/media?path=%2Ftmp%2Furl-only-logo.svg" },
+                type: "image_url",
+            })
+        ).toBe("/api/media?path=%2Ftmp%2Furl-only-logo.svg&preview=image");
+        expect(
+            chatImageUrl({
+                data: "/9j/4AAQSkZJRgABAQAAAQABAAD",
+                mimeType: "image/jpeg",
+                type: "image",
+            })
+        ).toBe("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD");
+        expect(extractImages([managedImage])).toEqual([managedImage]);
+        expect(normalizeText([managedImage])).toBe("[image]");
         expect(attachmentKind("image/png")).toBe("image");
         expect(attachmentKind("application/json")).toBe("text");
+        expect(attachmentKind("application/json; charset=utf-8")).toBe("text");
+        expect(attachmentKind("IMAGE/SVG+XML; charset=utf-8")).toBe("image");
         expect(attachmentKind("application/pdf")).toBe("file");
 
         const sendAttachment = {
@@ -4043,6 +4180,150 @@ describe("Mira Dashboard frontend behavior", () => {
             "result.png",
             "note.txt",
         ]);
+
+        const normalizedMediaReferences = normalizeOpenClawHistoryMessage({
+            MediaPaths: ["/tmp/data.csv", "/tmp/readme.md", "/tmp/logo.svg"],
+            content: "",
+            role: "user",
+        });
+        expect(normalizedMediaReferences.attachments).toMatchObject([
+            {
+                fileName: "data.csv",
+                kind: "text",
+                mimeType: "text/csv",
+                url: "/api/media?path=%2Ftmp%2Fdata.csv",
+            },
+            {
+                fileName: "readme.md",
+                kind: "text",
+                mimeType: "text/markdown",
+            },
+            {
+                dataUrl: "/api/media?path=%2Ftmp%2Flogo.svg&preview=image",
+                fileName: "logo.svg",
+                kind: "image",
+                mimeType: "image/svg+xml",
+            },
+        ]);
+
+        const normalizedManagedAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        label: "report.csv",
+                        mimeType: "text/csv",
+                        url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedManagedAttachment.attachments?.[0]).toMatchObject({
+            fileName: "report.csv",
+            kind: "text",
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+        });
+        const normalizedSignedAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        url: "https://files.example.test/report.csv?token=signed-value",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedSignedAttachment.attachments?.[0]).toMatchObject({
+            fileName: "report.csv",
+            kind: "text",
+            mimeType: "text/csv",
+            url: "https://files.example.test/report.csv?token=signed-value",
+        });
+        const normalizedFriendlyLabelAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        label: "Sales report",
+                        url: "https://files.example.test/report.csv?token=signed-value",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedFriendlyLabelAttachment.attachments?.[0]).toMatchObject({
+            fileName: "Sales report",
+            kind: "text",
+            mimeType: "text/csv",
+            url: "https://files.example.test/report.csv?token=signed-value",
+        });
+        const normalizedLocalProxyAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        url: "/api/media?path=%2Ftmp%2Fproxy-report.csv",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedLocalProxyAttachment.attachments?.[0]).toMatchObject({
+            fileName: "proxy-report.csv",
+            kind: "text",
+            mimeType: "text/csv",
+            url: "/api/media?path=%2Ftmp%2Fproxy-report.csv",
+        });
+        const previousLocation = location.href;
+        try {
+            location.assign("https://dashboard.test/");
+            const absoluteLocalProxyUrl =
+                "https://dashboard.test/api/media?path=%2Ftmp%2Fabsolute-report.csv";
+            const normalizedAbsoluteLocalProxyAttachment =
+                normalizeOpenClawHistoryMessage({
+                    content: [
+                        {
+                            attachment: {
+                                url: absoluteLocalProxyUrl,
+                            },
+                            type: "attachment",
+                        },
+                    ],
+                    role: "assistant",
+                });
+            expect(normalizedAbsoluteLocalProxyAttachment.attachments?.[0]).toMatchObject(
+                {
+                    fileName: "absolute-report.csv",
+                    kind: "text",
+                    mimeType: "text/csv",
+                    url: absoluteLocalProxyUrl,
+                }
+            );
+        } finally {
+            location.assign(previousLocation);
+        }
+        const normalizedManagedSvgAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        label: "logo.svg",
+                        mimeType: "image/svg+xml; charset=utf-8",
+                        url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174002/full",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedManagedSvgAttachment.attachments?.[0]).toMatchObject({
+            dataUrl:
+                "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174002/full?preview=image",
+            fileName: "logo.svg",
+            kind: "image",
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174002/full",
+        });
 
         expect(formatDatabaseNumber(123_456)).toBe("123,456");
         expect(formatDatabaseNumber(NaN)).toBe("0");

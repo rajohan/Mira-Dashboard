@@ -8,6 +8,10 @@ const originalAnimationFrame = {
     cancelAnimationFrame,
     requestAnimationFrame,
 };
+const originalVisibilityState = Object.getOwnPropertyDescriptor(
+    document,
+    "visibilityState"
+);
 const animationFrameState = {
     frames: new Map<number, FrameRequestCallback>(),
     nextFrameId: 0,
@@ -40,6 +44,14 @@ function chatRow(key: string, role: string): ChatRow {
     };
 }
 
+function setDocumentVisibility(visibilityState: DocumentVisibilityState): void {
+    Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: visibilityState,
+    });
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+}
+
 beforeEach(() => {
     animationFrameState.nextFrameId = 0;
     animationFrameState.frames.clear();
@@ -60,6 +72,10 @@ beforeEach(() => {
             writable: true,
         },
     });
+    Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "visible",
+    });
 });
 
 afterEach(() => {
@@ -75,6 +91,11 @@ afterEach(() => {
             writable: true,
         },
     });
+    if (originalVisibilityState) {
+        Object.defineProperty(document, "visibilityState", originalVisibilityState);
+    } else {
+        Reflect.deleteProperty(document, "visibilityState");
+    }
 });
 
 describe("chat scroll", () => {
@@ -286,6 +307,102 @@ describe("chat scroll", () => {
         expect(scrollWrites).toEqual([700, 1100]);
         expect(animationFrameState.frames.size).toBe(0);
 
+        unmount();
+    });
+
+    it("settles existing rows when an asynchronous history load finishes", () => {
+        const row = chatRow("answer", "assistant");
+        const stickToBottomReference = { current: true };
+        const { result, rerender, unmount } = renderHook(
+            ({ isLoadingHistory }: { isLoadingHistory: boolean }) =>
+                useChatScroll(
+                    [row],
+                    "agent:main:main",
+                    jest.fn(),
+                    stickToBottomReference,
+                    isLoadingHistory
+                ),
+            { initialProps: { isLoadingHistory: true } }
+        );
+        let scrollHeight = 500;
+        let scrollTop = 0;
+        const scrollWrites: number[] = [];
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, get: () => scrollHeight },
+            scrollTop: {
+                configurable: true,
+                get: () => scrollTop,
+                set: (value: number) => {
+                    scrollTop = value;
+                    scrollWrites.push(value);
+                },
+            },
+        });
+        result.current.messagesContainerReference.current = container;
+        runAnimationFrames(4);
+
+        scrollWrites.length = 0;
+        scrollTop = 120;
+        scrollHeight = 800;
+        rerender({ isLoadingHistory: false });
+        runNextAnimationFrame();
+        expect(scrollWrites.at(-1)).toBe(800);
+
+        scrollHeight = 950;
+        runNextAnimationFrame();
+        runAnimationFrames(2);
+        expect(scrollWrites.at(-1)).toBe(950);
+        expect(scrollTop).toBe(950);
+        unmount();
+    });
+
+    it("restores a hidden tab only when it was sticky before deactivation", () => {
+        const stickToBottomReference = { current: true };
+        const { result, unmount } = renderHook(() =>
+            useChatScroll(
+                [chatRow("answer", "assistant")],
+                "agent:main:main",
+                jest.fn(),
+                stickToBottomReference
+            )
+        );
+        let scrollHeight = 600;
+        let scrollTop = 0;
+        const scrollWrites: number[] = [];
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, get: () => scrollHeight },
+            scrollTop: {
+                configurable: true,
+                get: () => scrollTop,
+                set: (value: number) => {
+                    scrollTop = value;
+                    scrollWrites.push(value);
+                },
+            },
+        });
+        result.current.messagesContainerReference.current = container;
+        runAnimationFrames(4);
+
+        scrollWrites.length = 0;
+        setDocumentVisibility("hidden");
+        stickToBottomReference.current = false;
+        scrollTop = 180;
+        scrollHeight = 900;
+        setDocumentVisibility("visible");
+        expect(stickToBottomReference.current).toBe(true);
+        runAnimationFrames(4);
+        expect(scrollWrites).toEqual([900, 900]);
+
+        scrollWrites.length = 0;
+        stickToBottomReference.current = false;
+        setDocumentVisibility("hidden");
+        setDocumentVisibility("visible");
+        expect(animationFrameState.frames.size).toBe(0);
+        expect(scrollWrites).toEqual([]);
         unmount();
     });
 

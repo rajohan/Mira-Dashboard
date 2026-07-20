@@ -81,9 +81,18 @@ const sessionsRoute = createRoute({
     component: Sessions,
 });
 
+/** Keeps only a non-empty OpenClaw session key in the chat URL. */
+export function normalizeChatSearch(search: Record<string, unknown>): {
+    session?: string;
+} {
+    const session = typeof search.session === "string" ? search.session.trim() : "";
+    return session ? { session } : {};
+}
+
 const chatRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/chat",
+    validateSearch: normalizeChatSearch,
     component: Chat,
 });
 
