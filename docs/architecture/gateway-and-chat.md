@@ -138,12 +138,14 @@ Validation runs before FileReader output enters chat state. A supported declared
 MIME is authoritative. If the browser omits MIME or reports the generic
 `application/octet-stream`, a recognized filename extension supplies the canonical
 MIME; a non-generic unsupported MIME must agree with that extension instead of
-being accepted by filename alone. The normalized MIME is also used to rebuild the
-base64 data URL, so empty-MIME images keep working in picker and optimistic message
-previews. SVG is classified as `image/svg+xml` for chat display, while its normal
-backend download remains attachment-only as described below. Validation errors are
-scoped to their source: picker errors stay in the open picker, and direct-drop
-errors appear above the composer, never in both places.
+being accepted by filename alone. JSON is accepted from its declared MIME even
+without a filename extension, and common browser ZIP aliases are normalized to
+`application/zip`. The normalized MIME is also used to rebuild the base64 data URL,
+so empty-MIME images keep working in picker and optimistic message previews. SVG is
+classified as `image/svg+xml` for chat display, while its normal backend download
+remains attachment-only as described below. Validation errors are scoped to their
+source: picker errors stay in the open picker, and direct-drop errors appear above
+the composer, never in both places.
 
 History normalization accepts OpenClaw `image`, `image_url`, and `input_image`
 blocks plus generic attachment and `MediaPath` records. Every attachment keeps a
@@ -440,7 +442,8 @@ When changing chat event handling, test these cases:
   selects the next fallback without replacing a still-unresolved explicit URL key;
 - composer and picker drops share attachment validation, mismatched explicit MIME
   cannot bypass policy by filename, empty/generic MIME produces a normalized preview
-  data URL, and validation errors render only at their originating surface;
+  data URL, JSON MIME works without a suffix, common ZIP aliases are canonicalized,
+  and validation errors render only at their originating surface;
 - local and managed Gateway attachments preserve inline previews and an original
   download path without exposing Gateway credentials;
 - managed inline and tool-result images use bounded previews and notify the

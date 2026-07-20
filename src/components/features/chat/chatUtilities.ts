@@ -17,7 +17,11 @@ export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 /** Defines max attachments. */
 export const MAX_ATTACHMENTS = 10;
 const CHAT_ATTACHMENT_MIME_PREFIXES = ["image/", "audio/", "text/"] as const;
-const CHAT_ATTACHMENT_EXACT_MIME_TYPES = new Set(["application/pdf"]);
+const CHAT_ATTACHMENT_EXACT_MIME_TYPES = new Set(["application/json", "application/pdf"]);
+const CHAT_ATTACHMENT_MIME_TYPE_ALIASES = new Map([
+    ["application/x-zip", "application/zip"],
+    ["application/x-zip-compressed", "application/zip"],
+]);
 const GENERIC_ATTACHMENT_MIME_TYPE = "application/octet-stream";
 const CHAT_ATTACHMENT_EXTENSION_MIME_TYPES = new Map<string, string>([
     [".png", "image/png"],
@@ -76,7 +80,8 @@ function chatAttachmentExtension(fileName: string): string {
 
 /** Returns the browser-declared MIME without optional parameters. */
 function declaredChatAttachmentMimeType(type: string): string {
-    return type.split(";", 1)[0]?.trim().toLowerCase() || "";
+    const mimeType = type.split(";", 1)[0]?.trim().toLowerCase() || "";
+    return CHAT_ATTACHMENT_MIME_TYPE_ALIASES.get(mimeType) ?? mimeType;
 }
 
 /** Returns whether OpenClaw intentionally excludes this video attachment. */

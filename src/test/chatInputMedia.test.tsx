@@ -183,6 +183,12 @@ describe("chat input media", () => {
                     new File(["vector"], "diagram.svg"),
                     new File(["audio"], "clip.mp3"),
                     new File(["pdf"], "scan.pdf"),
+                    new File(["json"], "extensionless-json", {
+                        type: "application/json",
+                    }),
+                    new File(["zip"], "archive.zip", {
+                        type: "application/x-zip-compressed",
+                    }),
                 ])
             );
         });
@@ -200,6 +206,12 @@ describe("chat input media", () => {
             { fileName: "diagram.svg", kind: "image", mimeType: "image/svg+xml" },
             { fileName: "clip.mp3", kind: "file", mimeType: "audio/mpeg" },
             { fileName: "scan.pdf", kind: "file", mimeType: "application/pdf" },
+            {
+                fileName: "extensionless-json",
+                kind: "text",
+                mimeType: "application/json",
+            },
+            { fileName: "archive.zip", kind: "file", mimeType: "application/zip" },
         ]);
         const errorMessage =
             "Skipped unsupported files: installer.exe, payload.bin, spoofed.txt. Choose images, audio, PDFs, text, ZIP, or Office documents.";
