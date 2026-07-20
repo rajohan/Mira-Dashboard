@@ -6,6 +6,7 @@ import {
     renderHook,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
@@ -13,6 +14,7 @@ import { type ReactNode, type RefObject, useState } from "react";
 
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
+import { ChatAttachmentPickerModal } from "../components/features/chat/ChatAttachmentPickerModal";
 import { ChatComposer } from "../components/features/chat/ChatComposer";
 import { ChatHeader } from "../components/features/chat/ChatHeader";
 import {
@@ -524,7 +526,7 @@ describe("shared component helpers", () => {
                 previewItem={{
                     kind: "image",
                     mimeType: "image/png",
-                    sizeBytes: 1024,
+                    sizeBytes: 0,
                     title: "Preview image",
                     url: "data:image/png;base64,a",
                 }}
@@ -534,6 +536,7 @@ describe("shared component helpers", () => {
         expect(screen.getByAltText("Preview image")).toBeInTheDocument();
         expect(screen.getByText("File type")).toBeInTheDocument();
         expect(screen.getByText("image/png")).toBeInTheDocument();
+        expect(screen.getByText("0 B")).toBeInTheDocument();
         expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
             "download",
             "Preview image"
@@ -1194,15 +1197,90 @@ describe("shared component helpers", () => {
             files: modalDroppedFiles,
             types: ["Files"],
         };
+        expect(fireEvent.drop(document.body, { dataTransfer: modalDropData })).toBe(
+            false
+        );
+        expect(onAttachFiles).toHaveBeenCalledTimes(1);
         const dropZone = screen.getByTestId("chat-attachment-drop-zone");
         fireEvent.dragEnter(dropZone, { dataTransfer: modalDropData });
         expect(dropZone).toHaveClass("border-accent-400");
         fireEvent.drop(dropZone, { dataTransfer: modalDropData });
         expect(onAttachFiles).toHaveBeenLastCalledWith(modalDroppedFiles);
+        const attachmentDialog = screen.getByRole("dialog", {
+            name: "Attach files",
+        });
+        expect(within(attachmentDialog).getByText("Selected files")).toBeInTheDocument();
+        expect(within(attachmentDialog).getByText("note.txt")).toBeInTheDocument();
+        expect(within(attachmentDialog).getByText("image.png")).toBeInTheDocument();
+        await user.click(
+            within(attachmentDialog).getByRole("button", {
+                name: "Remove image.png",
+            })
+        );
+        expect(onRemoveAttachment).toHaveBeenLastCalledWith("a2");
+        await user.click(
+            within(attachmentDialog).getByRole("button", {
+                name: "Preview note.txt",
+            })
+        );
+        const previewDialog = screen.getByRole("dialog", { name: "note.txt" });
+        expect(within(previewDialog).getByText("hello")).toBeInTheDocument();
+        await user.click(
+            within(previewDialog).getByRole("button", {
+                name: "Back to attachments",
+            })
+        );
+        expect(
+            within(screen.getByRole("dialog", { name: "Attach files" })).getByText(
+                "Selected files"
+            )
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Close Attach files" }));
         await user.click(screen.getByRole("button", { name: /send/i }));
         expect(onToggleRecording).toHaveBeenCalledTimes(1);
         expect(onAttachFiles).toHaveBeenCalledTimes(2);
         expect(onSend).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not present a disabled attachment drop zone as accepting files", async () => {
+        const user = userEvent.setup();
+        const onFilesSelected = jest.fn();
+        function DisabledAttachmentPickerHarness() {
+            const [isOpen, setIsOpen] = useState(false);
+            return (
+                <>
+                    <button type="button" onClick={() => setIsOpen(true)}>
+                        Open disabled picker
+                    </button>
+                    <ChatAttachmentPickerModal
+                        attachments={[]}
+                        isDisabled={true}
+                        isOpen={isOpen}
+                        onChooseFiles={jest.fn()}
+                        onClose={() => setIsOpen(false)}
+                        onFilesSelected={onFilesSelected}
+                        onRemoveAttachment={jest.fn()}
+                    />
+                </>
+            );
+        }
+        render(<DisabledAttachmentPickerHarness />);
+        await user.click(screen.getByRole("button", { name: "Open disabled picker" }));
+        const files = [
+            new File(["disabled"], "disabled.txt", { type: "text/plain" }),
+        ] as unknown as FileList;
+        const dataTransfer = {
+            dropEffect: "copy",
+            files,
+            types: ["Files"],
+        };
+        const dropZone = screen.getByTestId("chat-attachment-drop-zone");
+
+        fireEvent.dragEnter(dropZone, { dataTransfer });
+        expect(dropZone).not.toHaveClass("border-accent-400");
+        fireEvent.drop(dropZone, { dataTransfer });
+        expect(onFilesSelected).not.toHaveBeenCalled();
+        await user.click(screen.getByRole("button", { name: "Close Attach files" }));
     });
 
     it("exposes final-thinking retention only while thinking is visible", async () => {

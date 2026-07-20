@@ -43,12 +43,12 @@ import {
 } from "./ChatAttachmentPickerModal";
 import type { ChatPreviewItem, ChatSendAttachment } from "./chatTypes";
 import {
-    base64ToText,
     CHAT_ATTACHMENT_ACCEPT,
     type ChatModelOption,
     chatSpeedOptions,
     chatThinkingOptions,
     MAX_ATTACHMENTS,
+    previewFromSendAttachment,
     selectedChatSpeed,
 } from "./chatUtilities";
 import type { SlashCommandSuggestion } from "./slashCommands";
@@ -394,13 +394,12 @@ export function ChatComposer({
         }
     };
 
-    /** Attaches a file-picker selection and closes the custom picker. */
+    /** Attaches a file-picker selection while keeping the custom picker open. */
     const handleFilesSelected = (files: FileList | undefined) => {
         if (!canAttachFiles || !files || files.length === 0) {
             return;
         }
         onAttachFiles(files);
-        setIsAttachmentPickerOpen(false);
     };
 
     return (
@@ -421,19 +420,7 @@ export function ChatComposer({
                             <button
                                 type="button"
                                 onClick={() =>
-                                    onPreview({
-                                        title: attachment.fileName,
-                                        mimeType: attachment.mimeType,
-                                        kind: attachment.kind,
-                                        url:
-                                            attachment.dataUrl ||
-                                            `data:${attachment.mimeType};base64,${attachment.contentBase64}`,
-                                        text:
-                                            attachment.kind === "text"
-                                                ? base64ToText(attachment.contentBase64)
-                                                : undefined,
-                                        sizeBytes: attachment.sizeBytes,
-                                    })
+                                    onPreview(previewFromSendAttachment(attachment))
                                 }
                                 className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left focus:ring-2 focus:ring-accent-500 focus:outline-none"
                             >
@@ -475,9 +462,10 @@ export function ChatComposer({
                     accept={CHAT_ATTACHMENT_ACCEPT}
                     multiple
                     className="hidden"
-                    onChange={(event) =>
-                        handleFilesSelected(event.target.files ?? undefined)
-                    }
+                    onChange={(event) => {
+                        handleFilesSelected(event.currentTarget.files ?? undefined);
+                        event.currentTarget.value = "";
+                    }}
                 />
                 {isDraggingFiles ? (
                     <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-accent-400 bg-primary-950/90 px-4 text-center text-sm font-medium text-accent-200 shadow-xl">
@@ -948,12 +936,13 @@ export function ChatComposer({
                 </Combobox>
             </div>
             <ChatAttachmentPickerModal
-                attachmentCount={attachments.length}
+                attachments={attachments}
                 isDisabled={!canAttachFiles}
                 isOpen={isAttachmentPickerOpen}
                 onChooseFiles={() => fileInputReference.current?.click()}
                 onClose={() => setIsAttachmentPickerOpen(false)}
                 onFilesSelected={handleFilesSelected}
+                onRemoveAttachment={onRemoveAttachment}
             />
         </div>
     );

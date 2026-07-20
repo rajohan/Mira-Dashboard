@@ -5,6 +5,8 @@ import {
     chatContentFingerprint,
     type ChatHistoryMessage,
     chatImageDownloadUrl,
+    type ChatPreviewItem,
+    type ChatSendAttachment,
     mergeChatAttachments,
     mergeChatImages,
     TOOL_ROLE_VARIANTS,
@@ -218,6 +220,25 @@ export function base64ToText(base64: string): string | undefined {
     } catch {
         return undefined;
     }
+}
+
+/** Builds a preview item from an attachment waiting to be sent. */
+export function previewFromSendAttachment(
+    attachment: ChatSendAttachment
+): ChatPreviewItem {
+    return {
+        title: attachment.fileName,
+        mimeType: attachment.mimeType,
+        kind: attachment.kind,
+        url:
+            attachment.dataUrl ||
+            `data:${attachment.mimeType};base64,${attachment.contentBase64}`,
+        text:
+            attachment.kind === "text"
+                ? base64ToText(attachment.contentBase64)
+                : undefined,
+        sizeBytes: attachment.sizeBytes,
+    };
 }
 
 /** Returns a stable media identity independent of the turn carrying it. */
