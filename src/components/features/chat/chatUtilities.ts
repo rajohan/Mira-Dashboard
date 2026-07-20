@@ -4,6 +4,7 @@ import {
     chatAttachmentIdentity,
     chatContentFingerprint,
     type ChatHistoryMessage,
+    chatImageDownloadUrl,
     mergeChatAttachments,
     mergeChatImages,
     TOOL_ROLE_VARIANTS,
@@ -13,10 +14,25 @@ import {
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 /** Defines max attachments. */
 export const MAX_ATTACHMENTS = 10;
+/** Mirrors OpenClaw Control UI's supported image and non-video file picker. */
+export const CHAT_ATTACHMENT_ACCEPT =
+    "image/*,audio/*,application/pdf,text/*,.csv,.json,.md,.txt,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx";
 /** Defines chat history limit. */
 export const CHAT_HISTORY_LIMIT = 1000;
 /** Defines optimistic message retention milliseconds. */
 export const OPTIMISTIC_MESSAGE_RETENTION_MS = 120_000;
+
+/** Returns whether OpenClaw intentionally excludes this video attachment. */
+export function isVideoAttachment(file: Pick<File, "name" | "type">): boolean {
+    const mimeType = file.type.trim().toLowerCase();
+    if (mimeType.startsWith("audio/")) {
+        return false;
+    }
+    return (
+        mimeType.startsWith("video/") ||
+        /\.(?:avi|m4v|mkv|mov|mp4|mpeg|mpg|webm)$/iu.test(file.name)
+    );
+}
 
 function canonicalChatValue(value: unknown, ancestors: Set<object>): unknown {
     if (value === null) {
@@ -213,7 +229,8 @@ export function messageMediaIdentity(message: ChatHistoryMessage): string | unde
     return [
         "media",
         ...(message.images || []).map((image) => {
-            const data = image.data || image.source?.data || "";
+            const data =
+                image.data || image.source?.data || chatImageDownloadUrl(image) || "";
             return [
                 image.mimeType || image.source?.media_type || "image",
                 chatContentFingerprint(data),
@@ -706,6 +723,7 @@ export function mergeWithRecentOptimisticMessages(
     );
     const nextIdentityCounts = new Map<string, number>();
     const unmatchedNextMediaCounts = new Map<string, number>();
+    const unmatchedNextDashboardUserMediaRunCounts = new Map<string, number>();
     const recoveredPreviousMessages = new Set<ChatHistoryMessage>();
     for (const message of enrichedNextMessages) {
         const identity = messageIdentity(message);
@@ -719,6 +737,16 @@ export function mergeWithRecentOptimisticMessages(
                 mediaKey,
                 (unmatchedNextMediaCounts.get(mediaKey) || 0) + 1
             );
+            if (
+                role === "user" &&
+                !message.text.trim() &&
+                message.runId?.startsWith("dashboard-chat-")
+            ) {
+                unmatchedNextDashboardUserMediaRunCounts.set(
+                    message.runId,
+                    (unmatchedNextDashboardUserMediaRunCounts.get(message.runId) || 0) + 1
+                );
+            }
         }
     }
     for (const message of previousMessages) {
@@ -745,6 +773,18 @@ export function mergeWithRecentOptimisticMessages(
         const mediaKey = `${role}::${mediaIdentity}`;
         const mediaCount = unmatchedNextMediaCounts.get(mediaKey) || 0;
         unmatchedNextMediaCounts.set(mediaKey, Math.max(0, mediaCount - 1));
+        if (
+            mediaCount > 0 &&
+            role === "user" &&
+            message.runId?.startsWith("dashboard-chat-")
+        ) {
+            const mediaRunCount =
+                unmatchedNextDashboardUserMediaRunCounts.get(message.runId) || 0;
+            unmatchedNextDashboardUserMediaRunCounts.set(
+                message.runId,
+                Math.max(0, mediaRunCount - 1)
+            );
+        }
     }
     const nextToolCallRowsByIdentity = new Map<string, ChatHistoryMessage>();
     for (const message of enrichedNextMessages) {
@@ -794,14 +834,29 @@ export function mergeWithRecentOptimisticMessages(
         const unmatchedMediaCount = mediaIdentity
             ? unmatchedNextMediaCounts.get(mediaKey) || 0
             : 0;
+        const dashboardUserMediaRunId =
+            role === "user" && message.runId?.startsWith("dashboard-chat-")
+                ? message.runId
+                : undefined;
+        const unmatchedMediaRunCount = dashboardUserMediaRunId
+            ? unmatchedNextDashboardUserMediaRunCounts.get(dashboardUserMediaRunId) || 0
+            : 0;
         if (
             (role === "user" || role === "assistant") &&
             isLocalMessage &&
             !message.text.trim() &&
             mediaIdentity &&
-            unmatchedMediaCount > 0
+            (unmatchedMediaCount > 0 || unmatchedMediaRunCount > 0)
         ) {
-            unmatchedNextMediaCounts.set(mediaKey, unmatchedMediaCount - 1);
+            if (unmatchedMediaCount > 0) {
+                unmatchedNextMediaCounts.set(mediaKey, unmatchedMediaCount - 1);
+            }
+            if (dashboardUserMediaRunId && unmatchedMediaRunCount > 0) {
+                unmatchedNextDashboardUserMediaRunCounts.set(
+                    dashboardUserMediaRunId,
+                    unmatchedMediaRunCount - 1
+                );
+            }
             return false;
         }
 

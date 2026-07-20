@@ -28,7 +28,10 @@ import {
     ChatMessagesList,
     previewFromAttachment,
 } from "../components/features/chat/ChatMessagesList";
-import { chatThinkingOptions } from "../components/features/chat/chatUtilities";
+import {
+    CHAT_ATTACHMENT_ACCEPT,
+    chatThinkingOptions,
+} from "../components/features/chat/chatUtilities";
 import {
     mergeWithRecentOptimisticMessages,
     messageIdentity,
@@ -505,7 +508,7 @@ describe("shared component helpers", () => {
         );
     });
 
-    it("renders chat attachment previews, header status, and diagnostic details", () => {
+    it("renders chat attachment previews, header status, and diagnostic details", async () => {
         const onClose = jest.fn();
         const onToggleThinking = jest.fn();
         const onToggleTools = jest.fn();
@@ -514,6 +517,7 @@ describe("shared component helpers", () => {
         const onSelectThinkingLevel = jest.fn();
         const onSelectSpeed = jest.fn();
         const onCompact = jest.fn();
+        const onDynamicContentLoad = jest.fn();
 
         const { rerender } = render(
             <AttachmentPreviewModal
@@ -528,6 +532,10 @@ describe("shared component helpers", () => {
             />
         );
         expect(screen.getByAltText("Preview image")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
+            "download",
+            "Preview image"
+        );
 
         rerender(
             <AttachmentPreviewModal
@@ -541,6 +549,174 @@ describe("shared component helpers", () => {
             />
         );
         expect(screen.getByText("hello attachment")).toBeInTheDocument();
+
+        const previewFetch = jest.fn(
+            async () =>
+                new Response('{"name":"Mira","items":[1,2]}', {
+                    headers: { "Content-Type": "text/plain; charset=utf-8" },
+                })
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: previewFetch,
+            writable: true,
+        });
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "application/json",
+                    title: "data.json",
+                    url: "/api/media?path=data.json",
+                }}
+                onClose={onClose}
+            />
+        );
+        await waitFor(() => {
+            expect(screen.getByRole("dialog", { name: "data.json" })).toHaveTextContent(
+                "Mira"
+            );
+        });
+        expect(previewFetch).toHaveBeenCalledWith(
+            "/api/media?path=data.json&preview=text",
+            expect.objectContaining({ headers: { Accept: "text/plain" } })
+        );
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "text/csv",
+                    title: "managed.csv",
+                    url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+                }}
+                onClose={onClose}
+            />
+        );
+        await waitFor(() => {
+            expect(previewFetch).toHaveBeenLastCalledWith(
+                "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full?preview=text",
+                expect.objectContaining({ headers: { Accept: "text/plain" } })
+            );
+        });
+
+        const previewFetchCallCount = previewFetch.mock.calls.length;
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "text/csv",
+                    title: "external.csv",
+                    url: "https://files.example.test/external.csv",
+                }}
+                onClose={onClose}
+            />
+        );
+        await waitFor(() => {
+            expect(previewFetch).toHaveBeenCalledTimes(previewFetchCallCount);
+            expect(
+                screen.getByText(
+                    "Preview is not available for this file type yet. Use the download link above to open it locally."
+                )
+            ).toBeInTheDocument();
+        });
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
+            "href",
+            "https://files.example.test/external.csv"
+        );
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "text/markdown",
+                    text: "# Attachment heading\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n![tracking pixel](https://files.example.test/pixel.png)",
+                    title: "readme.md",
+                    url: "data:text/markdown;base64,IyBBdHRhY2htZW50IGhlYWRpbmc=",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(
+            screen.getByRole("heading", { name: "Attachment heading" })
+        ).toBeInTheDocument();
+        expect(screen.getByRole("table")).toBeInTheDocument();
+        expect(
+            screen.queryByRole("img", { name: "tracking pixel" })
+        ).not.toBeInTheDocument();
+        expect(screen.getByText("[Image: tracking pixel]")).toBeInTheDocument();
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "image",
+                    mimeType: "image/png",
+                    title: "local-photo.png",
+                    url: "/api/media?path=local-photo.png",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(screen.getByAltText("local-photo.png")).toHaveAttribute(
+            "src",
+            "/api/media?path=local-photo.png"
+        );
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "image",
+                    mimeType: "image/svg+xml; charset=utf-8",
+                    title: "logo.svg",
+                    url: "/api/media?path=logo.svg",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(screen.getByAltText("logo.svg")).toHaveAttribute(
+            "src",
+            "/api/media?path=logo.svg&preview=image"
+        );
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
+            "href",
+            "/api/media?path=logo.svg"
+        );
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "image",
+                    mimeType: "image/svg+xml; charset=utf-8",
+                    title: "managed-logo.svg",
+                    url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(screen.getByAltText("managed-logo.svg")).toHaveAttribute(
+            "src",
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full?preview=image"
+        );
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "image",
+                    mimeType: "image/png",
+                    title: "managed-photo.png",
+                    url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174003/full",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(screen.getByAltText("managed-photo.png")).toHaveAttribute(
+            "src",
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174003/full?preview=image"
+        );
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
+            "href",
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174003/full"
+        );
 
         rerender(
             <AttachmentPreviewModal
@@ -601,6 +777,7 @@ describe("shared component helpers", () => {
                     onSelectSession={onSelectSession}
                 />
                 <ChatMessageDetails
+                    onDynamicContentLoad={onDynamicContentLoad}
                     shouldExpandToolDetails={true}
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
                     message={{
@@ -618,6 +795,22 @@ describe("shared component helpers", () => {
                                 toolResult: {
                                     content: "tool output",
                                     id: "tool-1",
+                                    images: [
+                                        {
+                                            image_url: {
+                                                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174010/full",
+                                            },
+                                            mimeType: "image/png",
+                                            type: "image_url",
+                                        },
+                                        {
+                                            image_url: {
+                                                url: "https://files.example.test/tool-output.png",
+                                            },
+                                            mimeType: "image/png",
+                                            type: "image_url",
+                                        },
+                                    ],
                                     name: "run",
                                 },
                             },
@@ -678,6 +871,20 @@ describe("shared component helpers", () => {
         expect(screen.getByText("Tool result · Bash")).toBeInTheDocument();
         expect(screen.getByText("late id output")).toBeInTheDocument();
         expect(screen.getByText("No arguments")).toBeInTheDocument();
+        const toolOutputImage = screen.getByAltText("Tool output 1");
+        expect(screen.getByRole("link", { name: "Open tool image 2" })).toHaveAttribute(
+            "href",
+            "https://files.example.test/tool-output.png"
+        );
+        expect(
+            document.querySelector(
+                'img[src="https://files.example.test/tool-output.png"]'
+            )
+        ).toBeNull();
+        const dynamicContentLoadCount = onDynamicContentLoad.mock.calls.length;
+        fireEvent.load(toolOutputImage);
+        fireEvent.error(toolOutputImage);
+        expect(onDynamicContentLoad).toHaveBeenCalledTimes(dynamicContentLoadCount + 2);
     });
 
     it("collapses individual tool bubbles and applies the global default to new tools", async () => {
@@ -1012,6 +1219,47 @@ describe("shared component helpers", () => {
         expect(onToggleKeepThinkingAfterFinal).toHaveBeenCalledTimes(1);
     });
 
+    it("keeps attachment support and stop controls visually distinct", () => {
+        const view = render(
+            <ChatComposer
+                attachments={[]}
+                canSend={false}
+                canStop={true}
+                draft=""
+                fileInputReference={{ current: undefined }}
+                isConnected={true}
+                isRecording={true}
+                isSending={false}
+                isTranscribing={false}
+                selectedSessionKey="agent:main:main"
+                slashCommandSuggestions={[]}
+                onApplySlashSuggestion={jest.fn()}
+                onAttachFiles={jest.fn()}
+                onChangeDraft={jest.fn()}
+                onPreview={jest.fn()}
+                onRemoveAttachment={jest.fn()}
+                onSend={jest.fn()}
+                onStop={jest.fn()}
+                onToggleRecording={jest.fn()}
+            />
+        );
+
+        const recordingButton = screen.getByRole("button", {
+            name: "Stop recording",
+        });
+        const responseStopButton = screen.getByRole("button", { name: "Stop" });
+        expect(recordingButton).toHaveTextContent("Recording");
+        expect(recordingButton).toHaveClass("bg-red-500");
+        expect(responseStopButton).toHaveClass(
+            "border-red-500/60",
+            "bg-transparent",
+            "text-red-500/80"
+        );
+        expect(
+            view.container.querySelector('input[type="file"][multiple]')
+        ).toHaveAttribute("accept", CHAT_ATTACHMENT_ACCEPT);
+    });
+
     it("submits an exact slash command on the first Enter", () => {
         const onApplySlashSuggestion = jest.fn();
         const onSend = jest.fn();
@@ -1292,6 +1540,55 @@ describe("shared component helpers", () => {
         ]);
     });
 
+    it("ignores a completed text preview after switching attachments", async () => {
+        const textPreviewDeferred = Promise.withResolvers<string>();
+        const previewFetch = jest.fn(async () => ({
+            ok: true,
+            text: () => textPreviewDeferred.promise,
+        }));
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: previewFetch,
+            writable: true,
+        });
+
+        const { rerender } = render(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "text/plain",
+                    title: "first.txt",
+                    url: "/api/media?path=first.txt",
+                }}
+                onClose={jest.fn()}
+            />
+        );
+        await waitFor(() => expect(previewFetch).toHaveBeenCalledTimes(1));
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "text/plain",
+                    title: "second.txt",
+                    url: "https://files.example.test/second.txt",
+                }}
+                onClose={jest.fn()}
+            />
+        );
+        expect(
+            screen.getByText(
+                "Preview is not available for this file type yet. Use the download link above to open it locally."
+            )
+        ).toBeInTheDocument();
+
+        await act(async () => {
+            textPreviewDeferred.resolve("stale first attachment");
+            await textPreviewDeferred.promise;
+        });
+        expect(screen.queryByText("stale first attachment")).not.toBeInTheDocument();
+    });
+
     it("keeps live tool results when history briefly lags", () => {
         const optimisticUserMessage = {
             content: "One submitted prompt\n\n\nWith review details",
@@ -1392,6 +1689,112 @@ describe("shared component helpers", () => {
         expect(reconciledTransientAttachmentId).toHaveLength(1);
         expect(reconciledTransientAttachmentId[0]?.attachments).toHaveLength(1);
         expect(reconciledTransientAttachmentId[0]?.local).toBeUndefined();
+        const managedAttachmentUrl =
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full";
+        const optimisticManagedAttachment = {
+            attachments: [
+                {
+                    contentBase64: "aW1hZ2UtYnl0ZXM=",
+                    dataUrl: "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
+                    fileName: "photo.png",
+                    id: "local-photo",
+                    kind: "image" as const,
+                    mimeType: "image/png",
+                    sizeBytes: 11,
+                },
+            ],
+            content: "",
+            local: true,
+            role: "user",
+            runId: "dashboard-chat-attachment-run",
+            text: "",
+            timestamp: "2026-07-10T15:03:00.000Z",
+        };
+        const retainedManagedAttachmentBeforeEcho = mergeWithRecentOptimisticMessages(
+            [repeatedAttachmentOnlyTurns[0]!, optimisticManagedAttachment],
+            [repeatedAttachmentOnlyTurns[0]!]
+        );
+        expect(retainedManagedAttachmentBeforeEcho).toHaveLength(2);
+        expect(
+            retainedManagedAttachmentBeforeEcho.some(
+                (message) =>
+                    message.local === true &&
+                    message.runId === "dashboard-chat-attachment-run"
+            )
+        ).toBe(true);
+        const persistedManagedAttachment = {
+            attachments: [
+                {
+                    dataUrl: managedAttachmentUrl,
+                    fileName: "photo.png",
+                    id: `content-${managedAttachmentUrl}-0`,
+                    kind: "image" as const,
+                    mimeType: "image/png",
+                    url: managedAttachmentUrl,
+                },
+            ],
+            content: "",
+            role: "user",
+            runId: "dashboard-chat-attachment-run",
+            text: "",
+            timestamp: "2026-07-10T15:03:01.000Z",
+        };
+        const reconciledManagedAttachment = mergeWithRecentOptimisticMessages(
+            [optimisticManagedAttachment],
+            [persistedManagedAttachment]
+        );
+        expect(reconciledManagedAttachment).toHaveLength(1);
+        expect(reconciledManagedAttachment[0]).toMatchObject({
+            attachments: [{ url: managedAttachmentUrl }],
+        });
+        expect(reconciledManagedAttachment[0]?.local).toBeUndefined();
+        const distinctAssistantMediaInOneRun = mergeWithRecentOptimisticMessages(
+            [
+                {
+                    ...optimisticManagedAttachment,
+                    role: "assistant",
+                },
+            ],
+            [
+                {
+                    ...persistedManagedAttachment,
+                    attachments: [
+                        {
+                            dataUrl: `${managedAttachmentUrl}?variant=second`,
+                            fileName: "second-photo.png",
+                            id: "second-photo",
+                            kind: "image" as const,
+                            mimeType: "image/png",
+                            url: `${managedAttachmentUrl}?variant=second`,
+                        },
+                    ],
+                    role: "assistant",
+                },
+            ]
+        );
+        expect(distinctAssistantMediaInOneRun).toHaveLength(2);
+        const unrelatedPreviousAttachment = {
+            ...persistedManagedAttachment,
+            attachments: [
+                {
+                    dataUrl: `${managedAttachmentUrl}?variant=unrelated`,
+                    fileName: "unrelated.png",
+                    id: "unrelated-photo",
+                    kind: "image" as const,
+                    mimeType: "image/png",
+                    url: `${managedAttachmentUrl}?variant=unrelated`,
+                },
+            ],
+            timestamp: "2026-07-10T15:02:59.000Z",
+        };
+        const reconciledAfterUnrelatedPreviousMedia = mergeWithRecentOptimisticMessages(
+            [unrelatedPreviousAttachment, optimisticManagedAttachment],
+            [persistedManagedAttachment]
+        );
+        expect(reconciledAfterUnrelatedPreviousMedia).toHaveLength(1);
+        expect(reconciledAfterUnrelatedPreviousMedia[0]?.attachments?.[0]?.url).toBe(
+            managedAttachmentUrl
+        );
         expect(messageIdentity(repeatedAttachmentOnlyTurns[0]!)).not.toBe(
             messageIdentity(repeatedAttachmentOnlyTurns[1]!)
         );
@@ -1957,6 +2360,19 @@ describe("shared component helpers", () => {
         expect(
             previewFromAttachment({ fileName: "empty.bin", id: "empty", kind: "file" })
         ).toBeUndefined();
+        expect(
+            previewFromAttachment({
+                dataUrl:
+                    "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full?preview=image",
+                fileName: "diagram.svg",
+                id: "diagram",
+                kind: "image",
+                mimeType: "image/svg+xml",
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+            })
+        ).toMatchObject({
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+        });
 
         render(
             <>
@@ -2001,7 +2417,22 @@ describe("shared component helpers", () => {
                                     },
                                 ],
                                 content: "answer",
-                                images: [{ data: "a", type: "image" }],
+                                images: [
+                                    {
+                                        image_url: {
+                                            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+                                        },
+                                        mimeType: "image/svg+xml",
+                                        type: "image_url",
+                                    },
+                                    {
+                                        image_url: {
+                                            url: "https://files.example.test/chat-image.png",
+                                        },
+                                        mimeType: "image/png",
+                                        type: "image_url",
+                                    },
+                                ],
                                 role: "assistant",
                                 text: "answer",
                                 timestamp: "2026-06-24T10:01:00.000Z",
@@ -2061,13 +2492,32 @@ describe("shared component helpers", () => {
         await user.click(
             screen.getByRole("button", { name: /open chat image 1 preview/i })
         );
+        const chatImage = screen.getByAltText("Chat attachment");
+        expect(chatImage).toHaveAttribute(
+            "src",
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full?preview=image"
+        );
+        expect(
+            document.querySelector('img[src="https://files.example.test/chat-image.png"]')
+        ).toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Open chat image 2 preview" })
+        ).toBeInTheDocument();
+        const dynamicContentLoadCount = onDynamicContentLoad.mock.calls.length;
+        fireEvent.load(chatImage);
+        fireEvent.error(chatImage);
         await user.click(screen.getByRole("button", { name: /readme.txt/i }));
         expect(onScroll).toHaveBeenCalledTimes(1);
         expect(onUserScrollIntent).toHaveBeenCalledTimes(4);
         expect(onFollow).toHaveBeenCalledTimes(1);
+        expect(onDynamicContentLoad).toHaveBeenCalledTimes(dynamicContentLoadCount + 2);
         expect(onDeleteMessage).toHaveBeenCalledWith("user", ["user", "user-history"]);
         expect(onPreview).toHaveBeenCalledWith(
-            expect.objectContaining({ kind: "image", title: "Chat image" })
+            expect.objectContaining({
+                kind: "image",
+                title: "Chat image",
+                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
+            })
         );
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({ kind: "text", title: "readme.txt" })

@@ -22,7 +22,8 @@ export function useChatScroll(
     rows: ChatRow[],
     selectedSessionKey: string,
     setIsAtBottom: Dispatch<SetStateAction<boolean>>,
-    shouldStickToBottomReference: RefObject<boolean>
+    shouldStickToBottomReference: RefObject<boolean>,
+    isLoadingHistory = false
 ) {
     const messagesContainerReference = useRef<HTMLDivElement | undefined>(undefined);
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
@@ -30,8 +31,11 @@ export function useChatScroll(
     const bottomFollowLastHeightReference = useRef<number | undefined>(undefined);
     const bottomFollowNeedsPrimeReference = useRef(false);
     const bottomFollowStableFramesReference = useRef(0);
+    const resumeStickyBottomReference = useRef<() => void>(() => {});
     const structuralBottomFollowReference = useRef(false);
+    const wasStickyWhenDocumentHiddenReference = useRef(false);
     const previousRowKeysReference = useRef<string[]>([]);
+    const previousIsLoadingHistoryReference = useRef(false);
     const previousScrollTopReference = useRef(0);
     const previousSessionKeyReference = useRef("");
 
@@ -172,6 +176,10 @@ export function useChatScroll(
         };
         bottomFollowFrameReference.current = requestAnimationFrame(followBottom);
     };
+    resumeStickyBottomReference.current = () => {
+        shouldStickToBottomReference.current = true;
+        scheduleBottomFollow(true, true);
+    };
 
     const handleUserScrollIntent = () => {
         cancelBottomFollow();
@@ -197,8 +205,11 @@ export function useChatScroll(
             previousRowKeys.every((key, index) => rowKeys[index] === key);
         const needsStructuralBottomFollow =
             previousRowKeys.length > 0 && didRowKeysChange && !isPureTailAppend;
+        const didFinishHistoryLoad =
+            previousIsLoadingHistoryReference.current && !isLoadingHistory;
         previousSessionKeyReference.current = selectedSessionKey;
         previousRowKeysReference.current = rowKeys;
+        previousIsLoadingHistoryReference.current = isLoadingHistory;
 
         if (isSessionChanged) {
             previousScrollTopReference.current = 0;
@@ -208,11 +219,17 @@ export function useChatScroll(
         if (
             rows.length > 0 &&
             shouldStickToBottomReference.current &&
-            (isSessionChanged || isInitialHistoryLoad || needsStructuralBottomFollow)
+            (isSessionChanged ||
+                isInitialHistoryLoad ||
+                needsStructuralBottomFollow ||
+                didFinishHistoryLoad)
         ) {
-            scheduleBottomFollow(true, isSessionChanged || isInitialHistoryLoad);
+            scheduleBottomFollow(
+                true,
+                isSessionChanged || isInitialHistoryLoad || didFinishHistoryLoad
+            );
         }
-    }, [rows, selectedSessionKey]);
+    }, [isLoadingHistory, rows, selectedSessionKey]);
 
     useLayoutEffect(
         () => () => {
@@ -220,6 +237,25 @@ export function useChatScroll(
         },
         [cancelBottomFollow]
     );
+
+    useLayoutEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === "hidden") {
+                wasStickyWhenDocumentHiddenReference.current =
+                    shouldStickToBottomReference.current;
+                return;
+            }
+            if (!wasStickyWhenDocumentHiddenReference.current) {
+                return;
+            }
+            wasStickyWhenDocumentHiddenReference.current = false;
+            resumeStickyBottomReference.current();
+        };
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        return () =>
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+    }, []);
 
     return {
         handleDynamicContentLoad,

@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+    createMemoryHistory,
+    createRootRoute,
+    createRoute,
+    createRouter,
+    RouterProvider,
+} from "@tanstack/react-router";
+import {
     act,
     cleanup,
     fireEvent,
@@ -13,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
 import { logsCollection } from "../collections/logs";
+import { sessionsCollection } from "../collections/sessions";
 import {
     addDeletedMessageKeys,
     didScheduleBottomFollow,
@@ -49,6 +57,7 @@ import {
     scrollTerminalOutputToBottomAndReport,
     Terminal,
 } from "../pages/Terminal";
+import { normalizeChatSearch } from "../router";
 import { authActions } from "../stores/authStore";
 import { parseLogLine } from "../utils/logUtilities";
 
@@ -128,6 +137,21 @@ function resetLogsCollectionForTest() {
 
     logsCollection.utils.writeBatch(() => {
         logsCollection.utils.writeDelete(keys);
+    });
+}
+
+function resetSessionsCollectionForTest() {
+    if (!sessionsCollection.isReady()) {
+        return;
+    }
+
+    const keys = Array.from(sessionsCollection, ([key]) => String(key));
+    if (keys.length === 0) {
+        return;
+    }
+
+    sessionsCollection.utils.writeBatch(() => {
+        sessionsCollection.utils.writeDelete(keys);
     });
 }
 
@@ -1730,6 +1754,38 @@ function renderPage(children: ReactNode, options: { withSocket?: boolean } = {})
     };
 }
 
+function renderChatPage(initialEntry = "/chat") {
+    const rootRoute = createRootRoute();
+    const chatRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/chat",
+        validateSearch: normalizeChatSearch,
+        component: Chat,
+    });
+    const router = createRouter({
+        history: createMemoryHistory({ initialEntries: [initialEntry] }),
+        routeTree: rootRoute.addChildren([chatRoute]),
+    });
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            mutations: { retry: false },
+            queries: { retry: false, staleTime: Infinity },
+        },
+    });
+
+    return {
+        ...render(
+            <QueryClientProvider client={queryClient}>
+                <OpenClawSocketProvider>
+                    <RouterProvider router={router} />
+                </OpenClawSocketProvider>
+            </QueryClientProvider>
+        ),
+        queryClient,
+        router,
+    };
+}
+
 function clickElement(element: Element) {
     act(() => {
         fireEvent.click(element);
@@ -1798,6 +1854,7 @@ describe("Mira Dashboard pages", () => {
     afterEach(() => {
         cleanup();
         resetLogsCollectionForTest();
+        resetSessionsCollectionForTest();
         authActions.clearSession();
         localStorage.clear();
         animationFrameState.frames.clear();
@@ -2680,7 +2737,7 @@ describe("Mira Dashboard pages", () => {
 
     it("drives chat page session sync, history loading, diagnostics, and send ack", async () => {
         const user = userEvent.setup();
-        const view = renderPage(createElement(Chat), { withSocket: true });
+        const view = renderChatPage();
 
         await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
         const socket = FakeWebSocket.instances[0]!;
@@ -2935,13 +2992,22 @@ describe("Mira Dashboard pages", () => {
             expect(screen.queryByText("failed.txt")).not.toBeInTheDocument();
             expect(screen.getByText("Failed to send message")).toBeInTheDocument();
         });
+        await act(async () => {
+            socket.emit("error");
+            await Promise.resolve();
+        });
+        await user.click(screen.getByRole("button", { name: "Dismiss error" }));
+        expect(screen.queryByText("Failed to send message")).not.toBeInTheDocument();
+        expect(screen.getByText("WebSocket connection failed")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Dismiss error" }));
+        expect(screen.queryByText("WebSocket connection failed")).not.toBeInTheDocument();
 
         view.unmount();
         view.queryClient.clear();
-    });
+    }, 10_000);
 
     it("clears chat history loading when the selected session disappears", async () => {
-        const view = renderPage(createElement(Chat), { withSocket: true });
+        const view = renderChatPage();
 
         await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
         const socket = FakeWebSocket.instances[0]!;
@@ -2987,6 +3053,126 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(screen.queryByText(/Loading chat/)).not.toBeInTheDocument();
         });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("restores the selected chat session from the URL and follows URL changes", async () => {
+        const user = userEvent.setup();
+        const view = renderChatPage("/chat?session=agent%3Aops%3Amain%3Aheartbeat");
+        const chatRouter = view.router;
+
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+
+        await waitFor(() => {
+            expect(findSocketRequest(socket, "chat.history")?.params).toMatchObject({
+                sessionKey: "agent:ops:main:heartbeat",
+            });
+        });
+        await respondToSocketRequest(socket, "chat.history", { messages: [] });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [
+                {
+                    agentType: "main",
+                    displayLabel: "Main chat",
+                    id: "session-main",
+                    key: "agent:main:main",
+                    model: "codex",
+                    type: "main",
+                    updatedAt: "2026-07-19T18:00:00.000Z",
+                },
+                {
+                    agentType: "ops",
+                    displayLabel: "Heartbeat",
+                    id: "session-heartbeat",
+                    key: "agent:ops:main:heartbeat",
+                    model: "synthetic",
+                    type: "heartbeat",
+                    updatedAt: "2026-07-19T17:00:00.000Z",
+                },
+            ],
+        });
+        await flushQueuedTimers();
+
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "Session: main:heartbeat" })
+            ).toBeInTheDocument();
+        });
+        expect(chatRouter.state.location.search).toEqual({
+            session: "agent:ops:main:heartbeat",
+        });
+
+        const historyRequestsBeforeSelection = socket.sent.filter((entry) =>
+            entry.includes('"method":"chat.history"')
+        ).length;
+        await user.click(screen.getByRole("button", { name: "Agent: ops" }));
+        await user.click(screen.getByRole("menuitem", { name: /^main\b/i }));
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "Session: main" })
+            ).toBeInTheDocument();
+            expect(findSocketRequest(socket, "chat.history")?.params).toMatchObject({
+                sessionKey: "agent:main:main",
+            });
+        });
+        await flushQueuedTimers();
+        const selectedSessionHistoryRequests = socket.sent
+            .filter((entry) => entry.includes('"method":"chat.history"'))
+            .slice(historyRequestsBeforeSelection)
+            .map((entry) => {
+                const request = JSON.parse(entry) as {
+                    params?: { sessionKey?: string };
+                };
+                return request.params?.sessionKey;
+            });
+        expect(selectedSessionHistoryRequests).toEqual(["agent:main:main"]);
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("does not enable sending for an unknown URL-selected session", async () => {
+        const user = userEvent.setup();
+        const view = renderChatPage("/chat?session=agent%3Amissing%3Amain");
+
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+        await respondToSocketRequest(socket, "chat.history", { messages: [] });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [
+                {
+                    agentType: "main",
+                    displayLabel: "Main chat",
+                    id: "session-main",
+                    key: "agent:main:main",
+                    model: "codex",
+                    type: "main",
+                    updatedAt: "2026-07-19T18:00:00.000Z",
+                },
+            ],
+        });
+        await flushQueuedTimers();
+
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:missing:main",
+        });
+
+        const composer = screen.getByPlaceholderText(
+            "Message, attach files, or use / commands (try /help)"
+        );
+        await user.type(composer, "Do not send this");
+        expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
 
         view.unmount();
         view.queryClient.clear();
