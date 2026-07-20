@@ -86,7 +86,13 @@ function isMatchingToolResult(
 }
 
 /** Renders tool result images. */
-function ToolResultImages({ images = [] }: { images?: ChatImageBlock[] }) {
+function ToolResultImages({
+    images = [],
+    onDynamicContentLoad,
+}: {
+    images?: ChatImageBlock[];
+    onDynamicContentLoad?: () => void;
+}) {
     const imageUrls = images
         .map((image) => chatImageUrl(image))
         .filter((imageUrl): imageUrl is string => Boolean(imageUrl));
@@ -101,6 +107,8 @@ function ToolResultImages({ images = [] }: { images?: ChatImageBlock[] }) {
                     key={`${imageUrl.slice(0, 48)}-${index}`}
                     src={imageUrl}
                     alt={`Tool output ${index + 1}`}
+                    onLoad={onDynamicContentLoad}
+                    onError={onDynamicContentLoad}
                     className="max-h-40 max-w-full rounded-md border border-amber-400/20 object-contain"
                 />
             ))}
@@ -244,6 +252,7 @@ export function ChatMessageDetails({
     messageKey,
     shouldExpandToolDetails = false,
     toolDetailExpansionOverrides = new Map(),
+    onDynamicContentLoad,
     onToggleToolDetails,
     visibility,
 }: {
@@ -251,6 +260,7 @@ export function ChatMessageDetails({
     messageKey?: string;
     shouldExpandToolDetails?: boolean;
     toolDetailExpansionOverrides?: ReadonlyMap<string, boolean>;
+    onDynamicContentLoad?: () => void;
     onToggleToolDetails?: (toolKey: string) => void;
     visibility: ChatVisibilitySettings;
 }) {
@@ -338,7 +348,10 @@ export function ChatMessageDetails({
                                               No text output
                                           </span>
                                       )}
-                                      <ToolResultImages images={toolResult.images} />
+                                      <ToolResultImages
+                                          images={toolResult.images}
+                                          onDynamicContentLoad={onDynamicContentLoad}
+                                      />
                                   </ToolSection>
                               ) : undefined}
                           </ToolDetailBlock>
@@ -367,7 +380,10 @@ export function ChatMessageDetails({
                     ) : (
                         <span className="text-primary-300">No text output</span>
                     )}
-                    <ToolResultImages images={message.toolResult?.images} />
+                    <ToolResultImages
+                        images={message.toolResult?.images}
+                        onDynamicContentLoad={onDynamicContentLoad}
+                    />
                 </ToolDetailBlock>
             ) : undefined}
         </div>

@@ -204,11 +204,11 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
             signal: gatewayRequestController.signal,
         });
     } catch {
-        return json({ error: "Gateway media unavailable" }, { status: 502 });
-    } finally {
         clearTimeout(gatewayRequestTimeout);
+        return json({ error: "Gateway media unavailable" }, { status: 502 });
     }
     if (!response.ok) {
+        clearTimeout(gatewayRequestTimeout);
         const status = [400, 401, 403, 404, 413, 429].includes(response.status)
             ? response.status
             : 502;
@@ -223,10 +223,18 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
             !TEXT_PREVIEW_EXTENSIONS.has(fileExtension)
         ) {
             await response.body?.cancel();
+            clearTimeout(gatewayRequestTimeout);
             return json({ error: "Text preview is not available" }, { status: 415 });
         }
 
-        const body = await readGatewayBodyUpTo(response, MAX_TEXT_PREVIEW_SIZE);
+        let body: Uint8Array | undefined;
+        try {
+            body = await readGatewayBodyUpTo(response, MAX_TEXT_PREVIEW_SIZE);
+        } catch {
+            return json({ error: "Gateway media preview timed out" }, { status: 504 });
+        } finally {
+            clearTimeout(gatewayRequestTimeout);
+        }
         if (!body) {
             return json({ error: "Text preview is too large" }, { status: 413 });
         }
@@ -241,22 +249,42 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
     }
 
     if (previewMode === "image") {
-        if (contentType !== "image/svg+xml" && fileExtension !== ".svg") {
+        const isSvg = contentType === "image/svg+xml" || fileExtension === ".svg";
+        const previewContentType = contentType.startsWith("image/")
+            ? contentType
+            : isSvg
+              ? "image/svg+xml"
+              : undefined;
+        if (!previewContentType) {
             await response.body?.cancel();
+            clearTimeout(gatewayRequestTimeout);
             return json({ error: "Image preview is not available" }, { status: 415 });
         }
-        const body = await readGatewayBodyUpTo(response, MAX_MEDIA_SIZE);
+        let body: Uint8Array | undefined;
+        try {
+            body = await readGatewayBodyUpTo(response, MAX_MEDIA_SIZE);
+        } catch {
+            return json({ error: "Gateway media preview timed out" }, { status: 504 });
+        } finally {
+            clearTimeout(gatewayRequestTimeout);
+        }
         if (!body) {
             return json({ error: "Media file too large" }, { status: 413 });
         }
+        const previewHeaders = new Headers({
+            "Cache-Control":
+                response.headers.get("cache-control") || "private, max-age=3600",
+            "Content-Type": previewContentType,
+            "X-Content-Type-Options": "nosniff",
+        });
+        if (isSvg) {
+            previewHeaders.set(
+                "Content-Security-Policy",
+                SVG_PREVIEW_CONTENT_SECURITY_POLICY
+            );
+        }
         return new Response(body, {
-            headers: {
-                "Cache-Control":
-                    response.headers.get("cache-control") || "private, max-age=3600",
-                "Content-Security-Policy": SVG_PREVIEW_CONTENT_SECURITY_POLICY,
-                "Content-Type": "image/svg+xml",
-                "X-Content-Type-Options": "nosniff",
-            },
+            headers: previewHeaders,
         });
     }
 
@@ -282,6 +310,7 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
     if (contentLength) {
         headers.set("Content-Length", contentLength);
     }
+    clearTimeout(gatewayRequestTimeout);
     return new Response(response.body, { headers });
 }
 

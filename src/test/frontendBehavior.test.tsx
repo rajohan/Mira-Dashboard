@@ -4050,7 +4050,16 @@ describe("Mira Dashboard frontend behavior", () => {
             mimeType: "image/png",
             type: "image_url",
         } as const;
-        expect(chatImageUrl(managedImage)).toBe(managedImage.image_url.url);
+        expect(chatImageUrl(managedImage)).toBe(
+            `${managedImage.image_url.url}?preview=image`
+        );
+        expect(
+            chatImageUrl({
+                image_url: { url: "/api/settings" },
+                mimeType: "image/png",
+                type: "image_url",
+            })
+        ).toBeUndefined();
         const managedSvgImage = {
             ...managedImage,
             image_url: {

@@ -517,6 +517,7 @@ describe("shared component helpers", () => {
         const onSelectThinkingLevel = jest.fn();
         const onSelectSpeed = jest.fn();
         const onCompact = jest.fn();
+        const onDynamicContentLoad = jest.fn();
 
         const { rerender } = render(
             <AttachmentPreviewModal
@@ -740,6 +741,7 @@ describe("shared component helpers", () => {
                     onSelectSession={onSelectSession}
                 />
                 <ChatMessageDetails
+                    onDynamicContentLoad={onDynamicContentLoad}
                     shouldExpandToolDetails={true}
                     visibility={{ shouldShowThinking: true, shouldShowTools: true }}
                     message={{
@@ -757,6 +759,15 @@ describe("shared component helpers", () => {
                                 toolResult: {
                                     content: "tool output",
                                     id: "tool-1",
+                                    images: [
+                                        {
+                                            image_url: {
+                                                url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174010/full",
+                                            },
+                                            mimeType: "image/png",
+                                            type: "image_url",
+                                        },
+                                    ],
                                     name: "run",
                                 },
                             },
@@ -817,6 +828,11 @@ describe("shared component helpers", () => {
         expect(screen.getByText("Tool result · Bash")).toBeInTheDocument();
         expect(screen.getByText("late id output")).toBeInTheDocument();
         expect(screen.getByText("No arguments")).toBeInTheDocument();
+        const toolOutputImage = screen.getByAltText("Tool output 1");
+        const dynamicContentLoadCount = onDynamicContentLoad.mock.calls.length;
+        fireEvent.load(toolOutputImage);
+        fireEvent.error(toolOutputImage);
+        expect(onDynamicContentLoad).toHaveBeenCalledTimes(dynamicContentLoadCount + 2);
     });
 
     it("collapses individual tool bubbles and applies the global default to new tools", async () => {
@@ -1183,9 +1199,9 @@ describe("shared component helpers", () => {
         expect(recordingButton).toHaveTextContent("Recording");
         expect(recordingButton).toHaveClass("bg-red-500");
         expect(responseStopButton).toHaveClass(
-            "border-red-600/70",
+            "border-red-500/60",
             "bg-transparent",
-            "text-red-600"
+            "text-red-500/80"
         );
         expect(
             view.container.querySelector('input[type="file"][multiple]')

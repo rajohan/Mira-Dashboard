@@ -843,7 +843,7 @@ export function ChatComposer({
                                     disabled={!canStop}
                                     title="Stop"
                                     aria-label="Stop"
-                                    className="size-8 shrink-0 rounded-full border border-red-600/70 bg-transparent p-0 text-red-600 hover:border-red-500 hover:bg-transparent hover:text-red-500"
+                                    className="size-8 shrink-0 rounded-full border border-red-500/60 bg-transparent p-0 text-red-500/80 hover:border-red-500/90 hover:bg-transparent hover:text-red-500"
                                 >
                                     <Square className="size-3.5 fill-current" />
                                 </Button>

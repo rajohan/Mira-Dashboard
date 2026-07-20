@@ -2716,6 +2716,66 @@ describe("backend route and service behavior", () => {
         expect(await svgPreview.text()).toBe(activeSvg);
 
         gatewayFetch.mockResolvedValueOnce(
+            new Response(Uint8Array.from([4, 5, 6]), {
+                headers: {
+                    "Content-Disposition": 'inline; filename="generated.png"',
+                    "Content-Type": "image/png",
+                },
+            })
+        );
+        const rasterPreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=image`)
+        );
+        expect(rasterPreview.status).toBe(200);
+        expect(rasterPreview.headers.get("Content-Type")).toBe("image/png");
+        expect([...new Uint8Array(await rasterPreview.arrayBuffer())]).toEqual([4, 5, 6]);
+
+        const originalSetTimeout = setTimeout;
+        let didAbortStalledPreview = false;
+        gatewayFetch.mockImplementationOnce(
+            async (...requestArguments: Parameters<typeof fetch>) => {
+                const requestSignal = requestArguments[1]?.signal;
+                return new Response(
+                    new ReadableStream<Uint8Array>({
+                        start(controller) {
+                            const closeTimeout = originalSetTimeout(
+                                () => controller.close(),
+                                100
+                            );
+                            requestSignal?.addEventListener(
+                                "abort",
+                                () => {
+                                    didAbortStalledPreview = true;
+                                    clearTimeout(closeTimeout);
+                                    controller.error(
+                                        new Error("Gateway preview body timed out")
+                                    );
+                                },
+                                { once: true }
+                            );
+                        },
+                    }),
+                    {
+                        headers: {
+                            "Content-Disposition": 'inline; filename="stalled.png"',
+                            "Content-Type": "image/png",
+                        },
+                    }
+                );
+            }
+        );
+        const gatewayBodyTimeoutSpy = jest
+            .spyOn(globalThis, "setTimeout")
+            .mockImplementationOnce(((callback: () => void) =>
+                originalSetTimeout(callback, 0)) as unknown as typeof setTimeout);
+        const stalledPreview = await mediaRoutes["/api/chat/media/outgoing/*"].GET(
+            new Request(`https://dashboard.test${mediaPath}?preview=image`)
+        );
+        gatewayBodyTimeoutSpy.mockRestore();
+        expect(stalledPreview.status).toBe(504);
+        expect(didAbortStalledPreview).toBe(true);
+
+        gatewayFetch.mockResolvedValueOnce(
             new Response("<html><script>alert(1)</script></html>", {
                 headers: {
                     "Content-Disposition": 'inline; filename="page.html"',
@@ -2737,7 +2797,7 @@ describe("backend route and service behavior", () => {
             )
         );
         expect(rejected.status).toBe(404);
-        expect(gatewayFetch).toHaveBeenCalledTimes(6);
+        expect(gatewayFetch).toHaveBeenCalledTimes(8);
     });
 
     it("starts manual WAL-G backups through the backup route using fake Docker", async () => {

@@ -140,17 +140,20 @@ to the browser. The browser requests the same managed path from Dashboard under
 `/api/chat/media/outgoing/*`; the backend validates the exact UUID-shaped path,
 converts the configured Gateway WebSocket origin to HTTP(S), adds the bearer
 token server-side, and does not follow redirects. The 30-second upstream timeout
-ends after response headers arrive so a valid slow download stream can finish.
+ends after response headers arrive for downloads so a valid slow stream can
+finish, while bounded preview reads keep the timeout active through the body.
 
 Managed TXT, JSON, CSV, and Markdown previews use the same Dashboard proxy with
 an explicit `preview=text` query. The backend validates the upstream media type
 or filename and stops reading after 1 MiB; the original managed URL remains the
-download target. Managed SVG preview uses `preview=image`, a bounded response,
-and the same restrictive sandbox CSP as local SVG. Managed SVG, HTML, XHTML, and
-XML downloads are downgraded to `application/octet-stream` with attachment
-disposition so active provider content cannot render as a same-origin document.
-Inline SVG thumbnails use the sandboxed preview URL while their download action
-retains the original managed URL.
+download target. Managed image thumbnails use `preview=image` and stop reading
+after 16 MiB; SVG responses additionally use the same restrictive sandbox CSP
+as local SVG. Managed SVG, HTML, XHTML, and XML downloads are downgraded to
+`application/octet-stream` with attachment disposition so active provider
+content cannot render as a same-origin document. Inline image thumbnails use
+the bounded preview URL while their download action retains the original managed
+URL. History-provided root-relative image URLs auto-render only through the two
+known Dashboard media proxy paths.
 
 Local OpenClaw media continues through `/api/media`. Text preview is opt-in and
 limited to `.txt`, `.json`, `.csv`, and `.md` files no larger than 1 MiB. SVG is
@@ -393,6 +396,8 @@ When changing chat event handling, test these cases:
   query-less chat keeps default selection;
 - local and managed Gateway attachments preserve inline previews and an original
   download path without exposing Gateway credentials;
+- managed inline and tool-result images use bounded previews and notify the
+  virtualized sticky-scroll path after both successful and failed loads;
 - active managed documents are forced to download instead of rendering in the
   Dashboard origin, SVG previews stay sandboxed, and external text references
   remain download-only;

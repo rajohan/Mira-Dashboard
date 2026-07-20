@@ -692,6 +692,9 @@ export function ChatMessagesList({
                                             <ChatMessageDetails
                                                 message={row.message}
                                                 messageKey={row.key}
+                                                onDynamicContentLoad={
+                                                    onDynamicContentLoad
+                                                }
                                                 onToggleToolDetails={onToggleToolDetails}
                                                 shouldExpandToolDetails={
                                                     shouldExpandToolDetails
@@ -714,6 +717,7 @@ export function ChatMessagesList({
                                         <ChatMessageDetails
                                             message={row.message}
                                             messageKey={row.key}
+                                            onDynamicContentLoad={onDynamicContentLoad}
                                             onToggleToolDetails={onToggleToolDetails}
                                             shouldExpandToolDetails={
                                                 shouldExpandToolDetails

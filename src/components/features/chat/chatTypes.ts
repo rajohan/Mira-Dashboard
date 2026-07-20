@@ -101,7 +101,11 @@ function safeChatImageUrl(value: unknown): string | undefined {
         return undefined;
     }
     if (candidate.startsWith("/") && !candidate.startsWith("//")) {
-        return candidate;
+        return candidate === "/api/media" ||
+            candidate.startsWith("/api/media?") ||
+            candidate.startsWith("/api/chat/media/outgoing/")
+            ? candidate
+            : undefined;
     }
     if (candidate.startsWith("data:image/")) {
         return candidate;
@@ -163,7 +167,8 @@ export function chatImageDisplayUrl(url: string, mimeType: string): string | und
     if (!safeUrl) {
         return undefined;
     }
-    return normalizeChatMimeType(mimeType) === "image/svg+xml"
+    const isManagedMedia = safeUrl.startsWith("/api/chat/media/outgoing/");
+    return isManagedMedia || normalizeChatMimeType(mimeType) === "image/svg+xml"
         ? chatAttachmentPreviewUrl(safeUrl, "image")
         : safeUrl;
 }
