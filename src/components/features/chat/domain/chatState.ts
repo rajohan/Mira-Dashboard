@@ -1009,7 +1009,7 @@ function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState
             return {
                 ...run,
                 operation: event.operation ?? run.operation,
-                error: event.operation && isPendingOperation ? undefined : run.error,
+                error: isPendingOperation && event.operation ? undefined : run.error,
                 operationPhase,
                 operationUpdatedAt: event.operation
                     ? event.timestamp
@@ -1017,13 +1017,13 @@ function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState
                 phase: operationOutcome,
                 statusText: event.text,
                 terminalAt:
-                    event.operation && !isPendingOperation
+                    !isPendingOperation && event.operation
                         ? event.timestamp
                         : event.operation
                           ? undefined
                           : run.terminalAt,
                 terminalSequence:
-                    event.operation && !isPendingOperation
+                    !isPendingOperation && event.operation
                         ? event.sequence
                         : event.operation
                           ? undefined

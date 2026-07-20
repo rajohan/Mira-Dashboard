@@ -292,7 +292,7 @@ export function useChatRuntime({
     }, [transport.connectionGeneration, transport.isConnected]);
 
     useEffect(() => {
-        if (!transport.isConnected || !selectedSessionKey) {
+        if (!selectedSessionKey || !transport.isConnected) {
             gateReference.current = undefined;
             return;
         }

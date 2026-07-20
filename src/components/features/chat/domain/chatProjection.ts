@@ -247,10 +247,10 @@ function runFinalAnchorIndex(
             const role = message.role.toLowerCase();
             const timestamp = messageTimestamp(message);
             if (
+                timestamp === undefined ||
                 message.runId ||
                 (role !== "assistant" && role !== "system") ||
                 isStandaloneDiagnostic(message) ||
-                timestamp === undefined ||
                 !isRecoveredAssistantText(message.text, assistantText)
             ) {
                 continue;
@@ -578,7 +578,7 @@ function scopeCompletedResponse(
         const message = messages[index];
         const belongsToCompletedRun =
             index === finalIndex || (message && isStandaloneDiagnostic(message));
-        if (message && !message.runId && belongsToCompletedRun) {
+        if (message && belongsToCompletedRun && !message.runId) {
             messages[index] = { ...message, runId: run.runId };
         }
     }
@@ -604,7 +604,7 @@ function mergeExactToolResult(
     previous: ChatHistoryMessage["toolResult"],
     current: NonNullable<ChatHistoryMessage["toolResult"]>
 ): NonNullable<ChatHistoryMessage["toolResult"]> {
-    if (!current.isPlaceholder || !previous || previous.isPlaceholder) {
+    if (!previous || !current.isPlaceholder || previous.isPlaceholder) {
         return current;
     }
     return {
@@ -891,9 +891,9 @@ function isMatchingRuntimeUser(
         messageIdentity(candidate) === messageIdentity(runtimeMessage);
     const candidateMediaIdentity = messageMediaIdentity(candidate);
     const isMediaOnlyContentMatching = Boolean(
+        candidateMediaIdentity &&
         !candidate.text.trim() &&
         !runtimeMessage.text.trim() &&
-        candidateMediaIdentity &&
         candidateMediaIdentity === messageMediaIdentity(runtimeMessage)
     );
     if (!areIdentitiesMatching && !isMediaOnlyContentMatching) {
@@ -1073,8 +1073,8 @@ function visibleAssistantStreamRunIds(
                     isRunMatchingMessage(run, message) &&
                     (isUserMessage(message) || isAssistantTextStream(message))
             );
-            return run.lastContentKind === "assistant" &&
-                latestVisibleTurnMessage &&
+            return latestVisibleTurnMessage &&
+                run.lastContentKind === "assistant" &&
                 isAssistantTextStream(latestVisibleTurnMessage)
                 ? [run.runId, ...run.aliases]
                 : [];

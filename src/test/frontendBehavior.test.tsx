@@ -3431,7 +3431,7 @@ describe("Mira Dashboard frontend behavior", () => {
     it("renders dashboard reports and switches report filters", async () => {
         const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
             const url = String(input);
-            const [path, query = ""] = url.split("?");
+            const [path, query = ""] = url.split("?", 2);
             const reportType = new URLSearchParams(query).get("type");
             if (path === "/api/reports" && reportType === "heartbeat") {
                 return Response.json({
@@ -3503,7 +3503,7 @@ describe("Mira Dashboard frontend behavior", () => {
     it("loads linked dashboard report details outside the first report page", async () => {
         const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
             const url = String(input);
-            const [path, query = ""] = url.split("?");
+            const [path, query = ""] = url.split("?", 2);
             const reportType = new URLSearchParams(query).get("type");
             if (path === "/api/reports" && reportType === "heartbeat") {
                 return Response.json({

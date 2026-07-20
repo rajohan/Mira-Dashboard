@@ -237,7 +237,7 @@ function runtimeStreamDrafts(
                     : undefined,
             toolFailure: isToolFailureError(terminalError) || undefined,
         });
-    } else if (!progress.text && OPENCLAW_WORK_STREAMS.has(stream) && phase === "start") {
+    } else if (phase === "start" && !progress.text && OPENCLAW_WORK_STREAMS.has(stream)) {
         drafts.push({ ...common, kind: "status", text: "Thinking" });
     }
     return drafts;

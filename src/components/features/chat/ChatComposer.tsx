@@ -519,7 +519,7 @@ export function ChatComposer({
                             }
 
                             const shouldUseEnterForAction = shouldSendFromEnter(event);
-                            if (event.key === "Enter" && !shouldUseEnterForAction) {
+                            if (!shouldUseEnterForAction && event.key === "Enter") {
                                 event.stopPropagation();
                                 return;
                             }

@@ -52,7 +52,7 @@ export function ServiceActionsCard() {
     const execJob = useExecJob(runningJobId);
 
     useEffect(() => {
-        if (!execJob.data || execJob.data.status !== "done" || !runningActionLabel) {
+        if (!runningActionLabel || !execJob.data || execJob.data.status !== "done") {
             return;
         }
 

@@ -15,7 +15,7 @@ export function formatBytes(bytes: number): string {
         unitIndex += 1;
     }
 
-    return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+    return `${value.toFixed(unitIndex === 0 || value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 /** Formats Docker memory for display. */

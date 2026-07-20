@@ -53,9 +53,9 @@ function primaryAnswerDetails(message: ChatHistoryMessage): PrimaryAnswerDetails
         (!hasToolOutput || message.isFinal === true)
     );
     const hasPrimaryContent = Boolean(
+        hasVisibleAttachments ||
         withoutThinking.text.trim() ||
-        withoutThinking.images?.length ||
-        hasVisibleAttachments
+        withoutThinking.images?.length
     );
     return {
         hasPrimaryContent,
@@ -111,7 +111,7 @@ function applyFinalThinkingPreference(
                   (hasUnscopedAnswer && scopedRunIds.size <= 1)
                 : hasAnswer;
             reversed.push(
-                entry.retainableThinking && !thinkingHasFinal
+                !thinkingHasFinal && entry.retainableThinking
                     ? entry.message
                     : entry.withoutThinking
             );
@@ -244,7 +244,7 @@ function thinkingAnchorIndex(
             isUser && (!message.runId || message.runId.startsWith("dashboard-chat-"))
         );
         if (
-            (isUser && (isInGroup(message, index) || isCompatibleSteer)) ||
+            (isUser && (isCompatibleSteer || isInGroup(message, index))) ||
             (isInGroup(message, index) && hasToolDetails(message))
         ) {
             latestPrerequisiteIndex = index;

@@ -291,8 +291,8 @@ export class OpenClawHistoryLoader {
         const totalMessages = first.totalMessages;
         const canReuse = Boolean(
             cached &&
-            cached.limit === limit &&
             totalMessages !== undefined &&
+            cached.limit === limit &&
             totalMessages >= cached.throughSequence &&
             isSameHistorySession(cached.sessionId, first.sessionId)
         );

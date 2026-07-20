@@ -82,7 +82,7 @@ export function FileContentViewer({
                         className="max-h-full max-w-full rounded object-contain"
                     />
                 </div>
-            ) : isMarkdownFile(fileContent.path) && markdownPreview ? (
+            ) : markdownPreview && isMarkdownFile(fileContent.path) ? (
                 <Suspense
                     fallback={
                         <div className="p-4 text-primary-400">Loading preview...</div>
@@ -90,7 +90,7 @@ export function FileContentViewer({
                 >
                     <MarkdownPreview content={editedContent} />
                 </Suspense>
-            ) : isJsonFile(fileContent.path) && jsonPreview ? (
+            ) : jsonPreview && isJsonFile(fileContent.path) ? (
                 <Suspense
                     fallback={
                         <div className="p-4 text-primary-400">Loading preview...</div>

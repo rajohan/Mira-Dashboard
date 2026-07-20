@@ -91,6 +91,7 @@ export function AttachmentPreviewModal({
     const shouldRenderMarkdown =
         normalizedMimeType === "text/markdown" ||
         previewItem?.title.toLowerCase().endsWith(".md");
+    const isTextPreview = previewItem?.kind === "text";
 
     return (
         <Modal
@@ -124,27 +125,25 @@ export function AttachmentPreviewModal({
                             alt={previewItem.title}
                             className="max-h-[70vh] w-full rounded-lg object-contain"
                         />
-                    ) : previewItem.kind === "text" &&
-                      textPreview !== undefined &&
-                      shouldRenderJson ? (
+                    ) : isTextPreview && textPreview !== undefined && shouldRenderJson ? (
                         <div className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950">
                             <JsonPreview content={textPreview} />
                         </div>
-                    ) : previewItem.kind === "text" &&
+                    ) : isTextPreview &&
                       textPreview !== undefined &&
                       shouldRenderMarkdown ? (
                         <div className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950">
                             <MarkdownPreview content={textPreview} renderImages={false} />
                         </div>
-                    ) : previewItem.kind === "text" && textPreview !== undefined ? (
+                    ) : isTextPreview && textPreview !== undefined ? (
                         <pre className="max-h-[70vh] overflow-auto rounded-lg border border-primary-700 bg-primary-950 p-4 text-sm whitespace-pre-wrap text-primary-100">
                             {textPreview}
                         </pre>
-                    ) : previewItem.kind === "text" && isLoadingTextPreview ? (
+                    ) : isTextPreview && isLoadingTextPreview ? (
                         <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-300">
                             Loading preview…
                         </div>
-                    ) : previewItem.kind === "text" && textPreviewError ? (
+                    ) : isTextPreview && textPreviewError ? (
                         <div className="rounded-lg border border-primary-700 bg-primary-900/60 p-4 text-sm text-primary-300">
                             {textPreviewError}
                         </div>
