@@ -40,6 +40,11 @@ cannot infer.
   refresh failures and show a non-blocking warning.
 - Jobs keep the active view's last successful list visible during transient
   refresh failures and show a non-blocking warning.
+- The Jobs overview card reports enabled and disabled totals across Dashboard
+  jobs and OpenClaw cron jobs.
+- Disabling a task-linked OpenClaw cron opens an intent form. A required comment
+  and either a future expiry or an indefinite mode controls heartbeat warning
+  suppression; enabling the cron clears the intent.
 - Dashboard cache badges poll the lightweight `/api/cache/status` endpoint.
   Heartbeat automation uses `/api/cache/heartbeat`; it is not the UI polling
   endpoint.

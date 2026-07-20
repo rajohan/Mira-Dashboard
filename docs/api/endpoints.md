@@ -109,11 +109,17 @@ Create body:
 | `PATCH` | `/api/jobs/:id`             | Updates scheduled job settings.        |
 | `POST`  | `/api/jobs/:id/run`         | Runs a scheduled job now.              |
 | `GET`   | `/api/jobs/:id/runs`        | Lists job run history.                 |
-| `GET`   | `/api/cron/jobs`            | Lists OpenClaw cron jobs.              |
+| `GET`   | `/api/cron/jobs`            | Lists OpenClaw cron jobs and open linked tasks. |
 | `POST`  | `/api/cron/jobs/:id/run`    | Runs an OpenClaw cron job.             |
-| `POST`  | `/api/cron/jobs/:id/toggle` | Enables/disables an OpenClaw cron job. |
+| `POST`  | `/api/cron/jobs/:id/toggle` | Enables/disables an OpenClaw cron job and updates linked-task disable intent. |
 | `POST`  | `/api/cron/jobs/:id/update` | Updates an OpenClaw cron job patch.    |
 | `POST`  | `/api/cron/jobs/:id/delete` | Deletes an OpenClaw cron job.          |
+
+When a task-linked cron job is intentionally disabled, the toggle body may
+include `disableIntent: { mode, comment, until? }`. `mode` is `until` or
+`indefinite`; a non-empty comment is always required, and `until` must be a
+future timestamp. Enabling the job clears the annotation. The annotation is
+stored in the linked task's existing `automation_json` field.
 
 ## OpenClaw Config
 
@@ -197,7 +203,7 @@ upstream download metadata.
 | `GET`  | `/api/backups/walg`                        | Reads WAL-G backup state.                                              |
 | `POST` | `/api/backups/walg/run`                    | Starts WAL-G backup.                                                   |
 | `POST` | `/api/backups/walg/clear-needs-attention`  | Clears WAL-G attention state.                                          |
-| `GET`  | `/api/cache/heartbeat`                     | Reads schema v2 cache envelopes with compact operational projections.  |
+| `GET`  | `/api/cache/heartbeat`                     | Reads schema v2 cache envelopes plus compact task, OpenClaw cron, and Dashboard-job projections. |
 | `GET`  | `/api/cache/status`                        | Reads cache envelopes without payload data for lightweight UI polling. |
 | `GET`  | `/api/cache/:key`                          | Reads one cache entry.                                                 |
 | `POST` | `/api/cache/:key/refresh`                  | Refreshes one cache entry.                                             |

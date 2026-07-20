@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { CronDisableIntent } from "../types/task";
 import { apiFetchRequired, apiPostRequired } from "./useApi";
+
+/** Represents a task linked to an OpenClaw cron job. */
+export interface CronTaskLink {
+    number: number;
+    title: string;
+    disableIntent?: CronDisableIntent;
+}
 
 /** Represents cron job. */
 export interface CronJob {
@@ -11,6 +19,7 @@ export interface CronJob {
     schedule?: { kind?: string; [key: string]: unknown };
     payload?: { kind?: string; [key: string]: unknown };
     delivery?: { mode?: string; [key: string]: unknown };
+    taskLinks?: CronTaskLink[];
     [key: string]: unknown;
 }
 
@@ -40,10 +49,22 @@ export function useToggleCronJob() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/toggle`, { enabled }),
+        mutationFn: ({
+            id,
+            enabled,
+            disableIntent,
+        }: {
+            id: string;
+            enabled: boolean;
+            disableIntent?: CronDisableIntent;
+        }) =>
+            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/toggle`, {
+                enabled,
+                disableIntent,
+            }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
+            void queryClient.invalidateQueries({ queryKey: ["tasks"] });
         },
     });
 }

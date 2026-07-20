@@ -9,8 +9,10 @@ import { Card, CardTitle } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { Input } from "../components/ui/Input";
 import { LoadingState } from "../components/ui/LoadingState";
+import { Modal } from "../components/ui/Modal";
 import { Select } from "../components/ui/Select";
 import { Switch } from "../components/ui/Switch";
+import { Textarea } from "../components/ui/Textarea";
 import type { CronJob, ScheduledJob, ScheduledJobPatch } from "../hooks";
 import {
     useCronJobs,
@@ -23,6 +25,7 @@ import {
     useUpdateCronJob,
     useUpdateScheduledJob,
 } from "../hooks";
+import type { CronDisableIntent } from "../types/task";
 import {
     getCronJobId,
     isCronExpressionValid,
@@ -38,6 +41,7 @@ import { validateJsonString } from "../utils/json";
 const CLEAR_SCHEDULE_FIELD = JSON.parse("null") as null;
 
 type JobsView = "scheduled" | "openclaw";
+type DisableMode = CronDisableIntent["mode"];
 
 const scheduleTypeOptions = [
     { value: "interval", label: "Interval", description: "Run every N seconds" },
@@ -52,6 +56,25 @@ const minuteOptions = Array.from({ length: 60 }, (_value, index) => {
     const value = String(index).padStart(2, "0");
     return { value, label: value };
 });
+const disableModeOptions = [
+    {
+        value: "until",
+        label: "Until a date",
+        description: "Heartbeat warns again after this time",
+    },
+    {
+        value: "indefinite",
+        label: "Indefinitely",
+        description:
+            "Heartbeat stays quiet until this annotation changes or the job is enabled",
+    },
+];
+
+function toDateTimeLocal(timestamp: number): string {
+    const date = new Date(timestamp);
+    const localTimestamp = timestamp - date.getTimezoneOffset() * 60_000;
+    return new Date(localTimestamp).toISOString().slice(0, 16);
+}
 
 function formatScheduledJobSchedule(job: ScheduledJob): string {
     if (!job.enabled) return "Disabled";
@@ -510,6 +533,15 @@ export function Jobs() {
     const [deleteCandidate, setDeleteCandidate] = useState<CronJob | undefined>(
         undefined
     );
+    const [disableCandidate, setDisableCandidate] = useState<CronJob | undefined>(
+        undefined
+    );
+    const [disableMode, setDisableMode] = useState<DisableMode>("until");
+    const [disableComment, setDisableComment] = useState("");
+    const [disableUntil, setDisableUntil] = useState(() =>
+        toDateTimeLocal(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    );
+    const [disableError, setDisableError] = useState<string | undefined>(undefined);
     const [scheduleTypeDraft, setScheduleTypeDraft] =
         useState<ScheduledJob["scheduleType"]>("interval");
     const [intervalDraft, setIntervalDraft] = useState("");
@@ -628,15 +660,73 @@ export function Jobs() {
         }
     }
 
-    async function handleCronToggle(job: CronJob, isEnabled: boolean) {
+    function openDisableModal(job: CronJob) {
+        const existingIntent = job.taskLinks?.find(
+            (link) => link.disableIntent
+        )?.disableIntent;
+        setDisableCandidate(job);
+        setDisableMode(existingIntent?.mode ?? "until");
+        setDisableComment(existingIntent?.comment ?? "");
+        const untilTimestamp =
+            existingIntent?.mode === "until" && existingIntent.until
+                ? Date.parse(existingIntent.until)
+                : Date.now() + 7 * 24 * 60 * 60 * 1000;
+        setDisableUntil(toDateTimeLocal(untilTimestamp));
+        setDisableError(undefined);
+    }
+
+    async function persistCronToggle(
+        job: CronJob,
+        isEnabled: boolean,
+        disableIntent?: CronDisableIntent
+    ) {
         const id = getCronJobId(job);
         if (!id) return;
         try {
-            await toggleCronJob.mutateAsync({ id, enabled: isEnabled });
+            await toggleCronJob.mutateAsync({
+                id,
+                enabled: isEnabled,
+                disableIntent,
+            });
             setActionError(undefined);
+            setDisableCandidate(undefined);
         } catch (error) {
             setActionError(getErrorMessage(error, "Failed to update cron job state"));
         }
+    }
+
+    function handleCronToggle(job: CronJob, isEnabled: boolean) {
+        if (!isEnabled && (job.taskLinks?.length ?? 0) > 0) {
+            openDisableModal(job);
+            return;
+        }
+        void persistCronToggle(job, isEnabled);
+    }
+
+    async function handleIntentionalDisable() {
+        if (!disableCandidate) return;
+        const comment = disableComment.trim();
+        if (!comment) {
+            setDisableError("A comment is required for an intentional disable.");
+            return;
+        }
+        if (disableMode === "indefinite") {
+            await persistCronToggle(disableCandidate, false, {
+                mode: "indefinite",
+                comment,
+            });
+            return;
+        }
+        const untilTimestamp = Date.parse(disableUntil);
+        if (Number.isNaN(untilTimestamp) || untilTimestamp <= Date.now()) {
+            setDisableError("Choose a future date and time.");
+            return;
+        }
+        await persistCronToggle(disableCandidate, false, {
+            mode: "until",
+            comment,
+            until: new Date(untilTimestamp).toISOString(),
+        });
     }
 
     async function handleCronRunNow(job: CronJob) {
@@ -813,8 +903,9 @@ export function Jobs() {
                         updatePending={updateCronJob.isPending}
                         deletePending={deleteCronJob.isPending}
                         onToggle={(job, enabled) => {
-                            void handleCronToggle(job, enabled);
+                            handleCronToggle(job, enabled);
                         }}
+                        onConfigureDisable={openDisableModal}
                         onRunNow={(job) => {
                             void handleCronRunNow(job);
                         }}
@@ -859,6 +950,76 @@ export function Jobs() {
                         void handleCronDelete(deleteCandidate);
                     }}
                 />
+            ) : undefined}
+
+            {disableCandidate ? (
+                <Modal
+                    isOpen
+                    title={
+                        disableCandidate.enabled === false
+                            ? "Edit disabled state"
+                            : "Disable linked cron job"
+                    }
+                    onClose={() => {
+                        if (!toggleCronJob.isPending) setDisableCandidate(undefined);
+                    }}
+                >
+                    <div className="space-y-4">
+                        <p className="text-sm text-primary-300">
+                            This cron job is linked to{" "}
+                            {disableCandidate.taskLinks?.length} open task
+                            {disableCandidate.taskLinks?.length === 1 ? "" : "s"}.
+                            Heartbeat will treat the disable as intentional while this
+                            annotation is active.
+                        </p>
+                        <Select
+                            ariaLabel="Disabled duration"
+                            value={disableMode}
+                            options={disableModeOptions}
+                            onChange={(value) => setDisableMode(value as DisableMode)}
+                            width="w-full"
+                        />
+                        {disableMode === "until" ? (
+                            <Input
+                                label="Disabled until"
+                                type="datetime-local"
+                                value={disableUntil}
+                                onChange={(event) => setDisableUntil(event.target.value)}
+                            />
+                        ) : undefined}
+                        <Textarea
+                            label="Comment"
+                            description="Required. Explain why the job is disabled and what should happen before it is enabled again."
+                            value={disableComment}
+                            onChange={(event) => setDisableComment(event.target.value)}
+                            maxLength={1000}
+                            rows={4}
+                            error={disableError}
+                        />
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                variant="secondary"
+                                disabled={toggleCronJob.isPending}
+                                onClick={() => setDisableCandidate(undefined)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="primary"
+                                disabled={toggleCronJob.isPending}
+                                onClick={() => {
+                                    void handleIntentionalDisable();
+                                }}
+                            >
+                                {toggleCronJob.isPending
+                                    ? "Saving..."
+                                    : disableCandidate.enabled === false
+                                      ? "Save disabled state"
+                                      : "Disable job"}
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
             ) : undefined}
         </div>
     );

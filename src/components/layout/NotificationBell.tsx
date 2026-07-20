@@ -157,13 +157,7 @@ export function NotificationBell() {
                                 >
                                     <div className="mb-1 flex items-center justify-between gap-2">
                                         <div className="inline-flex items-center gap-2">
-                                            <Badge
-                                                variant={
-                                                    notification.type === "warning"
-                                                        ? "warning"
-                                                        : "info"
-                                                }
-                                            >
+                                            <Badge variant={notification.type}>
                                                 {notification.type}
                                             </Badge>
                                             {!notification.isRead && (

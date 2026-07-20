@@ -51,6 +51,8 @@ export function JobsOverviewCard() {
 
     const enabledCount = jobs.filter((job) => job.enabled).length;
     const cronEnabledCount = cronJobs.filter((job) => job.enabled !== false).length;
+    const disabledCount = jobs.filter((job) => !job.enabled).length;
+    const cronDisabledCount = cronJobs.filter((job) => job.enabled === false).length;
     const runningCount = jobs.filter((job) => job.isRunning).length;
     const latestRunJob =
         [...jobs]
@@ -142,6 +144,12 @@ export function JobsOverviewCard() {
                         <span>Enabled</span>
                         <span className="text-green-300">
                             {enabledCount + cronEnabledCount}
+                        </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <span>Disabled</span>
+                        <span className="text-yellow-300">
+                            {disabledCount + cronDisabledCount}
                         </span>
                     </div>
                     <div className="flex items-center justify-between">

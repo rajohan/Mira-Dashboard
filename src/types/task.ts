@@ -1,5 +1,10 @@
 import type { TaskAssigneeId } from "../constants/taskActors";
 
+/** Records why a task-linked cron job is intentionally disabled. */
+export type CronDisableIntent =
+    | { mode: "indefinite"; comment: string }
+    | { mode: "until"; comment: string; until: string };
+
 /** Represents task automation. */
 export interface TaskAutomation {
     type: "cron";
@@ -17,7 +22,16 @@ export interface TaskAutomation {
     lastRunAtMs?: number;
     lastRunStatus?: string;
     lastDurationMs?: number;
+    disableIntent?: CronDisableIntent;
     source?: "cron" | "stored";
+}
+
+/** Represents editable task automation metadata. */
+export interface TaskAutomationInput {
+    cronJobId: string;
+    scheduleSummary?: string;
+    sessionTarget?: string;
+    disableIntent?: CronDisableIntent;
 }
 
 /** Represents task. */

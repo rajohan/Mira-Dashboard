@@ -14,7 +14,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../constants/taskActors";
-import type { ColumnId, Task, TaskAutomation, TaskUpdate } from "../../../types/task";
+import type {
+    ColumnId,
+    Task,
+    TaskAutomationInput,
+    TaskUpdate,
+} from "../../../types/task";
 import {
     formatCronLastStatus,
     formatCronTimestamp,
@@ -74,10 +79,7 @@ interface TaskDetailModalProperties {
         title?: string;
         body?: string;
         labels?: string[];
-        automation?:
-            | Pick<TaskAutomation, "cronJobId" | "scheduleSummary" | "sessionTarget">
-            | null
-            | undefined;
+        automation?: TaskAutomationInput | null | undefined;
     }) => Promise<Task>;
     updates: TaskUpdate[];
     onAddUpdate: (messageMd: string) => Promise<void>;
@@ -244,6 +246,7 @@ export function TaskDetailModal({
                       cronJobId,
                       scheduleSummary,
                       sessionTarget,
+                      disableIntent: task.automation?.disableIntent,
                   }
                 : CLEAR_TASK_AUTOMATION,
         });

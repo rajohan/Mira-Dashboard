@@ -896,6 +896,10 @@ describe("backend route and service behavior", () => {
             jsonRequest("/api/tasks", {
                 automation: {
                     cronJobId: "cron-unit",
+                    disableIntent: {
+                        mode: "indefinite",
+                        comment: "Paused for route coverage",
+                    },
                     model: "stored-model",
                     scheduleSummary: "stored schedule",
                 },
@@ -910,6 +914,10 @@ describe("backend route and service behavior", () => {
         expect(created).toMatchObject({
             automation: {
                 cronJobId: "cron-unit",
+                disableIntent: {
+                    mode: "indefinite",
+                    comment: "Paused for route coverage",
+                },
                 model: "stored-model",
                 scheduleSummary: "stored schedule",
                 source: "stored",
@@ -924,6 +932,10 @@ describe("backend route and service behavior", () => {
         await expect(enriched.json()).resolves.toMatchObject({
             automation: {
                 enabled: true,
+                disableIntent: {
+                    mode: "indefinite",
+                    comment: "Paused for route coverage",
+                },
                 model: "codex",
                 scheduleSummary: "Every 1h",
                 source: "cron",
@@ -1265,6 +1277,157 @@ describe("backend route and service behavior", () => {
         expect(hardLinkedWrite.status).toBe(403);
     });
 
+    it("stores and clears intentional disable metadata for linked cron tasks", async () => {
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        const gatewayRequestSpy = jest
+            .spyOn(gateway, "request")
+            .mockImplementation(async (method) => {
+                if (method === "cron.list") {
+                    return {
+                        items: [
+                            {
+                                enabled: true,
+                                id: "coverage-linked-cron",
+                                name: "Coverage linked cron",
+                            },
+                        ],
+                    };
+                }
+                if (method === "cron.update") return { isOk: true };
+                throw new Error(`Unexpected Gateway method: ${method}`);
+            });
+        cleanupCallbacks.push(() => gatewayRequestSpy.mockRestore());
+        const timestamp = "2026-07-20T10:00:00.000Z";
+        const result = database
+            .prepare(
+                `INSERT INTO tasks (
+                    title, body, status, priority, labels_json, automation_json,
+                    assignee, created_at, updated_at
+                ) VALUES (?, '', 'in-progress', 'medium', ?, ?, 'mira-2026', ?, ?)`
+            )
+            .run(
+                "Coverage intentional disable task",
+                JSON.stringify(["in-progress", "priority-medium"]),
+                JSON.stringify({
+                    type: "cron",
+                    recurring: true,
+                    cronJobId: "coverage-linked-cron",
+                }),
+                timestamp,
+                timestamp
+            );
+        const taskId = Number(result.lastInsertRowid);
+        const { cronRoutes } = await import("../src/routes/cronRoutes.ts");
+
+        const listResponse = await cronRoutes["/api/cron/jobs"].GET();
+        await expect(listResponse.json()).resolves.toMatchObject({
+            jobs: [
+                {
+                    id: "coverage-linked-cron",
+                    taskLinks: [
+                        {
+                            number: taskId,
+                            title: "Coverage intentional disable task",
+                        },
+                    ],
+                },
+            ],
+        });
+
+        const expiredResponse = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/coverage-linked-cron/toggle",
+                { id: "coverage-linked-cron" },
+                {
+                    body: JSON.stringify({
+                        enabled: false,
+                        disableIntent: {
+                            mode: "until",
+                            comment: "Already expired",
+                            until: "2020-01-01T00:00:00.000Z",
+                        },
+                    }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(expiredResponse.status).toBe(400);
+
+        const disableResponse = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/coverage-linked-cron/toggle",
+                { id: "coverage-linked-cron" },
+                {
+                    body: JSON.stringify({
+                        enabled: false,
+                        disableIntent: {
+                            mode: "indefinite",
+                            comment: "Paused for maintenance",
+                        },
+                    }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(disableResponse.status).toBe(200);
+        await expect(disableResponse.json()).resolves.toEqual({ isOk: true });
+        const disabledAutomation = database
+            .prepare("SELECT automation_json FROM tasks WHERE id = ?")
+            .get(taskId) as { automation_json: string };
+        expect(JSON.parse(disabledAutomation.automation_json)).toMatchObject({
+            cronJobId: "coverage-linked-cron",
+            disableIntent: {
+                mode: "indefinite",
+                comment: "Paused for maintenance",
+            },
+        });
+
+        const timedDisableResponse = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/coverage-linked-cron/toggle",
+                { id: "coverage-linked-cron" },
+                {
+                    body: JSON.stringify({
+                        enabled: false,
+                        disableIntent: {
+                            mode: "until",
+                            comment: "Pause until maintenance ends",
+                            until: "2999-07-25T12:00:00+02:00",
+                        },
+                    }),
+                    method: "POST",
+                }
+            )
+        );
+        expect(timedDisableResponse.status).toBe(200);
+        const timedAutomation = database
+            .prepare("SELECT automation_json FROM tasks WHERE id = ?")
+            .get(taskId) as { automation_json: string };
+        expect(JSON.parse(timedAutomation.automation_json)).toMatchObject({
+            disableIntent: {
+                mode: "until",
+                comment: "Pause until maintenance ends",
+                until: "2999-07-25T10:00:00.000Z",
+            },
+        });
+
+        const enableResponse = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
+            requestWithParameters(
+                "/api/cron/jobs/coverage-linked-cron/toggle",
+                { id: "coverage-linked-cron" },
+                { body: JSON.stringify({ enabled: true }), method: "POST" }
+            )
+        );
+        expect(enableResponse.status).toBe(200);
+        const enabledAutomation = database
+            .prepare("SELECT automation_json FROM tasks WHERE id = ?")
+            .get(taskId) as { automation_json: string };
+        expect(JSON.parse(enabledAutomation.automation_json)).not.toHaveProperty(
+            "disableIntent"
+        );
+    });
+
     it("config file route allowlist, reads, writes, and backups", async () => {
         isolateOpenClawEnvironment("mira-config-file-route-");
         const root = process.env.OPENCLAW_HOME!;
@@ -1467,7 +1630,19 @@ describe("backend route and service behavior", () => {
             .spyOn(gateway, "request")
             .mockImplementation(async (method) => {
                 if (method === "cron.list") {
-                    return { items: [{ enabled: true, id: "item-cron" }] };
+                    return {
+                        items: [
+                            {
+                                enabled: false,
+                                id: "item-cron",
+                                name: "Coverage cron",
+                                state: {
+                                    lastRunAtMs: 1_721_465_940_000,
+                                    lastRunStatus: "ok",
+                                },
+                            },
+                        ],
+                    };
                 }
                 throw Object.assign(new Error(`gateway failed for ${method}`), {
                     statusCode: 502,
@@ -1487,17 +1662,114 @@ describe("backend route and service behavior", () => {
                 )
                 .run();
         });
+        const heartbeatTimestamp = "2026-07-20T10:00:00.000Z";
+        database
+            .prepare(
+                `INSERT INTO tasks (
+                    title, body, status, priority, labels_json, automation_json,
+                    assignee, created_at, updated_at
+                ) VALUES (?, '', 'in-progress', 'high', ?, ?, 'mira-2026', ?, ?)`
+            )
+            .run(
+                "Coverage heartbeat task",
+                JSON.stringify(["in-progress", "priority-high"]),
+                JSON.stringify({
+                    type: "cron",
+                    recurring: true,
+                    cronJobId: "item-cron",
+                    disableIntent: {
+                        mode: "indefinite",
+                        comment: "Paused during chat work",
+                    },
+                }),
+                heartbeatTimestamp,
+                heartbeatTimestamp
+            );
+        database
+            .prepare(
+                `INSERT INTO scheduled_jobs (
+                    id, name, description, enabled, schedule_type, interval_seconds,
+                    action_key, action_payload_json, next_run_at, created_at, updated_at
+                ) VALUES (?, ?, '', 1, 'daily', 86400, ?, '{}', ?, ?, ?)`
+            )
+            .run(
+                "coverage.workspace-sync",
+                "OpenClaw workspace sync",
+                "workspace.sync",
+                "2026-07-21T02:00:00.000Z",
+                heartbeatTimestamp,
+                heartbeatTimestamp
+            );
+        database
+            .prepare(
+                `INSERT INTO tasks (
+                    title, body, status, priority, labels_json, automation_json,
+                    assignee, created_at, updated_at
+                ) VALUES (?, '', 'done', 'high', ?, ?, 'mira-2026', ?, ?)`
+            )
+            .run(
+                "Coverage completed heartbeat task",
+                JSON.stringify(["done", "priority-high"]),
+                JSON.stringify({
+                    type: "cron",
+                    recurring: true,
+                    cronJobId: "item-cron",
+                }),
+                heartbeatTimestamp,
+                heartbeatTimestamp
+            );
+        database
+            .prepare(
+                `INSERT INTO scheduled_job_runs (
+                    job_id, status, trigger_type, started_at, finished_at, message,
+                    output_json
+                ) VALUES (?, 'failed', 'schedule', ?, ?, ?, '{}')`
+            )
+            .run(
+                "coverage.workspace-sync",
+                heartbeatTimestamp,
+                "2026-07-20T10:00:01.000Z",
+                "Refusing to push unrelated local commits"
+            );
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    "DELETE FROM scheduled_job_runs WHERE job_id = 'coverage.workspace-sync'"
+                )
+                .run();
+            database
+                .prepare(
+                    "DELETE FROM scheduled_jobs WHERE id = 'coverage.workspace-sync'"
+                )
+                .run();
+        });
 
         const missingValue = JSON.parse("null") as null;
         const cacheHeartbeat = await cacheRoutes["/api/cache/heartbeat"].GET();
         const cacheHeartbeatText = await cacheHeartbeat.text();
         const cacheHeartbeatJson = JSON.parse(cacheHeartbeatText) as {
             count: number;
+            cronJobs: {
+                dataAvailable: boolean;
+                items: Array<Record<string, unknown>>;
+            };
+            dashboardJobs: Array<Record<string, unknown>>;
             schemaVersion: number;
             entries: Record<string, { data?: unknown; key?: string }>;
+            tasks: Array<Record<string, unknown>>;
         };
         expect(cacheHeartbeatJson).toMatchObject({
             count: expect.any(Number),
+            cronJobs: {
+                dataAvailable: true,
+                items: [
+                    expect.objectContaining({
+                        enabled: false,
+                        id: "item-cron",
+                        lastRunStatus: "ok",
+                    }),
+                ],
+            },
             schemaVersion: 2,
             entries: expect.arrayContaining([
                 expect.objectContaining({
@@ -1508,6 +1780,34 @@ describe("backend route and service behavior", () => {
                 }),
             ]),
         });
+        const workspaceSyncJob = cacheHeartbeatJson.dashboardJobs.find(
+            (job) => job.id === "coverage.workspace-sync"
+        );
+        expect(workspaceSyncJob).toMatchObject({
+            lastRun: {
+                message: "Refusing to push unrelated local commits",
+                status: "failed",
+            },
+        });
+        const heartbeatTask = cacheHeartbeatJson.tasks.find(
+            (task) => task.title === "Coverage heartbeat task"
+        );
+        expect(heartbeatTask).toMatchObject({
+            automation: {
+                cronJobId: "item-cron",
+                disableIntent: {
+                    mode: "indefinite",
+                    comment: "Paused during chat work",
+                },
+                enabled: false,
+            },
+        });
+        expect(heartbeatTask?.number).toEqual(expect.any(Number));
+        expect(
+            cacheHeartbeatJson.tasks.find(
+                (task) => task.title === "Coverage completed heartbeat task"
+            )
+        ).toBeUndefined();
         const cacheStatus = await cacheRoutes["/api/cache/status"].GET();
         await expect(cacheStatus.json()).resolves.toMatchObject({
             count: expect.any(Number),
@@ -2004,7 +2304,27 @@ describe("backend route and service behavior", () => {
 
         const cronList = await cronRoutes["/api/cron/jobs"].GET();
         await expect(cronList.json()).resolves.toEqual({
-            jobs: [{ enabled: true, id: "item-cron" }],
+            jobs: [
+                {
+                    enabled: false,
+                    id: "item-cron",
+                    name: "Coverage cron",
+                    state: {
+                        lastRunAtMs: 1_721_465_940_000,
+                        lastRunStatus: "ok",
+                    },
+                    taskLinks: [
+                        {
+                            number: expect.any(Number),
+                            title: "Coverage heartbeat task",
+                            disableIntent: {
+                                mode: "indefinite",
+                                comment: "Paused during chat work",
+                            },
+                        },
+                    ],
+                },
+            ],
         });
 
         const badCronToggleBody = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(

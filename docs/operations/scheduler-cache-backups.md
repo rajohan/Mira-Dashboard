@@ -86,12 +86,28 @@ Dashboard exposes two intentionally different aggregate cache endpoints:
 | Endpoint               | Consumer               | Payload contract                                                       |
 | ---------------------- | ---------------------- | ---------------------------------------------------------------------- |
 | `/api/cache/status`    | Dashboard UI polling   | Cache envelopes only; `data` is `null`.                                |
-| `/api/cache/heartbeat` | OpenClaw ops heartbeat | `schemaVersion: 2` plus compact, key-specific operational projections. |
+| `/api/cache/heartbeat` | OpenClaw ops heartbeat | `schemaVersion: 2` plus compact cache, task, OpenClaw cron, and Dashboard-job projections. |
 
 Both responses retain every cache envelope so consumers can assess freshness,
 status, errors, timestamps, and consecutive failures. Heartbeat v2 avoids
 returning full provider payloads; consumers must use the documented compact
 fields and must not assume the original cached object is present.
+
+The heartbeat response also exposes these top-level operational projections:
+
+- `dashboardJobs`: every Dashboard scheduled job with enabled/running state,
+  next run, and the latest run status/message;
+- `cronJobs`: one compact snapshot from a single Gateway `cron.list`, including
+  enabled/running/last/next state for every OpenClaw cron job;
+- `tasks`: only open heartbeat-relevant tasks. Task automation contains its
+  linked `cronJobId` and optional intentional-disable annotation.
+
+Completed tasks are excluded from the heartbeat task projection. A disabled
+linked cron remains quiet while an `indefinite` annotation with a comment is
+present, or while an `until` annotation has not expired. Missing, malformed, or
+expired intent remains actionable, as do missing or failing cron jobs regardless
+of intent. The full `/api/tasks`, `/api/jobs`, and `/api/cron/jobs` responses
+remain the UI contracts and are not required by heartbeat.
 
 Do not change heartbeat automation to `/api/cache/status`: it needs the compact
 operational data. Conversely, routine UI badge polling should not download the

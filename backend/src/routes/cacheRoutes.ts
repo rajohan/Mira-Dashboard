@@ -9,6 +9,8 @@ import {
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { stringFallback } from "../lib/values.ts";
 import { refreshCacheProducer } from "../services/cacheRefresh.ts";
+import { listScheduledJobs } from "../services/scheduledJobs.ts";
+import { getHeartbeatAutomationSnapshot } from "../services/taskAutomation.ts";
 
 function parseJsonFieldOrValue(value: string) {
     const parsed = parseJsonField<unknown>(value);
@@ -179,6 +181,26 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
     }
 }
 
+function compactDashboardJobs() {
+    return listScheduledJobs().map((job) => ({
+        actionKey: job.actionKey,
+        enabled: job.enabled,
+        id: job.id,
+        isRunning: job.isRunning,
+        lastRun: job.lastRun
+            ? {
+                  finishedAt: job.lastRun.finishedAt,
+                  message: job.lastRun.message,
+                  startedAt: job.lastRun.startedAt,
+                  status: job.lastRun.status,
+                  triggerType: job.lastRun.triggerType,
+              }
+            : undefined,
+        name: job.name,
+        nextRunAt: job.nextRunAt,
+    }));
+}
+
 function mapCacheRowForResponse(
     row: CacheEntryRow,
     options: { includeData?: boolean } = {}
@@ -232,6 +254,8 @@ export const cacheRoutes = {
     "/api/cache/heartbeat": {
         GET: async () => {
             const rows = await getAllCacheEntries();
+            const dashboardJobs = compactDashboardJobs();
+            const automation = await getHeartbeatAutomationSnapshot();
             const entries = rows.map((row) => {
                 const entry = mapCacheRowForResponse(row);
                 return {
@@ -241,9 +265,16 @@ export const cacheRoutes = {
             });
             return json({
                 count: entries.length,
+                cronJobs: {
+                    dataAvailable: automation.isCronDataAvailable,
+                    error: automation.cronError,
+                    items: automation.cronJobs,
+                },
+                dashboardJobs,
                 entries,
                 generatedAt: new Date().toISOString(),
                 schemaVersion: 2,
+                tasks: automation.tasks,
             });
         },
     },

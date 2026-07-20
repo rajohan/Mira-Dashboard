@@ -2992,10 +2992,22 @@ describe("shared component helpers", () => {
                     isRunning: false,
                     name: "Cached dashboard job",
                 },
+                {
+                    enabled: false,
+                    isRunning: false,
+                    name: "Disabled dashboard job",
+                },
             ],
         });
         queryClient.setQueryData(cronKeys.jobs(), {
-            jobs: [{ enabled: true, id: "cached-cron", name: "Cached cron job" }],
+            jobs: [
+                { enabled: true, id: "cached-cron", name: "Cached cron job" },
+                {
+                    enabled: false,
+                    id: "disabled-cron",
+                    name: "Disabled cron job",
+                },
+            ],
         });
 
         render(
@@ -3019,11 +3031,12 @@ describe("shared component helpers", () => {
 
         expect(screen.queryByText("Jobs unavailable.")).not.toBeInTheDocument();
         expect(screen.getByText("Dashboard jobs").nextElementSibling).toHaveTextContent(
-            "1"
+            "2"
         );
         expect(screen.getByText("OpenClaw cron").nextElementSibling).toHaveTextContent(
-            "1"
+            "2"
         );
+        expect(screen.getByText("Disabled").nextElementSibling).toHaveTextContent("2");
 
         queryClient.clear();
     });
@@ -3967,6 +3980,7 @@ describe("shared component helpers", () => {
             },
         };
         const onToggle = jest.fn();
+        const onConfigureDisable = jest.fn();
         const onRunNow = jest.fn();
         const onDelete = jest.fn();
         const onEditModeChange = jest.fn();
@@ -3985,6 +3999,7 @@ describe("shared component helpers", () => {
                 updatePending={false}
                 deletePending={false}
                 onToggle={onToggle}
+                onConfigureDisable={onConfigureDisable}
                 onRunNow={onRunNow}
                 onDelete={onDelete}
                 isEditMode={false}
@@ -4016,15 +4031,30 @@ describe("shared component helpers", () => {
         expect(onDelete).toHaveBeenCalledWith(job);
         expect(onEditModeChange).toHaveBeenCalledWith(true);
 
+        const disabledJob = {
+            ...job,
+            enabled: false,
+            taskLinks: [
+                {
+                    number: 8,
+                    title: "Chat improvements",
+                    disableIntent: {
+                        mode: "indefinite" as const,
+                        comment: "Paused during chat work",
+                    },
+                },
+            ],
+        };
         rerender(
             <CronJobDetails
-                job={job}
+                job={disabledJob}
                 lastTriggeredAt={undefined}
                 togglePending={false}
                 runPending={true}
                 updatePending={false}
                 deletePending={false}
                 onToggle={onToggle}
+                onConfigureDisable={onConfigureDisable}
                 onRunNow={onRunNow}
                 onDelete={onDelete}
                 isEditMode={true}
@@ -4070,6 +4100,9 @@ describe("shared component helpers", () => {
         expect(screen.getByText("Invalid JSON: bad")).toBeInTheDocument();
         expect(screen.getByText("Save failed")).toBeInTheDocument();
         expect(screen.getByText("Running job...")).toBeInTheDocument();
+        expect(screen.getByText("Paused during chat work")).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: /edit disabled reason/i }));
+        expect(onConfigureDisable).toHaveBeenCalledWith(disabledJob);
     });
 
     it("drives database table shells, autovacuum cards, and top query modal copy", async () => {

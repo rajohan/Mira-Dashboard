@@ -722,6 +722,12 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     payload: { kind: "heartbeat" },
                     delivery: { mode: "session" },
                     enabled: true,
+                    taskLinks: [
+                        {
+                            number: 8,
+                            title: "Chat improvements",
+                        },
+                    ],
                     state: {
                         lastRunAtMs: 1_719_216_000_000,
                         nextRunAtMs: 1_719_217_800_000,
@@ -1346,7 +1352,13 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (method === "POST" && url === "/api/cron/jobs/heartbeat/toggle") {
-        expect(parseRequestBody(init)).toEqual({ enabled: false });
+        expect(parseRequestBody(init)).toEqual({
+            enabled: false,
+            disableIntent: {
+                mode: "indefinite",
+                comment: "Paused during chat work",
+            },
+        });
         return Response.json({ isOk: true });
     }
 
@@ -2299,6 +2311,20 @@ describe("Mira Dashboard pages", () => {
         });
 
         await user.click(screen.getByLabelText("Enabled"));
+        expect(
+            screen.getByRole("heading", { name: "Disable linked cron job" })
+        ).toBeInTheDocument();
+        await user.click(
+            screen.getByRole("button", { name: /disabled duration: until a date/i })
+        );
+        await user.click(screen.getByText("Indefinitely"));
+        await user.type(screen.getByLabelText("Comment"), "Paused during chat work");
+        await user.click(screen.getByRole("button", { name: "Disable job" }));
+        await waitFor(() => {
+            expect(
+                screen.queryByRole("heading", { name: "Disable linked cron job" })
+            ).not.toBeInTheDocument();
+        });
         await user.click(screen.getByRole("button", { name: /^edit$/i }));
         await user.clear(screen.getByLabelText("Name"));
         await user.type(screen.getByLabelText("Name"), "heartbeat-updated");
