@@ -272,10 +272,13 @@ function contentBlockAttachments(content: unknown): ChatAttachmentDisplay[] {
             typeof attachment.label === "string" && attachment.label.trim()
                 ? attachment.label.trim()
                 : fileNameFromPath(attachmentPath);
+        const labelMimeType = mimeTypeFromPath(label);
         const mimeType =
             typeof attachment.mimeType === "string" && attachment.mimeType.trim()
                 ? attachment.mimeType.trim()
-                : mimeTypeFromPath(label || attachmentPath);
+                : labelMimeType === "application/octet-stream"
+                  ? mimeTypeFromPath(attachmentPath)
+                  : labelMimeType;
         const kind = attachmentKind(mimeType);
         attachments.push({
             id: `content-${url}-${attachments.length}`,

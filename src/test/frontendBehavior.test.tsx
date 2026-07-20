@@ -4079,6 +4079,12 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         expect(
             chatImageUrl({
+                image_url: { url: "/api/media?path=%2Ftmp%2Furl-only-logo.svg" },
+                type: "image_url",
+            })
+        ).toBe("/api/media?path=%2Ftmp%2Furl-only-logo.svg&preview=image");
+        expect(
+            chatImageUrl({
                 data: "/9j/4AAQSkZJRgABAQAAAQABAAD",
                 mimeType: "image/jpeg",
                 type: "image",
@@ -4183,6 +4189,24 @@ describe("Mira Dashboard frontend behavior", () => {
         });
         expect(normalizedSignedAttachment.attachments?.[0]).toMatchObject({
             fileName: "report.csv",
+            kind: "text",
+            mimeType: "text/csv",
+            url: "https://files.example.test/report.csv?token=signed-value",
+        });
+        const normalizedFriendlyLabelAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        label: "Sales report",
+                        url: "https://files.example.test/report.csv?token=signed-value",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedFriendlyLabelAttachment.attachments?.[0]).toMatchObject({
+            fileName: "Sales report",
             kind: "text",
             mimeType: "text/csv",
             url: "https://files.example.test/report.csv?token=signed-value",

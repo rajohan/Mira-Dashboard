@@ -118,6 +118,20 @@ function safeChatImageUrl(value: unknown): string | undefined {
     }
 }
 
+function localMediaPathFromUrl(url: string): string | undefined {
+    if (!url.startsWith("/api/media?")) {
+        return undefined;
+    }
+    try {
+        const parsedUrl = new URL(url, "https://dashboard.invalid");
+        return parsedUrl.pathname === "/api/media"
+            ? parsedUrl.searchParams.get("path")?.trim() || undefined
+            : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 /** Returns a bounded preview URL for Dashboard-managed media. */
 export function chatAttachmentPreviewUrl(
     url: string,
@@ -187,7 +201,12 @@ export function chatImageUrl(image: ChatImageBlock): string | undefined {
 
 /** Returns the declared image MIME type with a safe display fallback. */
 export function chatImageMimeType(image: ChatImageBlock): string {
-    return image.source?.media_type || image.mimeType || "image/png";
+    const declaredMimeType = image.source?.media_type || image.mimeType;
+    if (declaredMimeType) {
+        return declaredMimeType;
+    }
+    const localMediaPath = localMediaPathFromUrl(chatImageDownloadUrl(image) || "");
+    return localMediaPath?.toLowerCase().endsWith(".svg") ? "image/svg+xml" : "image/png";
 }
 
 /** Represents one attachment in the provider-independent transport contract. */
