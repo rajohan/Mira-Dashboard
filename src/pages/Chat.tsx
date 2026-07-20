@@ -50,9 +50,9 @@ function normalizeChatAgentId(agentId: string): string {
 /** Returns the top-level chat agent bucket for a session. */
 function getChatAgentId(session: Session): string {
     const sessionKey = typeof session.key === "string" ? session.key : "";
-    const [scope = "", agentId] = sessionKey.split(":");
+    const [scope = "", agentId] = sessionKey.split(":", 2);
 
-    if (scope.toLowerCase() === "agent" && agentId) {
+    if (agentId && scope.toLowerCase() === "agent") {
         return normalizeChatAgentId(agentId);
     }
 
@@ -69,8 +69,8 @@ function formatChatSessionLabel(session: Session, agentId: string): string {
     const sessionKey = session.key;
     const [scope = "", keyAgentId, ...sessionParts] = sessionKey.split(":");
     if (
-        scope.toLowerCase() === "agent" &&
         keyAgentId &&
+        scope.toLowerCase() === "agent" &&
         normalizeChatAgentId(keyAgentId) === agentId
     ) {
         return sessionParts.join(":") || sessionKey;

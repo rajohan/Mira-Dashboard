@@ -90,11 +90,11 @@ export function openClawToolMessage(
         hasResult &&
         (phase !== "end" ||
             resultContent ||
+            hasErrorResult ||
+            isFailedResult ||
             resultImages.length > 0 ||
             resultMessage.attachments?.length ||
-            data.isError === true ||
-            hasErrorResult ||
-            isFailedResult)
+            data.isError === true)
     );
     const resultKeys = resultRecord ? Object.keys(resultRecord) : [];
     const isPlaceholderResult =

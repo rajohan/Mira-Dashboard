@@ -80,7 +80,7 @@ export function FileTreeItem({
     const isLoading =
         node.type === "directory" && !node.loaded && expandedPaths.has(node.path);
     const sortedChildren =
-        node.type === "directory" && isExpanded && node.children
+        isExpanded && node.type === "directory" && node.children
             ? [...node.children].toSorted((a, b) => {
                   if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
                   return a.name.localeCompare(b.name);

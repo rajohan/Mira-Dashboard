@@ -190,7 +190,7 @@ export function Logs() {
 
     // Auto-select today's file
     useEffect(() => {
-        if (availableLogFiles.length === 0 || selectedFile) {
+        if (selectedFile || availableLogFiles.length === 0) {
             return;
         }
 

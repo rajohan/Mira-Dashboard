@@ -278,7 +278,7 @@ export function Docker() {
 
     /** Handles console command keys. */
     function handleConsoleCommandKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-        if (event.key !== "Enter" || !selectedConsoleContainer) {
+        if (!selectedConsoleContainer || event.key !== "Enter") {
             return;
         }
 

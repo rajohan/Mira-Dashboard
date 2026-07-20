@@ -129,8 +129,8 @@ export function useFileExplorerState() {
     const activeContentPath = fileContent?.path ?? selectedPath;
     const isJsonEditing = !!(
         activeContentPath &&
-        isJsonFile(activeContentPath) &&
-        !jsonPreview
+        !jsonPreview &&
+        isJsonFile(activeContentPath)
     );
     const jsonValidationMode =
         activeContentPath && getFileExtension(activeContentPath) === "json5"

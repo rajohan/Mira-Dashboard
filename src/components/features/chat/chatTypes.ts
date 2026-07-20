@@ -167,7 +167,7 @@ function safeChatImageUrl(value: unknown): string | undefined {
     const isDashboardApiPath =
         parsedChatUrl.url.pathname === "/api" ||
         parsedChatUrl.url.pathname.startsWith("/api/");
-    if (parsedChatUrl.isSameDashboardOrigin && isDashboardApiPath && !mediaKind) {
+    if (isDashboardApiPath && !mediaKind && parsedChatUrl.isSameDashboardOrigin) {
         return undefined;
     }
     return CHAT_IMAGE_URL_PROTOCOLS.has(parsedChatUrl.url.protocol)
@@ -239,7 +239,7 @@ export function chatImageDisplayUrl(url: string, mimeType: string): string | und
         return undefined;
     }
     const mediaKind = dashboardMediaKindFromUrl(safeUrl);
-    if (!safeUrl.startsWith("data:image/") && !mediaKind) {
+    if (!mediaKind && !safeUrl.startsWith("data:image/")) {
         return undefined;
     }
     const isManagedMedia = mediaKind === "managed";
@@ -462,8 +462,8 @@ export function attachmentKind(mimeType: string): ChatAttachmentDisplay["kind"] 
     }
 
     if (
-        normalizedMimeType.startsWith("text/") ||
-        normalizedMimeType === "application/json"
+        normalizedMimeType === "application/json" ||
+        normalizedMimeType.startsWith("text/")
     ) {
         return "text";
     }

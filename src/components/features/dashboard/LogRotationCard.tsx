@@ -86,7 +86,7 @@ export function LogRotationCard() {
     const failedRealRun =
         realRun.error instanceof ScheduledJobRunError ? realRun.error.run : undefined;
     const requestError =
-        realRun.error && !failedRealRun ? { error: realRun.error.message } : undefined;
+        !failedRealRun && realRun.error ? { error: realRun.error.message } : undefined;
     const lastAction = realRun.data || failedRealRun || requestError || isDryRun.data;
     const lastRun = status.data?.lastRun;
     const logRotationJob = scheduledJobs.data?.find(

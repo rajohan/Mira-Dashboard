@@ -525,7 +525,7 @@ export function ChatMessagesList({
                             Boolean(row.message.text);
                         const isToolResult = TOOL_ROLE_VARIANTS.includes(normalizedRole);
                         const shouldRenderPrimaryText = Boolean(
-                            row.message.text && !isToolResult
+                            !isToolResult && row.message.text
                         );
                         const hasPrimaryMessageContent = Boolean(
                             shouldRenderPrimaryText ||

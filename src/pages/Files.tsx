@@ -38,7 +38,7 @@ export function Files() {
     } = useFileExplorerState();
 
     const isLoading = rootLoading || contentLoading;
-    const isEditable = !!(fileContent && !fileContent.isBinary && !largeFileWarning);
+    const isEditable = !!(fileContent && !largeFileWarning && !fileContent.isBinary);
     const syntaxClass = fileContent
         ? getSyntaxClass(fileContent.path.split("/").pop()!)
         : "";

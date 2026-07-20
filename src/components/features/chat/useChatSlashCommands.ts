@@ -54,7 +54,7 @@ export function useChatSlashCommands({
         const commandSessionKey = selectedSessionKey;
         const isCommandSessionSelected = () =>
             selectedSessionKeyReference.current === commandSessionKey;
-        const [rawCommand = ""] = commandText.trim().split(/\s+/);
+        const [rawCommand = ""] = commandText.trim().split(/\s+/, 1);
         const command = slashCommandCanonicalName(rawCommand);
 
         if (!command.startsWith("/")) {

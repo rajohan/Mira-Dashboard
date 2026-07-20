@@ -561,8 +561,8 @@ export function dedupeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessa
             !message.timestamp
         );
         const canDeduplicate = Boolean(
-            (message.text.trim() || diagnosticMessageIdentity(message)) &&
-            !isUnscopedTextlessConversationalMedia
+            !isUnscopedTextlessConversationalMedia &&
+            (message.text.trim() || diagnosticMessageIdentity(message))
         );
         const isMessageLocal = message.local === true;
         if (canDeduplicate && role === "user") {
@@ -731,7 +731,7 @@ export function mergeWithRecentOptimisticMessages(
 
         const mediaIdentity = messageMediaIdentity(message);
         const role = message.role.toLowerCase();
-        if ((role === "user" || role === "assistant") && mediaIdentity) {
+        if (mediaIdentity && (role === "user" || role === "assistant")) {
             const mediaKey = `${role}::${mediaIdentity}`;
             unmatchedNextMediaCounts.set(
                 mediaKey,
@@ -763,9 +763,9 @@ export function mergeWithRecentOptimisticMessages(
         const mediaIdentity = messageMediaIdentity(message);
         const role = message.role.toLowerCase();
         if (
+            !mediaIdentity ||
             (role !== "user" && role !== "assistant") ||
-            message.text.trim() ||
-            !mediaIdentity
+            message.text.trim()
         ) {
             continue;
         }
@@ -774,8 +774,8 @@ export function mergeWithRecentOptimisticMessages(
         const mediaCount = unmatchedNextMediaCounts.get(mediaKey) || 0;
         unmatchedNextMediaCounts.set(mediaKey, Math.max(0, mediaCount - 1));
         if (
-            mediaCount > 0 &&
             role === "user" &&
+            mediaCount > 0 &&
             message.runId?.startsWith("dashboard-chat-")
         ) {
             const mediaRunCount =
@@ -814,7 +814,7 @@ export function mergeWithRecentOptimisticMessages(
             return false;
         }
 
-        if (!message.text.trim() && !isSystemMessage && !isLocalDiagnosticMessage) {
+        if (!isSystemMessage && !isLocalDiagnosticMessage && !message.text.trim()) {
             return false;
         }
 
@@ -842,10 +842,10 @@ export function mergeWithRecentOptimisticMessages(
             ? unmatchedNextDashboardUserMediaRunCounts.get(dashboardUserMediaRunId) || 0
             : 0;
         if (
-            (role === "user" || role === "assistant") &&
             isLocalMessage &&
-            !message.text.trim() &&
             mediaIdentity &&
+            (role === "user" || role === "assistant") &&
+            !message.text.trim() &&
             (unmatchedMediaCount > 0 || unmatchedMediaRunCount > 0)
         ) {
             if (unmatchedMediaCount > 0) {

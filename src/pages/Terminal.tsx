@@ -91,7 +91,7 @@ export function Terminal() {
 
     // Auto-scroll only when user is at bottom
     useEffect(() => {
-        if (outputReference.current && isAtBottom) {
+        if (isAtBottom && outputReference.current) {
             outputReference.current.scrollTop = outputReference.current.scrollHeight;
         }
     }, [history, jobData?.stdout, jobData?.stderr, isAtBottom]);
@@ -174,12 +174,12 @@ export function Terminal() {
     /** Responds to submit events. */
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
-        if (!command.trim() || startCommand.isPending || hasActiveJob) return;
+        if (hasActiveJob || !command.trim() || startCommand.isPending) return;
 
         const trimmedCommand = command.trim();
 
         // Handle CD command with validation
-        if (trimmedCommand.startsWith("cd ") || trimmedCommand === "cd") {
+        if (trimmedCommand === "cd" || trimmedCommand.startsWith("cd ")) {
             const targetPath =
                 trimmedCommand === "cd" ? HOME_DIR : trimmedCommand.slice(3).trim();
 
@@ -432,7 +432,7 @@ export function Terminal() {
                             />
                         </div>
                         <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
-                            {jobData?.status === "running" && currentJobId ? (
+                            {currentJobId && jobData?.status === "running" ? (
                                 <Button
                                     type="button"
                                     variant="danger"
