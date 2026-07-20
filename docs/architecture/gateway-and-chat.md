@@ -130,6 +130,8 @@ blocks plus generic attachment and `MediaPath` records. Every attachment keeps a
 download action. Images render inline; JSON and Markdown use the existing
 structured viewers; CSV and plain text use a bounded text preview; other files
 remain downloadable. MIME parameters are normalized before the viewer is chosen.
+When OpenClaw omits attachment labels or MIME metadata, Dashboard derives them
+from the URL pathname rather than signed query parameters.
 External HTTP(S) text references remain download-only because Dashboard cannot
 enforce the bounded preview policy on cross-origin responses. Attachment Markdown
 renders image references as plain labels so opening a preview cannot fetch remote
@@ -150,10 +152,11 @@ download target. Managed image thumbnails use `preview=image` and stop reading
 after 16 MiB; SVG responses additionally use the same restrictive sandbox CSP
 as local SVG. Managed SVG, HTML, XHTML, and XML downloads are downgraded to
 `application/octet-stream` with attachment disposition so active provider
-content cannot render as a same-origin document. Inline image thumbnails use
-the bounded preview URL while their download action retains the original managed
-URL. History-provided root-relative image URLs auto-render only through the two
-known Dashboard media proxy paths.
+content cannot render as a same-origin document. Inline thumbnails and full modal
+image previews use the bounded preview URL while their download action retains
+the original managed URL. Switching attachment previews aborts the prior text
+request and ignores any stale completion. History-provided root-relative image
+URLs auto-render only through the two known Dashboard media proxy paths.
 
 Local OpenClaw media continues through `/api/media`. Text preview is opt-in and
 limited to `.txt`, `.json`, `.csv`, and `.md` files no larger than 1 MiB. SVG is
@@ -161,12 +164,13 @@ downloaded as `application/octet-stream` by default and rendered only through an
 explicit sandboxed image preview with a restrictive CSP. These preview rules do
 not remove the original download action.
 
-An attachment-only optimistic user row reconciles with its canonical managed
-Gateway URL by the send run ID when its local base64 identity necessarily differs
-from the persisted media identity. Matching remains role- and run-scoped so
-separate attachment turns are not collapsed, and an unrelated prior media row
-cannot consume the fallback match. URL-only image blocks include their safe source
-URL in media identity so distinct generated images in one run remain distinct.
+An attachment-only optimistic user row remains visible while history is still
+waiting for its echo, then reconciles with its canonical managed Gateway URL by
+the send run ID when its local base64 identity necessarily differs from the
+persisted media identity. Matching remains role- and run-scoped so separate
+attachment turns are not collapsed, and an unrelated prior media row cannot
+consume the fallback match. URL-only image blocks include their safe source URL
+in media identity so distinct generated images in one run remain distinct.
 
 ### Transcript And Runtime Authority
 

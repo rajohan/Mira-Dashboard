@@ -55,6 +55,22 @@ function fileNameFromPath(path: string): string {
     return path.split(/[\\/]/).pop() || path;
 }
 
+function pathFromMediaReference(reference: string): string {
+    try {
+        const url = new URL(reference, "https://dashboard.invalid");
+        if (
+            reference.startsWith("/") ||
+            REMOTE_MEDIA_PROTOCOLS.has(url.protocol) ||
+            url.protocol === "file:"
+        ) {
+            return decodeURIComponent(url.pathname);
+        }
+    } catch {
+        // Fall through to the original reference when it is not a valid URL.
+    }
+    return reference;
+}
+
 function mimeTypeFromPath(path: string): string {
     const extension = path.split(".").pop()?.toLowerCase() || "";
     const mimeTypes: Record<string, string> = {
@@ -244,14 +260,15 @@ function contentBlockAttachments(content: unknown): ChatAttachmentDisplay[] {
             continue;
         }
         const rawUrl = typeof attachment.url === "string" ? attachment.url : "";
+        const attachmentPath = pathFromMediaReference(rawUrl);
         const label =
             typeof attachment.label === "string" && attachment.label.trim()
                 ? attachment.label.trim()
-                : fileNameFromPath(rawUrl);
+                : fileNameFromPath(attachmentPath);
         const mimeType =
             typeof attachment.mimeType === "string" && attachment.mimeType.trim()
                 ? attachment.mimeType.trim()
-                : mimeTypeFromPath(label || rawUrl);
+                : mimeTypeFromPath(label || attachmentPath);
         const kind = attachmentKind(mimeType);
         attachments.push({
             id: `content-${url}-${attachments.length}`,

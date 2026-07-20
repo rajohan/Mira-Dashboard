@@ -55,7 +55,11 @@ export function AttachmentPreviewModal({
                 }
                 return response.text();
             })
-            .then((text) => setRemoteText(text))
+            .then((text) => {
+                if (!abortController.signal.aborted) {
+                    setRemoteText(text);
+                }
+            })
             .catch((error: unknown) => {
                 if (!abortController.signal.aborted) {
                     setTextPreviewError(
@@ -78,9 +82,7 @@ export function AttachmentPreviewModal({
     const normalizedMimeType = normalizeChatMimeType(previewItem?.mimeType || "");
     const imagePreviewUrl =
         previewItem?.kind === "image" && previewItem.url
-            ? normalizedMimeType === "image/svg+xml"
-                ? chatAttachmentPreviewUrl(previewItem.url, "image")
-                : previewItem.url
+            ? chatAttachmentPreviewUrl(previewItem.url, "image")
             : undefined;
     const shouldRenderJson =
         normalizedMimeType === "application/json" ||

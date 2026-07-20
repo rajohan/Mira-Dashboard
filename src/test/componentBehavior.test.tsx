@@ -685,6 +685,26 @@ describe("shared component helpers", () => {
         rerender(
             <AttachmentPreviewModal
                 previewItem={{
+                    kind: "image",
+                    mimeType: "image/png",
+                    title: "managed-photo.png",
+                    url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174003/full",
+                }}
+                onClose={onClose}
+            />
+        );
+        expect(screen.getByAltText("managed-photo.png")).toHaveAttribute(
+            "src",
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174003/full?preview=image"
+        );
+        expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
+            "href",
+            "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174003/full"
+        );
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
                     kind: "file",
                     mimeType: "application/pdf",
                     title: "report.pdf",
@@ -1488,6 +1508,55 @@ describe("shared component helpers", () => {
         ]);
     });
 
+    it("ignores a completed text preview after switching attachments", async () => {
+        const textPreviewDeferred = Promise.withResolvers<string>();
+        const previewFetch = jest.fn(async () => ({
+            ok: true,
+            text: () => textPreviewDeferred.promise,
+        }));
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: previewFetch,
+            writable: true,
+        });
+
+        const { rerender } = render(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "text/plain",
+                    title: "first.txt",
+                    url: "/api/media?path=first.txt",
+                }}
+                onClose={jest.fn()}
+            />
+        );
+        await waitFor(() => expect(previewFetch).toHaveBeenCalledTimes(1));
+
+        rerender(
+            <AttachmentPreviewModal
+                previewItem={{
+                    kind: "text",
+                    mimeType: "text/plain",
+                    title: "second.txt",
+                    url: "https://files.example.test/second.txt",
+                }}
+                onClose={jest.fn()}
+            />
+        );
+        expect(
+            screen.getByText(
+                "Preview is not available for this file type yet. Use the download link above to open it locally."
+            )
+        ).toBeInTheDocument();
+
+        await act(async () => {
+            textPreviewDeferred.resolve("stale first attachment");
+            await textPreviewDeferred.promise;
+        });
+        expect(screen.queryByText("stale first attachment")).not.toBeInTheDocument();
+    });
+
     it("keeps live tool results when history briefly lags", () => {
         const optimisticUserMessage = {
             content: "One submitted prompt\n\n\nWith review details",
@@ -1609,6 +1678,18 @@ describe("shared component helpers", () => {
             text: "",
             timestamp: "2026-07-10T15:03:00.000Z",
         };
+        const retainedManagedAttachmentBeforeEcho = mergeWithRecentOptimisticMessages(
+            [repeatedAttachmentOnlyTurns[0]!, optimisticManagedAttachment],
+            [repeatedAttachmentOnlyTurns[0]!]
+        );
+        expect(retainedManagedAttachmentBeforeEcho).toHaveLength(2);
+        expect(
+            retainedManagedAttachmentBeforeEcho.some(
+                (message) =>
+                    message.local === true &&
+                    message.runId === "dashboard-chat-attachment-run"
+            )
+        ).toBe(true);
         const persistedManagedAttachment = {
             attachments: [
                 {

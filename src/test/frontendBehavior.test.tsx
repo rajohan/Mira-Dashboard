@@ -4163,6 +4163,23 @@ describe("Mira Dashboard frontend behavior", () => {
             kind: "text",
             url: "/api/chat/media/outgoing/agent%3Amain%3Amain/123e4567-e89b-42d3-a456-426614174000/full",
         });
+        const normalizedSignedAttachment = normalizeOpenClawHistoryMessage({
+            content: [
+                {
+                    attachment: {
+                        url: "https://files.example.test/report.csv?token=signed-value",
+                    },
+                    type: "attachment",
+                },
+            ],
+            role: "assistant",
+        });
+        expect(normalizedSignedAttachment.attachments?.[0]).toMatchObject({
+            fileName: "report.csv",
+            kind: "text",
+            mimeType: "text/csv",
+            url: "https://files.example.test/report.csv?token=signed-value",
+        });
         const normalizedManagedSvgAttachment = normalizeOpenClawHistoryMessage({
             content: [
                 {
