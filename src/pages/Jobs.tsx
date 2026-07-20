@@ -2,6 +2,7 @@ import { Play, RotateCw, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { CronJobDetails, CronJobList } from "../components/features/cron";
+import { JobDisableIntentStatus } from "../components/features/jobs/JobDisableIntentStatus";
 import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -290,17 +291,11 @@ function ScheduledJobDetails({
                         className="rounded-lg border border-primary-700 bg-primary-800/60 px-3 py-2 sm:border-0 sm:bg-transparent sm:p-0"
                     />
                     {job.enabled ? undefined : (
-                        <Button
-                            size="sm"
-                            variant="secondary"
+                        <JobDisableIntentStatus
+                            disableIntent={job.disableIntent}
                             disabled={updatePending}
-                            onClick={onConfigureDisable}
-                            className="w-full sm:w-auto"
-                        >
-                            {job.disableIntent
-                                ? "Edit disabled reason"
-                                : "Set disabled reason"}
-                        </Button>
+                            onConfigureDisable={onConfigureDisable}
+                        />
                     )}
                     <Button
                         size="sm"
@@ -318,26 +313,6 @@ function ScheduledJobDetails({
                         {runPending || job.isRunning ? "Running..." : "Run now"}
                     </Button>
                 </div>
-                {job.enabled ? undefined : (
-                    <div className="mt-3 rounded-lg bg-primary-800/60 px-3 py-2 text-xs text-primary-300">
-                        {job.disableIntent ? (
-                            <>
-                                <div className="font-medium text-primary-100">
-                                    {job.disableIntent.mode === "indefinite"
-                                        ? "Intentionally disabled indefinitely"
-                                        : `Intentionally disabled until ${formatDate(job.disableIntent.until)}`}
-                                </div>
-                                <div className="mt-1 text-primary-400">
-                                    {job.disableIntent.comment}
-                                </div>
-                            </>
-                        ) : (
-                            <div className="text-yellow-300">
-                                No intentional-disable reason is set; heartbeat will warn.
-                            </div>
-                        )}
-                    </div>
-                )}
             </div>
 
             <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
