@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { AlertCircle, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { sessionsCollection } from "../collections/sessions";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
@@ -163,15 +163,21 @@ export function Chat() {
         voiceFileInputReference,
     } = inputMedia;
 
-    const { data: sessions = [] } = useLiveQuery((query) =>
+    const { data: sessions } = useLiveQuery((query) =>
         query.from({ session: sessionsCollection })
     );
     const { data: agentsStatus } = useAgentsStatus();
     const agents = agentsStatus?.agents || [];
     selectedSessionKeyReference.current = selectedSessionKey;
 
-    const sortedSessions = sortSessionsByTypeAndActivity(sessions);
-    const sessionMap = new Map(sortedSessions.map((session) => [session.key, session]));
+    const sortedSessions = useMemo(
+        () => sortSessionsByTypeAndActivity(sessions ?? []),
+        [sessions]
+    );
+    const sessionMap = useMemo(
+        () => new Map(sortedSessions.map((session) => [session.key, session])),
+        [sortedSessions]
+    );
     const selectedSessionUpdatedAt = selectedSessionKey
         ? sessionMap.get(selectedSessionKey)?.updatedAt
         : undefined;
@@ -275,13 +281,16 @@ export function Chat() {
             return;
         }
 
-        if (!selectedSessionKey || !sessionMap.has(selectedSessionKey)) {
-            const fallbackSession = sortedSessions.find(
-                (session) => session.key && sessionMap.has(session.key)
+        const hasSelectedSession = sortedSessions.some(
+            (session) => session.key === selectedSessionKey
+        );
+        if (!selectedSessionKey || !hasSelectedSession) {
+            const fallbackSession = sortedSessions.find((session) =>
+                hasSessionKey(session)
             );
             setSelectedSessionKey(fallbackSession?.key || "");
         }
-    }, [requestedSessionKey, selectedSessionKey, sessionMap, sortedSessions]);
+    }, [requestedSessionKey, selectedSessionKey, sortedSessions]);
 
     useEffect(() => {
         setDeletedMessageKeys(
