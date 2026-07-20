@@ -675,7 +675,7 @@ export const taskRoutes = {
             if (body instanceof Response) return body;
             try {
                 const messageMd = optionalString(body.messageMd, "Message")?.trim();
-                if (id === undefined || !isValidAssignee(body.author) || !messageMd) {
+                if (id === undefined || !messageMd || !isValidAssignee(body.author)) {
                     return json({ error: "Invalid update payload" }, { status: 400 });
                 }
                 if (!database.prepare("SELECT id FROM tasks WHERE id = ?").get(id)) {

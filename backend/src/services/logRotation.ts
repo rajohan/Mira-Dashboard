@@ -370,12 +370,12 @@ function validateConfig(config: LogRotationConfig): void {
         const hasArchivePaths =
             Array.isArray(effectivePolicy.archivePaths) &&
             effectivePolicy.archivePaths.length > 0;
-        if (effectivePolicy.archiveOnly === true && !hasArchivePaths) {
+        if (!hasArchivePaths && effectivePolicy.archiveOnly === true) {
             throw new Error(
                 `Archive-only group ${group.name} needs at least one archivePaths pattern`
             );
         }
-        if (effectivePolicy.archiveOnly !== true && !hasPaths) {
+        if (!hasPaths && effectivePolicy.archiveOnly !== true) {
             throw new Error(`Group ${group.name} needs at least one path pattern`);
         }
         if (
@@ -1648,7 +1648,7 @@ export async function runLogRotationService(
         ...(options.verbose && { files: [] }),
     };
     const lock = await acquireLogRotationLock(options.isDryRun);
-    if (!options.isDryRun && !lock) {
+    if (!lock && !options.isDryRun) {
         summary.isOk = false;
         summary.errors.push({ message: "Log rotation is already running" });
         summary.finishedAt = dateToISOString(new Date());

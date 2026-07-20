@@ -64,7 +64,7 @@ export function lineEntriesFromLogRead(
             index >= firstCompleteLineIndex && line.trim() && !isLikelyLogFragment(line)
     );
     const firstTailIndex =
-        !options.includeBlankLines && firstUsableIndex !== -1
+        firstUsableIndex !== -1 && !options.includeBlankLines
             ? firstUsableIndex
             : firstCompleteLineIndex;
     const nonEmptyLineIndexes = rawLines
