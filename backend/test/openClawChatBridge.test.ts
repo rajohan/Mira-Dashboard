@@ -2634,6 +2634,124 @@ describe("OpenClaw chat bridge", () => {
         );
     });
 
+    it("keeps one ordered run when a live response resumes after Gateway reconnect", () => {
+        const provisionalRunId = "dashboard-chat-before-gateway-restart";
+        const providerRunId = "provider-after-gateway-restart";
+        const bridge = new OpenClawChatBridge();
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "thinking before restart" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.markGatewayDisconnected();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "thinking after restart" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.message",
+            {
+                message: { content: "steer after restart", role: "user" },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.recordEvent(
+            "session.tool",
+            {
+                name: "after-steer",
+                runId: providerRunId,
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual([
+            providerRunId,
+            providerRunId,
+            providerRunId,
+            undefined,
+            providerRunId,
+        ]);
+        expect(snapshot.events.map((event) => event.event)).toEqual([
+            "agent",
+            "agent",
+            "agent",
+            "session.message",
+            "session.tool",
+        ]);
+        expect(
+            snapshot.events
+                .filter((event) => event.event === "agent")
+                .map(
+                    (event) =>
+                        (event.payload as { data?: { delta?: string } }).data?.delta
+                )
+                .filter(Boolean)
+        ).toEqual(["thinking before restart", "thinking after restart"]);
+    });
+
+    it("does not join an interrupted run across a newer chat send", () => {
+        const provisionalRunId = "dashboard-chat-before-reconnect-send";
+        const providerRunId = "provider-after-reconnect-send";
+        const bridge = new OpenClawChatBridge();
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "interrupted work" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.markGatewayDisconnected();
+        bridge.captureRequestBoundary(MAIN);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            new Set(
+                bridge
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
     it("does not promote a hydrated provisional run across a new send boundary", () => {
         const store = new MemorySnapshotStore();
         const provisionalRunId = "dashboard-chat-before-new-send";

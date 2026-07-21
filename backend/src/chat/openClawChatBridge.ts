@@ -46,7 +46,7 @@ interface RetainedRun {
     completed: boolean;
     eventBytes: number[];
     events: OpenClawRuntimeEnvelope[];
-    restored: boolean;
+    interruptionEligible: boolean;
     runId: string;
     terminalSequence: number;
     totalBytes: number;
@@ -792,7 +792,7 @@ function isPromotableInterruptedDashboardRun(
         resumeDelay < -5000 ||
         resumeDelay > INTERRUPTED_RUN_PROMOTION_WINDOW_MS ||
         run.completed ||
-        !run.restored ||
+        !run.interruptionEligible ||
         !run.runId.startsWith("dashboard-chat-") ||
         isProvisionalRunId(providerRunId) ||
         !isStartingLifecycleEvent(envelope.event, envelope.payload) ||
@@ -1545,7 +1545,7 @@ export class OpenClawChatBridge {
                     ...sourceRun.events,
                 ]);
                 existing.completed ||= sourceRun.completed;
-                existing.restored ||= sourceRun.restored;
+                existing.interruptionEligible ||= sourceRun.interruptionEligible;
                 existing.terminalSequence = Math.max(
                     existing.terminalSequence,
                     sourceRun.terminalSequence
@@ -1891,7 +1891,7 @@ export class OpenClawChatBridge {
         if (existing) {
             this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
             existing.completed ||= provisional.completed;
-            existing.restored ||= provisional.restored;
+            existing.interruptionEligible ||= provisional.interruptionEligible;
             existing.terminalSequence = Math.max(
                 existing.terminalSequence,
                 provisional.terminalSequence
@@ -1935,7 +1935,10 @@ export class OpenClawChatBridge {
         }> = [];
         const requestBoundary = this.#latestRequestBoundary(sessionKey);
         for (const providerRun of runs.values()) {
-            if (!providerRun.restored || isProvisionalRunId(providerRun.runId)) {
+            if (
+                !providerRun.interruptionEligible ||
+                isProvisionalRunId(providerRun.runId)
+            ) {
                 continue;
             }
             const startingEnvelope = providerRun.events.findLast((envelope) => {
@@ -2229,7 +2232,7 @@ export class OpenClawChatBridge {
                 completed: false,
                 eventBytes: [],
                 events: [],
-                restored: !shouldPersist,
+                interruptionEligible: !shouldPersist,
                 runId,
                 terminalSequence: -1,
                 totalBytes: 0,
@@ -2388,6 +2391,17 @@ export class OpenClawChatBridge {
         });
         this.#enforceSessionLimit();
         this.#enforceReplayMemoryLimit();
+    }
+
+    /** Allows one interrupted live Dashboard run to resume under a provider run ID. */
+    markGatewayDisconnected(): void {
+        for (const runs of this.#runsBySession.values()) {
+            for (const run of runs.values()) {
+                if (!run.completed && run.runId.startsWith("dashboard-chat-")) {
+                    run.interruptionEligible = true;
+                }
+            }
+        }
     }
 
     /** Clears all replay state, for example after credentials change. */

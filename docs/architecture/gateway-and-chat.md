@@ -139,8 +139,10 @@ MIME is authoritative. If the browser omits MIME or reports the generic
 `application/octet-stream`, a recognized filename extension supplies the canonical
 MIME; a non-generic unsupported MIME must agree with that extension instead of
 being accepted by filename alone. JSON is accepted from its declared MIME even
-without a filename extension, and common browser ZIP aliases are normalized to
-`application/zip`. The normalized MIME is also used to rebuild the base64 data URL,
+without a filename extension, common browser ZIP aliases are normalized to
+`application/zip`, CSV's legacy Excel MIME is normalized only for `.csv`, and
+ZIP-reported OOXML packages are normalized only for `.docx`, `.xlsx`, or `.pptx`.
+The normalized MIME is also used to rebuild the base64 data URL,
 so empty-MIME images keep working in picker and optimistic message previews. SVG is
 classified as `image/svg+xml` for chat display, while its normal backend download
 remains attachment-only as described below. Validation errors are scoped to their
@@ -266,6 +268,15 @@ available until the next successful send for that session. An abandoned active
 run expires after six hours without an event. Successful `/new` or `/reset`,
 abort, session deletion, and Gateway credential changes clear the applicable
 replay cache.
+
+A Gateway transport disconnect marks only unfinished `dashboard-chat-*` runs as
+eligible for interrupted-run recovery. If the Gateway resumes the same response
+under a provider run ID, the bridge rewrites the provisional replay to that
+canonical ID before retaining the new lifecycle event. The promotion is allowed
+only for one unambiguous active run, inside the bounded restart window, and only
+when no newer `chat.send` request boundary exists. This keeps pre- and
+post-restart thinking, later steer messages, and tools in one ordered response
+without merging a genuinely new or concurrent send.
 
 The canonical reducer is ordered and idempotent. Run identifiers and aliases are
 always session-scoped. Snapshot gating applies only to the selected session, so
@@ -396,6 +407,9 @@ When changing chat event handling, test these cases:
 - snapshot gating never drops queued events for other sessions;
 - restart and reconnect restore active and latest completed thinking from
   SQLite;
+- a live Gateway restart promotes one interrupted provisional response to its
+  resumed provider run, while a newer send boundary and concurrent runs remain
+  separate;
 - main and ops sessions never share runtime replay state;
 - an initial history load follows all pages, while incomplete sequence metadata
   cannot advance an incremental cache watermark;
@@ -442,7 +456,8 @@ When changing chat event handling, test these cases:
   selects the next fallback without replacing a still-unresolved explicit URL key;
 - composer and picker drops share attachment validation, mismatched explicit MIME
   cannot bypass policy by filename, empty/generic MIME produces a normalized preview
-  data URL, JSON MIME works without a suffix, common ZIP aliases are canonicalized,
+  data URL, JSON MIME works without a suffix, common ZIP aliases and suffix-bound
+  CSV/OOXML aliases are canonicalized,
   and validation errors render only at their originating surface;
 - local and managed Gateway attachments preserve inline previews and an original
   download path without exposing Gateway credentials;

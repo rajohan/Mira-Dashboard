@@ -17,22 +17,28 @@ Run the relevant checks locally when possible:
 ```bash
 bun run lint
 bun run build
-bun run test
+bun run test:coverage
 ```
 
-For browser-facing changes, also run the relevant Playwright tests:
+Backend changes use the same checks from `backend/`:
 
 ```bash
-bun run test:e2e
+cd backend
+bun run lint
+bun run build
+bun run test:coverage
 ```
 
-If a check cannot be run locally, mention that in the pull request notes.
+Run focused tests while iterating, then run the applicable coverage suite before
+handoff. For visible behavior, add a short manual smoke result or screenshot. If
+a check cannot be run locally, explain why in the pull request.
 
 ## Pull request requirements
 
 Pull requests must satisfy the repository rules before merging:
 
 - Required status checks must pass.
+- Frontend and backend patch coverage must satisfy Codecov.
 - CodeQL/code scanning checks must pass.
 - Code owner review is required.
 - Conversations should be resolved before merge.

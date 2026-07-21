@@ -28,6 +28,22 @@ body:
               3. See ...
       validations:
           required: true
+    - type: input
+      id: version
+      attributes:
+          label: Version or commit
+          description: Dashboard version/commit, if known.
+          placeholder: abc1234 or the version shown in Settings
+      validations:
+          required: false
+    - type: textarea
+      id: environment
+      attributes:
+          label: Environment
+          description: Browser/device, viewport, route, session type, and relevant service state.
+          placeholder: Firefox on Android, /chat, main session, after Gateway reconnect
+      validations:
+          required: false
     - type: textarea
       id: expected
       attributes:
@@ -67,4 +83,4 @@ body:
       id: verification
       attributes:
           label: Verification notes
-          description: Any checks already run, if applicable.
+          description: Reproduction frequency, regression range, and any sanitized checks already run.

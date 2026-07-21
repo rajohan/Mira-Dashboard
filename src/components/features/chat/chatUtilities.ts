@@ -22,6 +22,12 @@ const CHAT_ATTACHMENT_MIME_TYPE_ALIASES = new Map([
     ["application/x-zip", "application/zip"],
     ["application/x-zip-compressed", "application/zip"],
 ]);
+const CHAT_ATTACHMENT_EXTENSION_MIME_ALIASES = new Map<string, ReadonlySet<string>>([
+    [".csv", new Set(["application/vnd.ms-excel"])],
+    [".docx", new Set(["application/zip"])],
+    [".xlsx", new Set(["application/zip"])],
+    [".pptx", new Set(["application/zip"])],
+]);
 const GENERIC_ATTACHMENT_MIME_TYPE = "application/octet-stream";
 const CHAT_ATTACHMENT_EXTENSION_MIME_TYPES = new Map<string, string>([
     [".png", "image/png"],
@@ -84,6 +90,20 @@ function declaredChatAttachmentMimeType(type: string): string {
     return CHAT_ATTACHMENT_MIME_TYPE_ALIASES.get(mimeType) ?? mimeType;
 }
 
+/** Normalizes browser/OS MIME aliases that are safe only for a matching suffix. */
+function normalizedChatAttachmentMimeType(file: Pick<File, "name" | "type">): string {
+    const declaredMimeType = declaredChatAttachmentMimeType(file.type);
+    const extension = chatAttachmentExtension(file.name);
+    const extensionMimeType = CHAT_ATTACHMENT_EXTENSION_MIME_TYPES.get(extension);
+    if (
+        extensionMimeType &&
+        CHAT_ATTACHMENT_EXTENSION_MIME_ALIASES.get(extension)?.has(declaredMimeType)
+    ) {
+        return extensionMimeType;
+    }
+    return declaredMimeType;
+}
+
 /** Returns whether OpenClaw intentionally excludes this video attachment. */
 export function isVideoAttachment(file: Pick<File, "name" | "type">): boolean {
     const mimeType = file.type.trim().toLowerCase();
@@ -98,7 +118,7 @@ export function isVideoAttachment(file: Pick<File, "name" | "type">): boolean {
 
 /** Returns whether a selected or dropped file matches the chat picker policy. */
 export function isSupportedChatAttachment(file: Pick<File, "name" | "type">): boolean {
-    const mimeType = declaredChatAttachmentMimeType(file.type);
+    const mimeType = normalizedChatAttachmentMimeType(file);
     if (
         CHAT_ATTACHMENT_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix)) ||
         CHAT_ATTACHMENT_EXACT_MIME_TYPES.has(mimeType)
@@ -1022,7 +1042,7 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 
 /** Performs display MIME type. */
 export function displayMimeType(file: File): string {
-    const declaredMimeType = declaredChatAttachmentMimeType(file.type);
+    const declaredMimeType = normalizedChatAttachmentMimeType(file);
     if (declaredMimeType && declaredMimeType !== GENERIC_ATTACHMENT_MIME_TYPE) {
         return declaredMimeType;
     }

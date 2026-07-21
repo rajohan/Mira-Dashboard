@@ -916,6 +916,7 @@ function init(token: string): void {
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
+        chatReplayState.bridge.markGatewayDisconnected();
         chatReplayState.bridge.flush();
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });

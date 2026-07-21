@@ -251,6 +251,71 @@ describe("chat input media", () => {
         expect(result.current.attachmentError).toBeUndefined();
     });
 
+    it("accepts only suffix-matched CSV and OOXML MIME aliases", async () => {
+        const { result } = renderHook(() =>
+            useChatInputMedia({
+                onError: jest.fn(),
+                sessionKey: "session-a",
+                setDraft: jest.fn(),
+            })
+        );
+
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["csv"], "legacy.csv", {
+                        type: "application/vnd.ms-excel",
+                    }),
+                    new File(["docx"], "report.docx", {
+                        type: "application/zip",
+                    }),
+                    new File(["xlsx"], "workbook.xlsx", {
+                        type: "application/x-zip-compressed",
+                    }),
+                    new File(["pptx"], "slides.pptx", {
+                        type: "application/zip",
+                    }),
+                    new File(["spoof"], "spoofed.exe", {
+                        type: "application/vnd.ms-excel",
+                    }),
+                ])
+            );
+        });
+
+        expect(
+            result.current.attachments.map(({ fileName, kind, mimeType }) => ({
+                fileName,
+                kind,
+                mimeType,
+            }))
+        ).toEqual([
+            { fileName: "legacy.csv", kind: "text", mimeType: "text/csv" },
+            {
+                fileName: "report.docx",
+                kind: "file",
+                mimeType:
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            },
+            {
+                fileName: "workbook.xlsx",
+                kind: "file",
+                mimeType:
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            },
+            {
+                fileName: "slides.pptx",
+                kind: "file",
+                mimeType:
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            },
+        ]);
+        expect(result.current.attachmentError).toEqual({
+            message:
+                "Skipped unsupported files: spoofed.exe. Choose images, audio, PDFs, text, ZIP, or Office documents.",
+            source: "composer",
+        });
+    });
+
     it("transcribes voice files and reports provider and input failures", async () => {
         const originalFetch = fetch;
         const onError = jest.fn();

@@ -36,6 +36,15 @@ function runAnimationFrames(count: number): void {
     }
 }
 
+function runQueuedAnimationFrames(limit = 10): void {
+    for (let index = 0; animationFrameState.frames.size > 0; index += 1) {
+        if (index >= limit) {
+            throw new Error("Animation frame queue did not settle");
+        }
+        runNextAnimationFrame();
+    }
+}
+
 function chatRow(key: string, role: string): ChatRow {
     return {
         key,
@@ -537,20 +546,20 @@ describe("chat scroll", () => {
             clientHeight: { configurable: true, value: 300 },
             scrollHeight: { configurable: true, value: 1000 },
         });
-        act(() => result.current.handleUserScrollIntent());
         container.scrollTop = 700;
         result.current.messagesContainerReference.current = container;
 
         rerender({ layoutKey: "0:Unsupported attachment" });
 
+        runAnimationFrames(3);
         expect(container.scrollTop).toBe(1000);
         expect(stickToBottomReference.current).toBe(true);
-        runAnimationFrames(3);
 
         stickToBottomReference.current = false;
         container.scrollTop = 250;
         rerender({ layoutKey: "0:A longer transport error" });
 
+        runQueuedAnimationFrames();
         expect(container.scrollTop).toBe(250);
         expect(animationFrameState.frames.size).toBe(0);
         unmount();
