@@ -712,16 +712,10 @@ describe("gateway behavior", () => {
             () => gateway.shutdown()
         );
 
-        const disconnectedBridges: OpenClawChatBridge[] = [];
-        const markGatewayDisconnected = jest
-            .spyOn(OpenClawChatBridge.prototype, "markGatewayDisconnected")
-            .mockImplementation(function (
-                this: OpenClawChatBridge,
-                disconnectedAt?: number
-            ) {
-                disconnectedBridges.push(this);
-                return disconnectedAt;
-            });
+        const markGatewayDisconnected = jest.spyOn(
+            OpenClawChatBridge.prototype,
+            "markGatewayDisconnected"
+        );
         cleanupCallbacks.push(() => markGatewayDisconnected.mockRestore());
 
         gateway.init("token-one");
@@ -732,8 +726,10 @@ describe("gateway behavior", () => {
 
         gateway.init("token-two");
 
-        expect(disconnectedBridges).toHaveLength(2);
-        expect(disconnectedBridges[1]).toBe(disconnectedBridges[0]);
+        expect(markGatewayDisconnected).toHaveBeenCalledTimes(2);
+        expect(markGatewayDisconnected.mock.contexts[1]).toBe(
+            markGatewayDisconnected.mock.contexts[0]
+        );
         expect(fakeClients.at(-1)).not.toBe(firstClient);
     });
 
