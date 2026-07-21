@@ -36,6 +36,15 @@ function runAnimationFrames(count: number): void {
     }
 }
 
+function runQueuedAnimationFrames(limit = 10): void {
+    for (let index = 0; animationFrameState.frames.size > 0; index += 1) {
+        if (index >= limit) {
+            throw new Error("Animation frame queue did not settle");
+        }
+        runNextAnimationFrame();
+    }
+}
+
 function chatRow(key: string, role: string): ChatRow {
     return {
         key,
@@ -428,6 +437,131 @@ describe("chat scroll", () => {
         runNextAnimationFrame();
         expect(container.scrollTop).toBe(700);
         runAnimationFrames(3);
+        expect(animationFrameState.frames.size).toBe(0);
+        unmount();
+    });
+
+    it("settles an explicit follow after the virtualized tail grows", () => {
+        const stickToBottomReference = { current: true };
+        const { result, unmount } = renderHook(() =>
+            useChatScroll(
+                [chatRow("answer", "assistant")],
+                "agent:main:main",
+                jest.fn(),
+                stickToBottomReference
+            )
+        );
+        let scrollHeight = 500;
+        let scrollTop = 0;
+        const scrollWrites: number[] = [];
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, get: () => scrollHeight },
+            scrollTop: {
+                configurable: true,
+                get: () => scrollTop,
+                set: (value: number) => {
+                    scrollTop = value;
+                    scrollWrites.push(value);
+                },
+            },
+        });
+        result.current.messagesContainerReference.current = container;
+        runAnimationFrames(4);
+
+        scrollTop = 150;
+        scrollWrites.length = 0;
+        stickToBottomReference.current = false;
+        act(() => result.current.followToBottom());
+        expect(stickToBottomReference.current).toBe(true);
+
+        runNextAnimationFrame();
+        expect(scrollWrites).toEqual([500]);
+        scrollHeight = 760;
+        runAnimationFrames(3);
+        expect(scrollWrites).toEqual([500, 760]);
+        expect(scrollTop).toBe(760);
+        expect(animationFrameState.frames.size).toBe(0);
+
+        unmount();
+    });
+
+    it("keeps sticky bottom aligned when attachment chips resize the composer", () => {
+        const rows = [chatRow("assistant", "assistant")];
+        const stickToBottomReference = { current: true };
+        const { result, rerender, unmount } = renderHook(
+            ({ attachmentCount }: { attachmentCount: number }) =>
+                useChatScroll(
+                    rows,
+                    "agent:main:main",
+                    jest.fn(),
+                    stickToBottomReference,
+                    false,
+                    attachmentCount
+                ),
+            { initialProps: { attachmentCount: 0 } }
+        );
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 300 },
+            scrollHeight: { configurable: true, value: 1000 },
+        });
+        act(() => result.current.handleUserScrollIntent());
+        container.scrollTop = 700;
+        result.current.messagesContainerReference.current = container;
+
+        rerender({ attachmentCount: 1 });
+
+        expect(container.scrollTop).toBe(1000);
+        expect(stickToBottomReference.current).toBe(true);
+        runAnimationFrames(3);
+
+        stickToBottomReference.current = false;
+        container.scrollTop = 250;
+        rerender({ attachmentCount: 2 });
+
+        expect(container.scrollTop).toBe(250);
+        expect(animationFrameState.frames.size).toBe(0);
+        unmount();
+    });
+
+    it("keeps sticky bottom aligned when the global error changes layout", () => {
+        const rows = [chatRow("assistant", "assistant")];
+        const stickToBottomReference = { current: true };
+        const { result, rerender, unmount } = renderHook(
+            ({ layoutKey }: { layoutKey: string }) =>
+                useChatScroll(
+                    rows,
+                    "agent:main:main",
+                    jest.fn(),
+                    stickToBottomReference,
+                    false,
+                    layoutKey
+                ),
+            { initialProps: { layoutKey: "0:" } }
+        );
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+            clientHeight: { configurable: true, value: 300 },
+            scrollHeight: { configurable: true, value: 1000 },
+        });
+        container.scrollTop = 700;
+        result.current.messagesContainerReference.current = container;
+
+        rerender({ layoutKey: "0:Unsupported attachment" });
+
+        expect(container.scrollTop).toBe(1000);
+        expect(stickToBottomReference.current).toBe(true);
+        runAnimationFrames(3);
+
+        stickToBottomReference.current = false;
+        container.scrollTop = 250;
+        rerender({ layoutKey: "0:A longer transport error" });
+
+        expect(container.scrollTop).toBe(250);
+        runQueuedAnimationFrames();
+        expect(container.scrollTop).toBe(250);
         expect(animationFrameState.frames.size).toBe(0);
         unmount();
     });

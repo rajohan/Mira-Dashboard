@@ -54,9 +54,10 @@ describe("chat input media", () => {
             fileName: "file-0.txt",
             kind: "text",
         });
-        expect(onError).toHaveBeenCalledWith(
-            `Only ${MAX_ATTACHMENTS} attachments can be sent at once.`
-        );
+        expect(result.current.attachmentError).toEqual({
+            message: `Only ${MAX_ATTACHMENTS} attachments can be sent at once.`,
+            source: "composer",
+        });
         expect(input.value).toBe("");
 
         act(() => {
@@ -68,11 +69,14 @@ describe("chat input media", () => {
 
         await act(async () => {
             await result.current.handleFilesSelected(
-                fileList([fakeLargeFile("large.bin")])
+                fileList([fakeLargeFile("large.txt")])
             );
         });
         expect(result.current.attachments).toEqual([]);
-        expect(onError.mock.calls.at(-1)?.[0]).toContain("large.bin is too large");
+        expect(result.current.attachmentError).toEqual({
+            message: expect.stringContaining("large.txt is too large"),
+            source: "composer",
+        });
     });
 
     it("reserves attachment capacity across concurrent selections", async () => {
@@ -130,9 +134,11 @@ describe("chat input media", () => {
             "voice.webm",
             "notes.txt",
         ]);
-        expect(onError).toHaveBeenLastCalledWith(
-            "Skipped video files: clip.mp4, movie.webm. OpenClaw chat supports images and non-video files."
-        );
+        expect(result.current.attachmentError).toEqual({
+            message:
+                "Skipped video files: clip.mp4, movie.webm. Choose images, audio, PDFs, text, ZIP, or Office documents.",
+            source: "composer",
+        });
         expect(input.value).toBe("");
 
         act(() => result.current.clearAttachments());
@@ -142,9 +148,172 @@ describe("chat input media", () => {
             );
         });
         expect(result.current.attachments).toEqual([]);
-        expect(onError).toHaveBeenLastCalledWith(
-            "Skipped video files: only-video.mov. OpenClaw chat supports images and non-video files."
+        expect(result.current.attachmentError).toEqual({
+            message:
+                "Skipped video files: only-video.mov. Choose images, audio, PDFs, text, ZIP, or Office documents.",
+            source: "composer",
+        });
+    });
+
+    it("rejects dropped file types outside the attachment picker policy", async () => {
+        const onError = jest.fn();
+        const { result } = renderHook(() =>
+            useChatInputMedia({ onError, sessionKey: "session-a", setDraft: jest.fn() })
         );
+
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["app"], "installer.exe", {
+                        type: "application/x-msdownload",
+                    }),
+                    new File(["data"], "payload.bin", {
+                        type: "application/octet-stream",
+                    }),
+                    new File(["app"], "spoofed.txt", {
+                        type: "application/x-msdownload",
+                    }),
+                    new File(["report"], "report.pdf", {
+                        type: "application/pdf",
+                    }),
+                    new File(["image"], "photo.png"),
+                    new File(["generic-image"], "generic.png", {
+                        type: "application/octet-stream",
+                    }),
+                    new File(["vector"], "diagram.svg"),
+                    new File(["audio"], "clip.mp3"),
+                    new File(["pdf"], "scan.pdf"),
+                    new File(["json"], "extensionless-json", {
+                        type: "application/json",
+                    }),
+                    new File(["zip"], "archive.zip", {
+                        type: "application/x-zip-compressed",
+                    }),
+                ])
+            );
+        });
+
+        expect(
+            result.current.attachments.map(({ fileName, kind, mimeType }) => ({
+                fileName,
+                kind,
+                mimeType,
+            }))
+        ).toEqual([
+            { fileName: "report.pdf", kind: "file", mimeType: "application/pdf" },
+            { fileName: "photo.png", kind: "image", mimeType: "image/png" },
+            { fileName: "generic.png", kind: "image", mimeType: "image/png" },
+            { fileName: "diagram.svg", kind: "image", mimeType: "image/svg+xml" },
+            { fileName: "clip.mp3", kind: "file", mimeType: "audio/mpeg" },
+            { fileName: "scan.pdf", kind: "file", mimeType: "application/pdf" },
+            {
+                fileName: "extensionless-json",
+                kind: "text",
+                mimeType: "application/json",
+            },
+            { fileName: "archive.zip", kind: "file", mimeType: "application/zip" },
+        ]);
+        const errorMessage =
+            "Skipped unsupported files: installer.exe, payload.bin, spoofed.txt. Choose images, audio, PDFs, text, ZIP, or Office documents.";
+        expect(result.current.attachmentError).toEqual({
+            message: errorMessage,
+            source: "composer",
+        });
+        expect(onError).not.toHaveBeenCalledWith(errorMessage);
+        expect(
+            result.current.attachments.find(({ fileName }) => fileName === "photo.png")
+                ?.dataUrl
+        ).toStartWith("data:image/png;base64,");
+        expect(
+            result.current.attachments.find(({ fileName }) => fileName === "generic.png")
+                ?.dataUrl
+        ).toStartWith("data:image/png;base64,");
+
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["app"], "modal-installer.exe", {
+                        type: "application/x-msdownload",
+                    }),
+                ]),
+                "picker"
+            );
+        });
+        expect(result.current.attachmentError).toEqual({
+            message:
+                "Skipped unsupported files: modal-installer.exe. Choose images, audio, PDFs, text, ZIP, or Office documents.",
+            source: "picker",
+        });
+
+        act(() => result.current.clearAttachmentError("composer"));
+        expect(result.current.attachmentError?.source).toBe("picker");
+        act(() => result.current.clearAttachmentError("picker"));
+        expect(result.current.attachmentError).toBeUndefined();
+    });
+
+    it("accepts only suffix-matched CSV and OOXML MIME aliases", async () => {
+        const { result } = renderHook(() =>
+            useChatInputMedia({
+                onError: jest.fn(),
+                sessionKey: "session-a",
+                setDraft: jest.fn(),
+            })
+        );
+
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["csv"], "legacy.csv", {
+                        type: "application/vnd.ms-excel",
+                    }),
+                    new File(["docx"], "report.docx", {
+                        type: "application/zip",
+                    }),
+                    new File(["xlsx"], "workbook.xlsx", {
+                        type: "application/x-zip-compressed",
+                    }),
+                    new File(["pptx"], "slides.pptx", {
+                        type: "application/zip",
+                    }),
+                    new File(["spoof"], "spoofed.exe", {
+                        type: "application/vnd.ms-excel",
+                    }),
+                ])
+            );
+        });
+
+        expect(
+            result.current.attachments.map(({ fileName, kind, mimeType }) => ({
+                fileName,
+                kind,
+                mimeType,
+            }))
+        ).toEqual([
+            { fileName: "legacy.csv", kind: "text", mimeType: "text/csv" },
+            {
+                fileName: "report.docx",
+                kind: "file",
+                mimeType:
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            },
+            {
+                fileName: "workbook.xlsx",
+                kind: "file",
+                mimeType:
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            },
+            {
+                fileName: "slides.pptx",
+                kind: "file",
+                mimeType:
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            },
+        ]);
+        expect(result.current.attachmentError).toEqual({
+            message:
+                "Skipped unsupported files: spoofed.exe. Choose images, audio, PDFs, text, ZIP, or Office documents.",
+            source: "composer",
+        });
     });
 
     it("transcribes voice files and reports provider and input failures", async () => {

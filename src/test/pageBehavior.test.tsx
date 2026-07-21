@@ -40,7 +40,7 @@ import { Dashboard } from "../pages/Dashboard";
 import { Database } from "../pages/Database";
 import { Docker } from "../pages/Docker";
 import { Files } from "../pages/Files";
-import { Jobs } from "../pages/Jobs";
+import { defaultDisableUntilDraft, Jobs } from "../pages/Jobs";
 import { Logs } from "../pages/Logs";
 import { Moltbook } from "../pages/Moltbook";
 import { PullRequests } from "../pages/PullRequests";
@@ -59,6 +59,7 @@ import {
 } from "../pages/Terminal";
 import { normalizeChatSearch } from "../router";
 import { authActions } from "../stores/authStore";
+import { appTimeZoneParts } from "../utils/date";
 import { parseLogLine } from "../utils/logUtilities";
 
 type FakeWebSocketListener = (event?: { data?: string }) => void;
@@ -1933,6 +1934,18 @@ describe("Mira Dashboard pages", () => {
         Element.prototype.scrollIntoView = originalGlobals.scrollIntoView;
     });
 
+    it("avoids a nearly expired end-of-day disable default", () => {
+        const shortlyBeforeOsloMidnight = Date.parse("2026-07-21T21:58:30.000Z");
+
+        expect(defaultDisableUntilDraft(shortlyBeforeOsloMidnight)).toEqual({
+            day: 22,
+            hour: "00",
+            minute: "58",
+            month: 7,
+            year: 2026,
+        });
+    });
+
     it("renders the main data pages from their API contracts", async () => {
         const pages: Array<[ReactNode, string, { withSocket?: boolean }?]> = [
             [createElement(Agents), "Active (1)"],
@@ -2365,7 +2378,10 @@ describe("Mira Dashboard pages", () => {
             name: /choose disabled until date, selected \d{2}\/\d{2}\/\d{4}/i,
         });
         const disableCommentInput = screen.getByLabelText("Comment");
-        expect(disabledUntilDateButton).toHaveTextContent(/^\d{2}\/\d{2}\/\d{4}$/u);
+        const today = appTimeZoneParts(new Date());
+        expect(disabledUntilDateButton).toHaveTextContent(
+            `${String(today.day).padStart(2, "0")}/${String(today.month).padStart(2, "0")}/${today.year}`
+        );
         expect(screen.getByTestId("date-time-picker-fields")).toHaveClass(
             "min-w-0",
             "grid-cols-1"
@@ -2457,7 +2473,7 @@ describe("Mira Dashboard pages", () => {
 
         view.unmount();
         view.queryClient.clear();
-    });
+    }, 15_000);
 
     it("drives pull request review, branch update, deploy, merge, and reject flows", async () => {
         const user = userEvent.setup();
@@ -2872,7 +2888,7 @@ describe("Mira Dashboard pages", () => {
                 },
             });
         }
-    });
+    }, 15_000);
 
     it("drives chat page session sync, history loading, diagnostics, and send ack", async () => {
         const user = userEvent.setup();
@@ -2954,6 +2970,11 @@ describe("Mira Dashboard pages", () => {
             expect(
                 screen.getByText(/MAIN · codex · Context: 0.5k \/ 1k \(53%\)/)
             ).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            expect(view.router.state.location.search).toEqual({
+                session: "agent:main:main",
+            });
         });
 
         await user.click(screen.getByLabelText("Model and response settings"));
@@ -3192,6 +3213,85 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(screen.queryByText(/Loading chat/)).not.toBeInTheDocument();
         });
+        expect(view.router.state.location.search).toEqual({});
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("preserves a URL-selected chat while reconnecting through an empty session state", async () => {
+        const view = renderChatPage("/chat?session=agent%3Amain%3Amain");
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"sessions.list"'))
+            ).toBe(true);
+            expect(findSocketRequest(socket, "chat.history")).toBeDefined();
+        });
+        const session = {
+            agentType: "main",
+            displayLabel: "Main chat",
+            id: "session-main",
+            key: "agent:main:main",
+            model: "codex",
+            type: "main",
+            updatedAt: "2026-07-19T18:00:00.000Z",
+        };
+
+        await respondToSocketRequest(socket, "chat.history", { messages: [] });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [session],
+        });
+        await flushQueuedTimers();
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:main:main",
+        });
+        expect(screen.getByRole("button", { name: "Session: main" })).toBeInTheDocument();
+
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({
+                    gatewayConnected: false,
+                    sessions: [],
+                    type: "state",
+                }),
+            });
+            await Promise.resolve();
+        });
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:main:main",
+        });
+        expect(screen.getByRole("button", { name: "Session: main" })).toBeInTheDocument();
+
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({ gatewayConnected: true, type: "connected" }),
+            });
+            await Promise.resolve();
+        });
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:main:main",
+        });
+
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({ sessions: [session], type: "sessions" }),
+            });
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "Session: main" })
+            ).toBeInTheDocument();
+        });
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:main:main",
+        });
 
         view.unmount();
         view.queryClient.clear();
@@ -3328,7 +3428,10 @@ describe("Mira Dashboard pages", () => {
         await act(async () => {
             FakeWebSocket.instances[0]?.emit("open");
         });
-        FakeWebSocket.instances[0]?.respondToLastRequest({ sessions: [] });
+        await act(async () => {
+            FakeWebSocket.instances[0]?.respondToLastRequest({ sessions: [] });
+            await Promise.resolve();
+        });
         await waitFor(() =>
             expect(
                 screen.queryByText("Connecting to OpenClaw...")

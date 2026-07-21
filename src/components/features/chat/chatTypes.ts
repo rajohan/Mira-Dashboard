@@ -70,6 +70,15 @@ export interface ChatSendAttachment {
     kind: "image" | "text" | "file";
 }
 
+/** Identifies where files were added so validation feedback stays local. */
+export type ChatAttachmentInputSource = "composer" | "picker";
+
+/** Represents attachment validation feedback and its presentation target. */
+export interface ChatAttachmentError {
+    message: string;
+    source: ChatAttachmentInputSource;
+}
+
 /** Returns a lowercase MIME type without optional parameters. */
 export function normalizeChatMimeType(mimeType: string): string {
     return mimeType.split(";", 1)[0]?.trim().toLowerCase() || "";

@@ -63,6 +63,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
     }> = [];
     isStarted = false;
     isStopped = false;
+    closeOnStop = false;
 
     constructor(readonly options: OpenClawGatewayClientOptions) {
         fakeClients.push(this);
@@ -74,6 +75,9 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
     stop(): void {
         this.isStopped = true;
+        if (this.closeOnStop) {
+            this.options.onClose?.(1000, "Gateway client stopped");
+        }
     }
 
     async request(
@@ -488,6 +492,125 @@ describe("gateway behavior", () => {
         });
     });
 
+    it("keeps a continued response ordered across a live Gateway reconnect", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("OPENCLAW_GATEWAY_URL");
+        const root = createTemporaryRoot("mira-gateway-live-reconnect-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+        process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-live-reconnect.test";
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+        const socket = new FakeDashboardSocket();
+        gateway.handleDashboardClient(socket);
+
+        gateway.init("live-reconnect-token");
+        const client = fakeClients.at(-1);
+        client?.options.onHelloOk?.({ type: "hello-ok" });
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "thinking before restart" },
+                runId: "dashboard-chat-before-restart",
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+            },
+        });
+
+        client?.options.onClose?.(1006, "Gateway restarted");
+        client?.options.onHelloOk?.({ type: "hello-ok" });
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { phase: "start" },
+                runId: "provider-after-restart",
+                sessionKey: "agent:main:main",
+                stream: "lifecycle",
+            },
+        });
+        client?.options.onEvent?.({
+            event: "agent",
+            payload: {
+                data: { delta: "thinking after restart" },
+                runId: "provider-after-restart",
+                sessionKey: "agent:main:main",
+                stream: "thinking",
+            },
+        });
+        client?.options.onEvent?.({
+            event: "session.message",
+            payload: {
+                message: { content: "steer after restart", role: "user" },
+                sessionKey: "agent:main:main",
+            },
+        });
+        client?.options.onEvent?.({
+            event: "session.tool",
+            payload: {
+                name: "after-steer",
+                runId: "provider-after-restart",
+                sessionKey: "agent:main:main",
+            },
+        });
+
+        socket.emitMessage({
+            id: "runtime-snapshot-live-reconnect",
+            method: "chat.runtimeSnapshot",
+            params: { sessionKey: "agent:main:main" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) =>
+                raw.includes('"id":"runtime-snapshot-live-reconnect"')
+            )
+        );
+        const events = socket.sent
+            .map(
+                (raw) =>
+                    JSON.parse(raw) as {
+                        id?: string;
+                        payload?: {
+                            events?: Array<{
+                                event?: string;
+                                payload?: { runId?: string };
+                            }>;
+                        };
+                    }
+            )
+            .find((message) => message.id === "runtime-snapshot-live-reconnect")
+            ?.payload?.events;
+
+        expect(events?.map((event) => event.payload?.runId)).toEqual([
+            "provider-after-restart",
+            "provider-after-restart",
+            "provider-after-restart",
+            undefined,
+            "provider-after-restart",
+        ]);
+        expect(events?.map((event) => event.event)).toEqual([
+            "agent",
+            "agent",
+            "agent",
+            "session.message",
+            "session.tool",
+        ]);
+    });
+
     it("rotates the chat replay identity when Gateway credentials change", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
@@ -562,6 +685,58 @@ describe("gateway behavior", () => {
             runtimeGeneration: secondIdentity?.runtimeGeneration,
         });
         socket.close();
+    });
+
+    it("keeps synchronous close callbacks in the closing client's replay scope", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("OPENCLAW_GATEWAY_URL");
+        const root = createTemporaryRoot("mira-gateway-replay-scope-close-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+        process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-replay-scope-close.test";
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+
+        const markGatewayDisconnected = jest.spyOn(
+            OpenClawChatBridge.prototype,
+            "markGatewayDisconnected"
+        );
+        cleanupCallbacks.push(() => markGatewayDisconnected.mockRestore());
+
+        gateway.init("token-one");
+        const firstClient = fakeClients.at(-1);
+        expect(firstClient).toBeDefined();
+        firstClient?.options.onClose?.(1006, "Gateway restarted");
+        firstClient!.closeOnStop = true;
+
+        gateway.init("token-two");
+
+        expect(markGatewayDisconnected).toHaveBeenCalledTimes(3);
+        expect(markGatewayDisconnected.mock.contexts[1]).toBe(
+            markGatewayDisconnected.mock.contexts[0]
+        );
+        expect(markGatewayDisconnected.mock.contexts[2]).toBe(
+            markGatewayDisconnected.mock.contexts[0]
+        );
+        expect(fakeClients.at(-1)).not.toBe(firstClient);
+
+        firstClient?.options.onClose?.(1000, "Delayed close callback");
+        expect(markGatewayDisconnected).toHaveBeenCalledTimes(3);
     });
 
     it("normalizes sessions, enriches events, and hydrates omitted chat images without a real gateway", async () => {

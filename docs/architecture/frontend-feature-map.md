@@ -44,8 +44,10 @@ cannot infer.
   jobs and OpenClaw cron jobs.
 - Disabling a Dashboard or OpenClaw cron job opens an intent form. A required
   comment and either a future expiry or an indefinite mode controls heartbeat
-  warning suppression; enabling the job clears the intent. OpenClaw disable
-  metadata is job-scoped, so it also works without a linked task.
+  warning suppression; enabling the job clears the intent. Temporary disables
+  default to 23:59 on today's Oslo date, unless less than five minutes remain,
+  in which case the picker starts one hour ahead. OpenClaw disable metadata is
+  job-scoped, so it also works without a linked task.
 - Dashboard cache badges poll the lightweight `/api/cache/status` endpoint.
   Heartbeat automation uses `/api/cache/heartbeat`; it is not the UI polling
   endpoint.
@@ -92,6 +94,10 @@ For destructive actions:
 - Chat composer settings own model, thinking level, speed, and context
   compaction. Thinking, tool visibility, and retaining thinking after the final
   answer are independent persisted toggles.
+- Chat attachments support direct composer drops and a dedicated picker with
+  selection, drop, preview, and removal. File-policy errors remain scoped to the
+  surface that received the files, while supported empty/generic MIME values are
+  normalized before preview and transport.
 - The quota card shows provider-specific windows. OpenAI may expose a weekly
   window with an optional five-hour window; a missing five-hour value means
   unlimited, not a parse failure.
@@ -120,5 +126,5 @@ bun run format:check
 git diff --check
 ```
 
-Run Playwright or screenshot checks for visual changes that are hard to assert
-with DOM tests.
+Use the managed-browser DOM/screenshot smoke workflow for visual changes that
+are hard to assert with component tests.

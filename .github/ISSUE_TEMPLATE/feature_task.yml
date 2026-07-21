@@ -20,6 +20,13 @@ body:
           description: Why this matters, links to prior work, constraints, or screenshots.
       validations:
           required: false
+    - type: textarea
+      id: scope
+      attributes:
+          label: Scope and non-goals
+          description: State what is included and what should deliberately remain unchanged.
+      validations:
+          required: false
     - type: checkboxes
       id: type
       attributes:
@@ -68,3 +75,10 @@ body:
       attributes:
           label: Suggested verification
           description: Tests, builds, screenshots, service health checks, or manual smoke checks.
+    - type: textarea
+      id: rollout
+      attributes:
+          label: Rollout and compatibility
+          description: Deployment order, data/config impact, backward compatibility, or rollback notes.
+      validations:
+          required: false

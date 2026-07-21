@@ -36,6 +36,7 @@ import { useChatScroll } from "../components/features/chat/useChatScroll";
 import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { useAgentsStatus } from "../hooks/useAgents";
+import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import type { Session } from "../types/session";
 import {
     formatSessionType,
@@ -85,7 +86,9 @@ export function Chat() {
     const search = useSearch({ strict: false }) as { session?: string };
     const requestedSessionKey = search.session?.trim() || "";
     const transport = useOpenClawChatTransport();
+    const { hasConfirmedSessionList } = useOpenClawSocket();
     const { error, isConnected } = transport;
+    const availableSessionKeysReference = useRef<Set<string>>(new Set());
     const selectedSessionKeyReference = useRef("");
     const previousRequestedSessionKeyReference = useRef(requestedSessionKey);
     const shouldStickToBottomReference = useRef(true);
@@ -125,24 +128,11 @@ export function Chat() {
     const [keepThinkingAfterFinal, setKeepThinkingAfterFinal] = useState(
         () => readStoredChatDiagnosticVisibility().keepThinkingAfterFinal
     );
-    const visibleError =
-        sendError || (error === dismissedTransportError ? undefined : error);
-
     useEffect(() => {
         if (!error) {
             setDismissedTransportError(undefined);
         }
     }, [error]);
-
-    const dismissVisibleError = () => {
-        if (sendError) {
-            setSendError(undefined);
-            return;
-        }
-        if (error) {
-            setDismissedTransportError(error);
-        }
-    };
 
     const inputMedia = useChatInputMedia({
         onError: setSendError,
@@ -150,8 +140,10 @@ export function Chat() {
         setDraft,
     });
     const {
+        attachmentError,
         attachments,
         attachmentsReference,
+        clearAttachmentError,
         clearAttachments,
         fileInputReference,
         handleFilesSelected,
@@ -162,6 +154,28 @@ export function Chat() {
         removeAttachment,
         voiceFileInputReference,
     } = inputMedia;
+    const composerAttachmentError =
+        attachmentError?.source === "composer" ? attachmentError.message : undefined;
+    const attachmentPickerError =
+        attachmentError?.source === "picker" ? attachmentError.message : undefined;
+    const visibleError =
+        sendError ||
+        composerAttachmentError ||
+        (error === dismissedTransportError ? undefined : error);
+
+    const dismissVisibleError = () => {
+        if (sendError) {
+            setSendError(undefined);
+            return;
+        }
+        if (composerAttachmentError) {
+            clearAttachmentError("composer");
+            return;
+        }
+        if (error) {
+            setDismissedTransportError(error);
+        }
+    };
 
     const { data: sessions } = useLiveQuery((query) =>
         query.from({ session: sessionsCollection })
@@ -226,20 +240,22 @@ export function Chat() {
         rows: projection.rows,
         sessionKey: selectedSessionKey,
     });
+    const composerLayoutKey = `${attachments.length}:${visibleError ?? ""}`;
     const scroll = useChatScroll(
         chatRows,
         selectedSessionKey,
         setIsAtBottom,
         shouldStickToBottomReference,
-        isLoadingHistory
+        isLoadingHistory,
+        composerLayoutKey
     );
     const {
+        followToBottom: followMessagesToBottom,
         handleDynamicContentLoad: handleDynamicRowContentLoad,
         handleScroll: handleMessagesScroll,
         handleUserScrollIntent,
         messagesContainerReference,
         scheduleBottomFollow,
-        scrollToBottom: scrollMessagesToBottom,
         virtualizer: messagesVirtualizer,
     } = scroll;
 
@@ -273,27 +289,51 @@ export function Chat() {
     }, [requestedSessionKey, selectedSessionKey]);
 
     useEffect(() => {
-        if (sortedSessions.length === 0) {
-            if (selectedSessionKey && !requestedSessionKey) {
+        const availableSessionKeys = new Set(
+            sortedSessions
+                .filter((session) => hasSessionKey(session))
+                .map((session) => session.key)
+        );
+        const wasSelectedSessionAvailable = Boolean(
+            selectedSessionKey &&
+            availableSessionKeysReference.current.has(selectedSessionKey)
+        );
+        availableSessionKeysReference.current = availableSessionKeys;
+        const hasSelectedSession = availableSessionKeys.has(selectedSessionKey);
+
+        if (availableSessionKeys.size === 0) {
+            if (!hasConfirmedSessionList) {
+                return;
+            }
+            if (selectedSessionKey && wasSelectedSessionAvailable) {
+                selectSession("");
+            } else if (selectedSessionKey && !requestedSessionKey) {
                 setSelectedSessionKey("");
             }
             return;
         }
 
-        if (requestedSessionKey) {
+        if (requestedSessionKey && (!wasSelectedSessionAvailable || hasSelectedSession)) {
             return;
         }
 
-        const hasSelectedSession = sortedSessions.some(
-            (session) => session.key === selectedSessionKey
-        );
         if (!selectedSessionKey || !hasSelectedSession) {
             const fallbackSession = sortedSessions.find((session) =>
                 hasSessionKey(session)
             );
-            setSelectedSessionKey(fallbackSession?.key || "");
+            if (fallbackSession) {
+                selectSession(fallbackSession.key);
+            } else if (selectedSessionKey) {
+                setSelectedSessionKey("");
+            }
         }
-    }, [requestedSessionKey, selectedSessionKey, sortedSessions]);
+    }, [
+        hasConfirmedSessionList,
+        requestedSessionKey,
+        selectSession,
+        selectedSessionKey,
+        sortedSessions,
+    ]);
 
     useEffect(() => {
         setDeletedMessageKeys(
@@ -487,7 +527,7 @@ export function Chat() {
                         messagesContainerReference={messagesContainerReference}
                         messagesVirtualizer={messagesVirtualizer}
                         onDynamicContentLoad={handleDynamicRowContentLoad}
-                        onFollow={scrollMessagesToBottom}
+                        onFollow={followMessagesToBottom}
                         onPreview={setPreviewItem}
                         visibility={createRuntimeVisibility(
                             showThinkingOutput,
@@ -534,6 +574,7 @@ export function Chat() {
                     />
 
                     <ChatComposer
+                        attachmentPickerError={attachmentPickerError}
                         attachments={attachments}
                         modelOptions={chatModelOptions}
                         canSend={canSend}
@@ -556,8 +597,13 @@ export function Chat() {
                         isCompacting={isCompactingSession}
                         slashCommandSuggestions={slashCommandSuggestions}
                         onApplySlashSuggestion={applySlashSuggestion}
-                        onAttachFiles={(files) => void handleFilesSelected(files)}
+                        onAttachFiles={(files, source) =>
+                            void handleFilesSelected(files, source)
+                        }
                         onChangeDraft={setDraft}
+                        onDismissAttachmentPickerError={() =>
+                            clearAttachmentError("picker")
+                        }
                         onPreview={setPreviewItem}
                         onRemoveAttachment={removeAttachment}
                         onSend={() => void handleSend()}

@@ -2634,6 +2634,183 @@ describe("OpenClaw chat bridge", () => {
         );
     });
 
+    it("keeps one ordered run when a live response resumes after Gateway reconnect", () => {
+        const provisionalRunId = "dashboard-chat-before-gateway-restart";
+        const providerRunId = "provider-after-gateway-restart";
+        const disconnectedAt = 1_785_000_000_000;
+        const bridge = new OpenClawChatBridge();
+        const dateNow = jest.spyOn(Date, "now");
+        try {
+            dateNow.mockReturnValue(disconnectedAt - 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "thinking before restart" },
+                    runId: provisionalRunId,
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.markGatewayDisconnected(disconnectedAt);
+
+            dateNow.mockReturnValue(disconnectedAt + 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "thinking after restart" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "session.message",
+                {
+                    message: { content: "steer after restart", role: "user" },
+                    sessionKey: MAIN,
+                },
+                []
+            );
+            bridge.recordEvent(
+                "session.tool",
+                {
+                    name: "after-steer",
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                },
+                []
+            );
+        } finally {
+            dateNow.mockRestore();
+        }
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual([
+            providerRunId,
+            providerRunId,
+            providerRunId,
+            undefined,
+            providerRunId,
+        ]);
+        expect(snapshot.events.map((event) => event.event)).toEqual([
+            "agent",
+            "agent",
+            "agent",
+            "session.message",
+            "session.tool",
+        ]);
+        expect(
+            snapshot.events
+                .filter((event) => event.event === "agent")
+                .map(
+                    (event) =>
+                        (event.payload as { data?: { delta?: string } }).data?.delta
+                )
+                .filter(Boolean)
+        ).toEqual(["thinking before restart", "thinking after restart"]);
+    });
+
+    it("measures a quiet run's reconnect window from the Gateway disconnect", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-quiet-before-restart";
+        const providerRunId = "provider-after-quiet-restart";
+        const disconnectedAt = 1_785_000_000_000;
+        const providerStartedAt = disconnectedAt + 1000;
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, provisionalRunId, disconnectedAt - 7 * 60 * 60_000)
+        );
+        const bridge = new OpenClawChatBridge(store);
+
+        bridge.snapshot(MAIN);
+        bridge.markGatewayDisconnected(disconnectedAt);
+        expect(bridge.flush()).toBe(true);
+        expect(store.snapshots.get(MAIN)?.interruptedAtByRun).toEqual({
+            [provisionalRunId]: disconnectedAt,
+        });
+        const restarted = new OpenClawChatBridge(store);
+        const dateNow = jest.spyOn(Date, "now").mockReturnValue(providerStartedAt);
+        try {
+            restarted.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+        } finally {
+            dateNow.mockRestore();
+        }
+
+        expect(
+            restarted
+                .snapshot(MAIN)
+                .events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual([providerRunId, providerRunId]);
+    });
+
+    it("does not join an interrupted run across a newer chat send", () => {
+        const provisionalRunId = "dashboard-chat-before-reconnect-send";
+        const providerRunId = "provider-after-reconnect-send";
+        const disconnectedAt = 1_785_000_000_000;
+        const bridge = new OpenClawChatBridge();
+        const dateNow = jest.spyOn(Date, "now");
+        try {
+            dateNow.mockReturnValue(disconnectedAt - 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "interrupted work" },
+                    runId: provisionalRunId,
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.markGatewayDisconnected(disconnectedAt);
+            bridge.captureRequestBoundary(MAIN);
+
+            dateNow.mockReturnValue(disconnectedAt + 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+        } finally {
+            dateNow.mockRestore();
+        }
+
+        expect(
+            new Set(
+                bridge
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
     it("does not promote a hydrated provisional run across a new send boundary", () => {
         const store = new MemorySnapshotStore();
         const provisionalRunId = "dashboard-chat-before-new-send";
@@ -2775,6 +2952,49 @@ describe("OpenClaw chat bridge", () => {
                 []
             ).payload
         ).not.toHaveProperty("sessionKey");
+    });
+
+    it("repairs an interrupted alias when the provider run starts before canonicalization", () => {
+        const provisionalRunId = "dashboard-chat-live-short-key-restart";
+        const providerRunId = "provider-live-canonical-restart";
+        const disconnectedAt = 1_785_000_000_000;
+        const bridge = new OpenClawChatBridge();
+        const dateNow = jest.spyOn(Date, "now");
+        try {
+            dateNow.mockReturnValue(disconnectedAt - 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "thinking before restart" },
+                    runId: provisionalRunId,
+                    sessionKey: "main",
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.markGatewayDisconnected(disconnectedAt);
+
+            dateNow.mockReturnValue(disconnectedAt + 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+        } finally {
+            dateNow.mockRestore();
+        }
+
+        bridge.reconcileSessions([{ id: "main", key: MAIN }]);
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
     });
 
     it("keeps concurrent persisted alias runs separate from a provider run", () => {

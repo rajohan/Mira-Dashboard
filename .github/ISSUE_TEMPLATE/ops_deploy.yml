@@ -27,6 +27,17 @@ body:
               - High - production data, auth, secrets, or destructive action involved
       validations:
           required: true
+    - type: dropdown
+      id: environment
+      attributes:
+          label: Environment
+          options:
+              - Production
+              - Local development
+              - CI or automation
+              - Other
+      validations:
+          required: true
     - type: textarea
       id: plan
       attributes:
@@ -46,8 +57,10 @@ body:
           options:
               - label: Production checkout/root verified
               - label: Secrets/config changes identified without pasting secret values
+              - label: Database schema and backup impact checked
               - label: Rollback or recovery path is clear
               - label: Health check or smoke test is defined
+              - label: Required restart or interruption is explicitly authorized
     - type: textarea
       id: verification
       attributes:

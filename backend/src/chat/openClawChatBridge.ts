@@ -19,6 +19,7 @@ export interface OpenClawRuntimeEnvelope {
 export interface OpenClawRuntimeSnapshot {
     completed: boolean;
     events: OpenClawRuntimeEnvelope[];
+    interruptedAtByRun?: Record<string, number>;
     throughSequence: number;
 }
 
@@ -46,7 +47,8 @@ interface RetainedRun {
     completed: boolean;
     eventBytes: number[];
     events: OpenClawRuntimeEnvelope[];
-    restored: boolean;
+    interruptionEligible: boolean;
+    interruptedAt?: number;
     runId: string;
     terminalSequence: number;
     totalBytes: number;
@@ -103,6 +105,20 @@ function stringField(
 ): string | undefined {
     const value = record?.[key];
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/** Returns the later defined timestamp without inventing a fallback value. */
+function latestOptionalTimestamp(
+    left: number | undefined,
+    right: number | undefined
+): number | undefined {
+    if (left === undefined) {
+        return right;
+    }
+    if (right === undefined) {
+        return left;
+    }
+    return Math.max(left, right);
 }
 
 /** Uses the same nested event-data precedence as the browser runtime adapter. */
@@ -786,13 +802,13 @@ function isPromotableInterruptedDashboardRun(
     providerRun?: RetainedRun
 ): boolean {
     const providerRunId = stringField(runtimePayloadView(envelope.payload), "runId");
-    const resumeDelay = envelope.runtimeRecordedAt - run.updatedAt;
+    const resumeDelay = envelope.runtimeRecordedAt - (run.interruptedAt ?? run.updatedAt);
     if (
         !providerRunId ||
         resumeDelay < -5000 ||
         resumeDelay > INTERRUPTED_RUN_PROMOTION_WINDOW_MS ||
         run.completed ||
-        !run.restored ||
+        !run.interruptionEligible ||
         !run.runId.startsWith("dashboard-chat-") ||
         isProvisionalRunId(providerRunId) ||
         !isStartingLifecycleEvent(envelope.event, envelope.payload) ||
@@ -1134,6 +1150,16 @@ export class OpenClawChatBridge {
                 this.#retain(envelope, false);
             }
         });
+        const hydratedRuns = this.#runsBySession.get(storedStorageKey);
+        const interruptedRunEntries = Object.entries(snapshot.interruptedAtByRun || {});
+        for (const [runId, interruptedAt] of interruptedRunEntries) {
+            const hydratedRun = hydratedRuns?.get(runId);
+            if (!hydratedRun) {
+                continue;
+            }
+            hydratedRun.interruptionEligible = true;
+            hydratedRun.interruptedAt = interruptedAt;
+        }
         const prunedStaleRun = this.#pruneStaleActiveRuns(storedStorageKey);
         if (prunedStaleRun && !this.#runsBySession.has(storedStorageKey)) {
             const didPersist = this.#flushSessionPersistence(storedStorageKey);
@@ -1180,7 +1206,11 @@ export class OpenClawChatBridge {
             // Completed replay is the durable "last run" view and is intentionally
             // retained until a successful new send replaces it. The TTL only
             // recovers abandoned active runs after a missing lifecycle end.
-            if (run.completed || now - run.updatedAt <= ACTIVE_RUN_TTL_MS) {
+            const latestActivityAt = Math.max(
+                run.updatedAt,
+                run.interruptedAt ?? -Infinity
+            );
+            if (run.completed || now - latestActivityAt <= ACTIVE_RUN_TTL_MS) {
                 continue;
             }
             runs.delete(runId);
@@ -1197,7 +1227,8 @@ export class OpenClawChatBridge {
     }
 
     #snapshotFromRuns(
-        runs: ReadonlyMap<string, RetainedRun> | undefined
+        runs: ReadonlyMap<string, RetainedRun> | undefined,
+        shouldIncludeInterruptionMetadata = false
     ): OpenClawRuntimeSnapshot {
         const snapshots = runs ? runs.values().toArray() : [];
         const active = snapshots.filter((snapshot) => !snapshot.completed);
@@ -1221,18 +1252,35 @@ export class OpenClawChatBridge {
             selected = completedToReplay ? [completedToReplay] : [];
         }
 
+        const interruptedAtByRun = shouldIncludeInterruptionMetadata
+            ? Object.fromEntries(
+                  selected.flatMap((snapshot) =>
+                      snapshot.interruptedAt === undefined
+                          ? []
+                          : [[snapshot.runId, snapshot.interruptedAt]]
+                  )
+              )
+            : {};
+
         return {
             completed: active.length === 0 && selected.length > 0,
             events: selected
                 .flatMap((snapshot) => snapshot.events)
                 .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence),
+            ...(Object.keys(interruptedAtByRun).length > 0 && {
+                interruptedAtByRun,
+            }),
             throughSequence: this.#sequence,
         };
     }
 
-    #snapshotFromMemory(sessionKey: string): OpenClawRuntimeSnapshot {
+    #snapshotFromMemory(
+        sessionKey: string,
+        shouldIncludeInterruptionMetadata = false
+    ): OpenClawRuntimeSnapshot {
         return this.#snapshotFromRuns(
-            this.#runsBySession.get(normalizedSessionKey(sessionKey))
+            this.#runsBySession.get(normalizedSessionKey(sessionKey)),
+            shouldIncludeInterruptionMetadata
         );
     }
 
@@ -1267,7 +1315,7 @@ export class OpenClawChatBridge {
         ) {
             return false;
         }
-        const snapshot = this.#snapshotFromMemory(storageSessionKey);
+        const snapshot = this.#snapshotFromMemory(storageSessionKey, true);
         try {
             if (snapshot.events.length === 0) {
                 return this.#deletePersistedSession(storageSessionKey);
@@ -1545,7 +1593,11 @@ export class OpenClawChatBridge {
                     ...sourceRun.events,
                 ]);
                 existing.completed ||= sourceRun.completed;
-                existing.restored ||= sourceRun.restored;
+                existing.interruptionEligible ||= sourceRun.interruptionEligible;
+                existing.interruptedAt = latestOptionalTimestamp(
+                    existing.interruptedAt,
+                    sourceRun.interruptedAt
+                );
                 existing.terminalSequence = Math.max(
                     existing.terminalSequence,
                     sourceRun.terminalSequence
@@ -1574,8 +1626,8 @@ export class OpenClawChatBridge {
             nextCanonicalRuns.delete(oldestRunId);
             evictedCanonicalRunIds.add(oldestRunId);
         }
-        const sourceSnapshot = this.#snapshotFromRuns(nextSourceRuns);
-        const canonicalSnapshot = this.#snapshotFromRuns(nextCanonicalRuns);
+        const sourceSnapshot = this.#snapshotFromRuns(nextSourceRuns, true);
+        const canonicalSnapshot = this.#snapshotFromRuns(nextCanonicalRuns, true);
         if (
             !this.#persistSessionPromotion(
                 sourceStorageKey,
@@ -1891,7 +1943,11 @@ export class OpenClawChatBridge {
         if (existing) {
             this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
             existing.completed ||= provisional.completed;
-            existing.restored ||= provisional.restored;
+            existing.interruptionEligible ||= provisional.interruptionEligible;
+            existing.interruptedAt = latestOptionalTimestamp(
+                existing.interruptedAt,
+                provisional.interruptedAt
+            );
             existing.terminalSequence = Math.max(
                 existing.terminalSequence,
                 provisional.terminalSequence
@@ -1935,7 +1991,7 @@ export class OpenClawChatBridge {
         }> = [];
         const requestBoundary = this.#latestRequestBoundary(sessionKey);
         for (const providerRun of runs.values()) {
-            if (!providerRun.restored || isProvisionalRunId(providerRun.runId)) {
+            if (isProvisionalRunId(providerRun.runId)) {
                 continue;
             }
             const startingEnvelope = providerRun.events.findLast((envelope) => {
@@ -1954,6 +2010,8 @@ export class OpenClawChatBridge {
             for (const provisionalRun of runs.values()) {
                 if (
                     provisionalRun !== providerRun &&
+                    (providerRun.interruptionEligible ||
+                        provisionalRun.interruptedAt !== undefined) &&
                     isPromotableInterruptedDashboardRun(
                         provisionalRun,
                         startingEnvelope,
@@ -2229,7 +2287,7 @@ export class OpenClawChatBridge {
                 completed: false,
                 eventBytes: [],
                 events: [],
-                restored: !shouldPersist,
+                interruptionEligible: !shouldPersist,
                 runId,
                 terminalSequence: -1,
                 totalBytes: 0,
@@ -2388,6 +2446,27 @@ export class OpenClawChatBridge {
         });
         this.#enforceSessionLimit();
         this.#enforceReplayMemoryLimit();
+    }
+
+    /** Allows one interrupted live Dashboard run to resume under a provider run ID. */
+    markGatewayDisconnected(disconnectedAt = Date.now()): void {
+        for (const [sessionKey, runs] of this.#runsBySession) {
+            const interruptedRuns = runs
+                .values()
+                .filter(
+                    (candidate) =>
+                        !candidate.completed &&
+                        candidate.runId.startsWith("dashboard-chat-")
+                )
+                .toArray();
+            for (const run of interruptedRuns) {
+                run.interruptionEligible = true;
+                run.interruptedAt = disconnectedAt;
+            }
+            if (interruptedRuns.length > 0) {
+                this.#queuePersistence(sessionKey);
+            }
+        }
     }
 
     /** Clears all replay state, for example after credentials change. */

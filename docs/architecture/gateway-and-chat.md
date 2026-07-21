@@ -108,13 +108,19 @@ The runtime combines several event sources into one visible conversation:
 
 The selected chat session is stored in the `/chat?session=<session-key>` query.
 Refreshing, opening a copied URL, and browser back/forward navigation therefore
-restore the same session. A plain `/chat` URL keeps the existing default-session
-selection behavior. Session changes from the picker replace the query value so
-routine navigation does not add one browser-history entry per selection. History
-may load while a URL-selected session is being resolved, but sending, preference
+restore the same session. When a plain `/chat` route resolves an available fallback
+session, it passes that fallback through the normal selector and persists it in the
+URL. Session changes replace the query value, so automatic fallback and routine
+picker navigation do not add one browser-history entry per selection. History may
+load while a URL-selected session is being resolved, but sending, preference
 updates, and compaction remain disabled until that key exists in the Gateway
-session index. The unresolved key remains selected until Gateway reports it or the
-user explicitly chooses another session; it is never replaced by a default session.
+session index. A previously available selection that disappears is replaced with
+the next available fallback. An explicit URL key that has not yet appeared remains
+selected until Gateway reports it or the user chooses another session.
+The socket provider applies raw array and wrapped response shapes only to the
+Promise returned by its own `sessions.list` request. Unrelated RPC responses
+therefore cannot clear the session collection merely because their payload is an
+array; explicit `sessions` push envelopes remain supported separately.
 
 ### Attachments And Media
 
@@ -125,6 +131,27 @@ Images, audio, PDFs, text/data files, archives, and common Office formats are
 accepted. Selected video files are skipped before encoding because OpenClaw chat
 does not support them in this flow, while valid files from the same selection are
 kept. Audio MIME types take precedence over ambiguous extensions such as `.webm`.
+
+Files can be dropped directly on the composer or added through the attachment
+picker. The picker provides its own drop target, native file selection, queued-file
+removal, and an inline detail view built from the shared attachment preview content.
+Modal drag events do not reach the composer, and a page-level file-drop guard stops
+the browser from navigating away when a drop misses the active target.
+
+Validation runs before FileReader output enters chat state. A supported declared
+MIME is authoritative. If the browser omits MIME or reports the generic
+`application/octet-stream`, a recognized filename extension supplies the canonical
+MIME; a non-generic unsupported MIME must agree with that extension instead of
+being accepted by filename alone. JSON is accepted from its declared MIME even
+without a filename extension, common browser ZIP aliases are normalized to
+`application/zip`, CSV's legacy Excel MIME is normalized only for `.csv`, and
+ZIP-reported OOXML packages are normalized only for `.docx`, `.xlsx`, or `.pptx`.
+The normalized MIME is also used to rebuild the base64 data URL,
+so empty-MIME images keep working in picker and optimistic message previews. SVG is
+classified as `image/svg+xml` for chat display, while its normal backend download
+remains attachment-only as described below. Validation errors are scoped to their
+source: picker errors stay in the open picker, and direct-drop errors appear above
+the composer, never in both places.
 
 History normalization accepts OpenClaw `image`, `image_url`, and `input_image`
 blocks plus generic attachment and `MediaPath` records. Every attachment keeps a
@@ -246,6 +273,17 @@ run expires after six hours without an event. Successful `/new` or `/reset`,
 abort, session deletion, and Gateway credential changes clear the applicable
 replay cache.
 
+A Gateway transport disconnect marks only unfinished `dashboard-chat-*` runs as
+eligible for interrupted-run recovery. If the Gateway resumes the same response
+under a provider run ID, the bridge rewrites the provisional replay to that
+canonical ID before retaining the new lifecycle event. The promotion is allowed
+only for one unambiguous active run, inside the bounded restart window, and only
+when no newer `chat.send` request boundary exists. This keeps pre- and
+post-restart thinking, later steer messages, and tools in one ordered response
+without merging a genuinely new or concurrent send. The recorded disconnect
+time also protects a long-quiet interrupted run from the normal six-hour stale
+run cleanup while that bounded recovery window is open.
+
 The canonical reducer is ordered and idempotent. Run identifiers and aliases are
 always session-scoped. Snapshot gating applies only to the selected session, so
 off-screen terminal events continue to clean up their own runs while a snapshot
@@ -315,6 +353,13 @@ per-frame writes are avoided because they can cycle different virtual windows
 through the viewport and appear as flashing tool rows. Real wheel or touch intent
 cancels any queued correction immediately.
 
+The explicit Follow action marks the viewport sticky and uses the same bounded
+settling pass, so late virtual measurements cannot leave it slightly above the
+bottom. Composer layout changes participate in that correction: attachment chips
+and the visible global-error content trigger an immediate bottom write followed by
+one stable-height correction, but only when the user was already sticky. Deliberate
+scroll-away state is preserved.
+
 When the document is hidden, Chat remembers whether the viewport was sticky at
 the bottom. Returning to a background tab restores the stable bottom only when
 it was sticky before deactivation; a tab the user intentionally scrolled upward
@@ -368,6 +413,9 @@ When changing chat event handling, test these cases:
 - snapshot gating never drops queued events for other sessions;
 - restart and reconnect restore active and latest completed thinking from
   SQLite;
+- a live Gateway restart promotes one interrupted provisional response to its
+  resumed provider run, while a newer send boundary and concurrent runs remain
+  separate;
 - main and ops sessions never share runtime replay state;
 - an initial history load follows all pages, while incomplete sequence metadata
   cannot advance an incremental cache watermark;
@@ -405,10 +453,19 @@ When changing chat event handling, test these cases:
   media-only finals in their original turn;
 - hard-refresh history loads and post-final structural changes settle at the
   virtualized bottom without repeated per-frame scroll writes;
+- Follow, attachment-chip height changes, and global-error layout changes settle at
+  the real bottom only while sticky, without moving a user who scrolled away;
 - a background tab restores the bottom only when it was sticky before becoming
   hidden;
-- URL session selection survives refresh and follows browser navigation while a
-  query-less chat keeps default selection;
+- URL session selection survives refresh and browser navigation, a query-less chat
+  persists its resolved fallback, and a previously available session that disappears
+  selects the next fallback without replacing a still-unresolved explicit URL key;
+- composer and picker drops share attachment validation, mismatched explicit MIME
+  cannot bypass policy by filename, empty/generic MIME produces a normalized preview
+  data URL only for supported files with a recognized extension, JSON MIME works
+  without a suffix, common ZIP aliases and suffix-bound CSV/OOXML aliases are
+  canonicalized,
+  and validation errors render only at their originating surface;
 - local and managed Gateway attachments preserve inline previews and an original
   download path without exposing Gateway credentials;
 - managed inline and tool-result images use bounded previews and notify the

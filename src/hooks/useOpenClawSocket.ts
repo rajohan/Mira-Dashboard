@@ -9,6 +9,7 @@ import {
     useState,
 } from "react";
 
+import { replaceSessionsFromWebSocket } from "../collections/sessions";
 import {
     createSocketClient,
     type SocketClient,
@@ -16,11 +17,13 @@ import {
 } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import { authStore } from "../stores/authStore";
+import { isSocketEnvelope, readSessionsResponsePayload } from "../types/socket";
 import { getWebSocketUrl } from "../utils/websocket";
 
 /** Represents OpenClaw socket context value. */
 interface OpenClawSocketContextValue {
     isConnected: boolean;
+    hasConfirmedSessionList: boolean;
     error: string | undefined;
     connectionId: number;
     connect: () => void;
@@ -44,8 +47,22 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const listenersReference = useRef(new Set<(data: unknown) => void>());
 
     const [isConnected, setIsConnected] = useState(false);
+    const [hasConfirmedSessionList, setHasConfirmedSessionList] = useState(false);
     const [error, setError] = useState<string | undefined>(undefined);
     const [connectionId, setConnectionId] = useState(0);
+
+    /** Applies only the result of a request known to be sessions.list. */
+    const applySessionsListResponse = (client: SocketClient, payload: unknown) => {
+        if (clientReference.current !== client) {
+            return;
+        }
+        const sessions = readSessionsResponsePayload(payload);
+        if (sessions === undefined) {
+            return;
+        }
+        replaceSessionsFromWebSocket(sessions);
+        setHasConfirmedSessionList(true);
+    };
 
     /** Performs connect. */
     const connect = () => {
@@ -59,11 +76,17 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 url: getWebSocketUrl(),
                 onOpen: () => {
                     setIsConnected(true);
+                    setHasConfirmedSessionList(false);
                     setError(undefined);
                     setConnectionId((wasPrevious) => wasPrevious + 1);
+                    const client = clientReference.current;
+                    if (!client) {
+                        return;
+                    }
                     void (async () => {
                         try {
-                            await clientReference.current?.request("sessions.list");
+                            const payload = await client.request("sessions.list");
+                            applySessionsListResponse(client, payload);
                         } catch {
                             // Best-effort socket resync.
                         }
@@ -71,6 +94,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 },
                 onClose: () => {
                     setIsConnected(false);
+                    setHasConfirmedSessionList(false);
                 },
                 onError: () => {
                     setError("WebSocket connection failed");
@@ -78,6 +102,22 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                 onMessage: (data) => {
                     try {
                         const connectionState = handleSocketMessage(data);
+                        const envelope = isSocketEnvelope(data) ? data : undefined;
+                        const hasSessionList = Boolean(
+                            envelope &&
+                            envelope.type === "sessions" &&
+                            Array.isArray(envelope.sessions) &&
+                            envelope.gatewayConnected !== false
+                        );
+                        if (
+                            connectionState === false ||
+                            envelope?.type === "connected" ||
+                            envelope?.type === "disconnected"
+                        ) {
+                            setHasConfirmedSessionList(false);
+                        } else if (hasSessionList) {
+                            setHasConfirmedSessionList(true);
+                        }
                         if (connectionState !== undefined) {
                             setIsConnected(connectionState);
                         }
@@ -99,6 +139,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         clientReference.current?.disconnect();
         clientReference.current = undefined;
         setIsConnected(false);
+        setHasConfirmedSessionList(false);
     };
 
     /** Performs request. */
@@ -136,7 +177,8 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             const client = clientReference.current;
             void (async () => {
                 try {
-                    await client.request("sessions.list");
+                    const payload = await client.request("sessions.list");
+                    applySessionsListResponse(client, payload);
                 } catch {
                     if (clientReference.current !== client) {
                         return;
@@ -170,7 +212,12 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
 
             void (async () => {
                 try {
-                    await clientReference.current?.request("sessions.list");
+                    const client = clientReference.current;
+                    if (!client) {
+                        return;
+                    }
+                    const payload = await client.request("sessions.list");
+                    applySessionsListResponse(client, payload);
                 } catch {
                     // Best-effort socket resync.
                 }
@@ -208,6 +255,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         {
             value: {
                 isConnected,
+                hasConfirmedSessionList,
                 error,
                 connectionId,
                 connect,

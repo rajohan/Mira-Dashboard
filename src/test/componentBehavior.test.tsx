@@ -6,6 +6,7 @@ import {
     renderHook,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
@@ -13,6 +14,7 @@ import { type ReactNode, type RefObject, useState } from "react";
 
 import { TaskHistorySidebar } from "../components/features/agents/TaskHistorySidebar";
 import { AttachmentPreviewModal } from "../components/features/chat/AttachmentPreviewModal";
+import { ChatAttachmentPickerModal } from "../components/features/chat/ChatAttachmentPickerModal";
 import { ChatComposer } from "../components/features/chat/ChatComposer";
 import { ChatHeader } from "../components/features/chat/ChatHeader";
 import {
@@ -524,7 +526,7 @@ describe("shared component helpers", () => {
                 previewItem={{
                     kind: "image",
                     mimeType: "image/png",
-                    sizeBytes: 1024,
+                    sizeBytes: 0,
                     title: "Preview image",
                     url: "data:image/png;base64,a",
                 }}
@@ -532,6 +534,9 @@ describe("shared component helpers", () => {
             />
         );
         expect(screen.getByAltText("Preview image")).toBeInTheDocument();
+        expect(screen.getByText("File type")).toBeInTheDocument();
+        expect(screen.getByText("image/png")).toBeInTheDocument();
+        expect(screen.getByText("0 B")).toBeInTheDocument();
         expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute(
             "download",
             "Preview image"
@@ -1004,6 +1009,7 @@ describe("shared component helpers", () => {
         const onApplySlashSuggestion = jest.fn();
         const onAttachFiles = jest.fn();
         const onChangeDraft = jest.fn();
+        const onDismissAttachmentPickerError = jest.fn();
         const onPreview = jest.fn();
         const onRemoveAttachment = jest.fn();
         const onSend = jest.fn();
@@ -1012,6 +1018,7 @@ describe("shared component helpers", () => {
 
         render(
             <ChatComposer
+                attachmentPickerError="Unsupported file from attachment picker"
                 attachments={[
                     {
                         contentBase64: textToBase64("hello"),
@@ -1057,6 +1064,7 @@ describe("shared component helpers", () => {
                 onApplySlashSuggestion={onApplySlashSuggestion}
                 onAttachFiles={onAttachFiles}
                 onChangeDraft={onChangeDraft}
+                onDismissAttachmentPickerError={onDismissAttachmentPickerError}
                 onPreview={onPreview}
                 onRemoveAttachment={onRemoveAttachment}
                 onSend={onSend}
@@ -1075,6 +1083,27 @@ describe("shared component helpers", () => {
         await user.click(screen.getByRole("button", { name: /remove note.txt/i }));
         expect(onRemoveAttachment).toHaveBeenCalledWith("a1");
         const textarea = screen.getByRole("combobox");
+        const directlyDroppedFiles = [
+            new File(["direct"], "direct-drop.txt", { type: "text/plain" }),
+        ] as unknown as FileList;
+        const directDropData = {
+            dropEffect: "none",
+            files: directlyDroppedFiles,
+            types: ["Files"],
+        };
+        expect(fireEvent.dragOver(document.body, { dataTransfer: directDropData })).toBe(
+            false
+        );
+        expect(fireEvent.drop(document.body, { dataTransfer: directDropData })).toBe(
+            false
+        );
+        expect(onAttachFiles).not.toHaveBeenCalled();
+        fireEvent.dragEnter(textarea, { dataTransfer: directDropData });
+        expect(screen.getByText("Drop files to attach")).toBeInTheDocument();
+        fireEvent.dragOver(textarea, { dataTransfer: directDropData });
+        fireEvent.drop(textarea, { dataTransfer: directDropData });
+        expect(onAttachFiles).toHaveBeenCalledWith(directlyDroppedFiles, "composer");
+        expect(screen.queryByText("Drop files to attach")).not.toBeInTheDocument();
         fireEvent.change(textarea, { target: { value: "/hel" } });
         await user.click(await screen.findByRole("option", { name: /help/i }));
         expect(onApplySlashSuggestion).toHaveBeenCalledWith("/help");
@@ -1168,10 +1197,109 @@ describe("shared component helpers", () => {
         expect(onChangeDraft).toHaveBeenCalledWith("😀/he");
 
         await user.click(screen.getByRole("button", { name: /voice/i }));
+        expect(
+            screen.queryByText("Unsupported file from attachment picker")
+        ).not.toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: /attach/i }));
+        expect(screen.getByRole("dialog", { name: "Attach files" })).toBeInTheDocument();
+        const modalDroppedFiles = [
+            new File(["modal"], "modal-drop.txt", { type: "text/plain" }),
+        ] as unknown as FileList;
+        const modalDropData = {
+            dropEffect: "none",
+            files: modalDroppedFiles,
+            types: ["Files"],
+        };
+        const attachmentDialog = screen.getByRole("dialog", {
+            name: "Attach files",
+        });
+        expect(within(attachmentDialog).getByRole("alert")).toHaveTextContent(
+            "Unsupported file from attachment picker"
+        );
+        fireEvent.dragEnter(attachmentDialog, { dataTransfer: modalDropData });
+        expect(screen.queryByText("Drop files to attach")).not.toBeInTheDocument();
+        expect(fireEvent.drop(attachmentDialog, { dataTransfer: modalDropData })).toBe(
+            false
+        );
+        expect(onAttachFiles).toHaveBeenCalledTimes(1);
+        const dropZone = screen.getByTestId("chat-attachment-drop-zone");
+        fireEvent.dragEnter(dropZone, { dataTransfer: modalDropData });
+        expect(dropZone).toHaveClass("border-accent-400");
+        fireEvent.drop(dropZone, { dataTransfer: modalDropData });
+        expect(onAttachFiles).toHaveBeenLastCalledWith(modalDroppedFiles, "picker");
+        expect(within(attachmentDialog).getByText("Selected files")).toBeInTheDocument();
+        expect(within(attachmentDialog).getByText("note.txt")).toBeInTheDocument();
+        expect(within(attachmentDialog).getByText("image.png")).toBeInTheDocument();
+        await user.click(
+            within(attachmentDialog).getByRole("button", {
+                name: "Remove image.png",
+            })
+        );
+        expect(onRemoveAttachment).toHaveBeenLastCalledWith("a2");
+        await user.click(
+            within(attachmentDialog).getByRole("button", {
+                name: "Preview note.txt",
+            })
+        );
+        const previewDialog = screen.getByRole("dialog", { name: "note.txt" });
+        expect(within(previewDialog).getByText("hello")).toBeInTheDocument();
+        await user.click(
+            within(previewDialog).getByRole("button", {
+                name: "Back to attachments",
+            })
+        );
+        expect(
+            within(screen.getByRole("dialog", { name: "Attach files" })).getByText(
+                "Selected files"
+            )
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Close Attach files" }));
+        expect(onDismissAttachmentPickerError).toHaveBeenCalledTimes(2);
         await user.click(screen.getByRole("button", { name: /send/i }));
         expect(onToggleRecording).toHaveBeenCalledTimes(1);
+        expect(onAttachFiles).toHaveBeenCalledTimes(2);
         expect(onSend).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not present a disabled attachment drop zone as accepting files", async () => {
+        const user = userEvent.setup();
+        const onFilesSelected = jest.fn();
+        function DisabledAttachmentPickerHarness() {
+            const [isOpen, setIsOpen] = useState(false);
+            return (
+                <>
+                    <button type="button" onClick={() => setIsOpen(true)}>
+                        Open disabled picker
+                    </button>
+                    <ChatAttachmentPickerModal
+                        attachments={[]}
+                        isDisabled={true}
+                        isOpen={isOpen}
+                        onChooseFiles={jest.fn()}
+                        onClose={() => setIsOpen(false)}
+                        onFilesSelected={onFilesSelected}
+                        onRemoveAttachment={jest.fn()}
+                    />
+                </>
+            );
+        }
+        render(<DisabledAttachmentPickerHarness />);
+        await user.click(screen.getByRole("button", { name: "Open disabled picker" }));
+        const files = [
+            new File(["disabled"], "disabled.txt", { type: "text/plain" }),
+        ] as unknown as FileList;
+        const dataTransfer = {
+            dropEffect: "copy",
+            files,
+            types: ["Files"],
+        };
+        const dropZone = screen.getByTestId("chat-attachment-drop-zone");
+
+        fireEvent.dragEnter(dropZone, { dataTransfer });
+        expect(dropZone).not.toHaveClass("border-accent-400");
+        fireEvent.drop(dropZone, { dataTransfer });
+        expect(onFilesSelected).not.toHaveBeenCalled();
+        await user.click(screen.getByRole("button", { name: "Close Attach files" }));
     });
 
     it("exposes final-thinking retention only while thinking is visible", async () => {
@@ -1258,6 +1386,7 @@ describe("shared component helpers", () => {
         expect(
             view.container.querySelector('input[type="file"][multiple]')
         ).toHaveAttribute("accept", CHAT_ATTACHMENT_ACCEPT);
+        expect(CHAT_ATTACHMENT_ACCEPT.split(",")).toContain("application/json");
     });
 
     it("submits an exact slash command on the first Enter", () => {
@@ -2326,6 +2455,7 @@ describe("shared component helpers", () => {
 
     it("renders chat messages list helpers and primary row actions", async () => {
         const user = userEvent.setup();
+        const longActivityText = `Bash ${"very-long-status-segment".repeat(12)}`;
         const onDynamicContentLoad = jest.fn();
         const onFollow = jest.fn();
         const onPreview = jest.fn();
@@ -2447,7 +2577,7 @@ describe("shared component helpers", () => {
                                 content: "",
                                 images: [],
                                 role: "assistant",
-                                text: "Working",
+                                text: longActivityText,
                             },
                         },
                     ]}
@@ -2522,6 +2652,9 @@ describe("shared component helpers", () => {
         expect(onPreview).toHaveBeenCalledWith(
             expect.objectContaining({ kind: "text", title: "readme.txt" })
         );
+        const activityText = screen.getByText(longActivityText);
+        expect(activityText).toHaveClass("min-w-0", "flex-1", "wrap-break-word");
+        expect(messagesContainerReference.current).toHaveClass("overflow-x-hidden");
         expect(screen.getByLabelText("Assistant is working")).toBeInTheDocument();
     });
 

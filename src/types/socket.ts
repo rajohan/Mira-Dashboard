@@ -35,3 +35,22 @@ export function readSessionsPayload(value: unknown): unknown[] | undefined {
     const sessions = (value as { sessions?: unknown }).sessions;
     return Array.isArray(sessions) ? sessions : undefined;
 }
+
+/** Reads every sessions.list response shape accepted by the socket router. */
+export function readSessionsResponsePayload(value: unknown): unknown[] | undefined {
+    if (Array.isArray(value)) {
+        return value;
+    }
+
+    const sessions = readSessionsPayload(value);
+    if (sessions !== undefined) {
+        return sessions;
+    }
+
+    if (typeof value !== "object" || value === null) {
+        return undefined;
+    }
+
+    const nested = value as { data?: unknown; result?: unknown };
+    return readSessionsPayload(nested.result) ?? readSessionsPayload(nested.data);
+}

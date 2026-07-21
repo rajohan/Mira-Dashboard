@@ -23,7 +23,8 @@ export function useChatScroll(
     selectedSessionKey: string,
     setIsAtBottom: Dispatch<SetStateAction<boolean>>,
     shouldStickToBottomReference: RefObject<boolean>,
-    isLoadingHistory = false
+    isLoadingHistory = false,
+    composerLayoutKey: number | string = 0
 ) {
     const messagesContainerReference = useRef<HTMLDivElement | undefined>(undefined);
     const bottomFollowFrameReference = useRef<number | undefined>(undefined);
@@ -35,6 +36,7 @@ export function useChatScroll(
     const structuralBottomFollowReference = useRef(false);
     const wasStickyWhenDocumentHiddenReference = useRef(false);
     const previousRowKeysReference = useRef<string[]>([]);
+    const previousComposerLayoutKeyReference = useRef(composerLayoutKey);
     const previousIsLoadingHistoryReference = useRef(false);
     const previousScrollTopReference = useRef(0);
     const previousSessionKeyReference = useRef("");
@@ -176,10 +178,12 @@ export function useChatScroll(
         };
         bottomFollowFrameReference.current = requestAnimationFrame(followBottom);
     };
-    resumeStickyBottomReference.current = () => {
+    const followToBottom = () => {
         shouldStickToBottomReference.current = true;
+        setIsAtBottom(true);
         scheduleBottomFollow(true, true);
     };
+    resumeStickyBottomReference.current = followToBottom;
 
     const handleUserScrollIntent = () => {
         cancelBottomFollow();
@@ -207,9 +211,12 @@ export function useChatScroll(
             previousRowKeys.length > 0 && didRowKeysChange && !isPureTailAppend;
         const didFinishHistoryLoad =
             previousIsLoadingHistoryReference.current && !isLoadingHistory;
+        const didComposerLayoutChange =
+            previousComposerLayoutKeyReference.current !== composerLayoutKey;
         previousSessionKeyReference.current = selectedSessionKey;
         previousRowKeysReference.current = rowKeys;
         previousIsLoadingHistoryReference.current = isLoadingHistory;
+        previousComposerLayoutKeyReference.current = composerLayoutKey;
 
         if (isSessionChanged) {
             previousScrollTopReference.current = 0;
@@ -222,14 +229,18 @@ export function useChatScroll(
             (isSessionChanged ||
                 isInitialHistoryLoad ||
                 needsStructuralBottomFollow ||
-                didFinishHistoryLoad)
+                didFinishHistoryLoad ||
+                didComposerLayoutChange)
         ) {
+            if (didComposerLayoutChange) {
+                scrollToBottom();
+            }
             scheduleBottomFollow(
                 true,
                 isSessionChanged || isInitialHistoryLoad || didFinishHistoryLoad
             );
         }
-    }, [isLoadingHistory, rows, selectedSessionKey]);
+    }, [composerLayoutKey, isLoadingHistory, rows, selectedSessionKey]);
 
     useLayoutEffect(
         () => () => {
@@ -263,7 +274,7 @@ export function useChatScroll(
         handleUserScrollIntent,
         messagesContainerReference,
         scheduleBottomFollow,
-        scrollToBottom,
+        followToBottom,
         virtualizer,
     };
 }
