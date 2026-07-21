@@ -124,5 +124,5 @@ bun run format:check
 git diff --check
 ```
 
-Run Playwright or screenshot checks for visual changes that are hard to assert
-with DOM tests.
+Use the managed-browser DOM/screenshot smoke workflow for visual changes that
+are hard to assert with component tests.
