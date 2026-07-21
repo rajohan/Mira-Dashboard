@@ -899,6 +899,203 @@ describe("chat projection", () => {
         });
     });
 
+    it("keeps interrupted restart replay in chronological order without duplicate tools", () => {
+        const oldRunId = "dashboard-chat-before-restart";
+        const currentRunId = "dashboard-chat-after-restart";
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(8, "2026-07-16T12:00:01.000Z", {
+                kind: "status",
+                runId: oldRunId,
+                text: "Thinking",
+            }),
+            eventAt(16, "2026-07-16T12:00:10.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-recovered", name: "read" }],
+                },
+                runId: oldRunId,
+                toolKey: "tool:call-recovered",
+            }),
+            eventAt(24, "2026-07-16T12:00:20.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-before-restart", name: "exec" }],
+                },
+                runId: oldRunId,
+                toolKey: "tool:call-before-restart",
+            }),
+            eventAt(28, "2026-07-16T12:00:30.000Z", {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "interrupted reasoning", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [
+                        { id: "thought-interrupted", text: "interrupted reasoning" },
+                    ],
+                },
+                runId: oldRunId,
+            }),
+            eventAt(32, "2026-07-16T12:09:00.000Z", {
+                kind: "status",
+                runId: currentRunId,
+                text: "Thinking",
+            }),
+            eventAt(40, "2026-07-16T12:09:20.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-before-steer", name: "browser" }],
+                },
+                runId: currentRunId,
+                toolKey: "tool:call-before-steer",
+            }),
+            eventAt(48, "2026-07-16T12:11:20.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-after-steer", name: "exec" }],
+                },
+                runId: currentRunId,
+                toolKey: "tool:call-after-steer",
+            }),
+            eventAt(52, "2026-07-16T12:11:25.000Z", {
+                kind: "user",
+                message: {
+                    content: "latest live steer",
+                    role: "user",
+                    text: "latest live steer",
+                },
+            }),
+            eventAt(56, "2026-07-16T12:11:30.000Z", {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "current reasoning", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-current", text: "current reasoning" }],
+                },
+                runId: currentRunId,
+            }),
+        ]);
+        const history: ChatHistoryMessage[] = [
+            {
+                ...message("user", "continue", oldRunId),
+                timestamp: "2026-07-16T12:00:00.000Z",
+            },
+            {
+                content: "",
+                role: "assistant",
+                text: "",
+                timestamp: "2026-07-16T12:00:10.000Z",
+                toolCalls: [{ id: "call-recovered", name: "read" }],
+            },
+            {
+                ...message("user", "what are we waiting for"),
+                timestamp: "2026-07-16T12:09:01.000Z",
+            },
+            {
+                ...message("user", "sorting is still wrong", "dashboard-chat-steer-1"),
+                timestamp: "2026-07-16T12:10:00.000Z",
+            },
+            {
+                ...message("user", "inspect it in the browser", "dashboard-chat-steer-2"),
+                timestamp: "2026-07-16T12:11:00.000Z",
+            },
+            {
+                ...message("user", "latest live steer", "dashboard-chat-steer-3"),
+                timestamp: "2026-07-16T12:11:25.000Z",
+            },
+        ];
+
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const visible = projection.rows
+            .filter((row) => row.kind !== "typing")
+            .map((row) => row.message);
+        const rowIdentity = (item: ChatHistoryMessage) =>
+            item.text ||
+            item.toolCalls?.[0]?.id ||
+            (item.thinking?.length ? "thinking" : "");
+
+        expect(visible.map((item) => rowIdentity(item))).toEqual([
+            "continue",
+            "call-recovered",
+            "call-before-restart",
+            "thinking",
+            "what are we waiting for",
+            "call-before-steer",
+            "sorting is still wrong",
+            "inspect it in the browser",
+            "call-after-steer",
+            "latest live steer",
+            "thinking",
+        ]);
+        expect(
+            visible.filter((item) =>
+                item.toolCalls?.some((call) => call.id === "call-recovered")
+            )
+        ).toHaveLength(1);
+        expect(visible.filter((item) => item.text === "latest live steer")).toEqual([
+            expect.objectContaining({ runId: currentRunId }),
+        ]);
+        expect(
+            visible
+                .filter((item) => item.thinking?.length)
+                .map((item) => ({
+                    runId: item.runId,
+                    thinking: item.thinking?.map((block) => block.text),
+                }))
+        ).toEqual([
+            { runId: oldRunId, thinking: ["interrupted reasoning"] },
+            { runId: currentRunId, thinking: ["current reasoning"] },
+        ]);
+
+        const afterInterruptedCleanup = structuredClone(runtime);
+        delete afterInterruptedCleanup.sessions[SESSION]!.runs[oldRunId];
+        const refreshedVisible = projectChat(
+            history,
+            afterInterruptedCleanup,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        )
+            .rows.filter((row) => row.kind !== "typing")
+            .map((row) => row.message);
+
+        expect(refreshedVisible.map((item) => rowIdentity(item))).toEqual([
+            "continue",
+            "call-recovered",
+            "what are we waiting for",
+            "call-before-steer",
+            "sorting is still wrong",
+            "inspect it in the browser",
+            "call-after-steer",
+            "latest live steer",
+            "thinking",
+        ]);
+        expect(
+            refreshedVisible.filter((item) => item.text === "latest live steer")
+        ).toEqual([expect.objectContaining({ runId: currentRunId })]);
+    });
+
     it("moves thinking below a recovered unscoped steer before more work arrives", () => {
         const visible = presentChatMessages(
             [
