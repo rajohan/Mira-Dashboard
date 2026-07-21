@@ -139,6 +139,23 @@ function isInterruptedAtByRun(value: unknown): value is Record<string, number> {
     );
 }
 
+function isFirstSequenceByRun(
+    value: unknown,
+    throughSequence: number
+): value is Record<string, number> {
+    const record = asRecord(value);
+    return Boolean(
+        record &&
+        Object.entries(record).every(
+            ([runId, firstSequence]) =>
+                runId.trim().length > 0 &&
+                Number.isSafeInteger(firstSequence) &&
+                (firstSequence as number) >= 0 &&
+                (firstSequence as number) <= throughSequence
+        )
+    );
+}
+
 function isRequestBoundaryRecord(
     value: unknown,
     throughSequence: number
@@ -165,6 +182,7 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             ? value.eventFingerprints.filter(isStoredEventFingerprint)
             : [];
         const throughSequence = value.throughSequence;
+        const firstSequenceByRun = value.firstSequenceByRun;
         const interruptedAtByRun = value.interruptedAtByRun;
         const pendingRequestBoundaries = value.pendingRequestBoundaries;
         const requestBoundary = value.requestBoundary;
@@ -195,6 +213,12 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             )
         ) {
             return undefined;
+        }
+        if (
+            firstSequenceByRun !== undefined &&
+            !isFirstSequenceByRun(firstSequenceByRun, throughSequence as number)
+        ) {
+            delete value.firstSequenceByRun;
         }
         if (
             pendingRequestBoundaries !== undefined &&
@@ -294,6 +318,9 @@ function snapshotMetadata(
         })),
         eventStorage: EVENT_ROW_STORAGE,
         events: [],
+        ...(snapshot.firstSequenceByRun && {
+            firstSequenceByRun: snapshot.firstSequenceByRun,
+        }),
         ...(snapshot.interruptedAtByRun && {
             interruptedAtByRun: snapshot.interruptedAtByRun,
         }),
@@ -542,6 +569,11 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
         return {
             completed: stored.snapshot.completed,
             events: events as OpenClawRuntimeEnvelope[],
+            ...(stored.snapshot.firstSequenceByRun && {
+                firstSequenceByRun: {
+                    ...stored.snapshot.firstSequenceByRun,
+                },
+            }),
             ...(stored.snapshot.interruptedAtByRun && {
                 interruptedAtByRun: {
                     ...stored.snapshot.interruptedAtByRun,

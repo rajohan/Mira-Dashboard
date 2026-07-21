@@ -24,6 +24,7 @@ export interface OpenClawRuntimeEnvelope {
 export interface OpenClawRuntimeSnapshot {
     completed: boolean;
     events: OpenClawRuntimeEnvelope[];
+    firstSequenceByRun?: Record<string, number>;
     interruptedAtByRun?: Record<string, number>;
     pendingRequestBoundaries?: Record<string, number>;
     requestBoundary?: number;
@@ -54,6 +55,7 @@ interface RetainedRun {
     completed: boolean;
     eventBytes: number[];
     events: OpenClawRuntimeEnvelope[];
+    firstSequence: number;
     interruptionEligible: boolean;
     interruptedAt?: number;
     runId: string;
@@ -591,7 +593,7 @@ function lastSequence(run: RetainedRun): number {
 }
 
 function firstSequence(run: RetainedRun): number {
-    return run.events[0]?.runtimeSequence ?? -1;
+    return run.firstSequence;
 }
 
 function latestRunUpdatedAt(runs: Iterable<RetainedRun>): number {
@@ -600,6 +602,10 @@ function latestRunUpdatedAt(runs: Iterable<RetainedRun>): number {
         latest = Math.max(latest, run.updatedAt);
     }
     return latest;
+}
+
+function hasActiveConversationRun(runs: ReadonlyMap<string, RetainedRun>): boolean {
+    return runs.values().some((run) => !run.completed && !isCompactionOnlyRun(run));
 }
 
 function replayBytes(runs: Iterable<RetainedRun>): number {
@@ -1192,6 +1198,16 @@ export class OpenClawChatBridge {
             }
         });
         const hydratedRuns = this.#runsBySession.get(storedStorageKey);
+        const firstSequenceEntries = Object.entries(snapshot.firstSequenceByRun || {});
+        for (const [runId, firstSequenceValue] of firstSequenceEntries) {
+            const hydratedRun = hydratedRuns?.get(runId);
+            if (hydratedRun) {
+                hydratedRun.firstSequence = Math.min(
+                    hydratedRun.firstSequence,
+                    firstSequenceValue
+                );
+            }
+        }
         const interruptedRunEntries = Object.entries(snapshot.interruptedAtByRun || {});
         for (const [runId, interruptedAt] of interruptedRunEntries) {
             const hydratedRun = hydratedRuns?.get(runId);
@@ -1234,6 +1250,20 @@ export class OpenClawChatBridge {
             return false;
         }
         return true;
+    }
+
+    #ensureEquivalentSessionsLoaded(sessionKey: string): boolean {
+        if (!this.#ensureSessionLoaded(sessionKey)) {
+            return false;
+        }
+        const storedKeys = this.#storedSessionKeys();
+        return Boolean(
+            storedKeys?.every(
+                (candidateSessionKey) =>
+                    !isSameSessionKey(candidateSessionKey, sessionKey) ||
+                    this.#ensureSessionLoaded(candidateSessionKey)
+            )
+        );
     }
 
     #pruneStaleActiveRuns(sessionKey: string, now = Date.now()): boolean {
@@ -1303,12 +1333,20 @@ export class OpenClawChatBridge {
                   )
               )
             : {};
+        const firstSequenceByRun = shouldIncludePersistenceMetadata
+            ? Object.fromEntries(
+                  selected.map((snapshot) => [snapshot.runId, snapshot.firstSequence])
+              )
+            : {};
 
         return {
             completed: active.length === 0 && selected.length > 0,
             events: selected
                 .flatMap((snapshot) => snapshot.events)
                 .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence),
+            ...(Object.keys(firstSequenceByRun).length > 0 && {
+                firstSequenceByRun,
+            }),
             ...(Object.keys(interruptedAtByRun).length > 0 && {
                 interruptedAtByRun,
             }),
@@ -1641,6 +1679,10 @@ export class OpenClawChatBridge {
                     ...sourceRun.events,
                 ]);
                 existing.completed ||= sourceRun.completed;
+                existing.firstSequence = Math.min(
+                    existing.firstSequence,
+                    sourceRun.firstSequence
+                );
                 existing.interruptionEligible ||= sourceRun.interruptionEligible;
                 existing.interruptedAt = latestOptionalTimestamp(
                     existing.interruptedAt,
@@ -2033,6 +2075,10 @@ export class OpenClawChatBridge {
         if (existing) {
             this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
             existing.completed ||= provisional.completed;
+            existing.firstSequence = Math.min(
+                existing.firstSequence,
+                provisional.firstSequence
+            );
             existing.interruptionEligible ||= provisional.interruptionEligible;
             existing.interruptedAt = latestOptionalTimestamp(
                 existing.interruptedAt,
@@ -2415,6 +2461,7 @@ export class OpenClawChatBridge {
                 completed: false,
                 eventBytes: [],
                 events: [],
+                firstSequence: envelope.runtimeSequence,
                 interruptionEligible: !shouldPersist,
                 runId,
                 terminalSequence: -1,
@@ -2423,6 +2470,10 @@ export class OpenClawChatBridge {
             };
             runs.set(runId, snapshot);
         }
+        snapshot.firstSequence = Math.min(
+            snapshot.firstSequence,
+            envelope.runtimeSequence
+        );
 
         if (!isCompaction && snapshot.completed && isCompactionOnlyRun(snapshot)) {
             snapshot.completed = false;
@@ -2667,43 +2718,48 @@ export class OpenClawChatBridge {
     captureRequestBoundary(sessionKey?: string, requestId?: string): number {
         this.#requireSequenceHydrated();
         if (sessionKey) {
-            if (!this.#ensureSessionLoaded(sessionKey)) {
+            if (!this.#ensureEquivalentSessionsLoaded(sessionKey)) {
                 throw new Error("Chat send boundary session could not be hydrated");
             }
             const storageSessionKey = normalizedSessionKey(sessionKey);
-            const exactRuns = this.#runsBySession.get(storageSessionKey);
-            const aliasSessionKeys = this.#runsBySession
+            const boundarySessionKeys = this.#runsBySession
                 .entries()
                 .filter(
                     ([candidateSessionKey, runs]) =>
-                        runs.size > 0 &&
-                        isSameSessionKey(candidateSessionKey, storageSessionKey)
+                        isSameSessionKey(candidateSessionKey, storageSessionKey) &&
+                        hasActiveConversationRun(runs)
                 )
                 .map(([candidateSessionKey]) => candidateSessionKey)
                 .toArray();
-            const boundarySessionKey = exactRuns?.size
-                ? storageSessionKey
-                : aliasSessionKeys.length === 1
-                  ? aliasSessionKeys[0]
-                  : undefined;
-            if (!boundarySessionKey && aliasSessionKeys.length > 1) {
-                throw new Error("Chat send boundary session is ambiguous");
+            if (
+                boundarySessionKeys.some(
+                    (boundarySessionKey) =>
+                        !this.#requestBoundaries.canCapture(boundarySessionKey, requestId)
+                )
+            ) {
+                throw new Error("Too many pending chat requests for one session");
             }
-            if (boundarySessionKey) {
+            for (const boundarySessionKey of boundarySessionKeys) {
                 this.#requestBoundaries.capture(
                     boundarySessionKey,
                     requestId,
                     this.#sequence
                 );
+            }
+            let didPersistAll = true;
+            for (const boundarySessionKey of boundarySessionKeys) {
                 if (!this.#flushSessionPersistence(boundarySessionKey)) {
-                    this.#settleRequestBoundary(
-                        boundarySessionKey,
-                        requestId,
-                        this.#sequence,
-                        true
-                    );
-                    throw new Error("Chat send boundary could not be persisted");
+                    didPersistAll = false;
                 }
+            }
+            if (!didPersistAll) {
+                this.#settleRequestBoundary(
+                    storageSessionKey,
+                    requestId,
+                    this.#sequence,
+                    true
+                );
+                throw new Error("Chat send boundary could not be persisted");
             }
         }
         return this.#sequence;

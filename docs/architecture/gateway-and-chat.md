@@ -250,11 +250,13 @@ SQLite uses two related tables:
   sequence.
 
 The current `rows-v2` metadata stores a SHA-256 fingerprint for every retained
-event, pending `chat.send` boundaries keyed by request ID, and the latest settled
-new-turn boundary when one exists. An unchanged prefix only appends new event
-rows; coalescing, trimming, or a same-sequence content change replaces stale
-rows. Older inline and `rows-v1` cache layouts are intentionally unsupported and
-should be cleared or migrated when deploying the schema change.
+event, the original first sequence for every retained run, pending `chat.send`
+boundaries keyed by request ID, and the latest settled new-turn boundary when one
+exists. The durable first sequence cannot move when a later tool/item update
+coalesces over the run's first retained envelope. An unchanged prefix only
+appends new event rows; coalescing, trimming, or a same-sequence content change
+replaces stale rows. Older inline and `rows-v1` cache layouts are intentionally
+unsupported and should be cleared or migrated when deploying the schema change.
 
 Replay limits are:
 
@@ -297,7 +299,11 @@ same session; stale provider metadata cannot override the request identity.
 Equivalent canonical and short session keys contribute to the same logical
 boundary while retaining their own persisted owners until settlement flushes
 every changed row, so alias promotion and concurrent sends cannot clear or
-bypass each other.
+bypass each other. Capture hydrates every persisted equivalent key and writes the
+boundary to every owner with active conversation work; an exact but completed
+replay therefore cannot hide an active alias. If the same request ID is restored
+with different cutoffs, the maximum exact cutoff is authoritative regardless of
+load order.
 Restart hydration unions pending request IDs and keeps the highest settled cutoff
 across equivalent persisted aliases; snapshot load order is never an ordering
 authority. A Dashboard, systemd, or VPS restart therefore cannot change the
@@ -456,7 +462,9 @@ When changing chat event handling, test these cases:
   pre-boundary active conversation; failed hydration blocks the send, alias
   owners are all flushed after settlement, failed requests cancel only their own
   boundaries, pre-ack provider starts are repaired after steer settlement, and
-  stale provisional IDs cannot claim a new request;
+  stale provisional IDs cannot claim a new request; exact pending aliases use
+  their maximum cutoff, active alias owners remain protected beside completed
+  exact replay, and coalescing cannot move a run's durable first sequence;
 - live reduction and full replay both preserve
   `start -> tool/steer interleaving -> one thinking -> status/final`, including
   multiple steer messages between tool calls;

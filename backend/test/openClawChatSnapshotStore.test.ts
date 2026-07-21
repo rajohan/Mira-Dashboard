@@ -48,6 +48,9 @@ describe("OpenClaw chat snapshot store", () => {
                     type: "event",
                 },
             ],
+            firstSequenceByRun: {
+                "persisted-run": 3,
+            },
             interruptedAtByRun: {
                 "persisted-run": 1_785_000_000_000,
             },

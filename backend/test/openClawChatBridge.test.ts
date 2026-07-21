@@ -5,9 +5,17 @@ import {
     type OpenClawChatSnapshotStore,
     type OpenClawRuntimeSnapshot,
 } from "../src/chat/openClawChatBridge.ts";
+import { OpenClawChatRequestBoundaries } from "../src/chat/openClawChatRequestBoundaries.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
 
 const MAIN = "agent:main:main";
+
+function logicalMainSessionKey(sessionKey: string): string {
+    return sessionKey
+        .trim()
+        .toLowerCase()
+        .replace(/^agent:main:/u, "");
+}
 
 class MemorySnapshotStore implements OpenClawChatSnapshotStore {
     readonly loadedKeys: string[] = [];
@@ -3071,6 +3079,27 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("uses the maximum exact request boundary across persisted aliases", () => {
+        const boundaries = new OpenClawChatRequestBoundaries(
+            (sessionKey) => sessionKey.trim().toLowerCase(),
+            (left, right) => logicalMainSessionKey(left) === logicalMainSessionKey(right)
+        );
+        const requestId = "dashboard-chat-shared-alias-request";
+        boundaries.restore(MAIN, {
+            pendingRequestBoundaries: { [requestId]: 10 },
+        });
+        boundaries.restore("main", {
+            pendingRequestBoundaries: { [requestId]: 20 },
+        });
+
+        expect(boundaries.pending(MAIN, requestId)).toBe(20);
+        expect(boundaries.settle(MAIN, requestId, undefined, false)).toEqual([
+            MAIN,
+            "main",
+        ]);
+        expect(boundaries.metadata(MAIN)).toEqual({ requestBoundary: 20 });
+    });
+
     it("rejects more pending request boundaries than snapshots can restore", () => {
         const bridge = new OpenClawChatBridge(new MemorySnapshotStore());
         bridge.recordEvent(
@@ -3402,6 +3431,108 @@ describe("OpenClaw chat bridge", () => {
             new Set(
                 restarted
                     .snapshot("main")
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
+    it("protects an active alias when the exact replay is already completed", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-active-short-alias";
+        const requestId = "dashboard-chat-canonical-over-completed-request";
+        const providerRunId = "provider-after-completed-exact-replay";
+        const now = Date.now();
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, "completed-canonical-run", now - 2, "final", 1)
+        );
+        const activeAlias = persistedSnapshot("main", provisionalRunId, now - 1);
+        activeAlias.interruptedAtByRun = { [provisionalRunId]: now };
+        store.snapshots.set("main", activeAlias);
+        const bridge = new OpenClawChatBridge(store);
+
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, requestId);
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+        expect(store.snapshots.get("main")?.pendingRequestBoundaries).toEqual({
+            [requestId]: requestBoundary,
+        });
+
+        const restarted = new OpenClawChatBridge(store);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: "main",
+                stream: "lifecycle",
+            },
+            []
+        );
+        expect(
+            new Set(
+                restarted
+                    .snapshot("main")
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
+    it("persists a run start sequence across tool-event coalescing", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-coalesced-before-boundary";
+        const requestId = "dashboard-chat-after-coalesced-tool";
+        const providerRunId = "provider-after-coalesced-tool";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    phase: "start",
+                    stream: "tool",
+                    toolCallId: "coalesced-tool",
+                },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.markGatewayDisconnected(Date.now());
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, requestId);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    phase: "update",
+                    stream: "tool",
+                    toolCallId: "coalesced-tool",
+                },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+            },
+            []
+        );
+        expect(bridge.flush()).toBe(true);
+        const persisted = store.snapshots.get(MAIN)!;
+        expect(persisted.events[0]?.runtimeSequence).toBeGreaterThan(requestBoundary);
+        expect(persisted.firstSequenceByRun).toEqual({
+            [provisionalRunId]: requestBoundary,
+        });
+
+        const restarted = new OpenClawChatBridge(store);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+        expect(
+            new Set(
+                restarted
+                    .snapshot(MAIN)
                     .events.map((event) => (event.payload as { runId?: string }).runId)
             )
         ).toEqual(new Set([provisionalRunId, providerRunId]));
