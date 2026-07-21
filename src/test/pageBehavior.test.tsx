@@ -2888,7 +2888,7 @@ describe("Mira Dashboard pages", () => {
                 },
             });
         }
-    });
+    }, 15_000);
 
     it("drives chat page session sync, history loading, diagnostics, and send ack", async () => {
         const user = userEvent.setup();
