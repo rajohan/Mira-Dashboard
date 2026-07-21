@@ -868,15 +868,34 @@ function recoveredDiagnosticIndexes(
 function transientMessage(
     message: ChatHistoryMessage,
     run: ChatRunState,
-    runtimeKey: string
+    runtimeKey: string,
+    runtimeSequence?: number
 ): ChatHistoryMessage {
     return {
         ...message,
         local: true,
         runId: run.runId,
         runtimeKey,
+        runtimeSequence,
         timestamp: message.timestamp || run.updatedAt,
     };
+}
+
+/** Reorders only runtime-owned slots, leaving canonical transcript rows anchored. */
+function orderRuntimeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
+    const runtimeSlots = messages.flatMap((message, index) =>
+        message.runtimeSequence === undefined
+            ? []
+            : [{ index, message, sequence: message.runtimeSequence }]
+    );
+    const ordered = runtimeSlots.toSorted(
+        (left, right) => left.sequence - right.sequence || left.index - right.index
+    );
+    const next = [...messages];
+    for (const [slotIndex, slot] of runtimeSlots.entries()) {
+        next[slot.index] = ordered[slotIndex]!.message;
+    }
+    return next;
 }
 
 function isMatchingRuntimeUser(
@@ -954,7 +973,12 @@ function mergeAllRuntimeUserMessages(
         .flatMap((run) => run.userMessages.map((entry) => ({ entry, run })))
         .toReversed();
     for (const { entry, run } of runtimeMessages) {
-        const runtimeMessage = transientMessage(entry.message, run, entry.key);
+        const runtimeMessage = transientMessage(
+            entry.message,
+            run,
+            entry.key,
+            entry.sequence
+        );
         const recoveredIndex = runtimeUserMatchIndex(
             next,
             runtimeMessage,
@@ -969,6 +993,7 @@ function mergeAllRuntimeUserMessages(
         const enriched = {
             ...recovered,
             runId: run.runId,
+            runtimeSequence: entry.sequence,
         };
         next[recoveredIndex] = enriched;
         recoveredCandidates.add(enriched);
@@ -999,7 +1024,12 @@ export function reconcileChatMessages(
         const claimedRecoveredSignatures = new Map<number, Map<string, number>>();
         const signatureCache = new Map<ChatHistoryMessage, string[]>();
         for (const entry of run.diagnostics) {
-            const diagnostic = transientMessage(entry.message, run, entry.key);
+            const diagnostic = transientMessage(
+                entry.message,
+                run,
+                entry.key,
+                entry.sequence
+            );
             if (exactToolResultIds(diagnostic).size > 0) {
                 refreshExactToolResults(
                     diagnostic,
@@ -1020,7 +1050,11 @@ export function reconcileChatMessages(
             );
             if (recoveredIndexes) {
                 for (const index of recoveredIndexes) {
-                    messages[index] = { ...messages[index]!, runId: run.runId };
+                    messages[index] = {
+                        ...messages[index]!,
+                        runId: run.runId,
+                        runtimeSequence: entry.sequence,
+                    };
                 }
             } else {
                 diagnostics.push(diagnostic);
@@ -1049,7 +1083,7 @@ export function reconcileChatMessages(
         }
         messages.splice(segment.end, 0, ...additions);
     }
-    return dedupeMessages(messages);
+    return orderRuntimeMessages(dedupeMessages(messages));
 }
 
 function isAssistantTextStream(message: ChatHistoryMessage): boolean {

@@ -2683,6 +2683,7 @@ describe("OpenClaw chat bridge", () => {
                     { runId: provisionalRunId },
                     steerBoundary
                 );
+                expect(store.snapshots.get(MAIN)?.requestBoundary).toBeUndefined();
                 bridge.markGatewayDisconnected(disconnectedAt);
                 if (shouldRestartDashboard) {
                     expect(bridge.flush()).toBe(true);
@@ -2827,7 +2828,17 @@ describe("OpenClaw chat bridge", () => {
                 []
             );
             bridge.markGatewayDisconnected(disconnectedAt);
-            bridge.captureRequestBoundary(MAIN);
+            const requestBoundary = bridge.captureRequestBoundary(MAIN);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "delayed interrupted work" },
+                    runId: provisionalRunId,
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
 
             dateNow.mockReturnValue(disconnectedAt + 1000);
             bridge.recordEvent(
@@ -2839,6 +2850,16 @@ describe("OpenClaw chat bridge", () => {
                     stream: "lifecycle",
                 },
                 []
+            );
+            bridge.handleSuccessfulRequest(
+                "chat.send",
+                {
+                    idempotencyKey: "dashboard-chat-new-send",
+                    message: "new question",
+                    sessionKey: MAIN,
+                },
+                { runId: providerRunId },
+                requestBoundary
             );
         } finally {
             dateNow.mockRestore();
@@ -2868,11 +2889,14 @@ describe("OpenClaw chat bridge", () => {
             },
             []
         );
+        bridge.markGatewayDisconnected(Date.now());
         expect(bridge.flush()).toBe(true);
 
         const restarted = new OpenClawChatBridge(store);
         restarted.captureRequestBoundary(MAIN);
-        restarted.recordEvent(
+        expect(store.snapshots.get(MAIN)?.requestBoundary).toBe(1);
+        const afterBoundaryRestart = new OpenClawChatBridge(store);
+        afterBoundaryRestart.recordEvent(
             "agent",
             {
                 data: { phase: "start" },
@@ -2889,7 +2913,49 @@ describe("OpenClaw chat bridge", () => {
                     .snapshot(MAIN)
                     .events.map((event) => (event.payload as { runId?: string }).runId)
             )
+        ).toEqual(new Set([provisionalRunId]));
+        expect(
+            new Set(
+                afterBoundaryRestart
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
         ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
+    it("uses session message identity instead of timing to assign live steers", () => {
+        const bridge = new OpenClawChatBridge();
+        const providerRunId = "provider-active";
+        const provisionalRunId = "dashboard-chat-current-steer";
+        const liveSteer = bridge.recordEvent(
+            "session.message",
+            {
+                activeRunIds: [providerRunId, "dashboard-chat-stale"],
+                message: {
+                    content: "steer",
+                    idempotencyKey: `${provisionalRunId}:user`,
+                    role: "user",
+                },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        const newTurn = bridge.recordEvent(
+            "session.message",
+            {
+                activeRunIds: ["dashboard-chat-stale"],
+                message: {
+                    content: "new turn",
+                    idempotencyKey: `${provisionalRunId}:user`,
+                    role: "user",
+                },
+                sessionKey: "agent:main:other",
+            },
+            []
+        );
+
+        expect(liveSteer.payload).toMatchObject({ runId: providerRunId });
+        expect(newTurn.payload).toMatchObject({ runId: provisionalRunId });
     });
 
     it("preserves a short-key send boundary after session canonicalization", () => {

@@ -1959,7 +1959,11 @@ describe("chat projection", () => {
                 ],
             };
             history.push(toolMessage);
-            diagnostics.push({ key: `tool:${id}`, message: toolMessage });
+            diagnostics.push({
+                key: `tool:${id}`,
+                message: toolMessage,
+                sequence: index + 1,
+            });
         }
         history.push(message("assistant", "answer"));
         const session: ChatSessionRuntimeState = {
@@ -3457,51 +3461,109 @@ describe("chat projection", () => {
         expect(visible[1]?.thinking?.[0]?.text).toBe("first thought");
     });
 
-    it("preserves interleaved tools and steers before one thinking row and final", () => {
-        const visible = presentChatMessages(
-            [
-                message("user", "question", "run-1"),
-                {
+    it("uses runtime sequence for interleaved tools and steers across replay", () => {
+        const runId = "run-1";
+        const runtimeEvents: ChatRuntimeEvent[] = [
+            event(16, {
+                kind: "user",
+                message: message("user", "question", runId),
+                runId,
+            }),
+            event(32, {
+                kind: "thinking",
+                message: {
                     content: [{ text: "working", type: "thinking" }],
                     role: "assistant",
-                    runId: "run-1",
+                    runId,
                     text: "",
                     thinking: [{ id: "thought-1", text: "working" }],
                 },
-                {
-                    content: "",
-                    role: "assistant",
-                    runId: "run-1",
-                    text: "",
-                    toolCalls: [{ id: "call-1", name: "first-tool" }],
-                },
-                message("user", "first steer", "dashboard-chat-steer-1"),
-                {
-                    content: "",
-                    role: "assistant",
-                    runId: "run-1",
-                    text: "",
-                    toolCalls: [{ id: "call-2", name: "second-tool" }],
-                },
-                message("user", "second steer", "dashboard-chat-steer-2"),
-                message("assistant", "done", "run-1"),
-            ],
-            createChatVisibility(true, true),
-            true
+                runId,
+            }),
+            ...(
+                [
+                    [48, "call-1", "first-tool"],
+                    [80, "call-2", "second-tool"],
+                    [112, "call-3", "third-tool"],
+                ] satisfies Array<[number, string, string]>
+            ).map(([sequence, id, name]) =>
+                event(sequence, {
+                    kind: "tool",
+                    message: {
+                        content: "",
+                        role: "assistant",
+                        runId,
+                        text: "",
+                        toolCalls: [{ id, name }],
+                    },
+                    runId,
+                    toolKey: `tool:${id}`,
+                })
+            ),
+            event(64, {
+                kind: "user",
+                message: message("user", "first steer", runId),
+                runId,
+            }),
+            event(96, {
+                kind: "user",
+                message: message("user", "second steer", runId),
+                runId,
+            }),
+            event(128, { kind: "status", runId, text: "Working" }),
+        ].toSorted((left, right) => left.sequence - right.sequence);
+        const history = [{ ...message("user", "question"), timestamp: NOW }];
+        const beforeReplay = reduceChatRuntime(
+            createChatRuntimeState(),
+            runtimeEvents.slice(0, 5)
         );
-        expect(
-            visible.map(
-                (item) =>
-                    item.toolCalls?.[0]?.name ||
-                    (item.thinking?.length ? "thinking" : item.text)
-            )
-        ).toEqual([
+        const liveRuntime = reduceChatRuntime(
+            structuredClone(beforeReplay),
+            runtimeEvents.slice(5)
+        );
+        const replayedRuntime = reduceChatRuntime(
+            createChatRuntimeState(),
+            runtimeEvents
+        );
+        const labels = (runtime: ReturnType<typeof createChatRuntimeState>) =>
+            projectChat(
+                history,
+                runtime,
+                SESSION,
+                createChatVisibility(true, true),
+                true,
+                new Set()
+            ).rows.map((row) =>
+                row.kind === "typing"
+                    ? `status:${row.message.text}`
+                    : row.message.toolCalls?.[0]?.name ||
+                      (row.message.thinking?.length ? "thinking" : row.message.text)
+            );
+        const expectedActive = [
             "question",
             "first-tool",
             "first steer",
             "second-tool",
             "second steer",
+            "third-tool",
             "thinking",
+            "status:Working",
+        ];
+
+        expect(liveRuntime).toEqual(replayedRuntime);
+        expect(labels(liveRuntime)).toEqual(expectedActive);
+        expect(labels(replayedRuntime)).toEqual(expectedActive);
+
+        const completedRuntime = reduceChatRuntime(replayedRuntime, [
+            event(144, {
+                kind: "finish",
+                message: message("assistant", "done", runId),
+                outcome: "completed",
+                runId,
+            }),
+        ]);
+        expect(labels(completedRuntime)).toEqual([
+            ...expectedActive.slice(0, -1),
             "done",
         ]);
     });

@@ -147,6 +147,7 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             : [];
         const throughSequence = value.throughSequence;
         const interruptedAtByRun = value.interruptedAtByRun;
+        const requestBoundary = value.requestBoundary;
         if (
             !value ||
             typeof value !== "object" ||
@@ -160,6 +161,10 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             (throughSequence as number) < 0 ||
             (interruptedAtByRun !== undefined &&
                 !isInterruptedAtByRun(interruptedAtByRun)) ||
+            (requestBoundary !== undefined &&
+                (!Number.isSafeInteger(requestBoundary) ||
+                    (requestBoundary as number) < 0 ||
+                    (requestBoundary as number) > (throughSequence as number))) ||
             value.eventStorage !== EVENT_ROW_STORAGE ||
             eventFingerprints.some(
                 (event, index) =>
@@ -265,6 +270,9 @@ function snapshotMetadata(
         events: [],
         ...(snapshot.interruptedAtByRun && {
             interruptedAtByRun: snapshot.interruptedAtByRun,
+        }),
+        ...(snapshot.requestBoundary !== undefined && {
+            requestBoundary: snapshot.requestBoundary,
         }),
         runSignature,
         throughSequence: snapshot.throughSequence,
@@ -509,6 +517,9 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                 interruptedAtByRun: {
                     ...stored.snapshot.interruptedAtByRun,
                 },
+            }),
+            ...(stored.snapshot.requestBoundary !== undefined && {
+                requestBoundary: stored.snapshot.requestBoundary,
             }),
             throughSequence: stored.snapshot.throughSequence,
         };
