@@ -898,15 +898,24 @@ function orderRuntimeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessag
     }
     const next = [...messages];
     for (const runtimeSlots of slotsByRun.values()) {
-        const promptIndex = runtimeSlots.find((slot) =>
-            isUserMessage(slot.message)
-        )?.index;
-        const activitySlots = runtimeSlots.filter((slot) => slot.index !== promptIndex);
-        const ordered = activitySlots.toSorted(
-            (left, right) => left.sequence - right.sequence || left.index - right.index
-        );
-        for (const [slotIndex, slot] of activitySlots.entries()) {
-            next[slot.index] = ordered[slotIndex]!.message;
+        const promptSlot = runtimeSlots
+            .filter((slot) => isUserMessage(slot.message))
+            .toSorted(
+                (left, right) =>
+                    left.sequence - right.sequence || left.index - right.index
+            )[0];
+        const activitySlots = runtimeSlots
+            .filter((slot) => slot !== promptSlot)
+            .toSorted(
+                (left, right) =>
+                    left.sequence - right.sequence || left.index - right.index
+            );
+        const targetIndexes = runtimeSlots
+            .map((slot) => slot.index)
+            .toSorted((left, right) => left - right);
+        const ordered = promptSlot ? [promptSlot, ...activitySlots] : activitySlots;
+        for (const [slotIndex, index] of targetIndexes.entries()) {
+            next[index] = ordered[slotIndex]!.message;
         }
     }
     return next;

@@ -13,6 +13,7 @@ import {
     OpenClawGatewayClient,
     type OpenClawGatewayClientInstance,
     type OpenClawGatewayClientOptions,
+    type OpenClawGatewayRequestOptions,
 } from "./lib/openclawGatewayClient.ts";
 import { nonEmptyEnvironmentFallback, stringFallback } from "./lib/values.ts";
 
@@ -1021,6 +1022,29 @@ function captureChatSendRequestBoundary(
     );
 }
 
+async function requestWithReplayBoundary(
+    client: OpenClawGatewayClientInstance,
+    method: string,
+    parameters: Record<string, unknown>,
+    options?: OpenClawGatewayRequestOptions
+): Promise<unknown> {
+    let requestBoundary: number | undefined;
+    try {
+        requestBoundary = captureChatSendRequestBoundary(method, parameters);
+        const payload = await client.request(method, parameters, options);
+        chatReplayState.bridge.handleSuccessfulRequest(
+            method,
+            parameters,
+            payload,
+            requestBoundary
+        );
+        return payload;
+    } catch (error) {
+        chatReplayState.bridge.handleFailedRequest(method, parameters, requestBoundary);
+        throw error;
+    }
+}
+
 /** Performs forward request. */
 async function forwardRequest(
     method: string,
@@ -1043,13 +1067,11 @@ async function forwardRequest(
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
-            const requestBoundary = captureChatSendRequestBoundary(method, parameters);
-            let payload = await activeGateway.request(method, parameters, requestOptions);
-            chatReplayState.bridge.handleSuccessfulRequest(
+            let payload = await requestWithReplayBoundary(
+                activeGateway,
                 method,
                 parameters,
-                payload,
-                requestBoundary
+                requestOptions
             );
             if (method === "chat.history") {
                 payload = hydrateOmittedChatHistoryImages(
@@ -1089,13 +1111,11 @@ async function forwardRequest(
     }
 
     try {
-        const requestBoundary = captureChatSendRequestBoundary(method, parameters);
-        const payload = await activeGateway.request(method, parameters, requestOptions);
-        chatReplayState.bridge.handleSuccessfulRequest(
+        await requestWithReplayBoundary(
+            activeGateway,
             method,
             parameters,
-            payload,
-            requestBoundary
+            requestOptions
         );
         if (method.startsWith("sessions.")) {
             await refreshSessionsAfterRequest(activeGateway);
@@ -1289,15 +1309,7 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
-    const requestBoundary = captureChatSendRequestBoundary(method, parameters);
-    const payload = await gatewayState.client.request(method, parameters);
-    chatReplayState.bridge.handleSuccessfulRequest(
-        method,
-        parameters,
-        payload,
-        requestBoundary
-    );
-    return payload;
+    return requestWithReplayBoundary(gatewayState.client, method, parameters);
 }
 
 /** Performs send session message. */

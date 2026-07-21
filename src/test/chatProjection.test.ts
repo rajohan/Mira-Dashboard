@@ -3568,6 +3568,72 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("anchors the earliest runtime prompt ahead of a timestamp-skewed steer", () => {
+        const runId = "runtime-only-skewed-users";
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            eventAt(16, "2026-07-16T12:00:10.000Z", {
+                kind: "user",
+                message: message("user", "question", runId),
+                runId,
+            }),
+            eventAt(32, "2026-07-16T12:00:05.000Z", {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    runId,
+                    text: "",
+                    toolCalls: [{ id: "call-skewed", name: "first-tool" }],
+                },
+                runId,
+                toolKey: "tool:call-skewed",
+            }),
+            eventAt(48, "2026-07-16T12:00:00.000Z", {
+                kind: "user",
+                message: message("user", "steer", runId),
+                runId,
+            }),
+            eventAt(64, "2026-07-16T12:00:06.000Z", {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "working", type: "thinking" }],
+                    role: "assistant",
+                    runId,
+                    text: "",
+                    thinking: [{ id: "thought-skewed", text: "working" }],
+                },
+                runId,
+            }),
+            eventAt(80, "2026-07-16T12:00:07.000Z", {
+                kind: "status",
+                runId,
+                text: "Working",
+            }),
+        ]);
+
+        const labels = projectChat(
+            [],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).rows.map((row) =>
+            row.kind === "typing"
+                ? `status:${row.message.text}`
+                : row.message.toolCalls?.[0]?.name ||
+                  (row.message.thinking?.length ? "thinking" : row.message.text)
+        );
+
+        expect(labels).toEqual([
+            "question",
+            "first-tool",
+            "steer",
+            "thinking",
+            "status:Working",
+        ]);
+    });
+
     it("projects a single compacting status without mutating messages", () => {
         const runtime = addOptimisticChatRun(
             createChatRuntimeState(),

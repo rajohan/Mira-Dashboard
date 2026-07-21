@@ -2075,6 +2075,28 @@ export class OpenClawChatBridge {
         sessionKey: string,
         runs: Map<string, RetainedRun>
     ): RepairedInterruptedRun | undefined {
+        const candidate = this.#interruptedRunSplitCandidate(sessionKey, runs);
+        if (!candidate) {
+            return undefined;
+        }
+        const repairedRun = this.#mergeRunEntry(
+            sessionKey,
+            runs,
+            candidate.provisionalRunId,
+            candidate.providerRunId
+        );
+        return repairedRun
+            ? {
+                  providerRunId: repairedRun.runId,
+                  provisionalRunId: candidate.provisionalRunId,
+              }
+            : undefined;
+    }
+
+    #interruptedRunSplitCandidate(
+        sessionKey: string,
+        runs: ReadonlyMap<string, RetainedRun>
+    ): RepairedInterruptedRun | undefined {
         const candidates: Array<{
             providerRunId: string;
             provisionalRunId: string;
@@ -2120,19 +2142,35 @@ export class OpenClawChatBridge {
         if (candidates.length !== 1) {
             return undefined;
         }
-        const candidate = candidates[0]!;
-        const repairedRun = this.#mergeRunEntry(
-            sessionKey,
-            runs,
-            candidate.provisionalRunId,
-            candidate.providerRunId
+        return candidates[0];
+    }
+
+    #repairInterruptedRunForSession(
+        sessionKey: string
+    ): RepairedInterruptedRun | undefined {
+        const candidates = this.#runsBySession
+            .entries()
+            .filter(([candidateSessionKey]) =>
+                isSameSessionKey(candidateSessionKey, sessionKey)
+            )
+            .flatMap(([candidateSessionKey, runs]) => {
+                const candidate = this.#interruptedRunSplitCandidate(
+                    candidateSessionKey,
+                    runs
+                );
+                return candidate ? [{ candidate, sessionKey: candidateSessionKey }] : [];
+            })
+            .toArray();
+        if (candidates.length !== 1) {
+            return undefined;
+        }
+        const { candidate, sessionKey: candidateSessionKey } = candidates[0]!;
+        this.#promoteProvisionalRun(
+            candidateSessionKey,
+            candidate.providerRunId,
+            candidate.provisionalRunId
         );
-        return repairedRun
-            ? {
-                  providerRunId: repairedRun.runId,
-                  provisionalRunId: candidate.provisionalRunId,
-              }
-            : undefined;
+        return candidate;
     }
 
     #promoteProvisionalRun(
@@ -2658,6 +2696,12 @@ export class OpenClawChatBridge {
                     this.#sequence
                 );
                 if (!this.#flushSessionPersistence(boundarySessionKey)) {
+                    this.#settleRequestBoundary(
+                        boundarySessionKey,
+                        requestId,
+                        this.#sequence,
+                        true
+                    );
                     throw new Error("Chat send boundary could not be persisted");
                 }
             }
@@ -2760,7 +2804,7 @@ export class OpenClawChatBridge {
                 runId,
                 requestBoundary
             );
-            const acknowledgedRunId =
+            let acknowledgedRunId =
                 runId || (continuesExistingRun ? undefined : provisionalRunId);
             if (acknowledgedRunId) {
                 this.#promoteProvisionalRun(
@@ -2776,11 +2820,36 @@ export class OpenClawChatBridge {
                 requestBoundary,
                 continuesExistingRun
             );
+            if (!acknowledgedRunId && continuesExistingRun) {
+                acknowledgedRunId =
+                    this.#repairInterruptedRunForSession(sessionKey)?.providerRunId;
+            }
             this.#clearCompletedRuns(sessionKey, acknowledgedRunId);
             if (acknowledgedRunId) {
                 this.#rememberRunSession(acknowledgedRunId, sessionKey);
             }
         }
+    }
+
+    /** Removes a request boundary when the Gateway rejects or times out a send. */
+    handleFailedRequest(
+        method: string,
+        parameters: Record<string, unknown>,
+        requestBoundary?: number
+    ): void {
+        if (method !== "chat.send") {
+            return;
+        }
+        const sessionKey = stringField(parameters, "sessionKey");
+        if (!sessionKey) {
+            return;
+        }
+        this.#settleRequestBoundary(
+            sessionKey,
+            stringField(parameters, "idempotencyKey"),
+            requestBoundary,
+            true
+        );
     }
 
     /**

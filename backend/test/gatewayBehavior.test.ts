@@ -172,6 +172,9 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
             return { isOk: true };
         }
         if (method === "chat.send") {
+            if (requestParameters.message === "fail chat") {
+                throw new Error("chat send rejected");
+            }
             return { runId: "acknowledged-run" };
         }
         if (method === "chat.history") {
@@ -373,7 +376,14 @@ describe("gateway behavior", () => {
             .mockImplementation(() => {
                 throw new Error("unexpected replay boundary capture");
             });
-        cleanupCallbacks.push(() => captureBoundary.mockRestore());
+        const failBoundary = jest.spyOn(
+            OpenClawChatBridge.prototype,
+            "handleFailedRequest"
+        );
+        cleanupCallbacks.push(
+            () => failBoundary.mockRestore(),
+            () => captureBoundary.mockRestore()
+        );
 
         gateway.init("request-boundary-token");
         const client = fakeClients.at(-1);
@@ -417,6 +427,16 @@ describe("gateway behavior", () => {
             })
         ).resolves.toBeDefined();
         expect(captureBoundary).toHaveBeenCalledTimes(1);
+        const failedParameters = {
+            idempotencyKey: "dashboard-chat-failed-request",
+            message: "fail chat",
+            sessionKey: "agent:main:main",
+        };
+        await expect(gateway.request("chat.send", failedParameters)).rejects.toThrow(
+            "chat send rejected"
+        );
+        expect(failBoundary).toHaveBeenCalledWith("chat.send", failedParameters, 0);
+        expect(captureBoundary).toHaveBeenCalledTimes(2);
         socket.close();
     });
 

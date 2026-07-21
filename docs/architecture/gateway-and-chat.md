@@ -288,12 +288,16 @@ fails instead of crossing an unknown boundary. A matching acknowledgement or use
 identifies a run that already existed at the boundary, the request is a steer;
 otherwise the boundary becomes the durable cutoff for a new turn. Runless steer
 acknowledgements may infer continuation only when exactly one active
-conversation existed before the boundary. A user echo with one provisional active
-run joins it only when that unfinished run is already retained for the same
-session; stale provider metadata cannot override the request identity. Equivalent
-canonical and short session keys contribute to the same logical boundary while
-retaining their own persisted owners until settlement flushes every changed row,
-so alias promotion and concurrent sends cannot clear or bypass each other.
+conversation existed before the boundary. A rejected or timed-out send cancels
+only its own pending boundary. If a resumed provider lifecycle arrives before a
+runless steer acknowledgement, removing the steer boundary triggers the same
+bounded, unambiguous interrupted-run repair. A user echo with one provisional
+active run joins it only when that unfinished run is already retained for the
+same session; stale provider metadata cannot override the request identity.
+Equivalent canonical and short session keys contribute to the same logical
+boundary while retaining their own persisted owners until settlement flushes
+every changed row, so alias promotion and concurrent sends cannot clear or
+bypass each other.
 Restart hydration unions pending request IDs and keeps the highest settled cutoff
 across equivalent persisted aliases; snapshot load order is never an ordering
 authority. A Dashboard, systemd, or VPS restart therefore cannot change the
@@ -318,10 +322,11 @@ because it falls inside the timestamp-skew allowance; the allowance is only a
 fallback when no causal or explicitly matched user boundary exists.
 Name-only fallback matching is likewise bounded to the current user turn.
 Every runtime user, thinking, and tool entry retains its Gateway sequence. During
-reconciliation, projection anchors each run's initiating prompt and reorders its
-remaining runtime-owned row slots by that sequence; canonical transcript-only
-rows remain anchored. Presentation then collapses all thinking for the run into
-exactly one bubble after the last tool or steer. The active status row is
+reconciliation, projection identifies each run's initiating prompt as its
+lowest-sequence runtime user entry, moves it into the run's first runtime-owned
+row slot, and reorders the remaining runtime-owned slots by sequence; canonical
+transcript-only rows remain anchored. Presentation then collapses all thinking
+for the run into exactly one bubble after the last tool or steer. The active status row is
 appended last, and a canonical final replaces it as the last row when the run
 completes. The resulting contract is therefore
 `start -> tools/steers in event order -> one thinking -> active status or final`,
@@ -449,8 +454,9 @@ When changing chat event handling, test these cases:
   requests settle only their own boundary, delayed old events cannot cross the
   settled new-turn cutoff, and a runless steer can clear only one unambiguous
   pre-boundary active conversation; failed hydration blocks the send, alias
-  owners are all flushed after settlement, and stale provisional IDs cannot
-  claim a new request;
+  owners are all flushed after settlement, failed requests cancel only their own
+  boundaries, pre-ack provider starts are repaired after steer settlement, and
+  stale provisional IDs cannot claim a new request;
 - live reduction and full replay both preserve
   `start -> tool/steer interleaving -> one thinking -> status/final`, including
   multiple steer messages between tool calls;

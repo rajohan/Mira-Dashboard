@@ -2947,6 +2947,95 @@ describe("OpenClaw chat bridge", () => {
         });
     });
 
+    it("rolls back a synthetic boundary when its durable capture fails", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "active work" },
+                runId: "dashboard-chat-before-boundary-write-failure",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        expect(bridge.flush()).toBe(true);
+        store.saveFailures = 1;
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            expect(() => bridge.captureRequestBoundary(MAIN)).toThrow(
+                "Chat send boundary could not be persisted"
+            );
+            expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+            expect(bridge.flush()).toBe(true);
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("releases failed send boundaries without clearing concurrent requests", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-before-failed-send";
+        const failedRequestId = "dashboard-chat-failed-send";
+        const concurrentRequestId = "dashboard-chat-concurrent-after-failure";
+        const providerRunId = "provider-after-failed-send";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "work before failed send" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.markGatewayDisconnected(Date.now());
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, failedRequestId);
+        bridge.captureRequestBoundary(MAIN, concurrentRequestId);
+
+        bridge.handleFailedRequest(
+            "chat.send",
+            {
+                idempotencyKey: failedRequestId,
+                message: "failed request",
+                sessionKey: MAIN,
+            },
+            requestBoundary
+        );
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toEqual({
+            [concurrentRequestId]: requestBoundary,
+        });
+
+        bridge.handleFailedRequest(
+            "chat.send",
+            {
+                idempotencyKey: concurrentRequestId,
+                message: "concurrent failed request",
+                sessionKey: MAIN,
+            },
+            requestBoundary
+        );
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+        const resumed = bridge.snapshot(MAIN);
+        expect(
+            resumed.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: resumed.events.length }, () => providerRunId));
+    });
+
     it("settles only a synthetic fallback when the acknowledgement gains an id", () => {
         const store = new MemorySnapshotStore();
         const activeRunId = "dashboard-chat-synthetic-boundary-run";
@@ -3150,6 +3239,61 @@ describe("OpenClaw chat bridge", () => {
         expect(
             snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
         ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
+    });
+
+    it("repairs a resumed provider run that starts before a runless steer ack", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-pre-ack-live-steer";
+        const steerRequestId = "dashboard-chat-pre-ack-steer-request";
+        const providerRunId = "provider-before-runless-steer-ack";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "before steer" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.markGatewayDisconnected(Date.now());
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, steerRequestId);
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+        expect(
+            new Set(
+                bridge
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: steerRequestId,
+                message: "keep going",
+                sessionKey: MAIN,
+            },
+            {},
+            requestBoundary
+        );
+
+        const repaired = bridge.snapshot(MAIN);
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+        expect(
+            repaired.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: repaired.events.length }, () => providerRunId));
     });
 
     it("uses session message identity instead of timing to assign live steers", () => {
