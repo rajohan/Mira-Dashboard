@@ -726,11 +726,17 @@ describe("gateway behavior", () => {
 
         gateway.init("token-two");
 
-        expect(markGatewayDisconnected).toHaveBeenCalledTimes(2);
+        expect(markGatewayDisconnected).toHaveBeenCalledTimes(3);
         expect(markGatewayDisconnected.mock.contexts[1]).toBe(
             markGatewayDisconnected.mock.contexts[0]
         );
+        expect(markGatewayDisconnected.mock.contexts[2]).toBe(
+            markGatewayDisconnected.mock.contexts[0]
+        );
         expect(fakeClients.at(-1)).not.toBe(firstClient);
+
+        firstClient?.options.onClose?.(1000, "Delayed close callback");
+        expect(markGatewayDisconnected).toHaveBeenCalledTimes(3);
     });
 
     it("normalizes sessions, enriches events, and hydrates omitted chat images without a real gateway", async () => {

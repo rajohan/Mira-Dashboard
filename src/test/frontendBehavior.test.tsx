@@ -1133,6 +1133,11 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         try {
             handleSocketMessage({ payload: [], type: "response" });
+            handleSocketMessage({
+                gatewayConnected: false,
+                sessions: [],
+                type: "sessions",
+            });
             expect(deletes).toEqual([]);
         } finally {
             restore();
@@ -1405,6 +1410,14 @@ describe("Mira Dashboard frontend behavior", () => {
                     gatewayConnected: true,
                     sessions: [],
                     type: "state",
+                });
+            });
+            expect(result.current.hasConfirmedSessionList).toBe(false);
+            act(() => {
+                socket.message({
+                    gatewayConnected: false,
+                    sessions: [],
+                    type: "sessions",
                 });
             });
             expect(result.current.hasConfirmedSessionList).toBe(false);

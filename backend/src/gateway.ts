@@ -821,12 +821,15 @@ function init(token: string): void {
         return;
     }
     const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || "ws://127.0.0.1:18789";
+    const previousGatewayClient = gatewayState.client;
+    if (previousGatewayClient) {
+        chatReplayState.bridge.markGatewayDisconnected();
+    }
     if (!didSelectChatReplayScope(gatewayUrl, token)) {
         throw new Error(
             "Gateway credentials were not changed because pending chat replay could not be persisted"
         );
     }
-    const previousGatewayClient = gatewayState.client;
     try {
         previousGatewayClient?.stop();
     } catch (error) {

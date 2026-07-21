@@ -30,7 +30,7 @@ export function handleSocketMessage(raw: unknown): boolean | undefined {
         replaceSessionsFromWebSocket(data.sessions);
     }
 
-    if (data.type === "sessions" && data.sessions) {
+    if (data.type === "sessions" && data.sessions && data.gatewayConnected !== false) {
         replaceSessionsFromWebSocket(data.sessions);
     }
 

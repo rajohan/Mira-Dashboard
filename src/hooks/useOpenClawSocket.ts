@@ -106,7 +106,8 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                         const hasSessionList = Boolean(
                             envelope &&
                             envelope.type === "sessions" &&
-                            Array.isArray(envelope.sessions)
+                            Array.isArray(envelope.sessions) &&
+                            envelope.gatewayConnected !== false
                         );
                         if (
                             connectionState === false ||
