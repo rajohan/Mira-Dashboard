@@ -2766,13 +2766,12 @@ describe("OpenClaw chat bridge", () => {
         ).toEqual([providerRunId, providerRunId]);
     });
 
-    it("replaces an interrupted run after a newer chat send is acknowledged", () => {
+    it("does not join an interrupted run across a newer chat send", () => {
         const provisionalRunId = "dashboard-chat-before-reconnect-send";
         const providerRunId = "provider-after-reconnect-send";
         const disconnectedAt = 1_785_000_000_000;
         const bridge = new OpenClawChatBridge();
         const dateNow = jest.spyOn(Date, "now");
-        let requestBoundary: number | undefined;
         try {
             dateNow.mockReturnValue(disconnectedAt - 1000);
             bridge.recordEvent(
@@ -2786,7 +2785,7 @@ describe("OpenClaw chat bridge", () => {
                 []
             );
             bridge.markGatewayDisconnected(disconnectedAt);
-            requestBoundary = bridge.captureRequestBoundary(MAIN);
+            bridge.captureRequestBoundary(MAIN);
 
             dateNow.mockReturnValue(disconnectedAt + 1000);
             bridge.recordEvent(
@@ -2810,19 +2809,6 @@ describe("OpenClaw chat bridge", () => {
                     .events.map((event) => (event.payload as { runId?: string }).runId)
             )
         ).toEqual(new Set([provisionalRunId, providerRunId]));
-
-        bridge.handleSuccessfulRequest(
-            "chat.send",
-            { idempotencyKey: providerRunId, sessionKey: MAIN },
-            { runId: providerRunId },
-            requestBoundary
-        );
-
-        expect(
-            bridge
-                .snapshot(MAIN)
-                .events.map((event) => (event.payload as { runId?: string }).runId)
-        ).toEqual([providerRunId]);
     });
 
     it("does not promote a hydrated provisional run across a new send boundary", () => {
@@ -2843,7 +2829,7 @@ describe("OpenClaw chat bridge", () => {
         expect(bridge.flush()).toBe(true);
 
         const restarted = new OpenClawChatBridge(store);
-        const requestBoundary = restarted.captureRequestBoundary(MAIN);
+        restarted.captureRequestBoundary(MAIN);
         restarted.recordEvent(
             "agent",
             {
@@ -2853,12 +2839,6 @@ describe("OpenClaw chat bridge", () => {
                 stream: "lifecycle",
             },
             []
-        );
-        restarted.handleSuccessfulRequest(
-            "chat.send",
-            { idempotencyKey: providerRunId, sessionKey: MAIN },
-            { runId: providerRunId },
-            requestBoundary
         );
 
         expect(

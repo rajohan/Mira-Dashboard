@@ -1395,28 +1395,18 @@ export class OpenClawChatBridge {
         }
     }
 
-    #clearReplacedRuns(
-        sessionKey: string,
-        preservedRunId?: string,
-        requestBoundary?: number
-    ): void {
+    #clearCompletedRuns(sessionKey: string, preservedRunId?: string): void {
         const storageSessionKey = normalizedSessionKey(sessionKey);
         const runs = this.#runsBySession.get(storageSessionKey);
         if (!runs) {
             return;
         }
         for (const [runId, run] of runs) {
-            if (runId === preservedRunId) {
+            if (runId === preservedRunId || !run.completed) {
                 continue;
             }
-            const isSupersededInterruptedRun =
-                requestBoundary !== undefined &&
-                run.interruptedAt !== undefined &&
-                firstSequence(run) <= requestBoundary;
-            if (isSupersededInterruptedRun || run.completed) {
-                runs.delete(runId);
-                this.#forgetRunSession(runId, storageSessionKey);
-            }
+            runs.delete(runId);
+            this.#forgetRunSession(runId, storageSessionKey);
         }
         if (runs.size === 0) {
             this.#runsBySession.delete(storageSessionKey);
@@ -2633,7 +2623,7 @@ export class OpenClawChatBridge {
                     requestBoundary
                 );
             }
-            this.#clearReplacedRuns(sessionKey, acknowledgedRunId, requestBoundary);
+            this.#clearCompletedRuns(sessionKey, acknowledgedRunId);
             if (acknowledgedRunId) {
                 this.#rememberRunSession(acknowledgedRunId, sessionKey);
             }

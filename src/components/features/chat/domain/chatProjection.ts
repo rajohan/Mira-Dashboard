@@ -85,24 +85,6 @@ function isDashboardRunId(runId?: string): boolean {
     );
 }
 
-function isUnacknowledgedDashboardRun(run: ChatRunState): boolean {
-    return (
-        run.phase === "active" &&
-        !run.assistant &&
-        run.diagnostics.length === 0 &&
-        isDashboardRunId(run.runId)
-    );
-}
-
-function isEstablishedActiveChatRun(run: ChatRunState): boolean {
-    return (
-        run.phase === "active" &&
-        run.operation !== "compact" &&
-        !isUnacknowledgedDashboardRun(run) &&
-        !run.runId.startsWith("runtime-runless-")
-    );
-}
-
 function isStandaloneDiagnostic(message: ChatHistoryMessage): boolean {
     const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
     return Boolean(
@@ -111,10 +93,6 @@ function isStandaloneDiagnostic(message: ChatHistoryMessage): boolean {
             (!message.text.trim() ||
                 TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase())))
     );
-}
-
-function hasDiagnosticToolDetails(message: ChatHistoryMessage): boolean {
-    return Boolean(message.toolCalls?.length || message.toolResult);
 }
 
 function stableDiagnosticRowKey(message: ChatHistoryMessage): string | undefined {
@@ -169,70 +147,23 @@ function projectedMessageDeleteKeys(message: ChatHistoryMessage): string[] {
         : [currentKey, persistedHistoryKey];
 }
 
-function latestCompatibleDashboardTurnRun(
+function isMatchedToAnotherRun(
     message: ChatHistoryMessage,
+    run: ChatRunState,
     runs: ChatRunState[]
-): ChatRunState | undefined {
-    if (!isDashboardRunId(message.runId)) {
-        return undefined;
-    }
-
-    const explicitMatches = runs.filter(
-        (candidate) =>
-            isRunMatchingMessage(candidate, message) &&
-            !isUnacknowledgedDashboardRun(candidate)
-    );
-    if (explicitMatches.length > 0) {
-        return explicitMatches.toSorted((left, right) => {
-            const canonicalDifference =
-                Number(right.runId === message.runId) -
-                Number(left.runId === message.runId);
-            return (
-                canonicalDifference ||
-                Date.parse(right.startedAt) - Date.parse(left.startedAt) ||
-                right.lastSequence - left.lastSequence
-            );
-        })[0];
-    }
-
-    const timestamp = messageTimestamp(message);
-    const isCompactionTurn = message.runId?.startsWith("dashboard-compact-") === true;
-    const compatibleRuns = runs.filter((candidate) => {
-        if (isUnacknowledgedDashboardRun(candidate)) {
-            return false;
-        }
-        const isCompactionRun = candidate.operation === "compact";
-        if (isCompactionRun !== isCompactionTurn) {
-            return false;
-        }
-        if (timestamp === undefined) {
-            return candidate.phase === "active";
-        }
-        const startedAt = Date.parse(candidate.startedAt);
-        if (!Number.isNaN(startedAt) && timestamp < startedAt - RUN_START_USER_SKEW_MS) {
-            return false;
-        }
-        const terminalAt = Date.parse(candidate.terminalAt || "");
+): boolean {
+    return runs.some((candidate) => {
+        const isUnacknowledgedDashboardRun =
+            candidate.phase === "active" &&
+            !candidate.assistant &&
+            candidate.diagnostics.length === 0 &&
+            isDashboardRunId(candidate.runId);
         return (
-            candidate.phase === "active" ||
-            Number.isNaN(terminalAt) ||
-            timestamp <= terminalAt
+            candidate.runId !== run.runId &&
+            !isUnacknowledgedDashboardRun &&
+            isRunMatchingMessage(candidate, message)
         );
     });
-    if (compatibleRuns.length === 0) {
-        return undefined;
-    }
-    if (timestamp === undefined && compatibleRuns.length !== 1) {
-        return undefined;
-    }
-    return compatibleRuns.toSorted((left, right) => {
-        const leftStartedAt = Date.parse(left.startedAt);
-        const rightStartedAt = Date.parse(right.startedAt);
-        const startDifference =
-            (Number.isNaN(rightStartedAt) ? -Infinity : rightStartedAt) -
-            (Number.isNaN(leftStartedAt) ? -Infinity : leftStartedAt);
-        return startDifference || right.lastSequence - left.lastSequence;
-    })[0];
 }
 
 function canUseDashboardTurn(
@@ -242,8 +173,7 @@ function canUseDashboardTurn(
 ): boolean {
     return (
         isDashboardRunId(message.runId) &&
-        (isRunMatchingMessage(run, message) ||
-            latestCompatibleDashboardTurnRun(message, runs)?.runId === run.runId)
+        (isRunMatchingMessage(run, message) || !isMatchedToAnotherRun(message, run, runs))
     );
 }
 
@@ -1046,71 +976,13 @@ function mergeAllRuntimeUserMessages(
     return insertMessagesByTimestamp(next, missingMessages.toReversed());
 }
 
-function inferredRuntimeUserRun(
-    message: ChatHistoryMessage,
-    runs: ChatRunState[]
-): ChatRunState | undefined {
-    const activeRuns = runs.filter((run) => isEstablishedActiveChatRun(run));
-    if (activeRuns.length === 0) {
-        return undefined;
-    }
-    if (activeRuns.length > 1) {
-        const dashboardRun = latestCompatibleDashboardTurnRun(message, activeRuns);
-        if (dashboardRun) {
-            return dashboardRun;
-        }
-    }
-    if (message.runId && !message.runId.startsWith("runtime-runless-")) {
-        return undefined;
-    }
-    if (!message.runId && activeRuns.length === 1) {
-        return undefined;
-    }
-
-    const timestamp = messageTimestamp(message);
-    if (timestamp === undefined) {
-        return undefined;
-    }
-    return activeRuns
-        .filter((run) => {
-            const startedAt = Date.parse(run.startedAt);
-            return (
-                Number.isNaN(startedAt) ||
-                startedAt <= timestamp + RUNTIME_USER_ECHO_WINDOW_MS
-            );
-        })
-        .toSorted((left, right) => {
-            const leftStartedAt = Date.parse(left.startedAt);
-            const rightStartedAt = Date.parse(right.startedAt);
-            const startDifference =
-                (Number.isNaN(rightStartedAt) ? -Infinity : rightStartedAt) -
-                (Number.isNaN(leftStartedAt) ? -Infinity : leftStartedAt);
-            return startDifference || right.lastSequence - left.lastSequence;
-        })[0];
-}
-
-function mergeAndScopeRuntimeUserMessages(
-    history: ChatHistoryMessage[],
-    runs: ChatRunState[]
-): ChatHistoryMessage[] {
-    return mergeAllRuntimeUserMessages(history, runs).map((message) => {
-        if (!isUserMessage(message)) {
-            return message;
-        }
-        const run = inferredRuntimeUserRun(message, runs);
-        return run && message.runId !== run.runId
-            ? { ...message, runId: run.runId }
-            : message;
-    });
-}
-
 /** Reconciles history with the current provider-independent runtime turn. */
 export function reconcileChatMessages(
     history: ChatHistoryMessage[],
     session?: ChatSessionRuntimeState
 ): ChatHistoryMessage[] {
     const runs = orderedRuns(session);
-    const messages = mergeAndScopeRuntimeUserMessages(history, runs);
+    const messages = mergeAllRuntimeUserMessages(history, runs);
     for (const run of runs) {
         for (const [index, message] of messages.entries()) {
             const shouldUseCanonicalRunId =
@@ -1168,34 +1040,6 @@ export function reconcileChatMessages(
                 };
             }
             messages.splice(finalIndex, 0, ...diagnostics);
-            continue;
-        }
-
-        if (run.phase === "active" && run.operation !== "compact") {
-            const chronologicalDiagnostics = diagnostics.filter((message) =>
-                hasDiagnosticToolDetails(message)
-            );
-            const anchoredAdditions = diagnostics.filter(
-                (message) => !hasDiagnosticToolDetails(message)
-            );
-            if (run.assistant) {
-                anchoredAdditions.push(transientMessage(run.assistant, run, "assistant"));
-            }
-            const chronologicalMessages = insertMessagesByTimestamp(
-                messages,
-                chronologicalDiagnostics
-            );
-            messages.splice(0, messages.length, ...chronologicalMessages);
-            if (anchoredAdditions.length > 0) {
-                const refreshedExactToolIndex = indexExactToolMessages(messages);
-                const refreshedSegment = responseSegment(
-                    messages,
-                    run,
-                    runs,
-                    refreshedExactToolIndex
-                );
-                messages.splice(refreshedSegment.end, 0, ...anchoredAdditions);
-            }
             continue;
         }
 
@@ -1303,7 +1147,7 @@ export function projectChat(
 ): ChatProjection {
     const session = findChatSessionRuntimeState(runtime, sessionKey);
     const runs = orderedRuns(session);
-    const boundaryMessages = mergeAndScopeRuntimeUserMessages(history, runs);
+    const boundaryMessages = mergeAllRuntimeUserMessages(history, runs);
     const boundaryExactToolIndex = indexExactToolMessages(boundaryMessages);
     const reconciled = reconcileChatMessages(history, session);
     const presented = presentChatMessages(
