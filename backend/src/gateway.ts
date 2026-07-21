@@ -844,6 +844,7 @@ function init(token: string): void {
     failPendingRequests("Gateway disconnected");
     broadcast({ type: "disconnected", gatewayConnected: false });
     gatewayState.currentToken = token;
+    const thisReplayBridge = chatReplayState.bridge;
     /** Returns the active Gateway client when this callback belongs to it. */
     function getCurrentInitGatewayClient(): OpenClawGatewayClientInstance | undefined {
         return thisGatewayClient && isCurrentGatewayClient(thisGatewayClient)
@@ -891,7 +892,7 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
-        const envelope = chatReplayState.bridge.recordEvent(
+        const envelope = thisReplayBridge.recordEvent(
             event.event,
             event.payload,
             gatewayState.sessions
@@ -916,8 +917,8 @@ function init(token: string): void {
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
-        chatReplayState.bridge.markGatewayDisconnected();
-        chatReplayState.bridge.flush();
+        thisReplayBridge.markGatewayDisconnected();
+        thisReplayBridge.flush();
         failPendingRequests("Gateway disconnected");
         broadcast({ type: "disconnected", gatewayConnected: false });
     }

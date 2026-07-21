@@ -63,6 +63,7 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
     }> = [];
     isStarted = false;
     isStopped = false;
+    closeOnStop = false;
 
     constructor(readonly options: OpenClawGatewayClientOptions) {
         fakeClients.push(this);
@@ -74,6 +75,9 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
     stop(): void {
         this.isStopped = true;
+        if (this.closeOnStop) {
+            this.options.onClose?.(1000, "Gateway client stopped");
+        }
     }
 
     async request(
@@ -681,6 +685,56 @@ describe("gateway behavior", () => {
             runtimeGeneration: secondIdentity?.runtimeGeneration,
         });
         socket.close();
+    });
+
+    it("keeps synchronous close callbacks in the closing client's replay scope", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("OPENCLAW_GATEWAY_URL");
+        const root = createTemporaryRoot("mira-gateway-replay-scope-close-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+        process.env.OPENCLAW_GATEWAY_URL = "ws://gateway-replay-scope-close.test";
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+
+        const disconnectedBridges: OpenClawChatBridge[] = [];
+        const markGatewayDisconnected = jest
+            .spyOn(OpenClawChatBridge.prototype, "markGatewayDisconnected")
+            .mockImplementation(function (
+                this: OpenClawChatBridge,
+                disconnectedAt?: number
+            ) {
+                disconnectedBridges.push(this);
+                return disconnectedAt;
+            });
+        cleanupCallbacks.push(() => markGatewayDisconnected.mockRestore());
+
+        gateway.init("token-one");
+        const firstClient = fakeClients.at(-1);
+        expect(firstClient).toBeDefined();
+        firstClient?.options.onClose?.(1006, "Gateway restarted");
+        firstClient!.closeOnStop = true;
+
+        gateway.init("token-two");
+
+        expect(disconnectedBridges).toHaveLength(2);
+        expect(disconnectedBridges[1]).toBe(disconnectedBridges[0]);
+        expect(fakeClients.at(-1)).not.toBe(firstClient);
     });
 
     it("normalizes sessions, enriches events, and hydrates omitted chat images without a real gateway", async () => {
