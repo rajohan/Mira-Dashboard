@@ -288,13 +288,15 @@ otherwise the boundary becomes the durable cutoff for a new turn. Runless steer
 acknowledgements may infer continuation only when exactly one active
 conversation existed before the boundary. Equivalent canonical and short
 session keys share the same boundary state, so alias promotion and concurrent
-sends cannot clear or bypass each other. A Dashboard, systemd, or VPS restart
-therefore cannot change the decision. A delayed event on an older run does not
-move its first sequence past this boundary. This keeps pre- and post-restart
-thinking, later steer messages, and tools in one ordered response without
-merging a genuinely new, stale, or concurrent send. The recorded disconnect
-time also protects a long-quiet interrupted run from the normal six-hour stale
-run cleanup while that bounded recovery window is open.
+sends cannot clear or bypass each other. Restart hydration unions pending request
+IDs and keeps the highest settled cutoff across equivalent persisted aliases;
+snapshot load order is never an ordering authority. A Dashboard, systemd, or VPS
+restart therefore cannot change the decision. A delayed event on an older run
+does not move its first sequence past this boundary. This keeps pre- and
+post-restart thinking, later steer messages, and tools in one ordered response
+without merging a genuinely new, stale, or concurrent send. The recorded
+disconnect time also protects a long-quiet interrupted run from the normal
+six-hour stale run cleanup while that bounded recovery window is open.
 
 The canonical reducer is ordered and idempotent. Run identifiers and aliases are
 always session-scoped. Snapshot gating applies only to the selected session, so
