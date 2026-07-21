@@ -1536,8 +1536,9 @@ describe("Mira Dashboard frontend behavior", () => {
                 socket.open();
             });
             await waitFor(() => expect(result.current.isConnected).toBe(true));
-            act(() => {
+            await act(async () => {
                 socket.message({ type: "response", id: "1", isOk: true, payload: [] });
+                await Promise.resolve();
             });
 
             const snapshotPromise = result.current.snapshot("agent:main:main");
