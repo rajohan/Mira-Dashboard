@@ -3457,7 +3457,7 @@ describe("chat projection", () => {
         expect(visible[1]?.thinking?.[0]?.text).toBe("first thought");
     });
 
-    it("moves thinking below an optimistic steer before provider acknowledgement", () => {
+    it("preserves interleaved tools and steers before one thinking row and final", () => {
         const visible = presentChatMessages(
             [
                 message("user", "question", "run-1"),
@@ -3468,27 +3468,42 @@ describe("chat projection", () => {
                     text: "",
                     thinking: [{ id: "thought-1", text: "working" }],
                 },
-                message("user", "steer now", "dashboard-chat-steer"),
                 {
                     content: "",
                     role: "assistant",
                     runId: "run-1",
                     text: "",
-                    toolCalls: [{ id: "call-1", name: "read" }],
+                    toolCalls: [{ id: "call-1", name: "first-tool" }],
                 },
+                message("user", "first steer", "dashboard-chat-steer-1"),
+                {
+                    content: "",
+                    role: "assistant",
+                    runId: "run-1",
+                    text: "",
+                    toolCalls: [{ id: "call-2", name: "second-tool" }],
+                },
+                message("user", "second steer", "dashboard-chat-steer-2"),
                 message("assistant", "done", "run-1"),
             ],
             createChatVisibility(true, true),
             true
         );
-        const steerIndex = visible.findIndex((item) => item.text === "steer now");
-        const toolIndex = visible.findIndex((item) => item.toolCalls?.length);
-        const thinkingIndex = visible.findIndex((item) => item.thinking?.length);
-        const finalIndex = visible.findIndex((item) => item.text === "done");
-
-        expect(thinkingIndex).toBeGreaterThan(steerIndex);
-        expect(thinkingIndex).toBeGreaterThan(toolIndex);
-        expect(thinkingIndex).toBeLessThan(finalIndex);
+        expect(
+            visible.map(
+                (item) =>
+                    item.toolCalls?.[0]?.name ||
+                    (item.thinking?.length ? "thinking" : item.text)
+            )
+        ).toEqual([
+            "question",
+            "first-tool",
+            "first steer",
+            "second-tool",
+            "second steer",
+            "thinking",
+            "done",
+        ]);
     });
 
     it("projects a single compacting status without mutating messages", () => {

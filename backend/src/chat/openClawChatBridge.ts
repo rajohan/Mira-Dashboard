@@ -583,18 +583,6 @@ function lastSequence(run: RetainedRun): number {
     return run.events.at(-1)?.runtimeSequence ?? -1;
 }
 
-function firstSequence(run: RetainedRun): number {
-    const firstEvent = run.events[0];
-    if (!firstEvent) {
-        return -1;
-    }
-    let earliest = firstEvent.runtimeSequence;
-    for (const event of run.events) {
-        earliest = Math.min(earliest, event.runtimeSequence);
-    }
-    return earliest;
-}
-
 function latestRunUpdatedAt(runs: Iterable<RetainedRun>): number {
     let latest = -Infinity;
     for (const run of runs) {
@@ -813,7 +801,7 @@ function isPromotableInterruptedDashboardRun(
         isProvisionalRunId(providerRunId) ||
         !isStartingLifecycleEvent(envelope.event, envelope.payload) ||
         envelope.runtimeSequence <= lastSequence(run) ||
-        (requestBoundary !== undefined && firstSequence(run) <= requestBoundary)
+        (requestBoundary !== undefined && lastSequence(run) <= requestBoundary)
     ) {
         return false;
     }
