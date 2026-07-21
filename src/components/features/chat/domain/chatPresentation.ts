@@ -207,12 +207,6 @@ function thinkingAnchorIndex(
     segments: number[],
     group: ThinkingGroup
 ): number {
-    const scopedNonUserRunIds = new Set(
-        messages
-            .filter((message) => message.role.toLowerCase() !== "user")
-            .map((message) => message.runId)
-            .filter((runId): runId is string => Boolean(runId))
-    );
     const isInGroup = (message: ChatHistoryMessage, index: number) =>
         group.runId ? message.runId === group.runId : segments[index] === group.segment;
     const matchingUserBeforeThinking = messages.findLastIndex(
@@ -246,17 +240,7 @@ function thinkingAnchorIndex(
             continue;
         }
         const isUser = message.role.toLowerCase() === "user";
-        const isScopedToOtherRun = Boolean(
-            message.runId &&
-            group.runId &&
-            message.runId !== group.runId &&
-            scopedNonUserRunIds.has(message.runId)
-        );
-        const isCompatibleSteer =
-            isUser &&
-            (isInGroup(message, index) ||
-                !message.runId ||
-                (!isScopedToOtherRun && message.runId.startsWith("dashboard-chat-")));
+        const isCompatibleSteer = isUser && (isInGroup(message, index) || !message.runId);
         if (
             (isUser && isCompatibleSteer) ||
             (isInGroup(message, index) && hasToolDetails(message))
