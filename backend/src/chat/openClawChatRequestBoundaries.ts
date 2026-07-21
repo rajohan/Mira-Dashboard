@@ -84,6 +84,10 @@ export class OpenClawChatRequestBoundaries {
         }
     }
 
+    forgetExact(sessionKey: string): void {
+        this.#states.delete(this.normalizeSessionKey(sessionKey));
+    }
+
     metadata(sessionKey: string): OpenClawChatRequestBoundaryMetadata {
         const pending = new Map<string, number>();
         let settled: number | undefined;

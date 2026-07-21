@@ -271,7 +271,9 @@ When the process-wide memory budget is exceeded, completed sessions are evicted
 before active sessions, oldest first. The current session is preferred while
 another candidate exists, but remains a last-resort eviction candidate so the
 limit stays hard. Its latest state is flushed to SQLite before memory eviction
-and can be rehydrated transiently on demand. The latest completed run remains
+and can be rehydrated transiently on demand. Evicting one alias removes only
+that owner's in-memory boundary state; a still-loaded equivalent owner keeps its
+pending cutoffs. The latest completed run remains
 available until the next successful send for that session. An abandoned active
 run expires after six hours without an event. Successful `/new` or `/reset`,
 abort, session deletion, and Gateway credential changes clear the applicable
@@ -290,10 +292,12 @@ fails instead of crossing an unknown boundary. A matching acknowledgement or use
 identifies a run that already existed at the boundary, the request is a steer;
 otherwise the boundary becomes the durable cutoff for a new turn. Runless steer
 acknowledgements may infer continuation only when exactly one active
-conversation existed before the boundary. A rejected or timed-out send cancels
-only its own pending boundary. If a resumed provider lifecycle arrives before a
+conversation existed before the boundary. A rejected or timed-out send first
+rehydrates equivalent persisted owners after an eviction, then cancels only its
+own pending boundary. If a resumed provider lifecycle arrives before a
 runless steer acknowledgement, removing the steer boundary triggers the same
-bounded, unambiguous interrupted-run repair. A user echo with one provisional
+bounded, unambiguous interrupted-run repair. User echoes accept the Dashboard
+idempotency key from either the nested message or the top-level payload. A user echo with one provisional
 active run joins it only when that unfinished run is already retained for the
 same session; stale provider metadata cannot override the request identity.
 Equivalent canonical and short session keys contribute to the same logical
@@ -464,7 +468,9 @@ When changing chat event handling, test these cases:
   boundaries, pre-ack provider starts are repaired after steer settlement, and
   stale provisional IDs cannot claim a new request; exact pending aliases use
   their maximum cutoff, active alias owners remain protected beside completed
-  exact replay, and coalescing cannot move a run's durable first sequence;
+  exact replay, one alias eviction retains surviving boundary owners, failed
+  sends rehydrate evicted boundaries, top-level user-echo idempotency settles the
+  matching request, and coalescing cannot move a run's durable first sequence;
 - live reduction and full replay both preserve
   `start -> tool/steer interleaving -> one thinking -> status/final`, including
   multiple steer messages between tool calls;

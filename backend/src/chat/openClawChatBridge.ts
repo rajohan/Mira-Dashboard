@@ -763,7 +763,9 @@ function sessionMessageRunId(event: unknown, payload: unknown): string | undefin
     if (providerRunIds.length === 1) {
         return providerRunIds[0];
     }
-    const idempotencyKey = stringField(asRecord(record?.message), "idempotencyKey");
+    const idempotencyKey =
+        stringField(asRecord(record?.message), "idempotencyKey") ||
+        stringField(record, "idempotencyKey");
     return idempotencyKey?.match(/^(dashboard-chat-.+):user$/u)?.[1];
 }
 
@@ -785,8 +787,11 @@ function sessionMessageRequestId(event: unknown, payload: unknown): string | und
     if (event !== "session.message" || sessionMessageRole(payload) !== "user") {
         return undefined;
     }
-    const message = asRecord(runtimePayloadView(payload)?.message);
-    return stringField(message, "idempotencyKey")?.match(/^(.+):user$/u)?.[1];
+    const record = runtimePayloadView(payload);
+    const idempotencyKey =
+        stringField(asRecord(record?.message), "idempotencyKey") ||
+        stringField(record, "idempotencyKey");
+    return idempotencyKey?.match(/^(.+):user$/u)?.[1];
 }
 
 function isRunlessUserLedRun(run: RetainedRun): boolean {
@@ -1468,7 +1473,7 @@ export class OpenClawChatBridge {
             this.#cancelPersistenceTimer();
         }
         this.#runsBySession.delete(storageSessionKey);
-        this.#requestBoundaries.forget(storageSessionKey);
+        this.#requestBoundaries.forgetExact(storageSessionKey);
         this.#totalReplayBytes = Math.max(0, this.#totalReplayBytes - evictedBytes);
         for (const runId of this.#sessionsByRun.keys()) {
             this.#forgetRunSession(runId, storageSessionKey);
@@ -2900,6 +2905,7 @@ export class OpenClawChatBridge {
         if (!sessionKey) {
             return;
         }
+        this.#ensureEquivalentSessionsLoaded(sessionKey);
         this.#settleRequestBoundary(
             sessionKey,
             stringField(parameters, "idempotencyKey"),

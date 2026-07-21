@@ -3044,6 +3044,39 @@ describe("OpenClaw chat bridge", () => {
         ).toEqual(Array.from({ length: resumed.events.length }, () => providerRunId));
     });
 
+    it("hydrates a persisted request boundary before settling a failed send", () => {
+        const store = new MemorySnapshotStore();
+        const requestId = "dashboard-chat-failed-after-eviction";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "work before memory eviction" },
+                runId: "dashboard-chat-before-failed-eviction",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, requestId);
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toEqual({
+            [requestId]: requestBoundary,
+        });
+        expect(bridge.clearMemory()).toBe(true);
+
+        bridge.handleFailedRequest(
+            "chat.send",
+            {
+                idempotencyKey: requestId,
+                message: "request that failed after eviction",
+                sessionKey: MAIN,
+            },
+            requestBoundary
+        );
+
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+    });
+
     it("settles only a synthetic fallback when the acknowledgement gains an id", () => {
         const store = new MemorySnapshotStore();
         const activeRunId = "dashboard-chat-synthetic-boundary-run";
@@ -3098,6 +3131,27 @@ describe("OpenClaw chat bridge", () => {
             "main",
         ]);
         expect(boundaries.metadata(MAIN)).toEqual({ requestBoundary: 20 });
+    });
+
+    it("keeps an equivalent alias boundary when one owner is evicted", () => {
+        const boundaries = new OpenClawChatRequestBoundaries(
+            (sessionKey) => sessionKey.trim().toLowerCase(),
+            (left, right) => logicalMainSessionKey(left) === logicalMainSessionKey(right)
+        );
+        const requestId = "dashboard-chat-surviving-alias-request";
+        boundaries.restore("main", {
+            pendingRequestBoundaries: { [requestId]: 10 },
+        });
+        boundaries.restore(MAIN, {
+            pendingRequestBoundaries: { [requestId]: 20 },
+        });
+
+        boundaries.forgetExact("main");
+
+        expect(boundaries.pending(MAIN, requestId)).toBe(20);
+        expect(boundaries.metadata(MAIN)).toEqual({
+            pendingRequestBoundaries: { [requestId]: 20 },
+        });
     });
 
     it("rejects more pending request boundaries than snapshots can restore", () => {
@@ -3358,6 +3412,38 @@ describe("OpenClaw chat bridge", () => {
 
         expect(liveSteer.payload).toMatchObject({ runId: providerRunId });
         expect(newTurn.payload).toMatchObject({ runId: provisionalRunId });
+    });
+
+    it("reads a top-level idempotency key from a user session echo", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        const requestId = "dashboard-chat-top-level-user-echo";
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "older active work" },
+                runId: "dashboard-chat-before-top-level-user-echo",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, requestId);
+
+        const userEcho = bridge.recordEvent(
+            "session.message",
+            {
+                content: "start a new request",
+                idempotencyKey: `${requestId}:user`,
+                role: "user",
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(userEcho.payload).toMatchObject({ runId: requestId });
+        expect(store.snapshots.get(MAIN)).toMatchObject({ requestBoundary });
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
     });
 
     it("preserves a short-key send boundary after session canonicalization", () => {
