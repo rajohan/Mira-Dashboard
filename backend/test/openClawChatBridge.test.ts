@@ -3172,6 +3172,76 @@ describe("OpenClaw chat bridge", () => {
         ).toEqual(new Set([provisionalRunId, providerRunId]));
     });
 
+    it("merges restored alias boundaries before interrupted-run recovery", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-between-alias-boundaries";
+        const providerRunId = "provider-after-alias-boundary-merge";
+        const now = Date.now();
+        store.snapshots.set(MAIN, {
+            completed: false,
+            events: [
+                {
+                    event: "agent",
+                    payload: {
+                        runId: provisionalRunId,
+                        sessionKey: MAIN,
+                        stream: "thinking",
+                    },
+                    runtimeRecordedAt: now - 1,
+                    runtimeSequence: 15,
+                    type: "event",
+                },
+            ],
+            interruptedAtByRun: {
+                [provisionalRunId]: now,
+            },
+            pendingRequestBoundaries: {
+                "dashboard-chat-newer-alias-request": 20,
+            },
+            throughSequence: 20,
+        });
+        store.snapshots.set("main", {
+            completed: true,
+            events: [
+                {
+                    event: "chat",
+                    payload: {
+                        message: "older alias answer",
+                        runId: "older-alias-run",
+                        sessionKey: "main",
+                        state: "final",
+                    },
+                    runtimeRecordedAt: now - 2,
+                    runtimeSequence: 10,
+                    type: "event",
+                },
+            ],
+            requestBoundary: 10,
+            throughSequence: 10,
+        });
+        const restarted = new OpenClawChatBridge(store);
+        restarted.hydratePersistedSessions();
+
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            new Set(
+                restarted
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
     it("repairs an interrupted run split across persisted session aliases", () => {
         const store = new MemorySnapshotStore();
         const provisionalRunId = "dashboard-chat-short-key-restart";

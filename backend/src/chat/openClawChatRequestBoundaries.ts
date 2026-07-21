@@ -8,6 +8,28 @@ interface RequestBoundaryState {
     settled?: number;
 }
 
+function mergeRequestBoundaryMetadata(
+    left: OpenClawChatRequestBoundaryMetadata,
+    right: OpenClawChatRequestBoundaryMetadata
+): OpenClawChatRequestBoundaryMetadata {
+    const pending = new Map(Object.entries(left.pendingRequestBoundaries || {}));
+    const rightPending = Object.entries(right.pendingRequestBoundaries || {});
+    for (const [requestId, boundary] of rightPending) {
+        pending.set(requestId, Math.max(pending.get(requestId) ?? -1, boundary));
+    }
+    return {
+        ...(pending.size > 0 && {
+            pendingRequestBoundaries: Object.fromEntries(pending),
+        }),
+        requestBoundary:
+            left.requestBoundary === undefined
+                ? right.requestBoundary
+                : right.requestBoundary === undefined
+                  ? left.requestBoundary
+                  : Math.max(left.requestBoundary, right.requestBoundary),
+    };
+}
+
 export class OpenClawChatRequestBoundaries {
     readonly #states = new Map<string, RequestBoundaryState>();
 
@@ -54,37 +76,24 @@ export class OpenClawChatRequestBoundaries {
         sourceSessionKey: string,
         canonicalSessionKey: string
     ): OpenClawChatRequestBoundaryMetadata {
-        const source = this.metadata(sourceSessionKey);
-        const canonical = this.metadata(canonicalSessionKey);
-        const pending = new Map(Object.entries(source.pendingRequestBoundaries || {}));
-        const canonicalPending = Object.entries(canonical.pendingRequestBoundaries || {});
-        for (const [requestId, boundary] of canonicalPending) {
-            pending.set(requestId, Math.max(pending.get(requestId) ?? -1, boundary));
-        }
-        return {
-            ...(pending.size > 0 && {
-                pendingRequestBoundaries: Object.fromEntries(pending),
-            }),
-            requestBoundary:
-                source.requestBoundary === undefined
-                    ? canonical.requestBoundary
-                    : canonical.requestBoundary === undefined
-                      ? source.requestBoundary
-                      : Math.max(source.requestBoundary, canonical.requestBoundary),
-        };
+        return mergeRequestBoundaryMetadata(
+            this.metadata(sourceSessionKey),
+            this.metadata(canonicalSessionKey)
+        );
     }
 
     restore(sessionKey: string, metadata: OpenClawChatRequestBoundaryMetadata): void {
+        const merged = mergeRequestBoundaryMetadata(this.metadata(sessionKey), metadata);
         if (
-            metadata.requestBoundary === undefined &&
-            Object.keys(metadata.pendingRequestBoundaries || {}).length === 0
+            merged.requestBoundary === undefined &&
+            Object.keys(merged.pendingRequestBoundaries || {}).length === 0
         ) {
             return;
         }
         this.forget(sessionKey);
         this.#states.set(this.normalizeSessionKey(sessionKey), {
-            pending: new Map(Object.entries(metadata.pendingRequestBoundaries || {})),
-            settled: metadata.requestBoundary,
+            pending: new Map(Object.entries(merged.pendingRequestBoundaries || {})),
+            settled: merged.requestBoundary,
         });
     }
 
