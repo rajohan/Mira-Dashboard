@@ -421,6 +421,43 @@ describe("OpenClaw chat snapshot store", () => {
         }
     });
 
+    it("drops oversized request metadata without deleting replay events", () => {
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        const snapshot = snapshotFor(sessionKey, 1);
+
+        try {
+            store.save(sessionKey, snapshot);
+            const row = database
+                .prepare(
+                    `SELECT snapshot_json
+                     FROM chat_runtime_snapshots
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .get(gatewayScope, sessionKey) as { snapshot_json: string };
+            const metadata = JSON.parse(row.snapshot_json) as Record<string, unknown>;
+            metadata.pendingRequestBoundaries = Object.fromEntries(
+                Array.from({ length: 101 }, (_, index) => [
+                    `dashboard-chat-oversized-${index}`,
+                    1,
+                ])
+            );
+            database
+                .prepare(
+                    `UPDATE chat_runtime_snapshots
+                     SET snapshot_json = ?
+                     WHERE gateway_scope = ? AND session_key = ?`
+                )
+                .run(JSON.stringify(metadata), gatewayScope, sessionKey);
+
+            expect(store.load(sessionKey)).toEqual(snapshot);
+            expect(store.keys()).toContain(sessionKey);
+        } finally {
+            store.clear();
+        }
+    });
+
     it("deletes snapshots with invalid or inconsistent sequence metadata", () => {
         const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
         const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);

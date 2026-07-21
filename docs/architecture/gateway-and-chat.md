@@ -261,6 +261,7 @@ Replay limits are:
 - 1,000,000 serialized bytes per event;
 - 64,000,000 serialized bytes or 20,000 events per active run;
 - four runs per session;
+- 100 pending outgoing request boundaries per session;
 - 50 persisted sessions per Gateway scope;
 - 256,000,000 serialized bytes across in-process replay state.
 

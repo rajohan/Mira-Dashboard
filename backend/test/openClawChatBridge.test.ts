@@ -2926,6 +2926,61 @@ describe("OpenClaw chat bridge", () => {
         ).toEqual(new Set([provisionalRunId, providerRunId]));
     });
 
+    it("settles only a synthetic fallback when the acknowledgement gains an id", () => {
+        const store = new MemorySnapshotStore();
+        const activeRunId = "dashboard-chat-synthetic-boundary-run";
+        const concurrentRequestId = "dashboard-chat-concurrent-real-boundary";
+        const acknowledgedRequestId = "dashboard-chat-late-real-request-id";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "active work" },
+                runId: activeRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        const requestBoundary = bridge.captureRequestBoundary(MAIN);
+        bridge.captureRequestBoundary(MAIN, concurrentRequestId);
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: acknowledgedRequestId,
+                message: "continue",
+                sessionKey: MAIN,
+            },
+            { runId: activeRunId },
+            requestBoundary
+        );
+
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toEqual({
+            [concurrentRequestId]: requestBoundary,
+        });
+    });
+
+    it("rejects more pending request boundaries than snapshots can restore", () => {
+        const bridge = new OpenClawChatBridge(new MemorySnapshotStore());
+        bridge.recordEvent(
+            "agent",
+            {
+                runId: "dashboard-chat-boundary-limit",
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        for (let index = 0; index < 100; index += 1) {
+            bridge.captureRequestBoundary(MAIN, `dashboard-chat-pending-${index}`);
+        }
+
+        expect(() =>
+            bridge.captureRequestBoundary(MAIN, "dashboard-chat-pending-overflow")
+        ).toThrow("Too many pending chat requests for one session");
+    });
+
     it("keeps overlapping request boundaries isolated after a late steer acknowledgement", () => {
         const store = new MemorySnapshotStore();
         const interruptedRunId = "dashboard-chat-overlapping-run";

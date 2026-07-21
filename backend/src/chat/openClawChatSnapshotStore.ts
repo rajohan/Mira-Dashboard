@@ -7,6 +7,7 @@ import {
     type OpenClawRuntimeEnvelope,
     type OpenClawRuntimeSnapshot,
 } from "./openClawChatBridge.ts";
+import { MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES } from "./openClawChatRequestBoundaries.ts";
 
 interface SnapshotRow {
     snapshot_json: string;
@@ -145,7 +146,7 @@ function isRequestBoundaryRecord(
     const record = asRecord(value);
     return Boolean(
         record &&
-        Object.keys(record).length <= 100 &&
+        Object.keys(record).length <= MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES &&
         Object.entries(record).every(
             ([requestId, boundary]) =>
                 requestId.trim().length > 0 &&
@@ -180,12 +181,6 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             (throughSequence as number) < 0 ||
             (interruptedAtByRun !== undefined &&
                 !isInterruptedAtByRun(interruptedAtByRun)) ||
-            (pendingRequestBoundaries !== undefined &&
-                (!Number.isSafeInteger(throughSequence) ||
-                    !isRequestBoundaryRecord(
-                        pendingRequestBoundaries,
-                        throughSequence as number
-                    ))) ||
             (requestBoundary !== undefined &&
                 (!Number.isSafeInteger(requestBoundary) ||
                     (requestBoundary as number) < 0 ||
@@ -200,6 +195,12 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             )
         ) {
             return undefined;
+        }
+        if (
+            pendingRequestBoundaries !== undefined &&
+            !isRequestBoundaryRecord(pendingRequestBoundaries, throughSequence as number)
+        ) {
+            delete value.pendingRequestBoundaries;
         }
         const runSignature = Array.isArray(value.runSignature)
             ? value.runSignature.filter(

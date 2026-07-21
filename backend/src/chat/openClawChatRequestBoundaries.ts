@@ -8,6 +8,26 @@ interface RequestBoundaryState {
     settled?: number;
 }
 
+export const MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES = 100;
+const SYNTHETIC_REQUEST_ID_PREFIX = "request:";
+
+function fallbackPendingEntry(
+    pending: ReadonlyMap<string, number>,
+    requestId: string | undefined,
+    fallbackBoundary: number | undefined
+): [string, number] | undefined {
+    if (fallbackBoundary === undefined) {
+        return undefined;
+    }
+    return pending
+        .entries()
+        .find(
+            ([pendingRequestId, boundary]) =>
+                boundary === fallbackBoundary &&
+                (!requestId || pendingRequestId.startsWith(SYNTHETIC_REQUEST_ID_PREFIX))
+        );
+}
+
 function mergeRequestBoundaryMetadata(
     left: OpenClawChatRequestBoundaryMetadata,
     right: OpenClawChatRequestBoundaryMetadata
@@ -119,12 +139,13 @@ export class OpenClawChatRequestBoundaries {
             if (exact !== undefined) {
                 return exact;
             }
-            if (
-                !requestId &&
-                fallbackBoundary !== undefined &&
-                state.pending.values().toArray().includes(fallbackBoundary)
-            ) {
-                return fallbackBoundary;
+            const fallbackEntry = fallbackPendingEntry(
+                state.pending,
+                requestId,
+                fallbackBoundary
+            );
+            if (fallbackEntry) {
+                return fallbackEntry[1];
             }
         }
         return undefined;
@@ -139,8 +160,14 @@ export class OpenClawChatRequestBoundaries {
         if (!pendingRequestId) {
             let suffix = state.pending.size;
             do {
-                pendingRequestId = `request:${boundary}:${suffix++}`;
+                pendingRequestId = `${SYNTHETIC_REQUEST_ID_PREFIX}${boundary}:${suffix++}`;
             } while (state.pending.has(pendingRequestId));
+        }
+        if (
+            !state.pending.has(pendingRequestId) &&
+            state.pending.size >= MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES
+        ) {
+            throw new Error("Too many pending chat requests for one session");
         }
         state.pending.set(pendingRequestId, boundary);
         this.#states.set(storageSessionKey, state);
@@ -164,12 +191,9 @@ export class OpenClawChatRequestBoundaries {
                 continue;
             }
             const hasExact = Boolean(requestId && state.pending.has(requestId));
-            const fallbackEntry =
-                hasExact || requestId
-                    ? undefined
-                    : state.pending
-                          .entries()
-                          .find(([, boundary]) => boundary === requestBoundary);
+            const fallbackEntry = hasExact
+                ? undefined
+                : fallbackPendingEntry(state.pending, requestId, requestBoundary);
             if (hasExact && requestId) {
                 state.pending.delete(requestId);
             } else if (!hasRemovedFallback && fallbackEntry) {
