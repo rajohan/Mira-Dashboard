@@ -2720,7 +2720,8 @@ describe("OpenClaw chat bridge", () => {
         const store = new MemorySnapshotStore();
         const provisionalRunId = "dashboard-chat-quiet-before-restart";
         const providerRunId = "provider-after-quiet-restart";
-        const disconnectedAt = Date.now();
+        const disconnectedAt = 1_785_000_000_000;
+        const providerStartedAt = disconnectedAt + 1000;
         store.snapshots.set(
             MAIN,
             persistedSnapshot(MAIN, provisionalRunId, disconnectedAt - 30 * 60_000)
@@ -2729,16 +2730,21 @@ describe("OpenClaw chat bridge", () => {
 
         bridge.snapshot(MAIN);
         bridge.markGatewayDisconnected(disconnectedAt);
-        bridge.recordEvent(
-            "agent",
-            {
-                data: { phase: "start" },
-                runId: providerRunId,
-                sessionKey: MAIN,
-                stream: "lifecycle",
-            },
-            []
-        );
+        const dateNow = jest.spyOn(Date, "now").mockReturnValue(providerStartedAt);
+        try {
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+        } finally {
+            dateNow.mockRestore();
+        }
 
         expect(
             bridge
