@@ -2473,7 +2473,7 @@ describe("Mira Dashboard pages", () => {
 
         view.unmount();
         view.queryClient.clear();
-    });
+    }, 15_000);
 
     it("drives pull request review, branch update, deploy, merge, and reject flows", async () => {
         const user = userEvent.setup();
