@@ -250,11 +250,11 @@ SQLite uses two related tables:
   sequence.
 
 The current `rows-v2` metadata stores a SHA-256 fingerprint for every retained
-event and the latest `chat.send` boundary, when one exists. An unchanged prefix
-only appends new event rows; coalescing, trimming, or a same-sequence content
-change replaces stale rows. Older inline and `rows-v1` cache layouts are
-intentionally unsupported and should be cleared or migrated when deploying the
-schema change.
+event, pending `chat.send` boundaries keyed by request ID, and the latest settled
+new-turn boundary when one exists. An unchanged prefix only appends new event
+rows; coalescing, trimming, or a same-sequence content change replaces stale
+rows. Older inline and `rows-v1` cache layouts are intentionally unsupported and
+should be cleared or migrated when deploying the schema change.
 
 Replay limits are:
 
@@ -279,14 +279,18 @@ eligible for interrupted-run recovery. If the Gateway resumes the same response
 under a provider run ID, the bridge rewrites the provisional replay to that
 canonical ID before retaining the new lifecycle event. The promotion is allowed
 only for one unambiguous active run, inside the bounded restart window, and only
-when no newer `chat.send` request boundary exists. That boundary is flushed to
-SQLite before the request is forwarded. It is cleared only when the successful
-acknowledgement identifies a run that already existed at the boundary; otherwise
-it remains the cutoff for older interrupted work. A Dashboard, systemd, or VPS
-restart therefore cannot change the decision. A delayed event on an older run
-does not move its first sequence past this boundary. User `session.message`
-events use their explicit active provider run or Dashboard idempotency key as
-causal identity rather than a timestamp window. This keeps pre- and post-restart
+when no newer `chat.send` request boundary exists. Each outgoing request records
+its own boundary under the Dashboard idempotency key and flushes it to SQLite
+before forwarding the request. A matching acknowledgement or user
+`session.message` echo removes only that request's pending boundary. If it
+identifies a run that already existed at the boundary, the request is a steer;
+otherwise the boundary becomes the durable cutoff for a new turn. Runless steer
+acknowledgements may infer continuation only when exactly one active
+conversation existed before the boundary. Equivalent canonical and short
+session keys share the same boundary state, so alias promotion and concurrent
+sends cannot clear or bypass each other. A Dashboard, systemd, or VPS restart
+therefore cannot change the decision. A delayed event on an older run does not
+move its first sequence past this boundary. This keeps pre- and post-restart
 thinking, later steer messages, and tools in one ordered response without
 merging a genuinely new, stale, or concurrent send. The recorded disconnect
 time also protects a long-quiet interrupted run from the normal six-hour stale
@@ -306,11 +310,12 @@ because it falls inside the timestamp-skew allowance; the allowance is only a
 fallback when no causal or explicitly matched user boundary exists.
 Name-only fallback matching is likewise bounded to the current user turn.
 Every runtime user, thinking, and tool entry retains its Gateway sequence. During
-reconciliation, projection reorders only runtime-owned row slots by that
-sequence; canonical transcript-only rows remain anchored. Presentation then
-collapses all thinking for the run into exactly one bubble after the last tool or
-steer. The active status row is appended last, and a canonical final replaces it
-as the last row when the run completes. The resulting contract is therefore
+reconciliation, projection anchors each run's initiating prompt and reorders its
+remaining runtime-owned row slots by that sequence; canonical transcript-only
+rows remain anchored. Presentation then collapses all thinking for the run into
+exactly one bubble after the last tool or steer. The active status row is
+appended last, and a canonical final replaces it as the last row when the run
+completes. The resulting contract is therefore
 `start -> tools/steers in event order -> one thinking -> active status or final`,
 independent of wall-clock timestamps and identical after replay. Transcript
 order and runtime sequence also take precedence over message timestamps when a
@@ -432,9 +437,10 @@ When changing chat event handling, test these cases:
 - a live Gateway restart promotes one interrupted provisional response to its
   resumed provider run, while a newer send boundary and concurrent runs remain
   separate;
-- a pending send boundary survives Dashboard/systemd/VPS restart, a delayed old
-  event cannot cross it, and only an acknowledgement for a run that already
-  existed at that boundary clears it;
+- pending send boundaries survive Dashboard/systemd/VPS restart, overlapping
+  requests settle only their own boundary, delayed old events cannot cross the
+  settled new-turn cutoff, and a runless steer can clear only one unambiguous
+  pre-boundary active conversation;
 - live reduction and full replay both preserve
   `start -> tool/steer interleaving -> one thinking -> status/final`, including
   multiple steer messages between tool calls;

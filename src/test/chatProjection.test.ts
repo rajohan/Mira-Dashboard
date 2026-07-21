@@ -3465,11 +3465,6 @@ describe("chat projection", () => {
         const runId = "run-1";
         const runtimeEvents: ChatRuntimeEvent[] = [
             event(16, {
-                kind: "user",
-                message: message("user", "question", runId),
-                runId,
-            }),
-            event(32, {
                 kind: "thinking",
                 message: {
                     content: [{ text: "working", type: "thinking" }],
@@ -3482,7 +3477,7 @@ describe("chat projection", () => {
             }),
             ...(
                 [
-                    [48, "call-1", "first-tool"],
+                    [32, "call-1", "first-tool"],
                     [80, "call-2", "second-tool"],
                     [112, "call-3", "third-tool"],
                 ] satisfies Array<[number, string, string]>
@@ -3500,6 +3495,11 @@ describe("chat projection", () => {
                     toolKey: `tool:${id}`,
                 })
             ),
+            event(48, {
+                kind: "user",
+                message: message("user", "question", runId),
+                runId,
+            }),
             event(64, {
                 kind: "user",
                 message: message("user", "first steer", runId),

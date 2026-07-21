@@ -881,19 +881,33 @@ function transientMessage(
     };
 }
 
-/** Reorders only runtime-owned slots, leaving canonical transcript rows anchored. */
+/** Orders runtime activity inside each turn while keeping its first prompt anchored. */
 function orderRuntimeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
-    const runtimeSlots = messages.flatMap((message, index) =>
-        message.runtimeSequence === undefined
-            ? []
-            : [{ index, message, sequence: message.runtimeSequence }]
-    );
-    const ordered = runtimeSlots.toSorted(
-        (left, right) => left.sequence - right.sequence || left.index - right.index
-    );
+    const slotsByRun = new Map<
+        string,
+        Array<{ index: number; message: ChatHistoryMessage; sequence: number }>
+    >();
+    for (const [index, message] of messages.entries()) {
+        if (message.runtimeSequence === undefined) {
+            continue;
+        }
+        const runId = message.runId || "unscoped";
+        const slots = slotsByRun.get(runId) || [];
+        slots.push({ index, message, sequence: message.runtimeSequence });
+        slotsByRun.set(runId, slots);
+    }
     const next = [...messages];
-    for (const [slotIndex, slot] of runtimeSlots.entries()) {
-        next[slot.index] = ordered[slotIndex]!.message;
+    for (const runtimeSlots of slotsByRun.values()) {
+        const promptIndex = runtimeSlots.find((slot) =>
+            isUserMessage(slot.message)
+        )?.index;
+        const activitySlots = runtimeSlots.filter((slot) => slot.index !== promptIndex);
+        const ordered = activitySlots.toSorted(
+            (left, right) => left.sequence - right.sequence || left.index - right.index
+        );
+        for (const [slotIndex, slot] of activitySlots.entries()) {
+            next[slot.index] = ordered[slotIndex]!.message;
+        }
     }
     return next;
 }

@@ -51,6 +51,9 @@ describe("OpenClaw chat snapshot store", () => {
             interruptedAtByRun: {
                 "persisted-run": 1_785_000_000_000,
             },
+            pendingRequestBoundaries: {
+                "dashboard-chat-pending": 7,
+            },
             requestBoundary: 7,
             throughSequence: 7,
         };

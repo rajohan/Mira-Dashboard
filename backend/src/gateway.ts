@@ -1014,7 +1014,10 @@ function captureChatSendRequestBoundary(
         return undefined;
     }
     return chatReplayState.bridge.captureRequestBoundary(
-        typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
+        typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined,
+        typeof parameters.idempotencyKey === "string"
+            ? parameters.idempotencyKey
+            : undefined
     );
 }
 

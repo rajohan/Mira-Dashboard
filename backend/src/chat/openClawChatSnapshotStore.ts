@@ -138,6 +138,24 @@ function isInterruptedAtByRun(value: unknown): value is Record<string, number> {
     );
 }
 
+function isRequestBoundaryRecord(
+    value: unknown,
+    throughSequence: number
+): value is Record<string, number> {
+    const record = asRecord(value);
+    return Boolean(
+        record &&
+        Object.keys(record).length <= 100 &&
+        Object.entries(record).every(
+            ([requestId, boundary]) =>
+                requestId.trim().length > 0 &&
+                Number.isSafeInteger(boundary) &&
+                (boundary as number) >= 0 &&
+                (boundary as number) <= throughSequence
+        )
+    );
+}
+
 function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefined {
     try {
         const value = JSON.parse(serialized) as Record<string, unknown>;
@@ -147,6 +165,7 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             : [];
         const throughSequence = value.throughSequence;
         const interruptedAtByRun = value.interruptedAtByRun;
+        const pendingRequestBoundaries = value.pendingRequestBoundaries;
         const requestBoundary = value.requestBoundary;
         if (
             !value ||
@@ -161,6 +180,12 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             (throughSequence as number) < 0 ||
             (interruptedAtByRun !== undefined &&
                 !isInterruptedAtByRun(interruptedAtByRun)) ||
+            (pendingRequestBoundaries !== undefined &&
+                (!Number.isSafeInteger(throughSequence) ||
+                    !isRequestBoundaryRecord(
+                        pendingRequestBoundaries,
+                        throughSequence as number
+                    ))) ||
             (requestBoundary !== undefined &&
                 (!Number.isSafeInteger(requestBoundary) ||
                     (requestBoundary as number) < 0 ||
@@ -270,6 +295,9 @@ function snapshotMetadata(
         events: [],
         ...(snapshot.interruptedAtByRun && {
             interruptedAtByRun: snapshot.interruptedAtByRun,
+        }),
+        ...(snapshot.pendingRequestBoundaries && {
+            pendingRequestBoundaries: snapshot.pendingRequestBoundaries,
         }),
         ...(snapshot.requestBoundary !== undefined && {
             requestBoundary: snapshot.requestBoundary,
@@ -516,6 +544,11 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             ...(stored.snapshot.interruptedAtByRun && {
                 interruptedAtByRun: {
                     ...stored.snapshot.interruptedAtByRun,
+                },
+            }),
+            ...(stored.snapshot.pendingRequestBoundaries && {
+                pendingRequestBoundaries: {
+                    ...stored.snapshot.pendingRequestBoundaries,
                 },
             }),
             ...(stored.snapshot.requestBoundary !== undefined && {

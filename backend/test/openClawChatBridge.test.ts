@@ -2655,7 +2655,8 @@ describe("OpenClaw chat bridge", () => {
                     },
                     []
                 );
-                const steerBoundary = bridge.captureRequestBoundary(MAIN);
+                const steerRequestId = "dashboard-chat-steer-before-restart";
+                const steerBoundary = bridge.captureRequestBoundary(MAIN, steerRequestId);
                 bridge.recordEvent(
                     "session.message",
                     {
@@ -2676,7 +2677,7 @@ describe("OpenClaw chat bridge", () => {
                 bridge.handleSuccessfulRequest(
                     "chat.send",
                     {
-                        idempotencyKey: "dashboard-chat-steer-before-restart",
+                        idempotencyKey: steerRequestId,
                         message: "steer before restart",
                         sessionKey: MAIN,
                     },
@@ -2894,7 +2895,9 @@ describe("OpenClaw chat bridge", () => {
 
         const restarted = new OpenClawChatBridge(store);
         restarted.captureRequestBoundary(MAIN);
-        expect(store.snapshots.get(MAIN)?.requestBoundary).toBe(1);
+        expect(
+            Object.values(store.snapshots.get(MAIN)?.pendingRequestBoundaries || {})
+        ).toEqual([1]);
         const afterBoundaryRestart = new OpenClawChatBridge(store);
         afterBoundaryRestart.recordEvent(
             "agent",
@@ -2921,6 +2924,141 @@ describe("OpenClaw chat bridge", () => {
                     .events.map((event) => (event.payload as { runId?: string }).runId)
             )
         ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
+    it("keeps overlapping request boundaries isolated after a late steer acknowledgement", () => {
+        const store = new MemorySnapshotStore();
+        const interruptedRunId = "dashboard-chat-overlapping-run";
+        const steerRequestId = "dashboard-chat-overlapping-steer";
+        const newRequestId = "dashboard-chat-overlapping-new-turn";
+        const providerRunId = "provider-overlapping-new-turn";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "interrupted work" },
+                runId: interruptedRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.markGatewayDisconnected(Date.now());
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, steerRequestId);
+        expect(bridge.captureRequestBoundary(MAIN, newRequestId)).toBe(requestBoundary);
+
+        bridge.recordEvent(
+            "session.message",
+            {
+                activeRunIds: [interruptedRunId],
+                message: {
+                    content: "continue the active turn",
+                    idempotencyKey: `${steerRequestId}:user`,
+                    role: "user",
+                },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: steerRequestId,
+                message: "continue the active turn",
+                sessionKey: MAIN,
+            },
+            {},
+            requestBoundary
+        );
+
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toEqual({
+            [newRequestId]: requestBoundary,
+        });
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: newRequestId,
+                message: "start a new turn",
+                sessionKey: MAIN,
+            },
+            { runId: providerRunId },
+            requestBoundary
+        );
+        expect(bridge.flush()).toBe(true);
+
+        expect(store.snapshots.get(MAIN)).toMatchObject({
+            requestBoundary,
+        });
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+        expect(
+            new Set(
+                new OpenClawChatBridge(store)
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([interruptedRunId, providerRunId]));
+    });
+
+    it("clears a runless live-steer boundary before reconnecting the active run", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-runless-live-steer";
+        const steerRequestId = "dashboard-chat-runless-steer-request";
+        const providerRunId = "provider-after-runless-steer";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "before steer" },
+                runId: provisionalRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, steerRequestId);
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: steerRequestId,
+                message: "keep going",
+                sessionKey: MAIN,
+            },
+            {},
+            requestBoundary
+        );
+        expect(store.snapshots.get(MAIN)?.requestBoundary).toBeUndefined();
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+
+        bridge.markGatewayDisconnected(Date.now());
+        expect(bridge.flush()).toBe(true);
+        const restarted = new OpenClawChatBridge(store);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        const snapshot = restarted.snapshot(MAIN);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
     });
 
     it("uses session message identity instead of timing to assign live steers", () => {
@@ -2985,6 +3123,50 @@ describe("OpenClaw chat bridge", () => {
             new Set(
                 restarted
                     .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
+    it("captures a canonical send boundary for an active short-key alias", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-short-key-alias-send";
+        const requestId = "dashboard-chat-canonical-alias-request";
+        const providerRunId = "provider-short-key-alias-send";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "short-key work" },
+                runId: provisionalRunId,
+                sessionKey: "main",
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.markGatewayDisconnected(Date.now());
+
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, requestId);
+        expect(store.snapshots.get("main")?.pendingRequestBoundaries).toEqual({
+            [requestId]: requestBoundary,
+        });
+
+        const restarted = new OpenClawChatBridge(store);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: "main",
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            new Set(
+                restarted
+                    .snapshot("main")
                     .events.map((event) => (event.payload as { runId?: string }).runId)
             )
         ).toEqual(new Set([provisionalRunId, providerRunId]));
