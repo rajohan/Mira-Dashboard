@@ -456,8 +456,9 @@ When changing chat event handling, test these cases:
   selects the next fallback without replacing a still-unresolved explicit URL key;
 - composer and picker drops share attachment validation, mismatched explicit MIME
   cannot bypass policy by filename, empty/generic MIME produces a normalized preview
-  data URL, JSON MIME works without a suffix, common ZIP aliases and suffix-bound
-  CSV/OOXML aliases are canonicalized,
+  data URL only for supported files with a recognized extension, JSON MIME works
+  without a suffix, common ZIP aliases and suffix-bound CSV/OOXML aliases are
+  canonicalized,
   and validation errors render only at their originating surface;
 - local and managed Gateway attachments preserve inline previews and an original
   download path without exposing Gateway credentials;

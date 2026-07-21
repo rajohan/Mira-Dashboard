@@ -551,14 +551,15 @@ describe("chat scroll", () => {
 
         rerender({ layoutKey: "0:Unsupported attachment" });
 
-        runAnimationFrames(3);
         expect(container.scrollTop).toBe(1000);
         expect(stickToBottomReference.current).toBe(true);
+        runAnimationFrames(3);
 
         stickToBottomReference.current = false;
         container.scrollTop = 250;
         rerender({ layoutKey: "0:A longer transport error" });
 
+        expect(container.scrollTop).toBe(250);
         runQueuedAnimationFrames();
         expect(container.scrollTop).toBe(250);
         expect(animationFrameState.frames.size).toBe(0);
