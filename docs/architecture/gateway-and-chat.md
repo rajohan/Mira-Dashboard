@@ -282,20 +282,25 @@ canonical ID before retaining the new lifecycle event. The promotion is allowed
 only for one unambiguous active run, inside the bounded restart window, and only
 when no newer `chat.send` request boundary exists. Each outgoing request records
 its own boundary under the Dashboard idempotency key and flushes it to SQLite
-before forwarding the request. A matching acknowledgement or user
+before forwarding the request; if persisted replay cannot be hydrated, the send
+fails instead of crossing an unknown boundary. A matching acknowledgement or user
 `session.message` echo removes only that request's pending boundary. If it
 identifies a run that already existed at the boundary, the request is a steer;
 otherwise the boundary becomes the durable cutoff for a new turn. Runless steer
 acknowledgements may infer continuation only when exactly one active
-conversation existed before the boundary. Equivalent canonical and short
-session keys share the same boundary state, so alias promotion and concurrent
-sends cannot clear or bypass each other. Restart hydration unions pending request
-IDs and keeps the highest settled cutoff across equivalent persisted aliases;
-snapshot load order is never an ordering authority. A Dashboard, systemd, or VPS
-restart therefore cannot change the decision. A delayed event on an older run
-does not move its first sequence past this boundary. This keeps pre- and
-post-restart thinking, later steer messages, and tools in one ordered response
-without merging a genuinely new, stale, or concurrent send. The recorded
+conversation existed before the boundary. A user echo with one provisional active
+run joins it only when that unfinished run is already retained for the same
+session; stale provider metadata cannot override the request identity. Equivalent
+canonical and short session keys contribute to the same logical boundary while
+retaining their own persisted owners until settlement flushes every changed row,
+so alias promotion and concurrent sends cannot clear or bypass each other.
+Restart hydration unions pending request IDs and keeps the highest settled cutoff
+across equivalent persisted aliases; snapshot load order is never an ordering
+authority. A Dashboard, systemd, or VPS restart therefore cannot change the
+decision. A delayed event on an older run does not move its first sequence past
+this boundary. This keeps pre- and post-restart thinking, later steer messages,
+and tools in one ordered response without merging a genuinely new, stale, or
+concurrent send. The recorded
 disconnect time also protects a long-quiet interrupted run from the normal
 six-hour stale run cleanup while that bounded recovery window is open.
 
@@ -443,7 +448,9 @@ When changing chat event handling, test these cases:
 - pending send boundaries survive Dashboard/systemd/VPS restart, overlapping
   requests settle only their own boundary, delayed old events cannot cross the
   settled new-turn cutoff, and a runless steer can clear only one unambiguous
-  pre-boundary active conversation;
+  pre-boundary active conversation; failed hydration blocks the send, alias
+  owners are all flushed after settlement, and stale provisional IDs cannot
+  claim a new request;
 - live reduction and full replay both preserve
   `start -> tool/steer interleaving -> one thinking -> status/final`, including
   multiple steer messages between tool calls;

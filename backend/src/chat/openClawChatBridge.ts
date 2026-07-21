@@ -750,12 +750,7 @@ function sessionMessageRunId(event: unknown, payload: unknown): string | undefin
         return undefined;
     }
     const record = runtimePayloadView(payload);
-    const activeRunIds = Array.isArray(record?.activeRunIds)
-        ? record.activeRunIds.filter(
-              (runId): runId is string =>
-                  typeof runId === "string" && runId.trim().length > 0
-          )
-        : [];
+    const activeRunIds = sessionMessageActiveRunIds(payload);
     const providerRunIds = [...new Set(activeRunIds)].filter(
         (runId) => !isProvisionalRunId(runId)
     );
@@ -764,6 +759,20 @@ function sessionMessageRunId(event: unknown, payload: unknown): string | undefin
     }
     const idempotencyKey = stringField(asRecord(record?.message), "idempotencyKey");
     return idempotencyKey?.match(/^(dashboard-chat-.+):user$/u)?.[1];
+}
+
+function sessionMessageActiveRunIds(payload: unknown): string[] {
+    const activeRunIds = runtimePayloadView(payload)?.activeRunIds;
+    return Array.isArray(activeRunIds)
+        ? [
+              ...new Set(
+                  activeRunIds.filter(
+                      (runId): runId is string =>
+                          typeof runId === "string" && runId.trim().length > 0
+                  )
+              ),
+          ]
+        : [];
 }
 
 function sessionMessageRequestId(event: unknown, payload: unknown): string | undefined {
@@ -1838,7 +1847,8 @@ export class OpenClawChatBridge {
         this.reconcileSessions(sessions);
 
         const runId =
-            stringField(payloadView, "runId") || sessionMessageRunId(event, payloadView);
+            stringField(payloadView, "runId") ||
+            this.#retainedSessionMessageRunId(event, payloadView);
         const providedSessionKey = stringField(payloadView, "sessionKey");
         if (providedSessionKey) {
             const candidates = this.#sessionCandidates(
@@ -1881,6 +1891,35 @@ export class OpenClawChatBridge {
                 : undefined;
 
         return withRuntimeIdentity(record, { runId, sessionKey });
+    }
+
+    #retainedSessionMessageRunId(
+        event: unknown,
+        payload: Record<string, unknown>
+    ): string | undefined {
+        const inferredRunId = sessionMessageRunId(event, payload);
+        if (inferredRunId && !isProvisionalRunId(inferredRunId)) {
+            return inferredRunId;
+        }
+        const sessionKey = stringField(payload, "sessionKey");
+        const provisionalActiveRunIds = sessionMessageActiveRunIds(payload).filter(
+            (runId) => isProvisionalRunId(runId)
+        );
+        if (!sessionKey || provisionalActiveRunIds.length !== 1) {
+            return inferredRunId;
+        }
+        const activeRunId = provisionalActiveRunIds[0]!;
+        for (const [candidateSessionKey, runs] of this.#runsBySession) {
+            const run = runs.get(activeRunId);
+            if (
+                run &&
+                !run.completed &&
+                isSameSessionKey(candidateSessionKey, sessionKey)
+            ) {
+                return activeRunId;
+            }
+        }
+        return inferredRunId;
     }
 
     #rememberRunSession(runId: string, sessionKey: string): void {
@@ -2590,7 +2629,9 @@ export class OpenClawChatBridge {
     captureRequestBoundary(sessionKey?: string, requestId?: string): number {
         this.#requireSequenceHydrated();
         if (sessionKey) {
-            this.#ensureSessionLoaded(sessionKey);
+            if (!this.#ensureSessionLoaded(sessionKey)) {
+                throw new Error("Chat send boundary session could not be hydrated");
+            }
             const storageSessionKey = normalizedSessionKey(sessionKey);
             const exactRuns = this.#runsBySession.get(storageSessionKey);
             const aliasSessionKeys = this.#runsBySession

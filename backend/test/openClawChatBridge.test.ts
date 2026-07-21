@@ -2926,6 +2926,27 @@ describe("OpenClaw chat bridge", () => {
         ).toEqual(new Set([provisionalRunId, providerRunId]));
     });
 
+    it("fails boundary capture until persisted session hydration succeeds", () => {
+        const store = new MemorySnapshotStore();
+        const requestId = "dashboard-chat-after-hydration-retry";
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, "dashboard-chat-persisted-before-send")
+        );
+        store.loadFailures = 1;
+        const restarted = new OpenClawChatBridge(store);
+
+        expect(() => restarted.captureRequestBoundary(MAIN, requestId)).toThrow(
+            "Chat send boundary session could not be hydrated"
+        );
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+
+        const requestBoundary = restarted.captureRequestBoundary(MAIN, requestId);
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toEqual({
+            [requestId]: requestBoundary,
+        });
+    });
+
     it("settles only a synthetic fallback when the acknowledgement gains an id", () => {
         const store = new MemorySnapshotStore();
         const activeRunId = "dashboard-chat-synthetic-boundary-run";
@@ -3082,6 +3103,21 @@ describe("OpenClaw chat bridge", () => {
             []
         );
         const requestBoundary = bridge.captureRequestBoundary(MAIN, steerRequestId);
+
+        const steerEcho = bridge.recordEvent(
+            "session.message",
+            {
+                activeRunIds: [provisionalRunId],
+                message: {
+                    content: "keep going",
+                    idempotencyKey: `${steerRequestId}:user`,
+                    role: "user",
+                },
+                sessionKey: MAIN,
+            },
+            []
+        );
+        expect(steerEcho.payload).toMatchObject({ runId: provisionalRunId });
 
         bridge.handleSuccessfulRequest(
             "chat.send",
@@ -3295,6 +3331,58 @@ describe("OpenClaw chat bridge", () => {
                     .events.map((event) => (event.payload as { runId?: string }).runId)
             )
         ).toEqual(new Set([provisionalRunId, providerRunId]));
+    });
+
+    it("flushes the original boundary owner after a later alias hydrates", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-canonical-boundary-owner";
+        const steerRequestId = "dashboard-chat-owner-preserving-steer";
+        const providerRunId = "provider-after-owner-preserving-steer";
+        store.snapshots.set(MAIN, persistedSnapshot(MAIN, provisionalRunId));
+        store.snapshots.set(
+            "main",
+            persistedSnapshot(
+                "main",
+                "completed-short-key-before-steer",
+                Date.now() - 1,
+                "final",
+                2
+            )
+        );
+        const bridge = new OpenClawChatBridge(store);
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, steerRequestId);
+
+        bridge.snapshot("main");
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: steerRequestId,
+                message: "continue",
+                sessionKey: MAIN,
+            },
+            { runId: provisionalRunId },
+            requestBoundary
+        );
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+
+        bridge.markGatewayDisconnected(Date.now());
+        expect(bridge.flush()).toBe(true);
+        const restarted = new OpenClawChatBridge(store);
+        restarted.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        const snapshot = restarted.snapshot(MAIN);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
     });
 
     it("repairs an interrupted run split across persisted session aliases", () => {

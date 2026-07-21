@@ -50,6 +50,20 @@ function mergeRequestBoundaryMetadata(
     };
 }
 
+function requestBoundaryStateMetadata(
+    state: RequestBoundaryState | undefined
+): OpenClawChatRequestBoundaryMetadata {
+    if (!state) {
+        return {};
+    }
+    return {
+        ...(state.pending.size > 0 && {
+            pendingRequestBoundaries: Object.fromEntries(state.pending),
+        }),
+        ...(state.settled !== undefined && { requestBoundary: state.settled }),
+    };
+}
+
 export class OpenClawChatRequestBoundaries {
     readonly #states = new Map<string, RequestBoundaryState>();
 
@@ -103,15 +117,18 @@ export class OpenClawChatRequestBoundaries {
     }
 
     restore(sessionKey: string, metadata: OpenClawChatRequestBoundaryMetadata): void {
-        const merged = mergeRequestBoundaryMetadata(this.metadata(sessionKey), metadata);
+        const storageSessionKey = this.normalizeSessionKey(sessionKey);
+        const merged = mergeRequestBoundaryMetadata(
+            requestBoundaryStateMetadata(this.#states.get(storageSessionKey)),
+            metadata
+        );
         if (
             merged.requestBoundary === undefined &&
             Object.keys(merged.pendingRequestBoundaries || {}).length === 0
         ) {
             return;
         }
-        this.forget(sessionKey);
-        this.#states.set(this.normalizeSessionKey(sessionKey), {
+        this.#states.set(storageSessionKey, {
             pending: new Map(Object.entries(merged.pendingRequestBoundaries || {})),
             settled: merged.requestBoundary,
         });
