@@ -2637,56 +2637,64 @@ describe("OpenClaw chat bridge", () => {
     it("keeps one ordered run when a live response resumes after Gateway reconnect", () => {
         const provisionalRunId = "dashboard-chat-before-gateway-restart";
         const providerRunId = "provider-after-gateway-restart";
+        const disconnectedAt = 1_785_000_000_000;
         const bridge = new OpenClawChatBridge();
+        const dateNow = jest.spyOn(Date, "now");
+        try {
+            dateNow.mockReturnValue(disconnectedAt - 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "thinking before restart" },
+                    runId: provisionalRunId,
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.markGatewayDisconnected(disconnectedAt);
 
-        bridge.recordEvent(
-            "agent",
-            {
-                data: { delta: "thinking before restart" },
-                runId: provisionalRunId,
-                sessionKey: MAIN,
-                stream: "thinking",
-            },
-            []
-        );
-        bridge.markGatewayDisconnected();
-        bridge.recordEvent(
-            "agent",
-            {
-                data: { phase: "start" },
-                runId: providerRunId,
-                sessionKey: MAIN,
-                stream: "lifecycle",
-            },
-            []
-        );
-        bridge.recordEvent(
-            "agent",
-            {
-                data: { delta: "thinking after restart" },
-                runId: providerRunId,
-                sessionKey: MAIN,
-                stream: "thinking",
-            },
-            []
-        );
-        bridge.recordEvent(
-            "session.message",
-            {
-                message: { content: "steer after restart", role: "user" },
-                sessionKey: MAIN,
-            },
-            []
-        );
-        bridge.recordEvent(
-            "session.tool",
-            {
-                name: "after-steer",
-                runId: providerRunId,
-                sessionKey: MAIN,
-            },
-            []
-        );
+            dateNow.mockReturnValue(disconnectedAt + 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "thinking after restart" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.recordEvent(
+                "session.message",
+                {
+                    message: { content: "steer after restart", role: "user" },
+                    sessionKey: MAIN,
+                },
+                []
+            );
+            bridge.recordEvent(
+                "session.tool",
+                {
+                    name: "after-steer",
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                },
+                []
+            );
+        } finally {
+            dateNow.mockRestore();
+        }
 
         const snapshot = bridge.snapshot(MAIN);
         expect(
@@ -2761,29 +2769,38 @@ describe("OpenClaw chat bridge", () => {
     it("does not join an interrupted run across a newer chat send", () => {
         const provisionalRunId = "dashboard-chat-before-reconnect-send";
         const providerRunId = "provider-after-reconnect-send";
+        const disconnectedAt = 1_785_000_000_000;
         const bridge = new OpenClawChatBridge();
-        bridge.recordEvent(
-            "agent",
-            {
-                data: { delta: "interrupted work" },
-                runId: provisionalRunId,
-                sessionKey: MAIN,
-                stream: "thinking",
-            },
-            []
-        );
-        bridge.markGatewayDisconnected();
-        bridge.captureRequestBoundary(MAIN);
-        bridge.recordEvent(
-            "agent",
-            {
-                data: { phase: "start" },
-                runId: providerRunId,
-                sessionKey: MAIN,
-                stream: "lifecycle",
-            },
-            []
-        );
+        const dateNow = jest.spyOn(Date, "now");
+        try {
+            dateNow.mockReturnValue(disconnectedAt - 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "interrupted work" },
+                    runId: provisionalRunId,
+                    sessionKey: MAIN,
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.markGatewayDisconnected(disconnectedAt);
+            bridge.captureRequestBoundary(MAIN);
+
+            dateNow.mockReturnValue(disconnectedAt + 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+        } finally {
+            dateNow.mockRestore();
+        }
 
         expect(
             new Set(
