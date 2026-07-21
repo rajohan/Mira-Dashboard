@@ -3505,6 +3505,17 @@ describe("chat projection", () => {
                 message: message("user", "first steer", runId),
                 runId,
             }),
+            event(88, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "after restart", type: "thinking" }],
+                    role: "assistant",
+                    runId,
+                    text: "",
+                    thinking: [{ id: "thought-2", text: "after restart" }],
+                },
+                runId,
+            }),
             event(96, {
                 kind: "user",
                 message: message("user", "second steer", runId),
@@ -3525,7 +3536,7 @@ describe("chat projection", () => {
             createChatRuntimeState(),
             runtimeEvents
         );
-        const labels = (runtime: ReturnType<typeof createChatRuntimeState>) =>
+        const projectedRows = (runtime: ReturnType<typeof createChatRuntimeState>) =>
             projectChat(
                 history,
                 runtime,
@@ -3533,7 +3544,9 @@ describe("chat projection", () => {
                 createChatVisibility(true, true),
                 true,
                 new Set()
-            ).rows.map((row) =>
+            ).rows;
+        const labels = (runtime: ReturnType<typeof createChatRuntimeState>) =>
+            projectedRows(runtime).map((row) =>
                 row.kind === "typing"
                     ? `status:${row.message.text}`
                     : row.message.toolCalls?.[0]?.name ||
@@ -3553,6 +3566,14 @@ describe("chat projection", () => {
         expect(liveRuntime).toEqual(replayedRuntime);
         expect(labels(liveRuntime)).toEqual(expectedActive);
         expect(labels(replayedRuntime)).toEqual(expectedActive);
+        const thinkingRows = projectedRows(replayedRuntime).filter(
+            (row) => row.message.thinking?.length
+        );
+        expect(thinkingRows).toHaveLength(1);
+        expect(thinkingRows[0]?.message.thinking?.map((block) => block.text)).toEqual([
+            "working",
+            "after restart",
+        ]);
 
         const completedRuntime = reduceChatRuntime(replayedRuntime, [
             event(144, {

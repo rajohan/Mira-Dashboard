@@ -65,8 +65,8 @@ interface RetainedRun {
 }
 
 interface RepairedInterruptedRun {
+    interruptedRunId: string;
     providerRunId: string;
-    provisionalRunId: string;
 }
 
 const MAX_EVENTS_PER_ACTIVE_RUN = 20_000;
@@ -427,17 +427,11 @@ function isSettlingLifecycleEvent(event: unknown, payload: unknown): boolean {
     );
 }
 
-function isStartingLifecycleEvent(event: unknown, payload: unknown): boolean {
-    if (event === "session.started") {
-        return true;
-    }
-    const record = runtimePayloadView(payload);
-    const stream = (stringField(record, "stream") || "").toLowerCase();
-    const phase = (stringField(record, "phase") || "").toLowerCase();
-    return (
-        event === "agent" &&
-        stream === "lifecycle" &&
-        ["start", "started"].includes(phase)
+/** Identifies provider work that can continue one interrupted conversation. */
+function isConversationContinuationEvent(event: unknown, payload: unknown): boolean {
+    return !(
+        isCompactionEvent(event, payload) ||
+        (event === "session.message" && sessionMessageRole(payload) === "user")
     );
 }
 
@@ -842,7 +836,7 @@ function isPromotableRunlessUserLedRun(
     );
 }
 
-function isPromotableInterruptedDashboardRun(
+function isPromotableInterruptedConversationRun(
     run: RetainedRun,
     envelope: OpenClawRuntimeEnvelope,
     runs: ReadonlyMap<string, RetainedRun>,
@@ -857,9 +851,8 @@ function isPromotableInterruptedDashboardRun(
         resumeDelay > INTERRUPTED_RUN_PROMOTION_WINDOW_MS ||
         run.completed ||
         !run.interruptionEligible ||
-        !run.runId.startsWith("dashboard-chat-") ||
         isProvisionalRunId(providerRunId) ||
-        !isStartingLifecycleEvent(envelope.event, envelope.payload) ||
+        !isConversationContinuationEvent(envelope.event, envelope.payload) ||
         envelope.runtimeSequence <= lastSequence(run) ||
         (requestBoundary !== undefined && firstSequence(run) <= requestBoundary)
     ) {
@@ -1721,10 +1714,14 @@ export class OpenClawChatBridge {
             nextCanonicalRuns.delete(oldestRunId);
             evictedCanonicalRunIds.add(oldestRunId);
         }
-        const sourceSnapshot = this.#snapshotFromRuns(nextSourceRuns, true);
         const requestBoundaries = this.#requestBoundaries.merge(
             sourceStorageKey,
             canonicalStorageKey
+        );
+        const sourceSnapshot = this.#snapshotFromRuns(
+            nextSourceRuns,
+            true,
+            requestBoundaries
         );
         const canonicalSnapshot = this.#snapshotFromRuns(
             nextCanonicalRuns,
@@ -1756,6 +1753,9 @@ export class OpenClawChatBridge {
         this.#pendingPersistence.delete(sourceStorageKey);
         this.#requestBoundaries.forget(sourceStorageKey);
         this.#requestBoundaries.forget(canonicalStorageKey);
+        if (nextSourceRuns.size > 0) {
+            this.#requestBoundaries.restore(sourceStorageKey, requestBoundaries);
+        }
         this.#requestBoundaries.restore(canonicalStorageKey, requestBoundaries);
         for (const runId of movedRunIds) {
             this.#forgetRunSession(runId, sourceStorageKey);
@@ -1765,7 +1765,7 @@ export class OpenClawChatBridge {
         }
         if (repairedRunIdentity) {
             this.#forgetRunSession(
-                repairedRunIdentity.provisionalRunId,
+                repairedRunIdentity.interruptedRunId,
                 canonicalStorageKey
             );
             this.#rememberRunSession(
@@ -2084,11 +2084,8 @@ export class OpenClawChatBridge {
                 existing.firstSequence,
                 provisional.firstSequence
             );
-            existing.interruptionEligible ||= provisional.interruptionEligible;
-            existing.interruptedAt = latestOptionalTimestamp(
-                existing.interruptedAt,
-                provisional.interruptedAt
-            );
+            existing.interruptionEligible = false;
+            existing.interruptedAt = undefined;
             existing.terminalSequence = Math.max(
                 existing.terminalSequence,
                 provisional.terminalSequence
@@ -2098,6 +2095,8 @@ export class OpenClawChatBridge {
         }
 
         provisional.runId = providerRunId;
+        provisional.interruptionEligible = false;
+        provisional.interruptedAt = undefined;
         runs.set(providerRunId, provisional);
         return provisional;
     }
@@ -2133,13 +2132,13 @@ export class OpenClawChatBridge {
         const repairedRun = this.#mergeRunEntry(
             sessionKey,
             runs,
-            candidate.provisionalRunId,
+            candidate.interruptedRunId,
             candidate.providerRunId
         );
         return repairedRun
             ? {
+                  interruptedRunId: candidate.interruptedRunId,
                   providerRunId: repairedRun.runId,
-                  provisionalRunId: candidate.provisionalRunId,
               }
             : undefined;
     }
@@ -2149,43 +2148,41 @@ export class OpenClawChatBridge {
         runs: ReadonlyMap<string, RetainedRun>
     ): RepairedInterruptedRun | undefined {
         const candidates: Array<{
+            interruptedRunId: string;
             providerRunId: string;
-            provisionalRunId: string;
         }> = [];
         const requestBoundary = this.#requestBoundaries.latest(sessionKey);
         for (const providerRun of runs.values()) {
             if (isProvisionalRunId(providerRun.runId)) {
                 continue;
             }
-            const startingEnvelope = providerRun.events.findLast((envelope) => {
+            const continuationEnvelope = providerRun.events.find((envelope) => {
                 const envelopeRunId = stringField(
                     runtimePayloadView(envelope.payload),
                     "runId"
                 );
                 return (
                     envelopeRunId === providerRun.runId &&
-                    isStartingLifecycleEvent(envelope.event, envelope.payload)
+                    isConversationContinuationEvent(envelope.event, envelope.payload)
                 );
             });
-            if (!startingEnvelope) {
+            if (!continuationEnvelope) {
                 continue;
             }
-            for (const provisionalRun of runs.values()) {
+            for (const interruptedRun of runs.values()) {
                 if (
-                    provisionalRun !== providerRun &&
-                    (providerRun.interruptionEligible ||
-                        provisionalRun.interruptedAt !== undefined) &&
-                    isPromotableInterruptedDashboardRun(
-                        provisionalRun,
-                        startingEnvelope,
+                    interruptedRun !== providerRun &&
+                    isPromotableInterruptedConversationRun(
+                        interruptedRun,
+                        continuationEnvelope,
                         runs,
                         requestBoundary,
                         providerRun
                     )
                 ) {
                     candidates.push({
+                        interruptedRunId: interruptedRun.runId,
                         providerRunId: providerRun.runId,
-                        provisionalRunId: provisionalRun.runId,
                     });
                 }
             }
@@ -2219,7 +2216,7 @@ export class OpenClawChatBridge {
         this.#promoteProvisionalRun(
             candidateSessionKey,
             candidate.providerRunId,
-            candidate.provisionalRunId
+            candidate.interruptedRunId
         );
         return candidate;
     }
@@ -2364,7 +2361,7 @@ export class OpenClawChatBridge {
                 .filter(
                     (run) =>
                         isPromotableRunlessUserLedRun(run, retainedEnvelope, runs) ||
-                        isPromotableInterruptedDashboardRun(
+                        isPromotableInterruptedConversationRun(
                             run,
                             retainedEnvelope,
                             runs,
@@ -2664,15 +2661,13 @@ export class OpenClawChatBridge {
         this.#enforceReplayMemoryLimit();
     }
 
-    /** Allows one interrupted live Dashboard run to resume under a provider run ID. */
+    /** Allows one interrupted conversation to resume under a fresh provider run ID. */
     markGatewayDisconnected(disconnectedAt = Date.now()): void {
         for (const [sessionKey, runs] of this.#runsBySession) {
             const interruptedRuns = runs
                 .values()
                 .filter(
-                    (candidate) =>
-                        !candidate.completed &&
-                        candidate.runId.startsWith("dashboard-chat-")
+                    (candidate) => !candidate.completed && !isCompactionOnlyRun(candidate)
                 )
                 .toArray();
             for (const run of interruptedRuns) {

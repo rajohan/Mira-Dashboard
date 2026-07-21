@@ -279,12 +279,16 @@ run expires after six hours without an event. Successful `/new` or `/reset`,
 abort, session deletion, and Gateway credential changes clear the applicable
 replay cache.
 
-A Gateway transport disconnect marks only unfinished `dashboard-chat-*` runs as
-eligible for interrupted-run recovery. If the Gateway resumes the same response
-under a provider run ID, the bridge rewrites the provisional replay to that
-canonical ID before retaining the new lifecycle event. The promotion is allowed
-only for one unambiguous active run, inside the bounded restart window, and only
-when no newer `chat.send` request boundary exists. Each outgoing request records
+A Gateway transport disconnect marks every unfinished conversation run as
+eligible for interrupted-run recovery, including a run that already has a
+provider ID after an earlier reconnect. If the Gateway resumes the same response
+under a fresh provider run ID, the bridge rewrites the interrupted replay to that
+ID before retaining the new work. Recovery does not require a lifecycle-start:
+the first non-user, non-compaction provider event can establish the continuation,
+which covers Codex preamble and tool events emitted first after startup. The
+promotion is allowed only for one unambiguous active conversation, inside the
+bounded restart window, and only when no newer `chat.send` request boundary
+exists. Each outgoing request records
 its own boundary under the Dashboard idempotency key and flushes it to SQLite
 before forwarding the request; if persisted replay cannot be hydrated, the send
 fails instead of crossing an unknown boundary. A matching acknowledgement or user
@@ -303,7 +307,11 @@ same session; stale provider metadata cannot override the request identity.
 Equivalent canonical and short session keys contribute to the same logical
 boundary while retaining their own persisted owners until settlement flushes
 every changed row, so alias promotion and concurrent sends cannot clear or
-bypass each other. Capture hydrates every persisted equivalent key and writes the
+bypass each other. A partial alias promotion persists and restores the merged
+boundary metadata on both the canonical destination and any surviving source
+run. An id-less settlement selects only the synthetic request captured for that
+boundary and cannot consume a named concurrent request. Capture hydrates every
+persisted equivalent key and writes the
 boundary to every owner with active conversation work; an exact but completed
 replay therefore cannot hide an active alias. If the same request ID is restored
 with different cutoffs, the maximum exact cutoff is authoritative regardless of
@@ -457,9 +465,10 @@ When changing chat event handling, test these cases:
 - snapshot gating never drops queued events for other sessions;
 - restart and reconnect restore active and latest completed thinking from
   SQLite;
-- a live Gateway restart promotes one interrupted provisional response to its
-  resumed provider run, while a newer send boundary and concurrent runs remain
-  separate;
+- Gateway, Dashboard, systemd, and abrupt VPS recovery keep one logical response
+  while its identity moves from provisional to provider or from one provider ID
+  to another, even when preamble/tool work arrives before lifecycle metadata;
+  newer send boundaries and concurrent runs remain separate;
 - pending send boundaries survive Dashboard/systemd/VPS restart, overlapping
   requests settle only their own boundary, delayed old events cannot cross the
   settled new-turn cutoff, and a runless steer can clear only one unambiguous
@@ -470,7 +479,9 @@ When changing chat event handling, test these cases:
   their maximum cutoff, active alias owners remain protected beside completed
   exact replay, one alias eviction retains surviving boundary owners, failed
   sends rehydrate evicted boundaries, top-level user-echo idempotency settles the
-  matching request, and coalescing cannot move a run's durable first sequence;
+  matching request, partial alias promotion retains source-owner boundaries,
+  id-less settlement selects only synthetic requests, and coalescing cannot move
+  a run's durable first sequence;
 - live reduction and full replay both preserve
   `start -> tool/steer interleaving -> one thinking -> status/final`, including
   multiple steer messages between tool calls;

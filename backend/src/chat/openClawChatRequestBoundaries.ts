@@ -13,7 +13,6 @@ const SYNTHETIC_REQUEST_ID_PREFIX = "request:";
 
 function fallbackPendingEntry(
     pending: ReadonlyMap<string, number>,
-    requestId: string | undefined,
     fallbackBoundary: number | undefined
 ): [string, number] | undefined {
     if (fallbackBoundary === undefined) {
@@ -24,7 +23,7 @@ function fallbackPendingEntry(
         .find(
             ([pendingRequestId, boundary]) =>
                 boundary === fallbackBoundary &&
-                (!requestId || pendingRequestId.startsWith(SYNTHETIC_REQUEST_ID_PREFIX))
+                pendingRequestId.startsWith(SYNTHETIC_REQUEST_ID_PREFIX)
         );
 }
 
@@ -162,11 +161,7 @@ export class OpenClawChatRequestBoundaries {
             if (exact !== undefined) {
                 exactBoundary = Math.max(exactBoundary ?? -1, exact);
             }
-            const fallbackEntry = fallbackPendingEntry(
-                state.pending,
-                requestId,
-                fallbackBoundary
-            );
+            const fallbackEntry = fallbackPendingEntry(state.pending, fallbackBoundary);
             if (fallbackEntry) {
                 fallbackBoundaryMatch = Math.max(
                     fallbackBoundaryMatch ?? -1,
@@ -227,7 +222,7 @@ export class OpenClawChatRequestBoundaries {
             const hasExact = Boolean(requestId && state.pending.has(requestId));
             const fallbackEntry = hasExact
                 ? undefined
-                : fallbackPendingEntry(state.pending, requestId, requestBoundary);
+                : fallbackPendingEntry(state.pending, requestBoundary);
             if (hasExact && requestId) {
                 state.pending.delete(requestId);
             } else if (fallbackEntry) {
