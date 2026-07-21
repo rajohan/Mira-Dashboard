@@ -2716,6 +2716,37 @@ describe("OpenClaw chat bridge", () => {
         ).toEqual(["thinking before restart", "thinking after restart"]);
     });
 
+    it("measures a quiet run's reconnect window from the Gateway disconnect", () => {
+        const store = new MemorySnapshotStore();
+        const provisionalRunId = "dashboard-chat-quiet-before-restart";
+        const providerRunId = "provider-after-quiet-restart";
+        const disconnectedAt = Date.now();
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, provisionalRunId, disconnectedAt - 30 * 60_000)
+        );
+        const bridge = new OpenClawChatBridge(store);
+
+        bridge.snapshot(MAIN);
+        bridge.markGatewayDisconnected(disconnectedAt);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { phase: "start" },
+                runId: providerRunId,
+                sessionKey: MAIN,
+                stream: "lifecycle",
+            },
+            []
+        );
+
+        expect(
+            bridge
+                .snapshot(MAIN)
+                .events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual([providerRunId, providerRunId]);
+    });
+
     it("does not join an interrupted run across a newer chat send", () => {
         const provisionalRunId = "dashboard-chat-before-reconnect-send";
         const providerRunId = "provider-after-reconnect-send";

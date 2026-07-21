@@ -1362,6 +1362,27 @@ describe("Mira Dashboard frontend behavior", () => {
             act(() => {
                 socket.message({ type: "response", id: "1", isOk: true, payload: [] });
             });
+            expect(result.current.hasConfirmedSessionList).toBe(false);
+            act(() => {
+                socket.message({
+                    gatewayConnected: true,
+                    sessions: [],
+                    type: "state",
+                });
+            });
+            expect(result.current.hasConfirmedSessionList).toBe(false);
+            act(() => {
+                socket.message({ sessions: [], type: "sessions" });
+            });
+            await waitFor(() =>
+                expect(result.current.hasConfirmedSessionList).toBe(true)
+            );
+            act(() => {
+                socket.message({ gatewayConnected: true, type: "connected" });
+            });
+            await waitFor(() =>
+                expect(result.current.hasConfirmedSessionList).toBe(false)
+            );
 
             const request = result.current.request<{ pong: true }>("ping", {
                 value: 1,

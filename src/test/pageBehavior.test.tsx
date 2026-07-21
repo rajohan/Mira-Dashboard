@@ -3207,6 +3207,84 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("preserves a URL-selected chat while reconnecting through an empty session state", async () => {
+        const view = renderChatPage("/chat?session=agent%3Amain%3Amain");
+        await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+        const socket = FakeWebSocket.instances[0]!;
+        await act(async () => {
+            socket.emit("open");
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(
+                socket.sent.some((entry) => entry.includes('"method":"sessions.list"'))
+            ).toBe(true);
+            expect(findSocketRequest(socket, "chat.history")).toBeDefined();
+        });
+        const session = {
+            agentType: "main",
+            displayLabel: "Main chat",
+            id: "session-main",
+            key: "agent:main:main",
+            model: "codex",
+            type: "main",
+            updatedAt: "2026-07-19T18:00:00.000Z",
+        };
+
+        await respondToSocketRequest(socket, "chat.history", { messages: [] });
+        await respondToSocketRequest(socket, "sessions.list", {
+            sessions: [session],
+        });
+        await flushQueuedTimers();
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:main:main",
+        });
+        expect(screen.getByRole("button", { name: "Session: main" })).toBeInTheDocument();
+
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({
+                    gatewayConnected: false,
+                    sessions: [],
+                    type: "state",
+                }),
+            });
+            await Promise.resolve();
+        });
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:main:main",
+        });
+        expect(screen.getByRole("button", { name: "Session: main" })).toBeInTheDocument();
+
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({ gatewayConnected: true, type: "connected" }),
+            });
+            await Promise.resolve();
+        });
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:main:main",
+        });
+
+        await act(async () => {
+            socket.emit("message", {
+                data: JSON.stringify({ sessions: [session], type: "sessions" }),
+            });
+            await Promise.resolve();
+        });
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "Session: main" })
+            ).toBeInTheDocument();
+        });
+        expect(view.router.state.location.search).toEqual({
+            session: "agent:main:main",
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("restores the selected chat session from the URL and follows URL changes", async () => {
         const user = userEvent.setup();
         const view = renderChatPage("/chat?session=agent%3Aops%3Amain%3Aheartbeat");
@@ -3338,7 +3416,10 @@ describe("Mira Dashboard pages", () => {
         await act(async () => {
             FakeWebSocket.instances[0]?.emit("open");
         });
-        FakeWebSocket.instances[0]?.respondToLastRequest({ sessions: [] });
+        await act(async () => {
+            FakeWebSocket.instances[0]?.respondToLastRequest({ sessions: [] });
+            await Promise.resolve();
+        });
         await waitFor(() =>
             expect(
                 screen.queryByText("Connecting to OpenClaw...")

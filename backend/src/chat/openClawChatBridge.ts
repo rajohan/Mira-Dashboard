@@ -47,6 +47,7 @@ interface RetainedRun {
     eventBytes: number[];
     events: OpenClawRuntimeEnvelope[];
     interruptionEligible: boolean;
+    interruptedAt?: number;
     runId: string;
     terminalSequence: number;
     totalBytes: number;
@@ -103,6 +104,20 @@ function stringField(
 ): string | undefined {
     const value = record?.[key];
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/** Returns the later defined timestamp without inventing a fallback value. */
+function latestOptionalTimestamp(
+    left: number | undefined,
+    right: number | undefined
+): number | undefined {
+    if (left === undefined) {
+        return right;
+    }
+    if (right === undefined) {
+        return left;
+    }
+    return Math.max(left, right);
 }
 
 /** Uses the same nested event-data precedence as the browser runtime adapter. */
@@ -786,7 +801,7 @@ function isPromotableInterruptedDashboardRun(
     providerRun?: RetainedRun
 ): boolean {
     const providerRunId = stringField(runtimePayloadView(envelope.payload), "runId");
-    const resumeDelay = envelope.runtimeRecordedAt - run.updatedAt;
+    const resumeDelay = envelope.runtimeRecordedAt - (run.interruptedAt ?? run.updatedAt);
     if (
         !providerRunId ||
         resumeDelay < -5000 ||
@@ -1546,6 +1561,10 @@ export class OpenClawChatBridge {
                 ]);
                 existing.completed ||= sourceRun.completed;
                 existing.interruptionEligible ||= sourceRun.interruptionEligible;
+                existing.interruptedAt = latestOptionalTimestamp(
+                    existing.interruptedAt,
+                    sourceRun.interruptedAt
+                );
                 existing.terminalSequence = Math.max(
                     existing.terminalSequence,
                     sourceRun.terminalSequence
@@ -1892,6 +1911,10 @@ export class OpenClawChatBridge {
             this.#replaceRunEvents(existing, [...provisional.events, ...existing.events]);
             existing.completed ||= provisional.completed;
             existing.interruptionEligible ||= provisional.interruptionEligible;
+            existing.interruptedAt = latestOptionalTimestamp(
+                existing.interruptedAt,
+                provisional.interruptedAt
+            );
             existing.terminalSequence = Math.max(
                 existing.terminalSequence,
                 provisional.terminalSequence
@@ -2394,12 +2417,18 @@ export class OpenClawChatBridge {
     }
 
     /** Allows one interrupted live Dashboard run to resume under a provider run ID. */
-    markGatewayDisconnected(): void {
+    markGatewayDisconnected(disconnectedAt = Date.now()): void {
         for (const runs of this.#runsBySession.values()) {
-            for (const run of runs.values()) {
-                if (!run.completed && run.runId.startsWith("dashboard-chat-")) {
-                    run.interruptionEligible = true;
-                }
+            const interruptedRuns = runs
+                .values()
+                .filter(
+                    (candidate) =>
+                        !candidate.completed &&
+                        candidate.runId.startsWith("dashboard-chat-")
+                );
+            for (const run of interruptedRuns) {
+                run.interruptionEligible = true;
+                run.interruptedAt = disconnectedAt;
             }
         }
     }

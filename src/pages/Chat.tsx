@@ -36,6 +36,7 @@ import { useChatScroll } from "../components/features/chat/useChatScroll";
 import { Card } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { useAgentsStatus } from "../hooks/useAgents";
+import { useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import type { Session } from "../types/session";
 import {
     formatSessionType,
@@ -85,6 +86,7 @@ export function Chat() {
     const search = useSearch({ strict: false }) as { session?: string };
     const requestedSessionKey = search.session?.trim() || "";
     const transport = useOpenClawChatTransport();
+    const { hasConfirmedSessionList } = useOpenClawSocket();
     const { error, isConnected } = transport;
     const availableSessionKeysReference = useRef<Set<string>>(new Set());
     const selectedSessionKeyReference = useRef("");
@@ -300,6 +302,9 @@ export function Chat() {
         const hasSelectedSession = availableSessionKeys.has(selectedSessionKey);
 
         if (availableSessionKeys.size === 0) {
+            if (!hasConfirmedSessionList) {
+                return;
+            }
             if (selectedSessionKey && wasSelectedSessionAvailable) {
                 selectSession("");
             } else if (selectedSessionKey && !requestedSessionKey) {
@@ -322,7 +327,13 @@ export function Chat() {
                 setSelectedSessionKey("");
             }
         }
-    }, [requestedSessionKey, selectSession, selectedSessionKey, sortedSessions]);
+    }, [
+        hasConfirmedSessionList,
+        requestedSessionKey,
+        selectSession,
+        selectedSessionKey,
+        sortedSessions,
+    ]);
 
     useEffect(() => {
         setDeletedMessageKeys(

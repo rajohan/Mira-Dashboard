@@ -68,6 +68,7 @@ const CHAT_ATTACHMENT_EXTENSIONS = CHAT_ATTACHMENT_EXTENSION_MIME_TYPES.keys().t
 export const CHAT_ATTACHMENT_ACCEPT = [
     "image/*",
     "audio/*",
+    "application/json",
     "application/pdf",
     "text/*",
     ...CHAT_ATTACHMENT_EXTENSIONS,

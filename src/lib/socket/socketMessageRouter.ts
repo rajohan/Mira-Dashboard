@@ -54,7 +54,7 @@ export function handleSocketMessage(raw: unknown): boolean | undefined {
 
     const data = raw;
 
-    if (data.type === "state" && data.sessions) {
+    if (data.type === "state" && data.sessions && data.gatewayConnected !== false) {
         replaceSessionsFromWebSocket(data.sessions);
     }
 

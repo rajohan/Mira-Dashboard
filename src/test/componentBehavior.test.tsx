@@ -1386,6 +1386,7 @@ describe("shared component helpers", () => {
         expect(
             view.container.querySelector('input[type="file"][multiple]')
         ).toHaveAttribute("accept", CHAT_ATTACHMENT_ACCEPT);
+        expect(CHAT_ATTACHMENT_ACCEPT.split(",")).toContain("application/json");
     });
 
     it("submits an exact slash command on the first Enter", () => {
