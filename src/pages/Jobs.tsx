@@ -47,6 +47,7 @@ import { validateJsonString } from "../utils/json";
 
 const CLEAR_SCHEDULE_FIELD = JSON.parse("null") as null;
 const DEFAULT_DISABLE_FALLBACK_MS = 60 * 60 * 1000;
+const MINIMUM_DEFAULT_DISABLE_WINDOW_MS = 5 * 60 * 1000;
 
 type JobsView = "scheduled" | "openclaw";
 type DisableMode = JobDisableIntent["mode"];
@@ -102,7 +103,7 @@ function parseDisableUntilDraft(draft: DateTimePickerValue): number | undefined 
 }
 
 /** Starts a new temporary disable at the end of today's app-time-zone date. */
-function defaultDisableUntilDraft(now = Date.now()): DateTimePickerValue {
+export function defaultDisableUntilDraft(now = Date.now()): DateTimePickerValue {
     const today = appTimeZoneParts(new Date(now));
     const endOfToday = {
         day: today.day,
@@ -112,7 +113,8 @@ function defaultDisableUntilDraft(now = Date.now()): DateTimePickerValue {
         year: today.year,
     };
     const endOfTodayTimestamp = parseDisableUntilDraft(endOfToday);
-    return endOfTodayTimestamp !== undefined && endOfTodayTimestamp > now
+    return endOfTodayTimestamp !== undefined &&
+        endOfTodayTimestamp - now >= MINIMUM_DEFAULT_DISABLE_WINDOW_MS
         ? endOfToday
         : toDisableUntilDraft(now + DEFAULT_DISABLE_FALLBACK_MS);
 }

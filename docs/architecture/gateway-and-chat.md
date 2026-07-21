@@ -117,6 +117,10 @@ updates, and compaction remain disabled until that key exists in the Gateway
 session index. A previously available selection that disappears is replaced with
 the next available fallback. An explicit URL key that has not yet appeared remains
 selected until Gateway reports it or the user chooses another session.
+The socket provider applies raw array and wrapped response shapes only to the
+Promise returned by its own `sessions.list` request. Unrelated RPC responses
+therefore cannot clear the session collection merely because their payload is an
+array; explicit `sessions` push envelopes remain supported separately.
 
 ### Attachments And Media
 
@@ -276,7 +280,9 @@ canonical ID before retaining the new lifecycle event. The promotion is allowed
 only for one unambiguous active run, inside the bounded restart window, and only
 when no newer `chat.send` request boundary exists. This keeps pre- and
 post-restart thinking, later steer messages, and tools in one ordered response
-without merging a genuinely new or concurrent send.
+without merging a genuinely new or concurrent send. The recorded disconnect
+time also protects a long-quiet interrupted run from the normal six-hour stale
+run cleanup while that bounded recovery window is open.
 
 The canonical reducer is ordered and idempotent. Run identifiers and aliases are
 always session-scoped. Snapshot gating applies only to the selected session, so

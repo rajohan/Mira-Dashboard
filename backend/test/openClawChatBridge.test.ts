@@ -2732,7 +2732,7 @@ describe("OpenClaw chat bridge", () => {
         const providerStartedAt = disconnectedAt + 1000;
         store.snapshots.set(
             MAIN,
-            persistedSnapshot(MAIN, provisionalRunId, disconnectedAt - 30 * 60_000)
+            persistedSnapshot(MAIN, provisionalRunId, disconnectedAt - 7 * 60 * 60_000)
         );
         const bridge = new OpenClawChatBridge(store);
 

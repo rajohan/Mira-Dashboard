@@ -182,6 +182,7 @@ import { compareLogEntriesByLineId } from "../pages/Logs";
 import { Reports } from "../pages/Reports";
 import { Tasks } from "../pages/Tasks";
 import { authActions, authStore } from "../stores/authStore";
+import { readSessionsResponsePayload } from "../types/socket";
 import type { Task, TaskUpdate } from "../types/task";
 import {
     formatCronLastStatus,
@@ -1107,7 +1108,7 @@ describe("Mira Dashboard frontend behavior", () => {
         ).toBeUndefined();
     });
 
-    it("replaces sessions for every supported sessions.list response shape", () => {
+    it("reads every supported sessions.list response shape without routing unrelated responses", () => {
         const responsePayloads: unknown[] = [
             [],
             { sessions: [] },
@@ -1115,25 +1116,10 @@ describe("Mira Dashboard frontend behavior", () => {
             { data: { sessions: [] } },
         ];
 
-        for (const [index, payload] of responsePayloads.entries()) {
-            const staleKey = `stale-session-${index}`;
-            const deletes: string[] = [];
-            const restore = patchWritableCollection(
-                sessionsCollection,
-                [[staleKey, { key: staleKey }]],
-                {
-                    writeDelete: (key) => {
-                        deletes.push(key);
-                    },
-                }
-            );
-            try {
-                handleSocketMessage({ payload, type: "response" });
-                expect(deletes).toEqual([staleKey]);
-            } finally {
-                restore();
-            }
+        for (const payload of responsePayloads) {
+            expect(readSessionsResponsePayload(payload)).toEqual([]);
         }
+        expect(readSessionsResponsePayload({ unrelated: [] })).toBeUndefined();
 
         const deletes: string[] = [];
         const restore = patchWritableCollection(
@@ -1146,7 +1132,7 @@ describe("Mira Dashboard frontend behavior", () => {
             }
         );
         try {
-            handleSocketMessage({ payload: { unrelated: [] }, type: "response" });
+            handleSocketMessage({ payload: [], type: "response" });
             expect(deletes).toEqual([]);
         } finally {
             restore();
@@ -1434,8 +1420,25 @@ describe("Mira Dashboard frontend behavior", () => {
                 await waitFor(() =>
                     expect(result.current.hasConfirmedSessionList).toBe(false)
                 );
+                const previousRequestCount = socket.sent.length;
                 act(() => {
-                    socket.message({ type: "response", isOk: true, payload });
+                    dispatchEvent(new Event("focus"));
+                });
+                await waitFor(() =>
+                    expect(socket.sent.length).toBe(previousRequestCount + 1)
+                );
+                const sessionsRequest = JSON.parse(socket.sent.at(-1)!) as {
+                    id: string;
+                    method: string;
+                };
+                expect(sessionsRequest.method).toBe("sessions.list");
+                act(() => {
+                    socket.message({
+                        type: "response",
+                        id: sessionsRequest.id,
+                        isOk: true,
+                        payload,
+                    });
                 });
                 await waitFor(() =>
                     expect(result.current.hasConfirmedSessionList).toBe(true)
@@ -1463,9 +1466,12 @@ describe("Mira Dashboard frontend behavior", () => {
             const request = result.current.request<{ pong: true }>("ping", {
                 value: 1,
             });
+            const pingRequest = JSON.parse(socket.sent.at(-1)!) as {
+                id: string;
+            };
             expect(JSON.parse(socket.sent.at(-1)!)).toEqual({
                 type: "req",
-                id: "2",
+                id: pingRequest.id,
                 method: "ping",
                 params: { value: 1 },
                 timeoutMs: 30_000,
@@ -1473,7 +1479,7 @@ describe("Mira Dashboard frontend behavior", () => {
             act(() => {
                 socket.message({
                     type: "response",
-                    id: "2",
+                    id: pingRequest.id,
                     isOk: true,
                     payload: { pong: true },
                 });

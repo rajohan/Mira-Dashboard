@@ -9,6 +9,7 @@ import {
     useState,
 } from "react";
 
+import { replaceSessionsFromWebSocket } from "../collections/sessions";
 import {
     createSocketClient,
     type SocketClient,
@@ -50,6 +51,19 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const [error, setError] = useState<string | undefined>(undefined);
     const [connectionId, setConnectionId] = useState(0);
 
+    /** Applies only the result of a request known to be sessions.list. */
+    const applySessionsListResponse = (client: SocketClient, payload: unknown) => {
+        if (clientReference.current !== client) {
+            return;
+        }
+        const sessions = readSessionsResponsePayload(payload);
+        if (sessions === undefined) {
+            return;
+        }
+        replaceSessionsFromWebSocket(sessions);
+        setHasConfirmedSessionList(true);
+    };
+
     /** Performs connect. */
     const connect = () => {
         if (!isAuthenticated) {
@@ -65,9 +79,14 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                     setHasConfirmedSessionList(false);
                     setError(undefined);
                     setConnectionId((wasPrevious) => wasPrevious + 1);
+                    const client = clientReference.current;
+                    if (!client) {
+                        return;
+                    }
                     void (async () => {
                         try {
-                            await clientReference.current?.request("sessions.list");
+                            const payload = await client.request("sessions.list");
+                            applySessionsListResponse(client, payload);
                         } catch {
                             // Best-effort socket resync.
                         }
@@ -86,11 +105,8 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                         const envelope = isSocketEnvelope(data) ? data : undefined;
                         const hasSessionList = Boolean(
                             envelope &&
-                            ((envelope.type === "sessions" &&
-                                Array.isArray(envelope.sessions)) ||
-                                (envelope.type === "response" &&
-                                    readSessionsResponsePayload(envelope.payload) !==
-                                        undefined))
+                            envelope.type === "sessions" &&
+                            Array.isArray(envelope.sessions)
                         );
                         if (
                             connectionState === false ||
@@ -160,7 +176,8 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             const client = clientReference.current;
             void (async () => {
                 try {
-                    await client.request("sessions.list");
+                    const payload = await client.request("sessions.list");
+                    applySessionsListResponse(client, payload);
                 } catch {
                     if (clientReference.current !== client) {
                         return;
@@ -194,7 +211,12 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
 
             void (async () => {
                 try {
-                    await clientReference.current?.request("sessions.list");
+                    const client = clientReference.current;
+                    if (!client) {
+                        return;
+                    }
+                    const payload = await client.request("sessions.list");
+                    applySessionsListResponse(client, payload);
                 } catch {
                     // Best-effort socket resync.
                 }

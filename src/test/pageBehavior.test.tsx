@@ -40,7 +40,7 @@ import { Dashboard } from "../pages/Dashboard";
 import { Database } from "../pages/Database";
 import { Docker } from "../pages/Docker";
 import { Files } from "../pages/Files";
-import { Jobs } from "../pages/Jobs";
+import { defaultDisableUntilDraft, Jobs } from "../pages/Jobs";
 import { Logs } from "../pages/Logs";
 import { Moltbook } from "../pages/Moltbook";
 import { PullRequests } from "../pages/PullRequests";
@@ -1932,6 +1932,18 @@ describe("Mira Dashboard pages", () => {
             },
         });
         Element.prototype.scrollIntoView = originalGlobals.scrollIntoView;
+    });
+
+    it("avoids a nearly expired end-of-day disable default", () => {
+        const shortlyBeforeOsloMidnight = Date.parse("2026-07-21T21:58:30.000Z");
+
+        expect(defaultDisableUntilDraft(shortlyBeforeOsloMidnight)).toEqual({
+            day: 22,
+            hour: "00",
+            minute: "58",
+            month: 7,
+            year: 2026,
+        });
     });
 
     it("renders the main data pages from their API contracts", async () => {

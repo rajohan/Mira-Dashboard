@@ -44,8 +44,10 @@ cannot infer.
   jobs and OpenClaw cron jobs.
 - Disabling a Dashboard or OpenClaw cron job opens an intent form. A required
   comment and either a future expiry or an indefinite mode controls heartbeat
-  warning suppression; enabling the job clears the intent. OpenClaw disable
-  metadata is job-scoped, so it also works without a linked task.
+  warning suppression; enabling the job clears the intent. Temporary disables
+  default to 23:59 on today's Oslo date, unless less than five minutes remain,
+  in which case the picker starts one hour ahead. OpenClaw disable metadata is
+  job-scoped, so it also works without a linked task.
 - Dashboard cache badges poll the lightweight `/api/cache/status` endpoint.
   Heartbeat automation uses `/api/cache/heartbeat`; it is not the UI polling
   endpoint.

@@ -3,7 +3,7 @@ import { writeLogFromWebSocket } from "../../collections/logs";
 import { replaceSessionsFromWebSocket } from "../../collections/sessions";
 import type { AgentInfo } from "../../types/session";
 import type { SocketEnvelope } from "../../types/socket";
-import { isSocketEnvelope, readSessionsResponsePayload } from "../../types/socket";
+import { isSocketEnvelope } from "../../types/socket";
 
 /** Performs read gateway connection state. */
 function readGatewayConnectionState(data: SocketEnvelope): boolean | undefined {
@@ -44,13 +44,6 @@ export function handleSocketMessage(raw: unknown): boolean | undefined {
 
     if (data.type === "log" && data.line && data.history !== true) {
         writeLogFromWebSocket(data.line, data.lineId);
-    }
-
-    if (data.type === "response") {
-        const sessions = readSessionsResponsePayload(data.payload);
-        if (sessions !== undefined) {
-            replaceSessionsFromWebSocket(sessions);
-        }
     }
 
     return readGatewayConnectionState(data);
