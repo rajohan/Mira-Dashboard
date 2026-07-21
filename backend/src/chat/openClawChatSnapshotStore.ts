@@ -125,6 +125,19 @@ function isStoredEventFingerprint(value: unknown): value is StoredEventFingerpri
     );
 }
 
+function isInterruptedAtByRun(value: unknown): value is Record<string, number> {
+    const record = asRecord(value);
+    return Boolean(
+        record &&
+        Object.entries(record).every(
+            ([runId, interruptedAt]) =>
+                runId.trim().length > 0 &&
+                Number.isSafeInteger(interruptedAt) &&
+                (interruptedAt as number) >= 0
+        )
+    );
+}
+
 function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefined {
     try {
         const value = JSON.parse(serialized) as Record<string, unknown>;
@@ -133,6 +146,7 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             ? value.eventFingerprints.filter(isStoredEventFingerprint)
             : [];
         const throughSequence = value.throughSequence;
+        const interruptedAtByRun = value.interruptedAtByRun;
         if (
             !value ||
             typeof value !== "object" ||
@@ -144,6 +158,8 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             eventFingerprints.length !== value.eventFingerprints.length ||
             !Number.isSafeInteger(throughSequence) ||
             (throughSequence as number) < 0 ||
+            (interruptedAtByRun !== undefined &&
+                !isInterruptedAtByRun(interruptedAtByRun)) ||
             value.eventStorage !== EVENT_ROW_STORAGE ||
             eventFingerprints.some(
                 (event, index) =>
@@ -247,6 +263,9 @@ function snapshotMetadata(
         })),
         eventStorage: EVENT_ROW_STORAGE,
         events: [],
+        ...(snapshot.interruptedAtByRun && {
+            interruptedAtByRun: snapshot.interruptedAtByRun,
+        }),
         runSignature,
         throughSequence: snapshot.throughSequence,
     };
@@ -486,6 +505,11 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
         return {
             completed: stored.snapshot.completed,
             events: events as OpenClawRuntimeEnvelope[],
+            ...(stored.snapshot.interruptedAtByRun && {
+                interruptedAtByRun: {
+                    ...stored.snapshot.interruptedAtByRun,
+                },
+            }),
             throughSequence: stored.snapshot.throughSequence,
         };
     }

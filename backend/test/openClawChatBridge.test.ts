@@ -2730,9 +2730,14 @@ describe("OpenClaw chat bridge", () => {
 
         bridge.snapshot(MAIN);
         bridge.markGatewayDisconnected(disconnectedAt);
+        expect(bridge.flush()).toBe(true);
+        expect(store.snapshots.get(MAIN)?.interruptedAtByRun).toEqual({
+            [provisionalRunId]: disconnectedAt,
+        });
+        const restarted = new OpenClawChatBridge(store);
         const dateNow = jest.spyOn(Date, "now").mockReturnValue(providerStartedAt);
         try {
-            bridge.recordEvent(
+            restarted.recordEvent(
                 "agent",
                 {
                     data: { phase: "start" },
@@ -2747,7 +2752,7 @@ describe("OpenClaw chat bridge", () => {
         }
 
         expect(
-            bridge
+            restarted
                 .snapshot(MAIN)
                 .events.map((event) => (event.payload as { runId?: string }).runId)
         ).toEqual([providerRunId, providerRunId]);
@@ -2930,6 +2935,49 @@ describe("OpenClaw chat bridge", () => {
                 []
             ).payload
         ).not.toHaveProperty("sessionKey");
+    });
+
+    it("repairs an interrupted alias when the provider run starts before canonicalization", () => {
+        const provisionalRunId = "dashboard-chat-live-short-key-restart";
+        const providerRunId = "provider-live-canonical-restart";
+        const disconnectedAt = 1_785_000_000_000;
+        const bridge = new OpenClawChatBridge();
+        const dateNow = jest.spyOn(Date, "now");
+        try {
+            dateNow.mockReturnValue(disconnectedAt - 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { delta: "thinking before restart" },
+                    runId: provisionalRunId,
+                    sessionKey: "main",
+                    stream: "thinking",
+                },
+                []
+            );
+            bridge.markGatewayDisconnected(disconnectedAt);
+
+            dateNow.mockReturnValue(disconnectedAt + 1000);
+            bridge.recordEvent(
+                "agent",
+                {
+                    data: { phase: "start" },
+                    runId: providerRunId,
+                    sessionKey: MAIN,
+                    stream: "lifecycle",
+                },
+                []
+            );
+        } finally {
+            dateNow.mockRestore();
+        }
+
+        bridge.reconcileSessions([{ id: "main", key: MAIN }]);
+
+        const snapshot = bridge.snapshot(MAIN);
+        expect(
+            snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
     });
 
     it("keeps concurrent persisted alias runs separate from a provider run", () => {

@@ -19,6 +19,7 @@ export interface OpenClawRuntimeEnvelope {
 export interface OpenClawRuntimeSnapshot {
     completed: boolean;
     events: OpenClawRuntimeEnvelope[];
+    interruptedAtByRun?: Record<string, number>;
     throughSequence: number;
 }
 
@@ -1149,6 +1150,16 @@ export class OpenClawChatBridge {
                 this.#retain(envelope, false);
             }
         });
+        const hydratedRuns = this.#runsBySession.get(storedStorageKey);
+        const interruptedRunEntries = Object.entries(snapshot.interruptedAtByRun || {});
+        for (const [runId, interruptedAt] of interruptedRunEntries) {
+            const hydratedRun = hydratedRuns?.get(runId);
+            if (!hydratedRun) {
+                continue;
+            }
+            hydratedRun.interruptionEligible = true;
+            hydratedRun.interruptedAt = interruptedAt;
+        }
         const prunedStaleRun = this.#pruneStaleActiveRuns(storedStorageKey);
         if (prunedStaleRun && !this.#runsBySession.has(storedStorageKey)) {
             const didPersist = this.#flushSessionPersistence(storedStorageKey);
@@ -1212,7 +1223,8 @@ export class OpenClawChatBridge {
     }
 
     #snapshotFromRuns(
-        runs: ReadonlyMap<string, RetainedRun> | undefined
+        runs: ReadonlyMap<string, RetainedRun> | undefined,
+        shouldIncludeInterruptionMetadata = false
     ): OpenClawRuntimeSnapshot {
         const snapshots = runs ? runs.values().toArray() : [];
         const active = snapshots.filter((snapshot) => !snapshot.completed);
@@ -1236,18 +1248,35 @@ export class OpenClawChatBridge {
             selected = completedToReplay ? [completedToReplay] : [];
         }
 
+        const interruptedAtByRun = shouldIncludeInterruptionMetadata
+            ? Object.fromEntries(
+                  selected.flatMap((snapshot) =>
+                      snapshot.interruptedAt === undefined
+                          ? []
+                          : [[snapshot.runId, snapshot.interruptedAt]]
+                  )
+              )
+            : {};
+
         return {
             completed: active.length === 0 && selected.length > 0,
             events: selected
                 .flatMap((snapshot) => snapshot.events)
                 .toSorted((left, right) => left.runtimeSequence - right.runtimeSequence),
+            ...(Object.keys(interruptedAtByRun).length > 0 && {
+                interruptedAtByRun,
+            }),
             throughSequence: this.#sequence,
         };
     }
 
-    #snapshotFromMemory(sessionKey: string): OpenClawRuntimeSnapshot {
+    #snapshotFromMemory(
+        sessionKey: string,
+        shouldIncludeInterruptionMetadata = false
+    ): OpenClawRuntimeSnapshot {
         return this.#snapshotFromRuns(
-            this.#runsBySession.get(normalizedSessionKey(sessionKey))
+            this.#runsBySession.get(normalizedSessionKey(sessionKey)),
+            shouldIncludeInterruptionMetadata
         );
     }
 
@@ -1282,7 +1311,7 @@ export class OpenClawChatBridge {
         ) {
             return false;
         }
-        const snapshot = this.#snapshotFromMemory(storageSessionKey);
+        const snapshot = this.#snapshotFromMemory(storageSessionKey, true);
         try {
             if (snapshot.events.length === 0) {
                 return this.#deletePersistedSession(storageSessionKey);
@@ -1593,8 +1622,8 @@ export class OpenClawChatBridge {
             nextCanonicalRuns.delete(oldestRunId);
             evictedCanonicalRunIds.add(oldestRunId);
         }
-        const sourceSnapshot = this.#snapshotFromRuns(nextSourceRuns);
-        const canonicalSnapshot = this.#snapshotFromRuns(nextCanonicalRuns);
+        const sourceSnapshot = this.#snapshotFromRuns(nextSourceRuns, true);
+        const canonicalSnapshot = this.#snapshotFromRuns(nextCanonicalRuns, true);
         if (
             !this.#persistSessionPromotion(
                 sourceStorageKey,
@@ -1958,10 +1987,7 @@ export class OpenClawChatBridge {
         }> = [];
         const requestBoundary = this.#latestRequestBoundary(sessionKey);
         for (const providerRun of runs.values()) {
-            if (
-                !providerRun.interruptionEligible ||
-                isProvisionalRunId(providerRun.runId)
-            ) {
+            if (isProvisionalRunId(providerRun.runId)) {
                 continue;
             }
             const startingEnvelope = providerRun.events.findLast((envelope) => {
@@ -1980,6 +2006,8 @@ export class OpenClawChatBridge {
             for (const provisionalRun of runs.values()) {
                 if (
                     provisionalRun !== providerRun &&
+                    (providerRun.interruptionEligible ||
+                        provisionalRun.interruptedAt !== undefined) &&
                     isPromotableInterruptedDashboardRun(
                         provisionalRun,
                         startingEnvelope,
@@ -2418,17 +2446,21 @@ export class OpenClawChatBridge {
 
     /** Allows one interrupted live Dashboard run to resume under a provider run ID. */
     markGatewayDisconnected(disconnectedAt = Date.now()): void {
-        for (const runs of this.#runsBySession.values()) {
+        for (const [sessionKey, runs] of this.#runsBySession) {
             const interruptedRuns = runs
                 .values()
                 .filter(
                     (candidate) =>
                         !candidate.completed &&
                         candidate.runId.startsWith("dashboard-chat-")
-                );
+                )
+                .toArray();
             for (const run of interruptedRuns) {
                 run.interruptionEligible = true;
                 run.interruptedAt = disconnectedAt;
+            }
+            if (interruptedRuns.length > 0) {
+                this.#queuePersistence(sessionKey);
             }
         }
     }

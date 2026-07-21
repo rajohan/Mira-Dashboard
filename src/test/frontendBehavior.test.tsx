@@ -1107,6 +1107,52 @@ describe("Mira Dashboard frontend behavior", () => {
         ).toBeUndefined();
     });
 
+    it("replaces sessions for every supported sessions.list response shape", () => {
+        const responsePayloads: unknown[] = [
+            [],
+            { sessions: [] },
+            { result: { sessions: [] } },
+            { data: { sessions: [] } },
+        ];
+
+        for (const [index, payload] of responsePayloads.entries()) {
+            const staleKey = `stale-session-${index}`;
+            const deletes: string[] = [];
+            const restore = patchWritableCollection(
+                sessionsCollection,
+                [[staleKey, { key: staleKey }]],
+                {
+                    writeDelete: (key) => {
+                        deletes.push(key);
+                    },
+                }
+            );
+            try {
+                handleSocketMessage({ payload, type: "response" });
+                expect(deletes).toEqual([staleKey]);
+            } finally {
+                restore();
+            }
+        }
+
+        const deletes: string[] = [];
+        const restore = patchWritableCollection(
+            sessionsCollection,
+            [["retained-session", { key: "retained-session" }]],
+            {
+                writeDelete: (key) => {
+                    deletes.push(key);
+                },
+            }
+        );
+        try {
+            handleSocketMessage({ payload: { unrelated: [] }, type: "response" });
+            expect(deletes).toEqual([]);
+        } finally {
+            restore();
+        }
+    });
+
     it("drives socket client request, response, error, and disconnect behavior", async () => {
         const originalWebSocket = WebSocket;
         FakeWebSocket.instances = [];
@@ -1360,7 +1406,12 @@ describe("Mira Dashboard frontend behavior", () => {
             await waitFor(() => expect(result.current.isConnected).toBe(true));
             expect(lifecycle).toContain("connect");
             act(() => {
-                socket.message({ type: "response", id: "1", isOk: true, payload: [] });
+                socket.message({
+                    type: "response",
+                    id: "1",
+                    isOk: true,
+                    payload: { unrelated: [] },
+                });
             });
             expect(result.current.hasConfirmedSessionList).toBe(false);
             act(() => {
@@ -1371,6 +1422,31 @@ describe("Mira Dashboard frontend behavior", () => {
                 });
             });
             expect(result.current.hasConfirmedSessionList).toBe(false);
+            for (const payload of [
+                [],
+                { sessions: [] },
+                { result: { sessions: [] } },
+                { data: { sessions: [] } },
+            ]) {
+                act(() => {
+                    socket.message({ gatewayConnected: true, type: "connected" });
+                });
+                await waitFor(() =>
+                    expect(result.current.hasConfirmedSessionList).toBe(false)
+                );
+                act(() => {
+                    socket.message({ type: "response", isOk: true, payload });
+                });
+                await waitFor(() =>
+                    expect(result.current.hasConfirmedSessionList).toBe(true)
+                );
+            }
+            act(() => {
+                socket.message({ gatewayConnected: true, type: "connected" });
+            });
+            await waitFor(() =>
+                expect(result.current.hasConfirmedSessionList).toBe(false)
+            );
             act(() => {
                 socket.message({ sessions: [], type: "sessions" });
             });

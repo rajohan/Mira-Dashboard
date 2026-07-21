@@ -16,7 +16,7 @@ import {
 } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import { authStore } from "../stores/authStore";
-import { isSocketEnvelope, readSessionsPayload } from "../types/socket";
+import { isSocketEnvelope, readSessionsResponsePayload } from "../types/socket";
 import { getWebSocketUrl } from "../utils/websocket";
 
 /** Represents OpenClaw socket context value. */
@@ -89,7 +89,8 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                             ((envelope.type === "sessions" &&
                                 Array.isArray(envelope.sessions)) ||
                                 (envelope.type === "response" &&
-                                    readSessionsPayload(envelope.payload) !== undefined))
+                                    readSessionsResponsePayload(envelope.payload) !==
+                                        undefined))
                         );
                         if (
                             connectionState === false ||

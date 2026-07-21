@@ -1,37 +1,9 @@
 import { writeAgentsFromWebSocket } from "../../collections/agents";
 import { writeLogFromWebSocket } from "../../collections/logs";
 import { replaceSessionsFromWebSocket } from "../../collections/sessions";
-import type { AgentInfo, Session } from "../../types/session";
+import type { AgentInfo } from "../../types/session";
 import type { SocketEnvelope } from "../../types/socket";
-import { isSocketEnvelope, readSessionsPayload } from "../../types/socket";
-
-/** Extracts sessions from payload. */
-function extractSessionsFromPayload(payload: unknown): Session[] {
-    if (Array.isArray(payload)) {
-        return payload as Session[];
-    }
-
-    const sessions = readSessionsPayload(payload);
-    if (sessions) {
-        return sessions as Session[];
-    }
-
-    if (payload && typeof payload === "object") {
-        const maybe = payload as { result?: unknown; data?: unknown };
-
-        const fromResult = readSessionsPayload(maybe.result);
-        if (fromResult) {
-            return fromResult as Session[];
-        }
-
-        const fromData = readSessionsPayload(maybe.data);
-        if (fromData) {
-            return fromData as Session[];
-        }
-    }
-
-    return [];
-}
+import { isSocketEnvelope, readSessionsResponsePayload } from "../../types/socket";
 
 /** Performs read gateway connection state. */
 function readGatewayConnectionState(data: SocketEnvelope): boolean | undefined {
@@ -75,8 +47,8 @@ export function handleSocketMessage(raw: unknown): boolean | undefined {
     }
 
     if (data.type === "response") {
-        const sessions = extractSessionsFromPayload(data.payload);
-        if (sessions.length > 0) {
+        const sessions = readSessionsResponsePayload(data.payload);
+        if (sessions !== undefined) {
             replaceSessionsFromWebSocket(sessions);
         }
     }
