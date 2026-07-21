@@ -838,7 +838,7 @@ describe("chat projection", () => {
         ]);
     });
 
-    it("keeps active-run thinking before an exact new optimistic turn", () => {
+    it("moves active-run thinking below a live steer message", () => {
         const active = reduceChatRuntime(createChatRuntimeState(), [
             eventAt(16, "2026-07-16T12:00:01.000Z", {
                 kind: "status",
@@ -890,12 +890,9 @@ describe("chat projection", () => {
             (item) => item.text === "latest steer"
         );
         const thinkingIndex = reconciled.findIndex((item) => item.thinking?.length);
-        const firstSteerIndex = reconciled.findIndex((item) => item.text === "steer");
         expect(latestSteerIndex).toBeGreaterThanOrEqual(0);
-        expect(thinkingIndex).toBeGreaterThan(firstSteerIndex);
-        expect(thinkingIndex).toBeLessThan(latestSteerIndex);
+        expect(thinkingIndex).toBeGreaterThan(latestSteerIndex);
         expect(reconciled[thinkingIndex]?.thinking?.[0]?.text).toBe("after steer");
-        expect(reconciled[latestSteerIndex]?.runId).toBe("dashboard-chat-steer-2");
         expect(projection.rows.at(-1)).toMatchObject({
             kind: "typing",
             message: { text: "Thinking" },
@@ -1004,14 +1001,6 @@ describe("chat projection", () => {
                 toolCalls: [{ id: "call-recovered", name: "read" }],
             },
             {
-                content: [{ text: "interrupted reasoning", type: "thinking" }],
-                role: "assistant",
-                runId: oldRunId,
-                text: "",
-                thinking: [{ id: "thought-interrupted", text: "interrupted reasoning" }],
-                timestamp: "2026-07-16T12:00:30.000Z",
-            },
-            {
                 ...message("user", "what are we waiting for"),
                 timestamp: "2026-07-16T12:09:01.000Z",
             },
@@ -1105,82 +1094,6 @@ describe("chat projection", () => {
         expect(
             refreshedVisible.filter((item) => item.text === "latest live steer")
         ).toEqual([expect.objectContaining({ runId: currentRunId })]);
-        expect(
-            refreshedVisible
-                .filter((item) => item.thinking?.length)
-                .map((item) => ({
-                    runId: item.runId,
-                    thinking: item.thinking?.map((block) => block.text),
-                }))
-        ).toEqual([
-            {
-                runId: currentRunId,
-                thinking: ["interrupted reasoning", "current reasoning"],
-            },
-        ]);
-    });
-
-    it("does not fold a completed Dashboard turn into a later active run", () => {
-        const oldRunId = "dashboard-chat-completed";
-        const currentRunId = "dashboard-chat-current";
-        const runtime = reduceChatRuntime(createChatRuntimeState(), [
-            eventAt(16, "2026-07-16T12:09:00.000Z", {
-                kind: "thinking",
-                message: thinkingMessage(currentRunId),
-                runId: currentRunId,
-            }),
-        ]);
-        const history = [
-            {
-                ...message("user", "old question", oldRunId),
-                timestamp: "2026-07-16T12:00:00.000Z",
-            },
-            {
-                ...thinkingMessage(oldRunId),
-                timestamp: "2026-07-16T12:00:20.000Z",
-            },
-            {
-                ...message("assistant", "old answer", oldRunId),
-                timestamp: "2026-07-16T12:00:30.000Z",
-            },
-            {
-                ...message("user", "current question", currentRunId),
-                timestamp: "2026-07-16T12:09:00.000Z",
-            },
-        ];
-
-        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
-
-        expect(reconciled.find((item) => item.text === "old question")?.runId).toBe(
-            oldRunId
-        );
-        expect(reconciled.find((item) => item.text === "old answer")?.runId).toBe(
-            oldRunId
-        );
-    });
-
-    it("does not guess between multiple orphaned Dashboard diagnostic runs", () => {
-        const currentRunId = "dashboard-chat-current";
-        const orphanedRunIds = ["dashboard-chat-orphan-1", "dashboard-chat-orphan-2"];
-        const runtime = reduceChatRuntime(createChatRuntimeState(), [
-            eventAt(16, "2026-07-16T12:09:00.000Z", {
-                kind: "thinking",
-                message: thinkingMessage(currentRunId),
-                runId: currentRunId,
-            }),
-        ]);
-        const history = orphanedRunIds.map((runId, index) => ({
-            ...thinkingMessage(runId),
-            timestamp: `2026-07-16T12:0${index}:30.000Z`,
-        }));
-
-        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
-
-        expect(
-            reconciled
-                .filter((item) => orphanedRunIds.includes(item.runId || ""))
-                .map((item) => item.runId)
-        ).toEqual(orphanedRunIds);
     });
 
     it("moves thinking below a recovered unscoped steer before more work arrives", () => {
@@ -1315,85 +1228,6 @@ describe("chat projection", () => {
 
         expect(repeated).toHaveLength(2);
         expect(repeated.every((item) => item.runId === "run-1")).toBe(true);
-    });
-
-    it("keeps rapid unscoped sends with the run that started around each message", () => {
-        const runtime = reduceChatRuntime(createChatRuntimeState(), [
-            eventAt(8, "2026-07-16T12:00:00.000Z", {
-                kind: "thinking",
-                message: thinkingMessage("run-old"),
-                runId: "run-old",
-            }),
-            eventAt(16, "2026-07-16T12:00:04.000Z", {
-                kind: "thinking",
-                message: thinkingMessage("run-new"),
-                runId: "run-new",
-            }),
-        ]);
-        const history = [
-            {
-                ...message("user", "first rapid send"),
-                timestamp: "2026-07-16T12:00:00.000Z",
-            },
-            {
-                ...message("user", "second rapid send"),
-                timestamp: "2026-07-16T12:00:04.000Z",
-            },
-        ];
-
-        const reconciled = reconcileChatMessages(history, runtime.sessions[SESSION]);
-
-        expect(reconciled.find((item) => item.text === "first rapid send")?.runId).toBe(
-            "run-old"
-        );
-        expect(reconciled.find((item) => item.text === "second rapid send")?.runId).toBe(
-            "run-new"
-        );
-    });
-
-    it("preserves exact ownership for an unacknowledged optimistic turn", () => {
-        const optimisticRunId = "dashboard-chat-new-question";
-        const runtime = reduceChatRuntime(createChatRuntimeState(), [
-            eventAt(8, "2026-07-16T12:00:00.000Z", {
-                kind: "thinking",
-                message: thinkingMessage("run-old"),
-                runId: "run-old",
-            }),
-            eventAt(16, "2026-07-16T12:00:04.000Z", {
-                kind: "user",
-                message: message("user", "new question", optimisticRunId),
-                runId: optimisticRunId,
-            }),
-        ]);
-        const history = [
-            {
-                ...message("user", "old question", "run-old"),
-                timestamp: "2026-07-16T11:59:59.000Z",
-            },
-            {
-                ...message("user", "new question", optimisticRunId),
-                timestamp: "2026-07-16T12:00:04.000Z",
-            },
-        ];
-
-        const projection = projectChat(
-            history,
-            runtime,
-            SESSION,
-            createChatVisibility(true, true),
-            true,
-            new Set()
-        );
-        const messages = projection.rows
-            .filter((row) => row.kind !== "typing")
-            .map((row) => row.message);
-        const thinkingIndex = messages.findIndex((item) => item.thinking?.length);
-        const newQuestionIndex = messages.findIndex(
-            (item) => item.text === "new question"
-        );
-
-        expect(messages[newQuestionIndex]?.runId).toBe(optimisticRunId);
-        expect(thinkingIndex).toBeLessThan(newQuestionIndex);
     });
 
     it("deduplicates a recovered steer whose optimistic alias is absent after refresh", () => {
@@ -3820,7 +3654,7 @@ describe("chat projection", () => {
         expect(visible[1]?.thinking?.[0]?.text).toBe("first thought");
     });
 
-    it("keeps thinking with its run before a distinct optimistic turn", () => {
+    it("moves thinking below an optimistic steer before provider acknowledgement", () => {
         const visible = presentChatMessages(
             [
                 message("user", "question", "run-1"),
@@ -3831,6 +3665,7 @@ describe("chat projection", () => {
                     text: "",
                     thinking: [{ id: "thought-1", text: "working" }],
                 },
+                message("user", "steer now", "dashboard-chat-steer"),
                 {
                     content: "",
                     role: "assistant",
@@ -3838,7 +3673,6 @@ describe("chat projection", () => {
                     text: "",
                     toolCalls: [{ id: "call-1", name: "read" }],
                 },
-                message("user", "steer now", "dashboard-chat-steer"),
                 message("assistant", "done", "run-1"),
             ],
             createChatVisibility(true, true),
@@ -3849,7 +3683,7 @@ describe("chat projection", () => {
         const thinkingIndex = visible.findIndex((item) => item.thinking?.length);
         const finalIndex = visible.findIndex((item) => item.text === "done");
 
-        expect(thinkingIndex).toBeLessThan(steerIndex);
+        expect(thinkingIndex).toBeGreaterThan(steerIndex);
         expect(thinkingIndex).toBeGreaterThan(toolIndex);
         expect(thinkingIndex).toBeLessThan(finalIndex);
     });

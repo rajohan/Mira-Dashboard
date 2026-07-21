@@ -2766,12 +2766,13 @@ describe("OpenClaw chat bridge", () => {
         ).toEqual([providerRunId, providerRunId]);
     });
 
-    it("joins an interrupted run to its acknowledged continuation after reconnect", () => {
+    it("replaces an interrupted run after a newer chat send is acknowledged", () => {
         const provisionalRunId = "dashboard-chat-before-reconnect-send";
         const providerRunId = "provider-after-reconnect-send";
         const disconnectedAt = 1_785_000_000_000;
         const bridge = new OpenClawChatBridge();
         const dateNow = jest.spyOn(Date, "now");
+        let requestBoundary: number | undefined;
         try {
             dateNow.mockReturnValue(disconnectedAt - 1000);
             bridge.recordEvent(
@@ -2785,7 +2786,7 @@ describe("OpenClaw chat bridge", () => {
                 []
             );
             bridge.markGatewayDisconnected(disconnectedAt);
-            const requestBoundary = bridge.captureRequestBoundary(MAIN);
+            requestBoundary = bridge.captureRequestBoundary(MAIN);
 
             dateNow.mockReturnValue(disconnectedAt + 1000);
             bridge.recordEvent(
@@ -2798,127 +2799,30 @@ describe("OpenClaw chat bridge", () => {
                 },
                 []
             );
-
-            expect(
-                new Set(
-                    bridge
-                        .snapshot(MAIN)
-                        .events.map(
-                            (event) => (event.payload as { runId?: string }).runId
-                        )
-                )
-            ).toEqual(new Set([provisionalRunId, providerRunId]));
-
-            bridge.handleSuccessfulRequest(
-                "chat.send",
-                { idempotencyKey: providerRunId, sessionKey: MAIN },
-                { runId: providerRunId },
-                requestBoundary
-            );
         } finally {
             dateNow.mockRestore();
         }
 
-        const resumedEvents = bridge.snapshot(MAIN).events;
         expect(
-            resumedEvents.map((event) => (event.payload as { runId?: string }).runId)
-        ).toEqual([providerRunId, providerRunId]);
-        expect(
-            resumedEvents
-                .map(
-                    (event) =>
-                        (event.payload as { data?: { delta?: string } }).data?.delta
-                )
-                .filter(Boolean)
-        ).toEqual(["interrupted work"]);
-    });
-
-    it("does not guess between interrupted runs when a continuation is acknowledged", () => {
-        const bridge = new OpenClawChatBridge();
-        const interruptedRunIds = [
-            "dashboard-chat-interrupted-1",
-            "dashboard-chat-interrupted-2",
-        ];
-        for (const [index, runId] of interruptedRunIds.entries()) {
-            bridge.recordEvent(
-                "agent",
-                {
-                    data: { delta: `interrupted ${index}` },
-                    runId,
-                    sessionKey: MAIN,
-                    stream: "thinking",
-                },
-                []
-            );
-        }
-        bridge.markGatewayDisconnected();
-        const requestBoundary = bridge.captureRequestBoundary(MAIN);
+            new Set(
+                bridge
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            )
+        ).toEqual(new Set([provisionalRunId, providerRunId]));
 
         bridge.handleSuccessfulRequest(
             "chat.send",
-            { idempotencyKey: "dashboard-chat-continuation", sessionKey: MAIN },
-            { runId: "dashboard-chat-continuation" },
+            { idempotencyKey: providerRunId, sessionKey: MAIN },
+            { runId: providerRunId },
             requestBoundary
         );
 
         expect(
-            new Set(
-                bridge
-                    .snapshot(MAIN)
-                    .events.map((event) => (event.payload as { runId?: string }).runId)
-            )
-        ).toEqual(new Set(interruptedRunIds));
-    });
-
-    it("does not join an interrupted run after the reconnect window expires", () => {
-        const interruptedRunId = "dashboard-chat-stale-interruption";
-        const continuationRunId = "dashboard-chat-late-continuation";
-        const disconnectedAt = 1_785_000_000_000;
-        const bridge = new OpenClawChatBridge();
-        const dateNow = jest.spyOn(Date, "now");
-        try {
-            dateNow.mockReturnValue(disconnectedAt - 1000);
-            bridge.recordEvent(
-                "agent",
-                {
-                    data: { delta: "interrupted" },
-                    runId: interruptedRunId,
-                    sessionKey: MAIN,
-                    stream: "thinking",
-                },
-                []
-            );
-            bridge.markGatewayDisconnected(disconnectedAt);
-            const requestBoundary = bridge.captureRequestBoundary(MAIN);
-
-            dateNow.mockReturnValue(disconnectedAt + 15 * 60_000 + 1);
-            bridge.recordEvent(
-                "agent",
-                {
-                    data: { phase: "start" },
-                    runId: continuationRunId,
-                    sessionKey: MAIN,
-                    stream: "lifecycle",
-                },
-                []
-            );
-            bridge.handleSuccessfulRequest(
-                "chat.send",
-                { idempotencyKey: continuationRunId, sessionKey: MAIN },
-                { runId: continuationRunId },
-                requestBoundary
-            );
-        } finally {
-            dateNow.mockRestore();
-        }
-
-        expect(
-            new Set(
-                bridge
-                    .snapshot(MAIN)
-                    .events.map((event) => (event.payload as { runId?: string }).runId)
-            )
-        ).toEqual(new Set([interruptedRunId, continuationRunId]));
+            bridge
+                .snapshot(MAIN)
+                .events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual([providerRunId]);
     });
 
     it("does not promote a hydrated provisional run across a new send boundary", () => {

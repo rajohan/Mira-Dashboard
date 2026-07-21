@@ -23,7 +23,6 @@ import type {
 import { findChatSessionRuntimeState } from "./chatState";
 
 const RUN_START_USER_SKEW_MS = 1000;
-const INTERRUPTED_DASHBOARD_RUN_WINDOW_MS = 15 * 60_000;
 const RUNTIME_FINAL_SKEW_MS = 5000;
 const RUNTIME_USER_ECHO_WINDOW_MS = 5000;
 
@@ -104,72 +103,6 @@ function isEstablishedActiveChatRun(run: ChatRunState): boolean {
     );
 }
 
-/** Repairs one unambiguous diagnostic-only restart predecessor left in history. */
-function canonicalizeReplacedDashboardHistory(
-    history: ChatHistoryMessage[],
-    runs: ChatRunState[]
-): ChatHistoryMessage[] {
-    const activeRuns = runs.filter((run) => isEstablishedActiveChatRun(run));
-    if (activeRuns.length !== 1) {
-        return history;
-    }
-
-    const targetRun = activeRuns[0]!;
-    const targetStartedAt = Date.parse(targetRun.startedAt);
-    if (Number.isNaN(targetStartedAt)) {
-        return history;
-    }
-
-    const orphanedMessages = new Map<string, ChatHistoryMessage[]>();
-    for (const message of history) {
-        const runId = message.runId;
-        if (
-            !runId?.startsWith("dashboard-chat-") ||
-            isRunMatchingMessage(targetRun, message) ||
-            runs.some(
-                (candidate) =>
-                    candidate.runId === runId || candidate.aliases.includes(runId)
-            )
-        ) {
-            continue;
-        }
-        const messages = orphanedMessages.get(runId) || [];
-        messages.push(message);
-        orphanedMessages.set(runId, messages);
-    }
-
-    const candidates = [...orphanedMessages].filter(([, messages]) => {
-        if (
-            messages.some(
-                (message) =>
-                    message.role.toLowerCase() === "assistant" &&
-                    hasPrimaryAnswerContent(message)
-            ) ||
-            messages.every((message) => !isStandaloneDiagnostic(message))
-        ) {
-            return false;
-        }
-        const timestamps = messages.map((message) => messageTimestamp(message));
-        if (timestamps.includes(undefined)) {
-            return false;
-        }
-        const latestTimestamp = Math.max(...(timestamps as number[]));
-        const replacementDelay = targetStartedAt - latestTimestamp;
-        return (
-            replacementDelay >= -RUN_START_USER_SKEW_MS &&
-            replacementDelay <= INTERRUPTED_DASHBOARD_RUN_WINDOW_MS
-        );
-    });
-    if (candidates.length !== 1) {
-        return history;
-    }
-
-    const replacedRunId = candidates[0]![0];
-    return history.map((message) =>
-        message.runId === replacedRunId ? { ...message, runId: targetRun.runId } : message
-    );
-}
-
 function isStandaloneDiagnostic(message: ChatHistoryMessage): boolean {
     const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
     return Boolean(
@@ -244,8 +177,10 @@ function latestCompatibleDashboardTurnRun(
         return undefined;
     }
 
-    const explicitMatches = runs.filter((candidate) =>
-        isRunMatchingMessage(candidate, message)
+    const explicitMatches = runs.filter(
+        (candidate) =>
+            isRunMatchingMessage(candidate, message) &&
+            !isUnacknowledgedDashboardRun(candidate)
     );
     if (explicitMatches.length > 0) {
         return explicitMatches.toSorted((left, right) => {
@@ -1116,19 +1051,14 @@ function inferredRuntimeUserRun(
     runs: ChatRunState[]
 ): ChatRunState | undefined {
     const activeRuns = runs.filter((run) => isEstablishedActiveChatRun(run));
-    if (isDashboardRunId(message.runId)) {
-        const hasExplicitMatch = runs.some((run) => isRunMatchingMessage(run, message));
-        const dashboardRun = latestCompatibleDashboardTurnRun(
-            message,
-            hasExplicitMatch ? runs : activeRuns
-        );
+    if (activeRuns.length === 0) {
+        return undefined;
+    }
+    if (activeRuns.length > 1) {
+        const dashboardRun = latestCompatibleDashboardTurnRun(message, activeRuns);
         if (dashboardRun) {
             return dashboardRun;
         }
-    }
-
-    if (activeRuns.length === 0) {
-        return undefined;
     }
     if (message.runId && !message.runId.startsWith("runtime-runless-")) {
         return undefined;
@@ -1145,7 +1075,8 @@ function inferredRuntimeUserRun(
         .filter((run) => {
             const startedAt = Date.parse(run.startedAt);
             return (
-                Number.isNaN(startedAt) || startedAt <= timestamp + RUN_START_USER_SKEW_MS
+                Number.isNaN(startedAt) ||
+                startedAt <= timestamp + RUNTIME_USER_ECHO_WINDOW_MS
             );
         })
         .toSorted((left, right) => {
@@ -1179,8 +1110,7 @@ export function reconcileChatMessages(
     session?: ChatSessionRuntimeState
 ): ChatHistoryMessage[] {
     const runs = orderedRuns(session);
-    const canonicalHistory = canonicalizeReplacedDashboardHistory(history, runs);
-    const messages = mergeAndScopeRuntimeUserMessages(canonicalHistory, runs);
+    const messages = mergeAndScopeRuntimeUserMessages(history, runs);
     for (const run of runs) {
         for (const [index, message] of messages.entries()) {
             const shouldUseCanonicalRunId =

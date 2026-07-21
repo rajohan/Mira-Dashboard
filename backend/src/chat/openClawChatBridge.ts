@@ -1395,8 +1395,7 @@ export class OpenClawChatBridge {
         }
     }
 
-    /** Joins one unambiguous interrupted predecessor to an acknowledged continuation. */
-    #reconcileReplacedRuns(
+    #clearReplacedRuns(
         sessionKey: string,
         preservedRunId?: string,
         requestBoundary?: number
@@ -1407,51 +1406,16 @@ export class OpenClawChatBridge {
             return;
         }
         for (const [runId, run] of runs) {
-            if (runId === preservedRunId || !run.completed) {
+            if (runId === preservedRunId) {
                 continue;
             }
-            runs.delete(runId);
-            this.#forgetRunSession(runId, storageSessionKey);
-        }
-
-        if (preservedRunId && requestBoundary !== undefined) {
-            const now = Date.now();
-            const interruptedCandidates = runs
-                .entries()
-                .filter(([runId, run]) => {
-                    const replacementDelay = now - (run.interruptedAt ?? now);
-                    return (
-                        runId !== preservedRunId &&
-                        !run.completed &&
-                        run.interruptionEligible &&
-                        run.interruptedAt !== undefined &&
-                        run.runId.startsWith("dashboard-chat-") &&
-                        firstSequence(run) <= requestBoundary &&
-                        replacementDelay >= -5000 &&
-                        replacementDelay <= INTERRUPTED_RUN_PROMOTION_WINDOW_MS
-                    );
-                })
-                .toArray();
-            const hasCompetingActiveRun = runs
-                .values()
-                .some(
-                    (run) =>
-                        run.runId !== preservedRunId &&
-                        run.runId !== interruptedCandidates[0]?.[0] &&
-                        !run.completed &&
-                        !isCompactionOnlyRun(run)
-                );
-            if (!hasCompetingActiveRun && interruptedCandidates.length === 1) {
-                const resumedRun = this.#promoteRunEntry(
-                    storageSessionKey,
-                    runs,
-                    interruptedCandidates[0]![0],
-                    preservedRunId
-                );
-                if (resumedRun) {
-                    resumedRun.interruptionEligible = false;
-                    resumedRun.interruptedAt = undefined;
-                }
+            const isSupersededInterruptedRun =
+                requestBoundary !== undefined &&
+                run.interruptedAt !== undefined &&
+                firstSequence(run) <= requestBoundary;
+            if (isSupersededInterruptedRun || run.completed) {
+                runs.delete(runId);
+                this.#forgetRunSession(runId, storageSessionKey);
             }
         }
         if (runs.size === 0) {
@@ -2669,7 +2633,7 @@ export class OpenClawChatBridge {
                     requestBoundary
                 );
             }
-            this.#reconcileReplacedRuns(sessionKey, acknowledgedRunId, requestBoundary);
+            this.#clearReplacedRuns(sessionKey, acknowledgedRunId, requestBoundary);
             if (acknowledgedRunId) {
                 this.#rememberRunSession(acknowledgedRunId, sessionKey);
             }
