@@ -356,17 +356,28 @@ Name-only fallback matching is likewise bounded to the current user turn.
 Every runtime user, thinking, and tool entry retains its Gateway sequence. During
 reconciliation, projection identifies each run's initiating prompt as its
 lowest-sequence runtime user entry, moves it into the run's first runtime-owned
-row slot, and reorders the remaining runtime-owned slots by sequence; canonical
-transcript-only rows remain anchored. Presentation then collapses all thinking
-for the run into exactly one bubble after the last tool or steer. A completed
+row slot, and reorders the remaining runtime-owned slots by sequence. A
+transcript-only user row between that prompt and the run's matched final adopts
+the same run before final reconciliation. This also replaces a stale optimistic
+Dashboard run ID, but never an established provider run ID. Projection then
+inserts those rows by their transcript timestamps among provider-sequenced tool
+and assistant activity; pure thinking and final rows are excluded from that
+merge. Combined thinking/tool provider rows retain their tool position before
+presentation extracts all thinking into exactly one bubble after the last tool
+or steer. This includes a local optimistic steer before its history echo and
+after its provisional Dashboard run has been acknowledged. A completed
 assistant row uses the run's terminal sequence instead of an earlier recovered
 thinking sequence, including providers that combine thinking, tools, and final
 text in one message. The active status row is appended last, and a canonical
 final replaces it as the last row when the run completes. The resulting contract is therefore
 `start -> tools/steers in event order -> one thinking -> active status or final`,
-independent of wall-clock timestamps and identical after replay. Transcript
-order and runtime sequence also take precedence over message timestamps when a
-queued user message and compaction final carry inverted wall-clock times.
+with identical live and replay projection. Runtime sequence remains authoritative
+where it exists; timestamps only merge transcript-only steers inside an already
+bounded run. Once a completed turn's runtime snapshot expires, its persisted
+prompt and final provide the same bounds and timestamps restore user/tool
+interleaving without changing provider-owned run identities. Transcript position
+still takes precedence when a queued user message and compaction final carry
+inverted wall-clock times.
 Projection indexes exact tool IDs once per pass and caches fallback signatures so
 long runs do not rescan or reserialize the complete transcript for every runtime
 diagnostic. Once a
@@ -502,7 +513,8 @@ When changing chat event handling, test these cases:
   a run's durable first sequence;
 - live reduction and full replay both preserve
   `start -> tool/steer interleaving -> one thinking -> status/final`, including
-  multiple steer messages between tool calls;
+  multiple runtime or transcript-only steer messages between tool calls, before
+  and after run completion;
 - main and ops sessions never share runtime replay state;
 - an initial history load follows all pages, while incomplete sequence metadata
   cannot advance an incremental cache watermark;

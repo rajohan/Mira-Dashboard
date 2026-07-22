@@ -190,12 +190,29 @@ function mergeThinkingBlocks(
 
 function responseSegments(messages: ChatHistoryMessage[]): number[] {
     let segment = 0;
-    return messages.map((message) => {
+    const segments = messages.map((message) => {
         if (message.role.toLowerCase() === "user") {
             segment += 1;
         }
         return segment;
     });
+    let completedPromptIndex = -1;
+    for (const [finalIndex, message] of messages.entries()) {
+        if (completedPromptIndex === -1 && message.role.toLowerCase() === "user") {
+            completedPromptIndex = finalIndex;
+        }
+        if (!isPrimaryAssistantMessage(message)) {
+            continue;
+        }
+        if (completedPromptIndex !== -1) {
+            const completedSegment = segments[completedPromptIndex]!;
+            for (let index = completedPromptIndex; index <= finalIndex; index += 1) {
+                segments[index] = completedSegment;
+            }
+        }
+        completedPromptIndex = -1;
+    }
+    return segments;
 }
 
 function isPrimaryAssistantMessage(message: ChatHistoryMessage): boolean {

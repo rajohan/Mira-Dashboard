@@ -887,39 +887,277 @@ function assistantRuntimeSequence(run: ChatRunState): number | undefined {
         : (run.terminalSequence ?? run.lastContentSequence);
 }
 
-/** Orders runtime activity inside each turn while keeping its first prompt anchored. */
-function orderRuntimeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
-    const slotsByRun = new Map<
-        string,
-        Array<{ index: number; message: ChatHistoryMessage; sequence: number }>
-    >();
-    for (const [index, message] of messages.entries()) {
-        if (message.runtimeSequence === undefined) {
+function scopeTranscriptUsersToRuns(
+    messages: ChatHistoryMessage[],
+    runs: ChatRunState[]
+): ChatHistoryMessage[] {
+    const exactToolIndex = indexExactToolMessages(messages);
+    const windows = runs.flatMap((run) => {
+        const sequencedPromptIndex = messages
+            .map((message, index) => ({ index, message }))
+            .filter(
+                ({ message }) =>
+                    isUserMessage(message) &&
+                    isRunMatchingMessage(run, message) &&
+                    message.runtimeSequence !== undefined
+            )
+            .toSorted(
+                (left, right) =>
+                    left.message.runtimeSequence! - right.message.runtimeSequence!
+            )[0]?.index;
+        const startedAt = Date.parse(run.startedAt);
+        const timestampPromptIndex = Number.isNaN(startedAt)
+            ? -1
+            : messages.findLastIndex((message) => {
+                  const timestamp = messageTimestamp(message);
+                  return (
+                      isUserMessage(message) &&
+                      (!message.runId ||
+                          isRunMatchingMessage(run, message) ||
+                          canUseDashboardTurn(message, run, runs)) &&
+                      timestamp !== undefined &&
+                      timestamp <= startedAt + RUN_START_USER_SKEW_MS
+                  );
+              });
+        const explicitPromptIndex = messages.findIndex(
+            (message) => isUserMessage(message) && isRunMatchingMessage(run, message)
+        );
+        const start =
+            sequencedPromptIndex ??
+            (timestampPromptIndex === -1 ? explicitPromptIndex : timestampPromptIndex);
+        if (start === -1) {
+            return [];
+        }
+        const finalIndex = runFinalAnchorIndex(messages, run, exactToolIndex);
+        if (finalIndex === -1 && run.phase !== "active") {
+            return [];
+        }
+        return [{ end: finalIndex === -1 ? messages.length : finalIndex, run, start }];
+    });
+
+    return messages.map((message, index) => {
+        if (
+            !isUserMessage(message) ||
+            (message.runId && !isDashboardRunId(message.runId))
+        ) {
+            return message;
+        }
+        const matchingRun = windows
+            .filter(
+                (window) =>
+                    index > window.start &&
+                    index < window.end &&
+                    (!message.runId || canUseDashboardTurn(message, window.run, runs))
+            )
+            .toSorted((left, right) => right.start - left.start)[0]?.run;
+        return matchingRun ? { ...message, runId: matchingRun.runId } : message;
+    });
+}
+
+function isFinalRunMessage(message: ChatHistoryMessage, run: ChatRunState): boolean {
+    const role = message.role.toLowerCase();
+    return (
+        run.phase !== "active" &&
+        message.isFinal === true &&
+        (role === "assistant" || role === "system") &&
+        hasPrimaryAnswerContent(message)
+    );
+}
+
+function isThinkingOnlyRunMessage(message: ChatHistoryMessage): boolean {
+    return Boolean(
+        message.thinking?.length &&
+        !message.toolCalls?.length &&
+        !message.toolResult &&
+        !hasPrimaryAnswerContent(message)
+    );
+}
+
+interface IndexedChatMessage {
+    index: number;
+    message: ChatHistoryMessage;
+    sequence?: number;
+}
+
+function insertUsersByTimestamp(
+    activity: IndexedChatMessage[],
+    users: IndexedChatMessage[]
+): IndexedChatMessage[] {
+    const ordered = [...activity];
+    const timestampedUsers = users.toSorted((left, right) => {
+        const leftTimestamp = messageTimestamp(left.message) ?? Infinity;
+        const rightTimestamp = messageTimestamp(right.message) ?? Infinity;
+        return leftTimestamp - rightTimestamp || left.index - right.index;
+    });
+    for (const user of timestampedUsers) {
+        const userTimestamp = messageTimestamp(user.message);
+        const insertionIndex = ordered.findIndex((slot) => {
+            const slotTimestamp = messageTimestamp(slot.message);
+            return (
+                userTimestamp !== undefined &&
+                slotTimestamp !== undefined &&
+                slotTimestamp > userTimestamp
+            );
+        });
+        if (insertionIndex === -1) {
+            ordered.push(user);
+        } else {
+            ordered.splice(insertionIndex, 0, user);
+        }
+    }
+    return ordered;
+}
+
+function isCompletedHistoryFinal(message: ChatHistoryMessage): boolean {
+    const role = message.role.toLowerCase();
+    return (
+        (role === "assistant" || role === "system") &&
+        !isStandaloneDiagnostic(message) &&
+        hasPrimaryAnswerContent(message)
+    );
+}
+
+/** Restores causal user/tool order after completed restart batches lose runtime replay. */
+function orderCompletedHistoryTurns(
+    messages: ChatHistoryMessage[],
+    runs: ChatRunState[]
+): ChatHistoryMessage[] {
+    const next = [...messages];
+    const exactToolIndex = indexExactToolMessages(messages);
+    const runtimeFinalIndexes = new Set(
+        runs
+            .map((run) => runFinalAnchorIndex(messages, run, exactToolIndex))
+            .filter((index) => index !== -1)
+    );
+    let segmentStart = 0;
+    for (const [finalIndex, final] of messages.entries()) {
+        if (!isCompletedHistoryFinal(final)) {
             continue;
         }
-        const runId = message.runId || "unscoped";
-        const slots = slotsByRun.get(runId) || [];
+        if (runtimeFinalIndexes.has(finalIndex)) {
+            segmentStart = finalIndex + 1;
+            continue;
+        }
+        const segment = messages
+            .slice(segmentStart, finalIndex + 1)
+            .map((message, offset) => ({
+                index: segmentStart + offset,
+                message,
+            }));
+        const promptOffset = segment.findIndex((slot) => isUserMessage(slot.message));
+        if (promptOffset !== -1) {
+            const prefix = segment.slice(0, promptOffset);
+            const prompt = segment[promptOffset]!;
+            const turn = segment.slice(promptOffset + 1, -1);
+            const isMovableUser = (slot: IndexedChatMessage) =>
+                isUserMessage(slot.message) &&
+                (!slot.message.runId || isDashboardRunId(slot.message.runId));
+            const users = turn.filter((slot) => isMovableUser(slot));
+            const thinking = turn.filter((slot) =>
+                isThinkingOnlyRunMessage(slot.message)
+            );
+            const activity = turn.filter(
+                (slot) => !isMovableUser(slot) && !isThinkingOnlyRunMessage(slot.message)
+            );
+            const hasToolActivity = activity.some(
+                (slot) => slot.message.toolCalls?.length || slot.message.toolResult
+            );
+            if (hasToolActivity && users.length > 0) {
+                const ordered = [
+                    ...prefix,
+                    prompt,
+                    ...insertUsersByTimestamp(activity, users),
+                    ...thinking,
+                    segment.at(-1)!,
+                ];
+                for (const [slotIndex, slot] of segment.entries()) {
+                    next[slot.index] = ordered[slotIndex]!.message;
+                }
+            }
+        }
+        segmentStart = finalIndex + 1;
+    }
+    return next;
+}
+
+/** Orders one run by provider sequence, inserting transcript-only users by time. */
+function orderRuntimeMessages(
+    messages: ChatHistoryMessage[],
+    runs: ChatRunState[]
+): ChatHistoryMessage[] {
+    const slotsByRun = new Map<string, IndexedChatMessage[]>();
+    for (const [index, message] of messages.entries()) {
+        if (
+            !message.runId ||
+            (message.runtimeSequence === undefined && !isUserMessage(message))
+        ) {
+            continue;
+        }
+        const slots = slotsByRun.get(message.runId) || [];
         slots.push({ index, message, sequence: message.runtimeSequence });
-        slotsByRun.set(runId, slots);
+        slotsByRun.set(message.runId, slots);
     }
     const next = [...messages];
-    for (const runtimeSlots of slotsByRun.values()) {
-        const promptSlot = runtimeSlots
-            .filter((slot) => isUserMessage(slot.message))
+    for (const run of runs) {
+        const runtimeSlots = slotsByRun.get(run.runId) || [];
+        const startedAt = Date.parse(run.startedAt);
+        const sequencedPrompt = runtimeSlots
+            .filter((slot) => isUserMessage(slot.message) && slot.sequence !== undefined)
             .toSorted(
                 (left, right) =>
-                    left.sequence - right.sequence || left.index - right.index
+                    (left.sequence ?? Infinity) - (right.sequence ?? Infinity) ||
+                    left.index - right.index
             )[0];
-        const activitySlots = runtimeSlots
-            .filter((slot) => slot !== promptSlot)
+        const timestampedPrompt = runtimeSlots
+            .flatMap((slot) => {
+                const timestamp = messageTimestamp(slot.message);
+                const distance =
+                    timestamp === undefined || Number.isNaN(startedAt)
+                        ? Infinity
+                        : Math.abs(timestamp - startedAt);
+                return isUserMessage(slot.message) &&
+                    slot.sequence === undefined &&
+                    distance <= RUN_START_USER_SKEW_MS
+                    ? [{ distance, slot }]
+                    : [];
+            })
             .toSorted(
                 (left, right) =>
-                    left.sequence - right.sequence || left.index - right.index
-            );
+                    left.distance - right.distance || left.slot.index - right.slot.index
+            )[0]?.slot;
+        const untimestampedPrompt = runtimeSlots.find(
+            (slot) =>
+                isUserMessage(slot.message) &&
+                slot.sequence === undefined &&
+                messageTimestamp(slot.message) === undefined
+        );
+        const promptSlot = sequencedPrompt ?? timestampedPrompt ?? untimestampedPrompt;
+        const sequencedActivity = runtimeSlots
+            .filter((slot) => slot !== promptSlot && slot.sequence !== undefined)
+            .toSorted((left, right) => left.sequence! - right.sequence!);
+        const transcriptUsers = runtimeSlots
+            .filter((slot) => slot !== promptSlot && slot.sequence === undefined)
+            .toSorted((left, right) => left.index - right.index);
+        const finalSlots = sequencedActivity.filter((slot) =>
+            isFinalRunMessage(slot.message, run)
+        );
+        const thinkingSlots = sequencedActivity.filter(
+            (slot) =>
+                !isFinalRunMessage(slot.message, run) &&
+                isThinkingOnlyRunMessage(slot.message)
+        );
+        const activitySlots = sequencedActivity.filter(
+            (slot) =>
+                !isFinalRunMessage(slot.message, run) &&
+                !isThinkingOnlyRunMessage(slot.message)
+        );
+        const orderedActivity = insertUsersByTimestamp(activitySlots, transcriptUsers);
         const targetIndexes = runtimeSlots
             .map((slot) => slot.index)
             .toSorted((left, right) => left - right);
-        const ordered = promptSlot ? [promptSlot, ...activitySlots] : activitySlots;
+        const ordered = promptSlot
+            ? [promptSlot, ...orderedActivity, ...thinkingSlots, ...finalSlots]
+            : [...orderedActivity, ...thinkingSlots, ...finalSlots];
         for (const [slotIndex, index] of targetIndexes.entries()) {
             next[index] = ordered[slotIndex]!.message;
         }
@@ -1036,7 +1274,10 @@ export function reconcileChatMessages(
     session?: ChatSessionRuntimeState
 ): ChatHistoryMessage[] {
     const runs = orderedRuns(session);
-    const messages = mergeAllRuntimeUserMessages(history, runs);
+    const messages = scopeTranscriptUsersToRuns(
+        mergeAllRuntimeUserMessages(orderCompletedHistoryTurns(history, runs), runs),
+        runs
+    );
     for (const run of runs) {
         for (const [index, message] of messages.entries()) {
             const shouldUseCanonicalRunId =
@@ -1125,7 +1366,8 @@ export function reconcileChatMessages(
         }
         messages.splice(segment.end, 0, ...additions);
     }
-    return orderRuntimeMessages(dedupeMessages(messages));
+    const deduped = dedupeMessages(messages);
+    return orderRuntimeMessages(deduped, runs);
 }
 
 function isAssistantTextStream(message: ChatHistoryMessage): boolean {
