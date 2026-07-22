@@ -516,6 +516,8 @@ function sessionAssistantDiagnosticDrafts(
     }
     const toolCalls = message.toolCalls || [];
     for (const [index, toolCall] of toolCalls.entries()) {
+        // Media belongs to the provider turn, so one draft owns it to avoid
+        // rendering the same image or attachment once per sibling tool call.
         drafts.push(
             sessionToolCallDraft(
                 toolCall,

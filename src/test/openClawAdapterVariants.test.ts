@@ -455,6 +455,54 @@ describe("OpenClaw adapter variants", () => {
         });
     });
 
+    it("owns turn-scoped Synthetic media once across multiple tool drafts", () => {
+        const adapter = new OpenClawChatAdapter();
+        const toolTurn = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            { text: "Opening the image.", type: "text" },
+                            {
+                                data: "aW1hZ2U=",
+                                mimeType: "image/png",
+                                type: "image",
+                            },
+                            {
+                                arguments: { path: "/tmp/one.png" },
+                                id: "functions.image:1",
+                                name: "image",
+                                type: "toolCall",
+                            },
+                            {
+                                arguments: { path: "/tmp/two.png" },
+                                id: "functions.image:2",
+                                name: "image",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                        stopReason: "toolUse",
+                    },
+                },
+                33
+            )
+        );
+        const toolMessages = toolTurn.flatMap((event) =>
+            event.kind === "tool" ? [event.message] : []
+        );
+
+        expect(toolMessages).toHaveLength(2);
+        expect(toolMessages.flatMap((message) => message.images || [])).toEqual([
+            expect.objectContaining({ type: "image" }),
+        ]);
+        expect(toolMessages.map((message) => message.toolCalls?.[0]?.id)).toEqual([
+            "functions.image:1",
+            "functions.image:2",
+        ]);
+    });
+
     it("keeps media from a Synthetic tool-use turn without a call", () => {
         const adapter = new OpenClawChatAdapter();
         const mediaTurn = adapter.event(
@@ -474,7 +522,7 @@ describe("OpenClaw adapter variants", () => {
                         stopReason: "toolUse",
                     },
                 },
-                33
+                34
             )
         );
 

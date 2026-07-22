@@ -604,6 +604,35 @@ describe("chat projection", () => {
         expect(projection.rows.some((row) => row.kind === "typing")).toBe(false);
     });
 
+    it("keeps activity visible when tool-use commentary is hidden", () => {
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(8, { kind: "status", runId: "run-1", text: "Working" }),
+        ]);
+        const projection = projectChat(
+            [
+                message("user", "question", "run-1"),
+                {
+                    ...message("assistant", "Calling the tool.", "run-1"),
+                    isToolUse: true,
+                },
+            ],
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            projection.rows.some((row) => row.message.text === "Calling the tool.")
+        ).toBe(false);
+        expect(projection.activeRuns.map((run) => run.runId)).toEqual(["run-1"]);
+        expect(projection.rows.at(-1)).toMatchObject({
+            kind: "typing",
+            message: { text: "Working" },
+        });
+    });
+
     it("restores activity when tool work follows visible assistant text", () => {
         const runtime = reduceChatRuntime(createChatRuntimeState(), [
             event(8, { kind: "status", runId: "run-1", text: "Working" }),

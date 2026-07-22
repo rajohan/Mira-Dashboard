@@ -98,6 +98,7 @@ function isDashboardRunId(runId?: string): boolean {
 function isStandaloneDiagnostic(message: ChatHistoryMessage): boolean {
     const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
     return Boolean(
+        (message.isToolUse && message.isFinal !== true) ||
         (hasToolDetails && message.isFinal !== true) ||
         (message.thinking?.length &&
             (!message.text.trim() ||
@@ -235,8 +236,7 @@ function asAssistantToolResultMessage(message: ChatHistoryMessage): ChatHistoryM
 }
 
 function projectedMessageDisplay(message: ChatHistoryMessage): ChatHistoryMessage {
-    const withoutToolCommentary =
-        message.isToolUse && message.text ? { ...message, text: "" } : message;
+    const withoutToolCommentary = message.isToolUse ? { ...message, text: "" } : message;
     return asAssistantToolResultMessage(withoutToolCommentary);
 }
 
