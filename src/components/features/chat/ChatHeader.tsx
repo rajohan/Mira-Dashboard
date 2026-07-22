@@ -45,12 +45,17 @@ function formatHeaderStatus(
             ? `~${formatTokens(usedTokens, maxTokens)} (stale)`
             : `${formatTokens(usedTokens, maxTokens)} (${getTokenPercent(usedTokens, maxTokens)}%)`
         : "Unknown";
+    const updatedAtReference =
+        typeof selectedSession.updatedAt === "number" &&
+        Number.isFinite(selectedSession.updatedAt)
+            ? selectedSession.updatedAt
+            : 0;
 
     return `${formatSessionType(selectedSession)} · ${selectedSession.model || "Unknown"} · Context: ${contextText} · ${formatDuration(
         selectedSession.updatedAt,
         {
             includeSeconds: true,
-            referenceTime: Math.max(referenceTime, selectedSession.updatedAt ?? 0),
+            referenceTime: Math.max(referenceTime, updatedAtReference),
         }
     )}`;
 }

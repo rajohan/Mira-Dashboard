@@ -31,6 +31,14 @@ function session(updatedAt: number): Session {
     };
 }
 
+/** Creates the wire shape OpenClaw can send before timestamp normalization. */
+function sessionWithWireTimestamp(updatedAt: string): Session {
+    return {
+        ...session(Date.parse(updatedAt)),
+        updatedAt,
+    } as unknown as Session;
+}
+
 describe("ChatHeader", () => {
     it("refreshes the relative session update time while metadata stays unchanged", () => {
         jest.useFakeTimers();
@@ -51,6 +59,31 @@ describe("ChatHeader", () => {
         expect(screen.getByText(/less than 5 seconds ago/u)).toBeInTheDocument();
         expect(screen.getByText("Thinking: medium")).toBeInTheDocument();
         expect(screen.getByText("Speed: Default (Auto)")).toBeInTheDocument();
+
+        act(() => {
+            jest.advanceTimersByTime(10_000);
+        });
+
+        expect(screen.getByText(/less than 20 seconds ago/u)).toBeInTheDocument();
+    });
+
+    it("preserves ISO session timestamps while refreshing their relative age", () => {
+        jest.useFakeTimers();
+        const updatedAt = new Date(Date.now()).toISOString();
+
+        render(
+            <ChatHeader
+                selectedSession={sessionWithWireTimestamp(updatedAt)}
+                selectedAgentId="main"
+                selectedSessionKey="agent:main:main"
+                agentOptions={[]}
+                sessionOptions={[{ label: "Main session", value: "agent:main:main" }]}
+                onSelectAgent={jest.fn()}
+                onSelectSession={jest.fn()}
+            />
+        );
+
+        expect(screen.getByText(/less than 5 seconds ago/u)).toBeInTheDocument();
 
         act(() => {
             jest.advanceTimersByTime(10_000);
