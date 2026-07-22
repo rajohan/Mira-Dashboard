@@ -2453,7 +2453,7 @@ describe("Mira Dashboard frontend behavior", () => {
         ).resolves.toMatchObject({ keys: ["weather.spydeberg"] });
     });
 
-    it("clears cached Docker stats once live stats have loaded without a container row", async () => {
+    it("clears cached Docker stats once live containers report no stats", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {
                 const url = typeof input === "string" ? input : input.toString();
@@ -2514,8 +2514,32 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 }
 
-                if (url === "/api/docker/containers/stats" && method === "GET") {
-                    return Response.json({ stats: [] });
+                if (url === "/api/docker/containers" && method === "GET") {
+                    return Response.json({
+                        containers: [
+                            {
+                                command: "server",
+                                createdAt: "2026-07-09T17:00:00.000Z",
+                                finishedAt: undefined,
+                                health: "unknown",
+                                id: "stopped123",
+                                image: "app:latest",
+                                imageId: "sha256:image",
+                                ipAddresses: {},
+                                mounts: [],
+                                name: "stopped-app",
+                                ports: [],
+                                project: undefined,
+                                restartCount: 0,
+                                runningFor: "1 hour",
+                                service: undefined,
+                                startedAt: "2026-07-09T17:00:00.000Z",
+                                state: "exited",
+                                stats: undefined,
+                                status: "Exited",
+                            },
+                        ],
+                    });
                 }
 
                 throw new Error(`Unexpected Docker hook API call: ${method} ${url}`);

@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 
-import { useCacheEntry, usePullRequests } from "../../hooks";
+import { PULL_REQUEST_NAV_REFRESH_MS, useCacheEntry, usePullRequests } from "../../hooks";
 import { cn } from "../../utils/cn";
 import { AppHeader } from "./AppHeader";
 
@@ -57,7 +57,7 @@ export function Layout({ children }: LayoutProperties) {
     const sidebarId = useId();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const { data: systemHost } = useCacheEntry<SystemHostCache>("system.host", 60_000);
-    const { data: pullRequests = [] } = usePullRequests();
+    const { data: pullRequests = [] } = usePullRequests(PULL_REQUEST_NAV_REFRESH_MS);
     const openClawVersion = systemHost?.data.version?.current;
     const openPullRequestCount = pullRequests.length;
 

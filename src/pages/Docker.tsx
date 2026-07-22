@@ -35,6 +35,7 @@ import {
     useDockerImages,
     useDockerManualUpdate,
     useDockerPrune,
+    useDockerSummaryAutoRefresh,
     useDockerUpdaterEvents,
     useDockerUpdaterServices,
     useDockerVolumes,
@@ -87,6 +88,7 @@ export function Docker() {
     const execJobQuery = useDockerExecJob(consoleJobId);
     const updaterServicesQuery = useDockerUpdaterServices();
     const updaterEventsQuery = useDockerUpdaterEvents(25);
+    useDockerSummaryAutoRefresh();
 
     const dockerAction = useDockerAction();
     const deleteImage = useDeleteDockerImage();

@@ -1026,11 +1026,11 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     state: "running",
                     stats: {
                         blockIO: "0 B / 0 B",
-                        cpu: "3.5%",
-                        memory: "128 MiB / 1 GiB",
-                        memoryPercent: "12%",
-                        netIO: "1 KB / 2 KB",
-                        pids: "8",
+                        cpu: "8.5%",
+                        memory: "256 MiB / 1 GiB",
+                        memoryPercent: "25%",
+                        netIO: "3 KB / 6 KB",
+                        pids: "9",
                     },
                     status: "Up",
                 },
@@ -3537,6 +3537,10 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getAllByText("8.5%").length).toBeGreaterThan(0);
             expect(screen.getAllByText("268 MB").length).toBeGreaterThan(0);
         });
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/cache/docker.summary/refresh",
+            expect.objectContaining({ method: "POST" })
+        );
 
         clickElement(screen.getByRole("button", { name: /run updater now/i }));
         await waitFor(() => {
@@ -3716,8 +3720,17 @@ describe("Mira Dashboard pages", () => {
                     });
                 }
 
-                if (url === "/api/docker/containers/stats" && method === "GET") {
-                    return Response.json({ stats: [] });
+                if (url === "/api/docker/containers" && method === "GET") {
+                    const response = await apiResponse(url, method, init);
+                    const payload = (await response.json()) as {
+                        containers: Array<Record<string, unknown>>;
+                    };
+                    return Response.json({
+                        containers: payload.containers.map((container) => ({
+                            ...container,
+                            stats: undefined,
+                        })),
+                    });
                 }
 
                 return apiResponse(url, method, init);
@@ -3737,7 +3750,7 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(
                 fetchMock.mock.calls.some(
-                    ([url]) => String(url) === "/api/docker/containers/stats"
+                    ([url]) => String(url) === "/api/docker/containers"
                 )
             ).toBe(true);
         });

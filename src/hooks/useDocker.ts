@@ -203,8 +203,11 @@ export const dockerKeys = {
     execJob: (jobId: string | undefined) => ["docker", "exec", jobId] as const,
     updaterServices: ["docker", "updater", "services"] as const,
     updaterEvents: (limit: number) => ["docker", "updater", "events", limit] as const,
-    containerStats: ["docker", "containers", "stats"] as const,
+    summaryRefresh: ["docker", "summary-refresh"] as const,
 };
+
+const DOCKER_CONTAINER_REFRESH_MS = 5000;
+const DOCKER_SUMMARY_REFRESH_MS = 30_000;
 
 function invalidateDockerSummary(queryClient: ReturnType<typeof useQueryClient>) {
     return queryClient.invalidateQueries({ queryKey: cacheKeys.entry("docker.summary") });
@@ -227,6 +230,13 @@ async function fetchContainer(containerId: string): Promise<DockerContainerDetai
     );
 }
 
+async function fetchDockerContainers(): Promise<DockerContainer[]> {
+    const data = await apiFetchRequired<{ containers: DockerContainer[] }>(
+        "/docker/containers"
+    );
+    return data.containers;
+}
+
 /** Fetches container logs. */
 async function fetchContainerLogs(containerId: string, tail: number): Promise<string> {
     const data = await apiFetchRequired<{ content: string }>(
@@ -240,40 +250,28 @@ async function fetchDockerExecJob(jobId: string): Promise<DockerExecJob> {
     return apiFetchRequired<DockerExecJob>(`/docker/exec/${encodeURIComponent(jobId)}`);
 }
 
-async function fetchDockerContainerStats(): Promise<DockerContainerStats[]> {
-    const data = await apiFetchRequired<{ stats: DockerContainerStats[] }>(
-        "/docker/containers/stats"
-    );
-    return data.stats;
-}
-
 /** Provides Docker containers. */
 export function useDockerContainers() {
-    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", false, {
         refreshOnMissing: true,
     });
-    const statsQuery = useQuery({
-        queryKey: dockerKeys.containerStats,
-        queryFn: fetchDockerContainerStats,
-        refetchInterval: 5000,
+    const liveQuery = useQuery({
+        queryKey: dockerKeys.containers,
+        queryFn: fetchDockerContainers,
+        refetchInterval: DOCKER_CONTAINER_REFRESH_MS,
+        refetchIntervalInBackground: false,
         staleTime: 1000,
     });
-    const statsById = new Map(
-        (statsQuery.data ?? []).flatMap((stats) =>
-            stats.id ? ([[stats.id, stats]] as const) : []
-        )
-    );
-    const hasLiveStats = statsQuery.isSuccess;
+    const cachedContainers = query.data?.data.containers ?? [];
+    const containers = liveQuery.data ?? cachedContainers;
 
     return {
         ...query,
-        data: (query.data?.data.containers ?? []).map((container) => {
-            const liveStats = statsById.get(container.id);
-            return {
-                ...container,
-                stats: hasLiveStats ? liveStats : (liveStats ?? container.stats),
-            };
-        }),
+        data: containers,
+        error: liveQuery.error ?? query.error,
+        isError: liveQuery.isError && containers.length === 0,
+        isFetching: liveQuery.isFetching || query.isFetching,
+        isLoading: liveQuery.isLoading && query.isLoading,
     };
 }
 
@@ -305,7 +303,7 @@ export function useDockerContainerLogs(
 
 /** Provides Docker images. */
 export function useDockerImages() {
-    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", false, {
         refreshOnMissing: true,
     });
     return { ...query, data: query.data?.data.images ?? [] };
@@ -313,7 +311,7 @@ export function useDockerImages() {
 
 /** Provides Docker volumes. */
 export function useDockerVolumes() {
-    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", false, {
         refreshOnMissing: true,
     });
     return { ...query, data: query.data?.data.volumes ?? [] };
@@ -334,7 +332,7 @@ export function useDockerExecJob(jobId: string | undefined) {
 
 /** Provides Docker updater services. */
 export function useDockerUpdaterServices() {
-    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", false, {
         refreshOnMissing: true,
     });
     return {
@@ -355,7 +353,7 @@ export function useDockerUpdaterServices() {
 
 /** Provides Docker updater events. */
 export function useDockerUpdaterEvents(limit = 25) {
-    const query = useCacheEntry<DockerSummaryCache>("docker.summary", 30_000, {
+    const query = useCacheEntry<DockerSummaryCache>("docker.summary", false, {
         refreshOnMissing: true,
     });
     return { ...query, data: (query.data?.data.updaterEvents ?? []).slice(0, limit) };
@@ -365,6 +363,21 @@ export function useDockerUpdaterEvents(limit = 25) {
 export function useRefreshDockerSummary() {
     const queryClient = useQueryClient();
     return () => refreshDockerSummary(queryClient);
+}
+
+/** Keeps the complete Docker summary fresh while the Docker page is mounted. */
+export function useDockerSummaryAutoRefresh() {
+    const queryClient = useQueryClient();
+    return useQuery({
+        queryKey: dockerKeys.summaryRefresh,
+        queryFn: async () => {
+            await refreshDockerSummary(queryClient);
+            return Date.now();
+        },
+        refetchInterval: DOCKER_SUMMARY_REFRESH_MS,
+        refetchIntervalInBackground: false,
+        staleTime: 0,
+    });
 }
 
 /** Provides Docker action. */
