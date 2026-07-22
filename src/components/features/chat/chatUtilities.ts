@@ -279,6 +279,15 @@ export function chatThinkingOptions(session: Session | undefined): ChatSettingOp
     return [{ label: defaultLabel, value: "" }, ...options];
 }
 
+/** Returns the label shown for the selected thinking setting. */
+export function selectedChatThinkingLabel(session: Session | undefined): string {
+    const selectedValue = session?.thinkingLevel || "";
+    return (
+        chatThinkingOptions(session).find((option) => option.value === selectedValue)
+            ?.label || "Unknown"
+    );
+}
+
 /** Returns the OpenClaw fast-mode choices. */
 export function chatSpeedOptions(session?: Session): ChatSettingOption[] {
     const effectiveMode = session?.effectiveFastMode;
@@ -304,6 +313,15 @@ export function selectedChatSpeed(session: Session | undefined): string {
     if (session?.fastMode === true) return "on";
     if (session?.fastMode === false) return "off";
     return "";
+}
+
+/** Returns the label shown for the selected speed setting. */
+export function selectedChatSpeedLabel(session: Session | undefined): string {
+    const selectedValue = selectedChatSpeed(session);
+    return (
+        chatSpeedOptions(session).find((option) => option.value === selectedValue)
+            ?.label || "Unknown"
+    );
 }
 
 /** Performs data URL to base64. */
