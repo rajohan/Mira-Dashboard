@@ -33,10 +33,9 @@ function formatToolDisplayName(name = "tool"): string {
     const withoutNamespace = rawName.startsWith("functions.")
         ? rawName.slice("functions.".length)
         : rawName;
-    const normalized =
-        withoutNamespace === "exec_command" || withoutNamespace === "bash"
-            ? "bash"
-            : withoutNamespace;
+    const normalized = ["exec", "exec_command", "bash"].includes(withoutNamespace)
+        ? "bash"
+        : withoutNamespace;
     const words = normalized.replaceAll(/[_-]/g, " ").replaceAll(/\s+/g, " ").trim();
     return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : "Tool";
 }

@@ -1,9 +1,11 @@
 import { describe, expect, it, jest } from "bun:test";
 
+import { messageDeleteKey } from "../components/features/chat/chatUtilities";
 import {
     createChatVisibility,
     presentChatMessages,
 } from "../components/features/chat/domain/chatPresentation";
+import { projectChat } from "../components/features/chat/domain/chatProjection";
 import {
     createChatRuntimeState,
     reduceChatRuntime,
@@ -119,6 +121,224 @@ describe("OpenClaw adapter variants", () => {
         expect(visible[finalIndex]?.thinking).toBeUndefined();
     });
 
+    it("presents sanitized Synthetic tool turns like canonical assistant tool rows", () => {
+        const adapter = new OpenClawChatAdapter();
+        const history = adapter.history([
+            { content: "run one check", role: "user" },
+            {
+                content: [
+                    {
+                        text: "**Step 1/1:** Emitting marker `SYN_NORMAL_STEP_1`.",
+                        type: "text",
+                    },
+                ],
+                role: "assistant",
+                stopReason: "toolUse",
+            },
+            {
+                content: [{ text: "SYN_NORMAL_STEP_1", type: "text" }],
+                role: "toolResult",
+                toolCallId: "functions.exec:16",
+                toolName: "exec",
+            },
+            {
+                content: [{ text: "SYNTHETIC_NORMAL_FINAL_OK", type: "text" }],
+                role: "assistant",
+                stopReason: "stop",
+            },
+        ]);
+        const projection = projectChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const visible = projection.rows.map((row) => row.message);
+        const toolRow = projection.rows.find((row) => row.message.toolCalls?.length);
+
+        expect(history[1]).toMatchObject({
+            isToolUse: true,
+            role: "assistant",
+            text: "**Step 1/1:** Emitting marker `SYN_NORMAL_STEP_1`.",
+        });
+        expect(history[2]).toMatchObject({
+            role: "toolResult",
+            toolResult: { content: "SYN_NORMAL_STEP_1" },
+        });
+        expect(visible).toHaveLength(3);
+        expect(visible.some((message) => message.text.includes("Emitting marker"))).toBe(
+            false
+        );
+        expect(toolRow).toMatchObject({
+            deleteKeys: [messageDeleteKey(history[2]!)],
+            key: messageDeleteKey(history[2]!),
+            message: {
+                role: "assistant",
+                text: "",
+                toolCalls: [
+                    expect.objectContaining({
+                        id: "functions.exec:16",
+                        name: "exec",
+                        toolResult: expect.objectContaining({
+                            content: "SYN_NORMAL_STEP_1",
+                        }),
+                    }),
+                ],
+                toolResult: undefined,
+            },
+        });
+        expect(visible.at(-1)?.text).toBe("SYNTHETIC_NORMAL_FINAL_OK");
+    });
+
+    it("keeps a full Synthetic tool turn canonical while projecting OpenAI-style rows", () => {
+        const adapter = new OpenClawChatAdapter();
+        const history = adapter.history([
+            { content: "run one check", role: "user" },
+            {
+                content: [
+                    { thinking: "prepare command", type: "thinking" },
+                    { text: "Running the command.", type: "text" },
+                    {
+                        data: "aW1hZ2U=",
+                        mimeType: "image/png",
+                        type: "image",
+                    },
+                    {
+                        arguments: { command: "printf SYN_FULL" },
+                        id: "functions.exec:17",
+                        name: "exec",
+                        type: "toolCall",
+                    },
+                ],
+                role: "assistant",
+                stopReason: "toolUse",
+            },
+            {
+                content: [{ text: "SYN_FULL", type: "text" }],
+                role: "toolResult",
+                toolCallId: "functions.exec:17",
+                toolName: "exec",
+            },
+            {
+                content: [
+                    { thinking: "report result", type: "thinking" },
+                    { text: "SYNTHETIC_FULL_FINAL_OK", type: "text" },
+                ],
+                role: "assistant",
+                stopReason: "stop",
+            },
+        ]);
+        const projection = projectChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const rows = projection.rows.map((row) => row.message);
+        const toolsHidden = projectChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(false, false),
+            true,
+            new Set()
+        ).rows.map((row) => row.message);
+        const toolIndex = rows.findIndex((message) => message.toolCalls?.length);
+        const thinkingIndex = rows.findIndex((message) => message.thinking?.length);
+        const finalIndex = rows.findIndex(
+            (message) => message.text === "SYNTHETIC_FULL_FINAL_OK"
+        );
+
+        expect(history[1]).toMatchObject({
+            isToolUse: true,
+            text: "Running the command.",
+            toolCalls: [
+                {
+                    arguments: { command: "printf SYN_FULL" },
+                    id: "functions.exec:17",
+                    name: "exec",
+                    toolResult: { content: "SYN_FULL" },
+                },
+            ],
+        });
+        expect(rows[toolIndex]).toMatchObject({
+            role: "assistant",
+            text: "",
+            toolCalls: [
+                {
+                    arguments: { command: "printf SYN_FULL" },
+                    toolResult: { content: "SYN_FULL" },
+                },
+            ],
+        });
+        expect(rows.some((message) => message.text === "Running the command.")).toBe(
+            false
+        );
+        expect(
+            toolsHidden.some((message) => message.text === "Running the command.")
+        ).toBe(false);
+        expect(
+            toolsHidden.find((message) => message.text === "SYNTHETIC_FULL_FINAL_OK")
+                ?.images
+        ).toEqual([expect.objectContaining({ type: "image" })]);
+        expect(toolIndex).toBeGreaterThan(0);
+        expect(thinkingIndex).toBeGreaterThan(toolIndex);
+        expect(finalIndex).toBeGreaterThan(thinkingIndex);
+    });
+
+    it("leaves canonical OpenAI-style tool rows unchanged", () => {
+        const adapter = new OpenClawChatAdapter();
+        const history = adapter.history([
+            { content: "run one check", role: "user" },
+            {
+                content: [
+                    {
+                        arguments: {
+                            command: "/bin/bash -lc 'printf OPENAI_STEP'",
+                            cwd: "/workspace",
+                        },
+                        id: "call-openai-1",
+                        name: "exec_command",
+                        type: "toolCall",
+                    },
+                ],
+                role: "assistant",
+                stopReason: "toolUse",
+            },
+            {
+                content: [{ text: "OPENAI_STEP", type: "text" }],
+                role: "toolResult",
+                toolCallId: "call-openai-1",
+                toolName: "exec_command",
+            },
+            {
+                content: [{ text: "OPENAI_FINAL_OK", type: "text" }],
+                role: "assistant",
+                stopReason: "stop",
+            },
+        ]);
+        const projectedTool = projectChat(
+            history,
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).rows.find((row) => row.message.toolCalls?.length)?.message;
+        const canonicalTool = history.find((message) => message.toolCalls?.length);
+
+        expect(projectedTool).toMatchObject({
+            role: canonicalTool?.role,
+            text: canonicalTool?.text,
+            toolCalls: canonicalTool?.toolCalls,
+            toolResult: canonicalTool?.toolResult,
+        });
+    });
+
     it("splits Synthetic session messages into diagnostics and a terminal final", () => {
         const adapter = new OpenClawChatAdapter();
         const toolTurn = adapter.event(
@@ -128,6 +348,7 @@ describe("OpenClaw adapter variants", () => {
                     message: {
                         content: [
                             { thinking: "inspect repository", type: "thinking" },
+                            { text: "Inspecting the repository.", type: "text" },
                             {
                                 arguments: { command: "pwd" },
                                 id: "functions.exec:0",
@@ -192,6 +413,128 @@ describe("OpenClaw adapter variants", () => {
             kind: "finish",
             outcome: "completed",
         });
+    });
+
+    it("carries Synthetic tool-use media onto the live tool diagnostic", () => {
+        const adapter = new OpenClawChatAdapter();
+        const toolTurn = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            { text: "Opening the image.", type: "text" },
+                            {
+                                data: "aW1hZ2U=",
+                                mimeType: "image/png",
+                                type: "image",
+                            },
+                            {
+                                arguments: { path: "/tmp/image.png" },
+                                id: "functions.image:0",
+                                name: "image",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                        stopReason: "toolUse",
+                    },
+                },
+                32
+            )
+        );
+
+        expect(toolTurn.map((event) => event.kind)).toEqual(["tool"]);
+        expect(toolTurn[0]).toMatchObject({
+            kind: "tool",
+            message: {
+                images: [expect.objectContaining({ type: "image" })],
+                text: "",
+                toolCalls: [{ id: "functions.image:0", name: "image" }],
+            },
+        });
+    });
+
+    it("owns turn-scoped Synthetic media once across multiple tool drafts", () => {
+        const adapter = new OpenClawChatAdapter();
+        const toolTurn = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            { text: "Opening the image.", type: "text" },
+                            {
+                                data: "aW1hZ2U=",
+                                mimeType: "image/png",
+                                type: "image",
+                            },
+                            {
+                                arguments: { path: "/tmp/one.png" },
+                                id: "functions.image:1",
+                                name: "image",
+                                type: "toolCall",
+                            },
+                            {
+                                arguments: { path: "/tmp/two.png" },
+                                id: "functions.image:2",
+                                name: "image",
+                                type: "toolCall",
+                            },
+                        ],
+                        role: "assistant",
+                        stopReason: "toolUse",
+                    },
+                },
+                33
+            )
+        );
+        const toolMessages = toolTurn.flatMap((event) =>
+            event.kind === "tool" ? [event.message] : []
+        );
+
+        expect(toolMessages).toHaveLength(2);
+        expect(toolMessages.flatMap((message) => message.images || [])).toEqual([
+            expect.objectContaining({ type: "image" }),
+        ]);
+        expect(toolMessages.map((message) => message.toolCalls?.[0]?.id)).toEqual([
+            "functions.image:1",
+            "functions.image:2",
+        ]);
+    });
+
+    it("keeps media from a Synthetic tool-use turn without a call", () => {
+        const adapter = new OpenClawChatAdapter();
+        const mediaTurn = adapter.event(
+            envelope(
+                "session.message",
+                {
+                    message: {
+                        content: [
+                            { text: "Preparing the image.", type: "text" },
+                            {
+                                data: "aW1hZ2U=",
+                                mimeType: "image/png",
+                                type: "image",
+                            },
+                        ],
+                        role: "assistant",
+                        stopReason: "toolUse",
+                    },
+                },
+                34
+            )
+        );
+
+        expect(mediaTurn).toMatchObject([
+            {
+                kind: "assistant",
+                message: {
+                    images: [expect.objectContaining({ type: "image" })],
+                    text: "",
+                },
+            },
+        ]);
     });
 
     it("preserves the Synthetic terminal event when one message has many tools", () => {

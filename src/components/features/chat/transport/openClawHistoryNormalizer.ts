@@ -46,6 +46,15 @@ function normalizedIsFinal(message: RawOpenClawHistoryMessage): true | undefined
         : undefined;
 }
 
+function normalizedIsToolUse(message: RawOpenClawHistoryMessage): true | undefined {
+    const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
+    return role === "assistant" &&
+        typeof message.stopReason === "string" &&
+        message.stopReason.toLowerCase() === "tooluse"
+        ? true
+        : undefined;
+}
+
 function normalizedRunId(message: RawOpenClawHistoryMessage): string | undefined {
     const runId = typeof message.runId === "string" ? message.runId.trim() : "";
     if (runId) {
@@ -388,6 +397,7 @@ export function normalizeOpenClawHistoryMessage(
         images,
         attachments,
         isFinal: normalizedIsFinal(message),
+        isToolUse: normalizedIsToolUse(message),
         thinking: extractThinkingBlocks(content),
         toolCalls: extractToolCalls(content),
         toolResult: toolResult(message, content),

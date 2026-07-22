@@ -976,6 +976,9 @@ describe("shared component helpers", () => {
             />
         );
         expect(screen.getAllByText("Tool input")).toHaveLength(2);
+        expect(
+            screen.getAllByRole("button", { name: "Collapse Bash tool details" })
+        ).toHaveLength(2);
     });
 
     it("shows a write path in a collapsed tool bubble", () => {
@@ -2596,7 +2599,7 @@ describe("shared component helpers", () => {
         );
 
         expect(
-            screen.getByText("Exec").closest("[class*='border-amber']")
+            screen.getByText("Bash").closest("[class*='border-amber']")
         ).not.toContainElement(screen.getByText("answer"));
 
         await user.click(screen.getByRole("button", { name: /follow/i }));

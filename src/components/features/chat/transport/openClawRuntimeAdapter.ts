@@ -395,6 +395,7 @@ function sessionMessageDrafts(
     const stopReason =
         stringValue(nestedMessage?.stopReason) || stringValue(data.stopReason);
     const isTerminalAssistantMessage = stopReason?.toLowerCase() === "stop";
+    const isToolUseAssistantMessage = stopReason?.toLowerCase() === "tooluse";
     const topLevelRole = stringValue(data.role);
     const rawMessage = topLevelRole
         ? {
@@ -411,11 +412,16 @@ function sessionMessageDrafts(
     const message = normalizeAssistant(rawMessage, common.runId);
     const role = message.role.toLowerCase();
     if (role === "assistant") {
-        const drafts = sessionAssistantDiagnosticDrafts(message, common, sequence);
+        const drafts = sessionAssistantDiagnosticDrafts(
+            message,
+            common,
+            sequence,
+            isToolUseAssistantMessage
+        );
         const hasPrimaryContent = Boolean(
             message.text.trim() || message.images?.length || message.attachments?.length
         );
-        if (hasPrimaryContent) {
+        if (hasPrimaryContent && !isToolUseAssistantMessage) {
             drafts.push({
                 ...common,
                 kind: "assistant",
@@ -455,7 +461,10 @@ function sessionMessageDrafts(
             {
                 ...common,
                 kind: "tool",
-                message: { ...message, timestamp: common.timestamp },
+                message: {
+                    ...message,
+                    timestamp: common.timestamp,
+                },
                 toolKey: sessionToolKey(
                     message.toolResult.id,
                     message.toolResult.name || "tool"
@@ -479,7 +488,8 @@ function sessionToolKey(
 function sessionAssistantDiagnosticDrafts(
     message: ChatHistoryMessage,
     common: { runId?: string; sessionKey: string; timestamp: string },
-    sequence: number
+    sequence: number,
+    shouldCarryPrimaryMedia = false
 ): ChatRuntimeEventDraft[] {
     const drafts: ChatRuntimeEventDraft[] = [];
     if (message.thinking?.length) {
@@ -505,15 +515,45 @@ function sessionAssistantDiagnosticDrafts(
         });
     }
     const toolCalls = message.toolCalls || [];
-    for (const toolCall of toolCalls) {
-        drafts.push(sessionToolCallDraft(toolCall, common));
+    for (const [index, toolCall] of toolCalls.entries()) {
+        // Media belongs to the provider turn, so one draft owns it to avoid
+        // rendering the same image or attachment once per sibling tool call.
+        drafts.push(
+            sessionToolCallDraft(
+                toolCall,
+                common,
+                shouldCarryPrimaryMedia && index === 0 ? message : undefined
+            )
+        );
+    }
+    if (
+        shouldCarryPrimaryMedia &&
+        toolCalls.length === 0 &&
+        (message.images?.length || message.attachments?.length)
+    ) {
+        drafts.push({
+            ...common,
+            kind: "assistant",
+            message: {
+                ...message,
+                content: "",
+                text: "",
+                thinking: undefined,
+                toolCalls: undefined,
+                toolResult: undefined,
+                timestamp: common.timestamp,
+            },
+            mode: "merge",
+            source: "session",
+        });
     }
     return drafts;
 }
 
 function sessionToolCallDraft(
     toolCall: ChatToolCallDisplay,
-    common: { runId?: string; sessionKey: string; timestamp: string }
+    common: { runId?: string; sessionKey: string; timestamp: string },
+    primaryMedia?: ChatHistoryMessage
 ): ChatRuntimeEventDraft {
     return {
         ...common,
@@ -522,6 +562,9 @@ function sessionToolCallDraft(
             role: "assistant",
             content: "",
             text: "",
+            attachments: primaryMedia?.attachments,
+            images: primaryMedia?.images,
+            isToolUse: primaryMedia?.isToolUse,
             toolCalls: [toolCall],
             timestamp: common.timestamp,
             runId: common.runId,

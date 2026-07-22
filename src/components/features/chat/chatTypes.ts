@@ -364,6 +364,8 @@ export interface ChatHistoryMessage {
     runId?: string;
     /** True only when the runtime has identified this row as the final answer. */
     isFinal?: boolean;
+    /** True only for an assistant turn terminated by the provider for tool use. */
+    isToolUse?: boolean;
     /** Stable identity for one transient runtime row inside a run. */
     runtimeKey?: string;
     /** Canonical Gateway event order used only while reconciling runtime rows. */
@@ -572,7 +574,7 @@ export function isRenderableChatHistoryMessage(
     }
 
     if (
-        message.text.trim() ||
+        (!message.isToolUse && message.text.trim()) ||
         (message.images?.length || 0) > 0 ||
         (message.attachments?.length || 0) > 0
     ) {
