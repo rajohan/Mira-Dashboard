@@ -2397,12 +2397,18 @@ describe("Mira Dashboard pages", () => {
         const previousMonthButton = calendar.querySelector<HTMLButtonElement>(
             ":scope .rdp-button_previous"
         );
+        const nextMonthButton = calendar.querySelector<HTMLButtonElement>(
+            ":scope .rdp-button_next"
+        );
         expect(previousMonthButton).not.toBeNull();
+        expect(previousMonthButton).toHaveClass("hover:bg-primary-700!");
+        expect(nextMonthButton).toHaveClass("hover:bg-primary-700!");
         await user.click(previousMonthButton as HTMLButtonElement);
         const pastDayButton = calendar.querySelector<HTMLButtonElement>(
             ":scope .rdp-day:not(.rdp-outside) .rdp-day_button:not(:disabled)"
         );
         expect(pastDayButton).not.toBeNull();
+        expect(pastDayButton).toHaveClass("enabled:hover:bg-primary-700!");
         await user.click(pastDayButton as HTMLButtonElement);
         await user.type(disableCommentInput, "Paused Dashboard maintenance");
         await user.click(screen.getByRole("button", { name: "Disable job" }));

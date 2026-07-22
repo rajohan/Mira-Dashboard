@@ -55,15 +55,15 @@ const calendarClassNames = {
     ),
     [UI.DayButton]: cn(
         defaultClassNames[UI.DayButton],
-        "transition-colors hover:bg-primary-700 focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:outline-none"
+        "transition-colors focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:outline-none enabled:hover:bg-primary-700!"
     ),
     [UI.NextMonthButton]: cn(
         defaultClassNames[UI.NextMonthButton],
-        "rounded-md text-primary-300 hover:bg-primary-700 hover:text-primary-50 focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:outline-none"
+        "rounded-md text-primary-300 transition-colors hover:bg-primary-700! hover:text-primary-50! focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:outline-none"
     ),
     [UI.PreviousMonthButton]: cn(
         defaultClassNames[UI.PreviousMonthButton],
-        "rounded-md text-primary-300 hover:bg-primary-700 hover:text-primary-50 focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:outline-none"
+        "rounded-md text-primary-300 transition-colors hover:bg-primary-700! hover:text-primary-50! focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:outline-none"
     ),
     [UI.Weekday]: cn(defaultClassNames[UI.Weekday], "text-primary-400"),
 };

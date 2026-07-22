@@ -16,7 +16,7 @@ import { Badge } from "../ui/Badge";
 import { Dropdown } from "../ui/Dropdown";
 
 /** Defines notification filter. */
-type NotificationFilter = "all" | "unread" | "warning";
+type NotificationFilter = "all" | "unread" | "warning" | "error";
 
 const NOTIFICATION_ACTION_CLASS =
     "rounded-md border border-primary-600 px-2 py-1 text-xs text-primary-200 hover:bg-primary-700";
@@ -71,6 +71,7 @@ export function NotificationBell() {
     const filteredItems = sortedItems.filter((notification) => {
         if (filter === "unread") return !notification.isRead;
         if (filter === "warning") return notification.type === "warning";
+        if (filter === "error") return notification.type === "error";
         return true;
     });
 
@@ -125,6 +126,7 @@ export function NotificationBell() {
                                 ["all", "All"],
                                 ["unread", "Unread"],
                                 ["warning", "Warning"],
+                                ["error", "Error"],
                             ] as const
                         ).map(([value, label]) => (
                             <button

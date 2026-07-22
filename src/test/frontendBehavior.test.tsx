@@ -3543,6 +3543,11 @@ describe("Mira Dashboard frontend behavior", () => {
             "/reports?reportId=42"
         );
 
+        await user.click(screen.getByRole("menuitemradio", { name: "Error" }));
+        expect(screen.getByText("Workspace sync failed")).toBeInTheDocument();
+        expect(screen.queryByText("Cache refresh failed")).not.toBeInTheDocument();
+        expect(screen.queryByText("Backup complete")).not.toBeInTheDocument();
+
         await user.click(screen.getByRole("menuitemradio", { name: "Unread" }));
         expect(screen.getByText("Cache refresh failed")).toBeInTheDocument();
         expect(screen.queryByText("Backup complete")).not.toBeInTheDocument();

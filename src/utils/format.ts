@@ -1,4 +1,4 @@
-import { formatDistanceToNow } from "date-fns";
+import { formatDistance } from "date-fns";
 import { enUS } from "date-fns/locale";
 
 import { appTimeZoneParts, appTimeZoneShortMonth, appTimeZoneShortWeekday } from "./date";
@@ -184,14 +184,27 @@ export function appTimeOfDayToUtcTimeOfDay(
     ).padStart(2, "0")}`;
 }
 
+interface FormatDurationOptions {
+    includeSeconds?: boolean;
+    referenceTime?: Date | number;
+}
+
 /** Formats milliseconds as a compact duration string. */
-export function formatDuration(updatedAt: number | undefined): string {
+export function formatDuration(
+    updatedAt: number | undefined,
+    options: FormatDurationOptions = {}
+): string {
     if (updatedAt === undefined) return "Unknown";
     try {
-        return formatDistanceToNow(new Date(updatedAt), {
-            addSuffix: true,
-            locale: appLocale,
-        });
+        return formatDistance(
+            new Date(updatedAt),
+            toDateValue(options.referenceTime ?? Date.now()),
+            {
+                addSuffix: true,
+                includeSeconds: options.includeSeconds,
+                locale: appLocale,
+            }
+        );
     } catch {
         return "Unknown";
     }
