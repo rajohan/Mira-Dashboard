@@ -4199,6 +4199,59 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("keeps an unmarked completed answer separate from a later final", () => {
+        const visible = presentChatMessages(
+            [
+                {
+                    ...message("user", "first question"),
+                    timestamp: "2026-07-16T12:00:00.000Z",
+                },
+                timestampedToolMessage(
+                    "call-first-turn",
+                    "first-tool",
+                    "2026-07-16T12:00:01.000Z"
+                ),
+                {
+                    ...message("assistant", "first answer"),
+                    timestamp: "2026-07-16T12:00:02.000Z",
+                },
+                {
+                    ...message("user", "second question"),
+                    timestamp: "2026-07-16T12:00:03.000Z",
+                },
+                timestampedToolMessage(
+                    "call-second-turn",
+                    "second-tool",
+                    "2026-07-16T12:00:04.000Z"
+                ),
+                {
+                    ...message("assistant", "second answer"),
+                    isFinal: true,
+                    timestamp: "2026-07-16T12:00:05.000Z",
+                },
+            ],
+            createChatVisibility(true, true),
+            true
+        );
+
+        expect(
+            visible.map((item) =>
+                item.thinking?.length
+                    ? item.thinking[0]!.text
+                    : item.toolCalls?.[0]?.name || item.text
+            )
+        ).toEqual([
+            "first question",
+            "first-tool",
+            "thinking-call-first-turn",
+            "first answer",
+            "second question",
+            "second-tool",
+            "thinking-call-second-turn",
+            "second answer",
+        ]);
+    });
+
     it("uses a recovered history final to settle an active restart replay", () => {
         const runId = "dashboard-chat-recovered-restart";
         const systemContinuation =

@@ -283,7 +283,9 @@ export class OpenClawChatRequestBoundaries {
             const acknowledgedRequestId =
                 requestId && state.pending.has(requestId)
                     ? requestId
-                    : fallbackPendingEntry(state.pending, requestBoundary)?.[0];
+                    : requestId
+                      ? undefined
+                      : fallbackPendingEntry(state.pending, requestBoundary)?.[0];
             if (!acknowledgedRequestId || state.acknowledged.has(acknowledgedRequestId)) {
                 continue;
             }

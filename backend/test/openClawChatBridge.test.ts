@@ -3786,6 +3786,30 @@ describe("OpenClaw chat bridge", () => {
         expect(boundaries.blocking(MAIN)).toBe(5);
     });
 
+    it("does not acknowledge an unrelated synthetic alias request", () => {
+        const boundaries = new OpenClawChatRequestBoundaries(
+            (sessionKey) => sessionKey.trim().toLowerCase(),
+            (left, right) => logicalMainSessionKey(left) === logicalMainSessionKey(right)
+        );
+        const namedRequestId = "dashboard-chat-named-alias-request";
+        const syntheticRequestId = "request:20:0";
+        boundaries.restore(MAIN, {
+            pendingRequestBoundaries: { [namedRequestId]: 20 },
+        });
+        boundaries.restore("main", {
+            pendingRequestBoundaries: { [syntheticRequestId]: 20 },
+        });
+
+        expect(boundaries.acknowledge(MAIN, namedRequestId)).toEqual([MAIN]);
+        expect(boundaries.metadata(MAIN).acknowledgedRequestIds).toEqual([
+            namedRequestId,
+        ]);
+        expect(boundaries.blocking(MAIN)).toBe(20);
+
+        expect(boundaries.acknowledge(MAIN, undefined, 20)).toEqual(["main"]);
+        expect(boundaries.blocking(MAIN)).toBeUndefined();
+    });
+
     it("keeps an equivalent alias boundary when one owner is evicted", () => {
         const boundaries = new OpenClawChatRequestBoundaries(
             (sessionKey) => sessionKey.trim().toLowerCase(),

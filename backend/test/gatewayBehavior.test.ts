@@ -419,6 +419,23 @@ describe("gateway behavior", () => {
         await waitFor(() => (client?.requests.length ?? 0) > requestCount);
 
         expect(captureBoundary).not.toHaveBeenCalled();
+        const uncapturedParameters = {
+            idempotencyKey: "dashboard-chat-uncaptured-request",
+            message: "capture fails before forwarding",
+            sessionKey: "agent:main:main",
+        };
+        await expect(gateway.request("chat.send", uncapturedParameters)).rejects.toThrow(
+            "unexpected replay boundary capture"
+        );
+        expect(failBoundary).not.toHaveBeenCalled();
+        expect(
+            client?.requests.some(
+                ({ parameters }) =>
+                    parameters.idempotencyKey === uncapturedParameters.idempotencyKey
+            )
+        ).toBe(false);
+        expect(captureBoundary).toHaveBeenCalledTimes(1);
+
         captureBoundary.mockReturnValue(0);
         const handleSuccessfulRequest = jest
             .spyOn(OpenClawChatBridge.prototype, "handleSuccessfulRequest")
@@ -440,7 +457,7 @@ describe("gateway behavior", () => {
                 sessionKey: "agent:main:main",
             })
         ).resolves.toBeDefined();
-        expect(captureBoundary).toHaveBeenCalledTimes(1);
+        expect(captureBoundary).toHaveBeenCalledTimes(2);
         expect(
             socket.sent.some((raw) =>
                 raw.includes('"runtimeRunAliases":["provider-before-restart"]')
@@ -455,7 +472,7 @@ describe("gateway behavior", () => {
             "chat send rejected"
         );
         expect(failBoundary).toHaveBeenCalledWith("chat.send", failedParameters, 0);
-        expect(captureBoundary).toHaveBeenCalledTimes(2);
+        expect(captureBoundary).toHaveBeenCalledTimes(3);
         socket.close();
     });
 

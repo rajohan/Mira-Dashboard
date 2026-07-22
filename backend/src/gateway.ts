@@ -1029,8 +1029,10 @@ async function requestWithReplayBoundary(
     options?: OpenClawGatewayRequestOptions
 ): Promise<unknown> {
     let requestBoundary: number | undefined;
+    let didCaptureRequestBoundary = false;
     try {
         requestBoundary = captureChatSendRequestBoundary(method, parameters);
+        didCaptureRequestBoundary = method === "chat.send";
         const payload = await client.request(method, parameters, options);
         const identityEnvelope = chatReplayState.bridge.handleSuccessfulRequest(
             method,
@@ -1043,7 +1045,13 @@ async function requestWithReplayBoundary(
         }
         return payload;
     } catch (error) {
-        chatReplayState.bridge.handleFailedRequest(method, parameters, requestBoundary);
+        if (didCaptureRequestBoundary) {
+            chatReplayState.bridge.handleFailedRequest(
+                method,
+                parameters,
+                requestBoundary
+            );
+        }
         throw error;
     }
 }

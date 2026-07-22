@@ -237,9 +237,20 @@ function completedResponseStart(
         if (isStartingNewRuntimeRun) {
             return groupStart;
         }
-        const hasContinuationEvidence = messages
-            .slice(previousUser + 1, nextUser)
-            .some((candidate) => hasToolDetails(candidate));
+        const interveningMessages = messages.slice(previousUser + 1, nextUser);
+        const isGatewayRestartContinuation =
+            /^\[System\]\s+Your previous turn was interrupted by a gateway restart\b/iu.test(
+                nextUserMessage.text.trim()
+            );
+        const hasPriorAnswer = interveningMessages.some((candidate) =>
+            isPrimaryAssistantMessage(candidate)
+        );
+        if (hasPriorAnswer && !isGatewayRestartContinuation) {
+            return groupStart;
+        }
+        const hasContinuationEvidence = interveningMessages.some((candidate) =>
+            hasToolDetails(candidate)
+        );
         if (!hasContinuationEvidence) {
             return groupStart;
         }
