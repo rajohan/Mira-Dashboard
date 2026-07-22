@@ -2,6 +2,7 @@ import {
     type ChatHistoryMessage,
     type ChatRow,
     type ChatVisibilitySettings,
+    mergeChatImages,
     TOOL_ROLE_VARIANTS,
 } from "../chatTypes";
 import {
@@ -154,6 +155,89 @@ function projectedMessageDeleteKeys(message: ChatHistoryMessage): string[] {
     return currentKey === persistedHistoryKey
         ? [currentKey]
         : [currentKey, persistedHistoryKey];
+}
+
+function asAssistantToolResultMessage(message: ChatHistoryMessage): ChatHistoryMessage {
+    const toolResult = message.toolResult;
+    const isToolResultRole = TOOL_ROLE_VARIANTS.includes(message.role.toLowerCase());
+    if (!toolResult || !isToolResultRole) {
+        return message;
+    }
+
+    const nestedToolResult = {
+        ...toolResult,
+        images: mergeChatImages(toolResult.images, message.images),
+        name: toolResult.name || "tool",
+    };
+    const existingToolCalls = message.toolCalls || [];
+    const matchingNestedResultIndex = existingToolCalls.findIndex((toolCall) => {
+        const nestedResult = toolCall.toolResult;
+        if (!nestedResult) {
+            return false;
+        }
+        if (nestedResult.id || nestedToolResult.id) {
+            return Boolean(
+                nestedResult.id &&
+                nestedToolResult.id &&
+                nestedResult.id === nestedToolResult.id
+            );
+        }
+        return (nestedResult.name || toolCall.name) === nestedToolResult.name;
+    });
+    const matchingCallIndex =
+        matchingNestedResultIndex === -1
+            ? existingToolCalls.findIndex((toolCall) =>
+                  toolCall.id || nestedToolResult.id
+                      ? Boolean(
+                            toolCall.id &&
+                            nestedToolResult.id &&
+                            toolCall.id === nestedToolResult.id
+                        )
+                      : toolCall.name === nestedToolResult.name
+              )
+            : -1;
+    const toolCalls = existingToolCalls.map((toolCall, index) => {
+        if (index === matchingNestedResultIndex) {
+            return {
+                ...toolCall,
+                toolResult: {
+                    ...toolCall.toolResult,
+                    ...nestedToolResult,
+                    images: mergeChatImages(
+                        toolCall.toolResult?.images,
+                        nestedToolResult.images
+                    ),
+                },
+            };
+        }
+        return index === matchingCallIndex
+            ? { ...toolCall, toolResult: nestedToolResult }
+            : toolCall;
+    });
+    if (
+        toolCalls.length === 0 ||
+        (matchingNestedResultIndex === -1 && matchingCallIndex === -1)
+    ) {
+        toolCalls.push({
+            id: nestedToolResult.id,
+            name: nestedToolResult.name,
+            toolResult: nestedToolResult,
+        });
+    }
+    return {
+        ...message,
+        images: [],
+        role: "assistant",
+        text: "",
+        toolCalls,
+        toolResult: undefined,
+    };
+}
+
+function projectedMessageDisplay(message: ChatHistoryMessage): ChatHistoryMessage {
+    const withoutToolCommentary =
+        message.isToolUse && message.text ? { ...message, text: "" } : message;
+    return asAssistantToolResultMessage(withoutToolCommentary);
 }
 
 function isMatchedToAnotherRun(
@@ -1612,7 +1696,7 @@ export function projectChat(
                     message.local === true && message.runId && !isUserMessage(message)
                         ? "stream"
                         : "message",
-                message,
+                message: projectedMessageDisplay(message),
             });
         }
     }

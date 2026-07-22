@@ -1777,11 +1777,57 @@ describe("chat projection", () => {
 
         expect(projection.rows.map((row) => row.message.text)).toEqual([
             "question",
-            "done",
+            "",
             "answer",
         ]);
+        expect(projection.rows[1]).toMatchObject({
+            message: {
+                role: "assistant",
+                toolCalls: [
+                    {
+                        id: "call-1",
+                        name: "exec",
+                        toolResult: { content: "done" },
+                    },
+                ],
+            },
+        });
         expect(projection.rows.some((row) => row.kind === "typing")).toBe(false);
         expect(projection.activeRuns).toEqual([]);
+    });
+
+    it("projects a nameless orphan result once without changing its canonical key", () => {
+        const orphanResult: ChatHistoryMessage = {
+            content: "done",
+            role: "tool",
+            text: "done",
+            toolResult: { content: "done" },
+        };
+        const projection = projectChat(
+            [message("user", "question"), orphanResult],
+            createChatRuntimeState(),
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+        const toolRow = projection.rows[1];
+
+        expect(toolRow).toMatchObject({
+            deleteKeys: [messageDeleteKey(orphanResult)],
+            key: messageDeleteKey(orphanResult),
+            message: {
+                role: "assistant",
+                text: "",
+                toolCalls: [
+                    {
+                        name: "tool",
+                        toolResult: { content: "done", name: "tool" },
+                    },
+                ],
+                toolResult: undefined,
+            },
+        });
     });
 
     it("reconciles a late runtime copy of a history tool before the final answer", () => {
@@ -1862,6 +1908,7 @@ describe("chat projection", () => {
             },
             {
                 ...message("assistant", "running command"),
+                isToolUse: true,
                 timestamp: "2026-07-18T16:35:31.000Z",
             },
             {
@@ -1941,8 +1988,7 @@ describe("chat projection", () => {
         });
         expect(projection.rows.map((row) => row.message.text)).toEqual([
             "question",
-            "running command",
-            "completed",
+            "",
             "answer",
         ]);
     });

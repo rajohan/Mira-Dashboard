@@ -54,14 +54,16 @@ function primaryAnswerDetails(message: ChatHistoryMessage): PrimaryAnswerDetails
     );
     const hasPrimaryContent = Boolean(
         hasVisibleAttachments ||
-        withoutThinking.text.trim() ||
+        (!message.isToolUse && withoutThinking.text.trim()) ||
         withoutThinking.images?.length
     );
     return {
         hasPrimaryContent,
         hasToolOutput,
         isPrimaryAnswerContent:
-            hasPrimaryContent && (!hasToolOutput || message.isFinal === true),
+            !message.isToolUse &&
+            hasPrimaryContent &&
+            (!hasToolOutput || message.isFinal === true),
         withoutThinking,
     };
 }
@@ -469,7 +471,7 @@ export function presentChatMessages(
         const isTool = TOOL_ROLE_VARIANTS.includes(role);
         const hasToolDetails = Boolean(message.toolCalls?.length || message.toolResult);
         const isToolDiagnostic = Boolean(
-            isTool || (hasToolDetails && !message.text.trim())
+            isTool || message.isToolUse || (hasToolDetails && !message.text.trim())
         );
         const toolImages = allChatMessageImages(message);
         if (
