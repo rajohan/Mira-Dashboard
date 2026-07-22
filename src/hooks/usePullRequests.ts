@@ -103,6 +103,9 @@ export const pullRequestKeys = {
     productionCheckout: () => [...pullRequestKeys.all, "production-checkout"] as const,
 };
 
+export const PULL_REQUEST_NAV_REFRESH_MS = 60_000;
+export const PULL_REQUEST_PAGE_REFRESH_MS = AUTO_REFRESH_MS;
+
 /** Fetches pull requests. */
 async function fetchPullRequests(): Promise<PullRequestSummary[]> {
     const response = await apiFetchRequired<PullRequestsResponse>("/pull-requests");
@@ -176,12 +179,12 @@ async function deployDashboard(): Promise<{ isOk: boolean; deployment: Deploymen
 }
 
 /** Provides pull requests. */
-export function usePullRequests() {
+export function usePullRequests(refreshInterval = PULL_REQUEST_PAGE_REFRESH_MS) {
     return useQuery({
         queryKey: pullRequestKeys.list(),
         queryFn: fetchPullRequests,
         staleTime: 10_000,
-        refetchInterval: AUTO_REFRESH_MS,
+        refetchInterval: refreshInterval,
     });
 }
 

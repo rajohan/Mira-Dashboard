@@ -73,6 +73,8 @@ export type {
     WorktreeCleanupResult,
 } from "./usePullRequests";
 export {
+    PULL_REQUEST_NAV_REFRESH_MS,
+    PULL_REQUEST_PAGE_REFRESH_MS,
     pullRequestKeys,
     useApprovePullRequest,
     useApprovePullRequestReview,
