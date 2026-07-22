@@ -16,9 +16,10 @@ type ChatRunContentKind = "assistant" | "thinking" | "tool" | "user";
 
 const SESSION_ECHO_WINDOW_MILLISECONDS = 60_000;
 
-export interface ChatDiagnosticEntry {
+export interface ChatRuntimeMessageEntry {
     key: string;
     message: ChatHistoryMessage;
+    sequence: number;
 }
 
 /** Canonical runtime state for one session-scoped run. */
@@ -26,7 +27,7 @@ export interface ChatRunState {
     aliases: string[];
     assistant?: ChatHistoryMessage;
     assistantSource?: ChatTextSource;
-    diagnostics: ChatDiagnosticEntry[];
+    diagnostics: ChatRuntimeMessageEntry[];
     error?: string;
     lastContentKind?: ChatRunContentKind;
     lastContentSequence?: number;
@@ -43,7 +44,7 @@ export interface ChatRunState {
     terminalSequence?: number;
     toolFailure?: boolean;
     updatedAt: string;
-    userMessages: ChatDiagnosticEntry[];
+    userMessages: ChatRuntimeMessageEntry[];
 }
 
 export interface ChatSessionRuntimeState {
@@ -58,6 +59,7 @@ export interface ChatRuntimeState {
 }
 
 interface RuntimeEventBase {
+    runAliases?: string[];
     runId?: string;
     sequence: number;
     sessionKey: string;
@@ -65,6 +67,9 @@ interface RuntimeEventBase {
 }
 
 export type ChatRuntimeEvent =
+    | (RuntimeEventBase & {
+          kind: "identity";
+      })
     | (RuntimeEventBase & {
           kind: "user";
           message: ChatHistoryMessage;
@@ -111,6 +116,7 @@ function runContentKind(event: ChatRuntimeEvent): ChatRunContentKind | undefined
         case "finish": {
             return event.message ? "assistant" : undefined;
         }
+        case "identity":
         case "status": {
             return undefined;
         }
@@ -594,7 +600,7 @@ function mergeToolDiagnostic(
 }
 
 function matchingDiagnosticIndex(
-    diagnostics: ChatDiagnosticEntry[],
+    diagnostics: ChatRuntimeMessageEntry[],
     key: string,
     kind: "thinking" | "tool",
     message: ChatHistoryMessage
@@ -624,12 +630,13 @@ function matchingDiagnosticIndex(
 }
 
 function mergeDiagnosticEntry(
-    diagnostics: ChatDiagnosticEntry[],
+    diagnostics: ChatRuntimeMessageEntry[],
     key: string,
     kind: "thinking" | "tool",
     incoming: ChatHistoryMessage,
+    sequence: number,
     uniqueSuffix: number | string
-): ChatDiagnosticEntry[] {
+): ChatRuntimeMessageEntry[] {
     const next = [...diagnostics];
     const index = matchingDiagnosticIndex(next, key, kind, incoming);
     const previous = index === -1 ? undefined : next[index]?.message;
@@ -641,7 +648,11 @@ function mergeDiagnosticEntry(
         index === -1 && next.some((entry) => entry.key === key)
             ? `${key}:${uniqueSuffix}`
             : key;
-    const entry = { key: next[index]?.key || uniqueKey, message };
+    const entry = {
+        key: next[index]?.key || uniqueKey,
+        message,
+        sequence: Math.min(next[index]?.sequence ?? sequence, sequence),
+    };
     if (index === -1) {
         next.push(entry);
     } else {
@@ -665,6 +676,7 @@ function applyDiagnosticEvent(
                 ...event.message,
                 timestamp: event.message.timestamp || event.timestamp,
             },
+            event.sequence,
             event.sequence
         ),
     };
@@ -689,6 +701,7 @@ function applyUserEvent(
             {
                 key,
                 message,
+                sequence: event.sequence,
             },
         ],
     };
@@ -697,8 +710,8 @@ function applyUserEvent(
 function mergeRunDiagnostics(
     older: ChatRunState,
     newer: ChatRunState
-): ChatDiagnosticEntry[] {
-    let diagnostics: ChatDiagnosticEntry[] = [];
+): ChatRuntimeMessageEntry[] {
+    let diagnostics: ChatRuntimeMessageEntry[] = [];
     for (const [runIndex, run] of [older, newer].entries()) {
         for (const [entryIndex, entry] of run.diagnostics.entries()) {
             const kind =
@@ -710,6 +723,7 @@ function mergeRunDiagnostics(
                 kind === "thinking" ? "thinking:primary" : entry.key,
                 kind,
                 entry.message,
+                entry.sequence,
                 `merge-${runIndex}-${entryIndex}-${run.lastSequence}`
             );
         }
@@ -720,22 +734,18 @@ function mergeRunDiagnostics(
 function mergeRunUserMessages(
     older: ChatRunState,
     newer: ChatRunState
-): ChatDiagnosticEntry[] {
-    const entries = new Map<string, ChatDiagnosticEntry>();
+): ChatRuntimeMessageEntry[] {
+    const entries = new Map<string, ChatRuntimeMessageEntry>();
     for (const entry of [...older.userMessages, ...newer.userMessages]) {
         entries.set(entry.key, entry);
     }
     return entries
         .values()
         .toArray()
-        .toSorted((left, right) => {
-            const leftTimestamp = Date.parse(left.message.timestamp || "");
-            const rightTimestamp = Date.parse(right.message.timestamp || "");
-            if (Number.isNaN(leftTimestamp) || Number.isNaN(rightTimestamp)) {
-                return left.key.localeCompare(right.key);
-            }
-            return leftTimestamp - rightTimestamp;
-        });
+        .toSorted(
+            (left, right) =>
+                left.sequence - right.sequence || left.key.localeCompare(right.key)
+        );
 }
 
 function mergeAcknowledgedRuns(
@@ -916,6 +926,19 @@ export function reduceChatRuntime(
         (left, right) => left.sequence - right.sequence
     );
     for (const event of orderedEvents) {
+        if (event.runId) {
+            const runAliases = uniqueChatRunIds(event.runAliases || []);
+            for (const alias of runAliases) {
+                if (alias !== event.runId) {
+                    nextState = acknowledgeChatRun(
+                        nextState,
+                        event.sessionKey,
+                        alias,
+                        event.runId
+                    );
+                }
+            }
+        }
         const previousEntry = matchingSessionEntry(nextState, event.sessionKey);
         const previousSessionKey = previousEntry?.[0];
         const previousSession = previousEntry?.[1];
@@ -983,6 +1006,9 @@ export function reduceChatRuntime(
 
 function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState {
     switch (event.kind) {
+        case "identity": {
+            return run;
+        }
         case "user": {
             return applyUserEvent(run, event);
         }

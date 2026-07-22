@@ -239,9 +239,13 @@ tool-result rewrites replace stale cached rows without reloading older pages.
 
 The backend bridge keeps bounded replay state in memory and mirrors it to
 SQLite so active and completed thinking can survive a backend or VPS restart.
-Replay is partitioned by Gateway credential scope, normalized session key, and
-then run ID. Main and ops sessions therefore have independent caches, and each
-session can retain up to four runs.
+Replay is partitioned by Gateway credential scope, normalized session key,
+OpenClaw session instance, and then run ID. Main and ops sessions therefore have
+independent caches, and each session can retain up to four runs. OpenClaw may
+reuse a session key after creating a new transcript and `sessionId`; a newer
+lifecycle start (or initial user message) then replaces replay from the prior
+instance. A Gateway restart keeps the existing `sessionId`, so its pre- and
+post-restart events remain eligible for normal interrupted-run recovery.
 
 SQLite uses two related tables:
 
@@ -250,16 +254,20 @@ SQLite uses two related tables:
   sequence.
 
 The current `rows-v2` metadata stores a SHA-256 fingerprint for every retained
-event. An unchanged prefix only appends new event rows; coalescing, trimming, or
-a same-sequence content change replaces stale rows. Older inline and `rows-v1`
-cache layouts are intentionally unsupported and should be cleared or migrated
-when deploying the schema change.
+event, the original first sequence for every retained run, pending `chat.send`
+boundaries keyed by request ID, and the latest settled new-turn boundary when one
+exists. The durable first sequence cannot move when a later tool/item update
+coalesces over the run's first retained envelope. An unchanged prefix only
+appends new event rows; coalescing, trimming, or a same-sequence content change
+replaces stale rows. Older inline and `rows-v1` cache layouts are intentionally
+unsupported and should be cleared or migrated when deploying the schema change.
 
 Replay limits are:
 
 - 1,000,000 serialized bytes per event;
 - 64,000,000 serialized bytes or 20,000 events per active run;
 - four runs per session;
+- 100 pending outgoing request boundaries per session;
 - 50 persisted sessions per Gateway scope;
 - 256,000,000 serialized bytes across in-process replay state.
 
@@ -267,22 +275,74 @@ When the process-wide memory budget is exceeded, completed sessions are evicted
 before active sessions, oldest first. The current session is preferred while
 another candidate exists, but remains a last-resort eviction candidate so the
 limit stays hard. Its latest state is flushed to SQLite before memory eviction
-and can be rehydrated transiently on demand. The latest completed run remains
+and can be rehydrated transiently on demand. Evicting one alias removes only
+that owner's in-memory boundary state; a still-loaded equivalent owner keeps its
+pending cutoffs. The latest completed run remains
 available until the next successful send for that session. An abandoned active
 run expires after six hours without an event. Successful `/new` or `/reset`,
 abort, session deletion, and Gateway credential changes clear the applicable
 replay cache.
 
-A Gateway transport disconnect marks only unfinished `dashboard-chat-*` runs as
-eligible for interrupted-run recovery. If the Gateway resumes the same response
-under a provider run ID, the bridge rewrites the provisional replay to that
-canonical ID before retaining the new lifecycle event. The promotion is allowed
-only for one unambiguous active run, inside the bounded restart window, and only
-when no newer `chat.send` request boundary exists. This keeps pre- and
-post-restart thinking, later steer messages, and tools in one ordered response
-without merging a genuinely new or concurrent send. The recorded disconnect
-time also protects a long-quiet interrupted run from the normal six-hour stale
-run cleanup while that bounded recovery window is open.
+A Gateway transport disconnect marks every unfinished conversation run as
+eligible for interrupted-run recovery, including a run that already has a
+provider ID after an earlier reconnect. If repeated restarts split one response
+across several provider run IDs, the bridge repairs the complete unambiguous
+restart chain into the newest provider run instead of retaining one fragment per
+restart. Recovery does not require a lifecycle-start:
+the first non-user, non-compaction provider event can establish the continuation,
+which covers Codex preamble and tool events emitted first after startup. The
+live envelope carries every replaced run ID. If that provider event has no
+visible chat draft, the frontend adapter emits an internal identity event so the
+live reducer still performs the replacement; the control event never projects a
+row. This keeps live state identical to the already-repaired persisted replay.
+Promotion is allowed only for one unambiguous logical active conversation,
+inside the bounded restart window, and only when no newer `chat.send` request
+boundary exists. Each outgoing request records
+its own boundary under the Dashboard idempotency key and flushes it to SQLite
+before forwarding the request; if persisted replay cannot be hydrated, the send
+fails instead of crossing an unknown boundary. A matching acknowledgement or user
+`session.message` echo removes only that request's pending boundary. A
+`chat.send` acknowledgement carrying only the Dashboard idempotency key proves
+acceptance, not transcript placement, so the boundary remains pending until the
+user echo arrives. Pending boundaries do not split interrupted-run recovery;
+only a settled new-turn cutoff can do that. If the echo
+identifies a run that already existed at the boundary, the request is a steer;
+otherwise the boundary becomes the durable cutoff for a new turn. Runless steer
+acknowledgements may infer continuation only when exactly one logical active
+conversation existed before the boundary. Equivalent alias copies and the
+provider-ID fragments of one repairable restart chain count as that one
+conversation. A rejected or timed-out send first
+rehydrates equivalent persisted owners after an eviction, then cancels only its
+own pending boundary. If a resumed provider lifecycle arrives before a
+runless steer acknowledgement, removing the steer boundary triggers the same
+bounded, unambiguous interrupted-run repair. User echoes accept the Dashboard
+idempotency key from either the nested message or the top-level payload. A user echo with one provisional
+active run joins it only when that unfinished run is already retained for the
+same session; stale provider metadata cannot override the request identity.
+Equivalent canonical and short session keys contribute to the same logical
+boundary while retaining their own persisted owners. New-turn settlement stores
+the settled cutoff on every changed owner before flushing every changed row, so
+alias promotion, eviction, and concurrent sends cannot clear or bypass each
+other. An accepted send hydrates every equivalent owner before it settles; if
+hydration fails, its durable pending boundary remains for the matching provider
+user echo to settle later. A partial alias promotion persists and restores the merged
+boundary metadata on both the canonical destination and any surviving source
+run. An id-less settlement selects only the synthetic request captured for that
+boundary and cannot consume a named concurrent request. Capture hydrates every
+persisted equivalent key and writes the
+boundary to every owner with active conversation work; an exact but completed
+replay therefore cannot hide an active alias. If the same request ID is restored
+with different cutoffs, the maximum exact cutoff is authoritative regardless of
+load order.
+Restart hydration unions pending request IDs and keeps the highest settled cutoff
+across equivalent persisted aliases; snapshot load order is never an ordering
+authority. A Dashboard, systemd, or VPS restart therefore cannot change the
+decision. A delayed event on an older run does not move its first sequence past
+this boundary. This keeps pre- and post-restart thinking, later steer messages,
+and tools in one ordered response without merging a genuinely new, stale, or
+concurrent send. The recorded
+disconnect time also protects a long-quiet interrupted run from the normal
+six-hour stale run cleanup while that bounded recovery window is open.
 
 The canonical reducer is ordered and idempotent. Run identifiers and aliases are
 always session-scoped. Snapshot gating applies only to the selected session, so
@@ -297,8 +357,31 @@ follow-up recorded after the run starts cannot become its lower boundary merely
 because it falls inside the timestamp-skew allowance; the allowance is only a
 fallback when no causal or explicitly matched user boundary exists.
 Name-only fallback matching is likewise bounded to the current user turn.
-Transcript order and runtime sequence take precedence over message timestamps
-when a queued user message and compaction final carry inverted wall-clock times.
+Every runtime user, thinking, and tool entry retains its Gateway sequence. During
+reconciliation, projection identifies each run's initiating prompt as its
+lowest-sequence runtime user entry, moves it into the run's first runtime-owned
+row slot, and reorders the remaining runtime-owned slots by sequence. A
+transcript-only user row between that prompt and the run's matched final adopts
+the same run before final reconciliation. This also replaces a stale optimistic
+Dashboard run ID, but never an established provider run ID. Projection then
+inserts those rows by their transcript timestamps among provider-sequenced tool
+and assistant activity; pure thinking and final rows are excluded from that
+merge. Combined thinking/tool provider rows retain their tool position before
+presentation extracts all thinking into exactly one bubble after the last tool
+or steer. This includes a local optimistic steer before its history echo and
+after its provisional Dashboard run has been acknowledged. A completed
+assistant row uses the run's terminal sequence instead of an earlier recovered
+thinking sequence, including providers that combine thinking, tools, and final
+text in one message. The active status row is appended last, and a canonical
+final replaces it as the last row when the run completes. The resulting contract is therefore
+`start -> tools/steers in event order -> one thinking -> active status or final`,
+with identical live and replay projection. Runtime sequence remains authoritative
+where it exists; timestamps only merge transcript-only steers inside an already
+bounded run. Once a completed turn's runtime snapshot expires, its persisted
+prompt and final provide the same bounds and timestamps restore user/tool
+interleaving without changing provider-owned run identities. Transcript position
+still takes precedence when a queued user message and compaction final carry
+inverted wall-clock times.
 Projection indexes exact tool IDs once per pass and caches fallback signatures so
 long runs do not rescan or reserialize the complete transcript for every runtime
 diagnostic. Once a
@@ -324,9 +407,12 @@ Synthetic can place thinking, a tool call, and assistant text inside one
 thinking, tool, and primary assistant events before it reaches the reducer. A
 Synthetic assistant message with `stopReason: "toolUse"` remains nonterminal;
 `stopReason: "stop"` completes the run in both the frontend adapter and backend
-replay bridge. Split id-less thinking blocks receive stable per-message identities
-so separate provider messages cannot concatenate unrelated reasoning. If one
-provider envelope exceeds the adapter event-slot limit, the primary assistant and
+replay bridge. History normalization carries that same explicit stop evidence
+into projection, so an intermediate assistant commentary row cannot terminate a
+completed response or split its thinking group. Split id-less thinking blocks
+receive stable per-message identities so separate provider messages cannot
+concatenate unrelated reasoning. If one provider envelope exceeds the adapter
+event-slot limit, the primary assistant and
 terminal finish events are retained ahead of excess diagnostics; development
 builds warn with envelope identity when that bound discards drafts. Oversized
 terminal replay payloads retain a compact assistant-role/stop marker so refresh
@@ -413,9 +499,29 @@ When changing chat event handling, test these cases:
 - snapshot gating never drops queued events for other sessions;
 - restart and reconnect restore active and latest completed thinking from
   SQLite;
-- a live Gateway restart promotes one interrupted provisional response to its
-  resumed provider run, while a newer send boundary and concurrent runs remain
+- Gateway, Dashboard, systemd, and abrupt VPS recovery keep one logical response
+  while its identity moves from provisional to provider or from one provider ID
+  through several successive provider IDs, even when preamble/tool work arrives
+  before lifecycle metadata; newer send boundaries and concurrent runs remain
   separate;
+- pending send boundaries survive Dashboard/systemd/VPS restart, overlapping
+  requests settle only their own boundary, delayed old events cannot cross the
+  settled new-turn cutoff, and a runless steer can clear only one unambiguous
+  pre-boundary active conversation; failed hydration blocks the send, alias
+  owners are all flushed after settlement, failed requests cancel only their own
+  boundaries, pre-ack provider starts are repaired after steer settlement, and
+  stale provisional IDs cannot claim a new request; exact pending aliases use
+  their maximum cutoff, active alias owners remain protected beside completed
+  exact replay, one alias eviction retains surviving boundary owners, failed
+  sends rehydrate evicted boundaries, top-level user-echo idempotency settles the
+  matching request, accepted sends retain their pending cutoff until equivalent
+  owners hydrate, partial alias promotion retains source-owner boundaries,
+  id-less settlement selects only synthetic requests, and coalescing cannot move
+  a run's durable first sequence;
+- live reduction and full replay both preserve
+  `start -> tool/steer interleaving -> one thinking -> status/final`, including
+  multiple runtime or transcript-only steer messages between tool calls, before
+  and after run completion;
 - main and ops sessions never share runtime replay state;
 - an initial history load follows all pages, while incomplete sequence metadata
   cannot advance an incremental cache watermark;
@@ -442,7 +548,8 @@ When changing chat event handling, test these cases:
 - hidden tool media remains attached to its completed final after compaction;
 - media-only finals keep compacted tools before retained thinking;
 - mixed Synthetic session messages split into tool/thinking/final rows, and only
-  `stopReason: "stop"` completes their replay run;
+  `stopReason: "stop"` completes their replay run; terminal sequence keeps the
+  final after its tools and one grouped thinking bubble;
 - large Synthetic messages retain their primary final and terminal event, compact
   replay keeps the stop marker, id-less thinking stays as separate blocks, and
   bounded draft loss emits development diagnostics;
@@ -484,7 +591,7 @@ When changing chat event handling, test these cases:
 - repeated short final answers in different user turns remain distinct;
 - hidden tool attachments never cross a user or run boundary;
 - socket reconnects, compaction replacement runs, and selected-session changes
-  cannot leak control or stream state between sessions.
+  cannot leak control or stream state between sessions;
 
 ## Local Debug Commands
 

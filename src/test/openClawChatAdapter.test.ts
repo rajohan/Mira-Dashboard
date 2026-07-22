@@ -92,6 +92,50 @@ describe("OpenClaw chat adapter", () => {
         expect(tool[1]?.kind === "tool" && tool[1].toolKey).toBe("tool:call-1");
     });
 
+    it("carries a backend run replacement onto every normalized live event", () => {
+        const adapter = new OpenClawChatAdapter();
+        const raw = envelope(
+            "agent",
+            { data: { delta: "continued" }, stream: "reasoning" },
+            8
+        );
+        const events = adapter.event({
+            ...raw,
+            runtimeRunAliases: ["run-before-restart", "run-before-restart", ""],
+        });
+
+        expect(events).not.toHaveLength(0);
+        expect(
+            events.every((event) => event.runAliases?.[0] === "run-before-restart")
+        ).toBe(true);
+    });
+
+    it("preserves a backend run replacement when the provider event has no visible draft", () => {
+        const adapter = new OpenClawChatAdapter();
+        const events = adapter.event({
+            event: "session.tool",
+            payload: {
+                name: "typing",
+                phase: "result",
+                runId: "run-after-restart",
+                sessionKey: SESSION,
+            },
+            runtimeRecordedAt: Date.now(),
+            runtimeRunAliases: ["run-before-restart"],
+            runtimeSequence: 9,
+            type: "event",
+        });
+
+        expect(events).toEqual([
+            expect.objectContaining({
+                kind: "identity",
+                runAliases: ["run-before-restart"],
+                runId: "run-after-restart",
+                sequence: 144,
+            }),
+        ]);
+    });
+
     it("marks status-only runtime tool results as transcript placeholders", () => {
         const adapter = new OpenClawChatAdapter();
         const events = adapter.event(

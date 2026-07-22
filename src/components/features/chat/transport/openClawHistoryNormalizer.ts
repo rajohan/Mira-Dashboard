@@ -34,6 +34,16 @@ export interface RawOpenClawHistoryMessage {
     MediaTypes?: unknown;
     idempotencyKey?: unknown;
     runId?: unknown;
+    stopReason?: unknown;
+}
+
+function normalizedIsFinal(message: RawOpenClawHistoryMessage): true | undefined {
+    const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
+    return (role === "assistant" || role === "system") &&
+        typeof message.stopReason === "string" &&
+        message.stopReason.toLowerCase() === "stop"
+        ? true
+        : undefined;
 }
 
 function normalizedRunId(message: RawOpenClawHistoryMessage): string | undefined {
@@ -377,6 +387,7 @@ export function normalizeOpenClawHistoryMessage(
         text,
         images,
         attachments,
+        isFinal: normalizedIsFinal(message),
         thinking: extractThinkingBlocks(content),
         toolCalls: extractToolCalls(content),
         toolResult: toolResult(message, content),

@@ -7,6 +7,7 @@ import {
     type OpenClawRuntimeEnvelope,
     type OpenClawRuntimeSnapshot,
 } from "./openClawChatBridge.ts";
+import { MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES } from "./openClawChatRequestBoundaries.ts";
 
 interface SnapshotRow {
     snapshot_json: string;
@@ -138,6 +139,41 @@ function isInterruptedAtByRun(value: unknown): value is Record<string, number> {
     );
 }
 
+function isFirstSequenceByRun(
+    value: unknown,
+    throughSequence: number
+): value is Record<string, number> {
+    const record = asRecord(value);
+    return Boolean(
+        record &&
+        Object.entries(record).every(
+            ([runId, firstSequence]) =>
+                runId.trim().length > 0 &&
+                Number.isSafeInteger(firstSequence) &&
+                (firstSequence as number) >= 0 &&
+                (firstSequence as number) <= throughSequence
+        )
+    );
+}
+
+function isRequestBoundaryRecord(
+    value: unknown,
+    throughSequence: number
+): value is Record<string, number> {
+    const record = asRecord(value);
+    return Boolean(
+        record &&
+        Object.keys(record).length <= MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES &&
+        Object.entries(record).every(
+            ([requestId, boundary]) =>
+                requestId.trim().length > 0 &&
+                Number.isSafeInteger(boundary) &&
+                (boundary as number) >= 0 &&
+                (boundary as number) <= throughSequence
+        )
+    );
+}
+
 function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefined {
     try {
         const value = JSON.parse(serialized) as Record<string, unknown>;
@@ -146,7 +182,11 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             ? value.eventFingerprints.filter(isStoredEventFingerprint)
             : [];
         const throughSequence = value.throughSequence;
+        const acknowledgedRequestIds = value.acknowledgedRequestIds;
+        const firstSequenceByRun = value.firstSequenceByRun;
         const interruptedAtByRun = value.interruptedAtByRun;
+        const pendingRequestBoundaries = value.pendingRequestBoundaries;
+        const requestBoundary = value.requestBoundary;
         if (
             !value ||
             typeof value !== "object" ||
@@ -170,6 +210,56 @@ function parseStoredSnapshot(serialized: string): ParsedStoredSnapshot | undefin
             )
         ) {
             return undefined;
+        }
+        if (
+            acknowledgedRequestIds !== undefined &&
+            (!Array.isArray(acknowledgedRequestIds) ||
+                acknowledgedRequestIds.length > MAX_OPENCLAW_PENDING_REQUEST_BOUNDARIES ||
+                acknowledgedRequestIds.some(
+                    (requestId) =>
+                        typeof requestId !== "string" || requestId.trim().length === 0
+                ))
+        ) {
+            delete value.acknowledgedRequestIds;
+        }
+        if (
+            firstSequenceByRun !== undefined &&
+            !isFirstSequenceByRun(firstSequenceByRun, throughSequence as number)
+        ) {
+            delete value.firstSequenceByRun;
+        }
+        if (
+            pendingRequestBoundaries !== undefined &&
+            !isRequestBoundaryRecord(pendingRequestBoundaries, throughSequence as number)
+        ) {
+            delete value.pendingRequestBoundaries;
+        }
+        if (
+            requestBoundary !== undefined &&
+            (!Number.isSafeInteger(requestBoundary) ||
+                (requestBoundary as number) < 0 ||
+                (requestBoundary as number) > (throughSequence as number))
+        ) {
+            delete value.requestBoundary;
+        }
+        if (Array.isArray(value.acknowledgedRequestIds)) {
+            const validPendingRequestIds = new Set(
+                Object.keys(asRecord(value.pendingRequestBoundaries) || {})
+            );
+            const normalizedAcknowledgedRequestIds = [
+                ...new Set(
+                    value.acknowledgedRequestIds.filter(
+                        (requestId): requestId is string =>
+                            typeof requestId === "string" &&
+                            validPendingRequestIds.has(requestId)
+                    )
+                ),
+            ];
+            if (normalizedAcknowledgedRequestIds.length === 0) {
+                delete value.acknowledgedRequestIds;
+            } else {
+                value.acknowledgedRequestIds = normalizedAcknowledgedRequestIds;
+            }
         }
         const runSignature = Array.isArray(value.runSignature)
             ? value.runSignature.filter(
@@ -256,6 +346,9 @@ function snapshotMetadata(
     events: readonly SerializedSnapshotEvent[]
 ): Record<string, unknown> {
     return {
+        ...(snapshot.acknowledgedRequestIds && {
+            acknowledgedRequestIds: snapshot.acknowledgedRequestIds,
+        }),
         completed: snapshot.completed,
         eventFingerprints: events.map(({ fingerprint, runtimeSequence }) => ({
             fingerprint,
@@ -263,8 +356,17 @@ function snapshotMetadata(
         })),
         eventStorage: EVENT_ROW_STORAGE,
         events: [],
+        ...(snapshot.firstSequenceByRun && {
+            firstSequenceByRun: snapshot.firstSequenceByRun,
+        }),
         ...(snapshot.interruptedAtByRun && {
             interruptedAtByRun: snapshot.interruptedAtByRun,
+        }),
+        ...(snapshot.pendingRequestBoundaries && {
+            pendingRequestBoundaries: snapshot.pendingRequestBoundaries,
+        }),
+        ...(snapshot.requestBoundary !== undefined && {
+            requestBoundary: snapshot.requestBoundary,
         }),
         runSignature,
         throughSequence: snapshot.throughSequence,
@@ -503,12 +605,28 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             );
         }
         return {
+            ...(stored.snapshot.acknowledgedRequestIds && {
+                acknowledgedRequestIds: [...stored.snapshot.acknowledgedRequestIds],
+            }),
             completed: stored.snapshot.completed,
             events: events as OpenClawRuntimeEnvelope[],
+            ...(stored.snapshot.firstSequenceByRun && {
+                firstSequenceByRun: {
+                    ...stored.snapshot.firstSequenceByRun,
+                },
+            }),
             ...(stored.snapshot.interruptedAtByRun && {
                 interruptedAtByRun: {
                     ...stored.snapshot.interruptedAtByRun,
                 },
+            }),
+            ...(stored.snapshot.pendingRequestBoundaries && {
+                pendingRequestBoundaries: {
+                    ...stored.snapshot.pendingRequestBoundaries,
+                },
+            }),
+            ...(stored.snapshot.requestBoundary !== undefined && {
+                requestBoundary: stored.snapshot.requestBoundary,
             }),
             throughSequence: stored.snapshot.throughSequence,
         };

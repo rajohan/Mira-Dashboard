@@ -13,6 +13,7 @@ import {
     OpenClawGatewayClient,
     type OpenClawGatewayClientInstance,
     type OpenClawGatewayClientOptions,
+    type OpenClawGatewayRequestOptions,
 } from "./lib/openclawGatewayClient.ts";
 import { nonEmptyEnvironmentFallback, stringFallback } from "./lib/values.ts";
 
@@ -1014,8 +1015,45 @@ function captureChatSendRequestBoundary(
         return undefined;
     }
     return chatReplayState.bridge.captureRequestBoundary(
-        typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined
+        typeof parameters.sessionKey === "string" ? parameters.sessionKey : undefined,
+        typeof parameters.idempotencyKey === "string"
+            ? parameters.idempotencyKey
+            : undefined
     );
+}
+
+async function requestWithReplayBoundary(
+    client: OpenClawGatewayClientInstance,
+    method: string,
+    parameters: Record<string, unknown>,
+    options?: OpenClawGatewayRequestOptions
+): Promise<unknown> {
+    let requestBoundary: number | undefined;
+    let didCaptureRequestBoundary = false;
+    try {
+        requestBoundary = captureChatSendRequestBoundary(method, parameters);
+        didCaptureRequestBoundary = method === "chat.send";
+        const payload = await client.request(method, parameters, options);
+        const identityEnvelope = chatReplayState.bridge.handleSuccessfulRequest(
+            method,
+            parameters,
+            payload,
+            requestBoundary
+        );
+        if (identityEnvelope) {
+            broadcast(identityEnvelope);
+        }
+        return payload;
+    } catch (error) {
+        if (didCaptureRequestBoundary) {
+            chatReplayState.bridge.handleFailedRequest(
+                method,
+                parameters,
+                requestBoundary
+            );
+        }
+        throw error;
+    }
 }
 
 /** Performs forward request. */
@@ -1040,13 +1078,11 @@ async function forwardRequest(
         pendingRequests.set(id, { clientWs, clientId, method });
 
         try {
-            const requestBoundary = captureChatSendRequestBoundary(method, parameters);
-            let payload = await activeGateway.request(method, parameters, requestOptions);
-            chatReplayState.bridge.handleSuccessfulRequest(
+            let payload = await requestWithReplayBoundary(
+                activeGateway,
                 method,
                 parameters,
-                payload,
-                requestBoundary
+                requestOptions
             );
             if (method === "chat.history") {
                 payload = hydrateOmittedChatHistoryImages(
@@ -1086,13 +1122,11 @@ async function forwardRequest(
     }
 
     try {
-        const requestBoundary = captureChatSendRequestBoundary(method, parameters);
-        const payload = await activeGateway.request(method, parameters, requestOptions);
-        chatReplayState.bridge.handleSuccessfulRequest(
+        await requestWithReplayBoundary(
+            activeGateway,
             method,
             parameters,
-            payload,
-            requestBoundary
+            requestOptions
         );
         if (method.startsWith("sessions.")) {
             await refreshSessionsAfterRequest(activeGateway);
@@ -1286,15 +1320,7 @@ async function sendRequestAsync(
         throw new Error("Gateway not connected");
     }
 
-    const requestBoundary = captureChatSendRequestBoundary(method, parameters);
-    const payload = await gatewayState.client.request(method, parameters);
-    chatReplayState.bridge.handleSuccessfulRequest(
-        method,
-        parameters,
-        payload,
-        requestBoundary
-    );
-    return payload;
+    return requestWithReplayBoundary(gatewayState.client, method, parameters);
 }
 
 /** Performs send session message. */

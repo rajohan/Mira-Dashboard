@@ -177,7 +177,6 @@ export function useChatActions({
         compactingSessionKeysReference.current
             .values()
             .some((candidate) => isSameChatSession(candidate, sessionKey));
-
     const handleSend = async () => {
         if (!selectedSessionKey || !selectedSession) {
             return;

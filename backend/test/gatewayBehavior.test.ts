@@ -172,6 +172,9 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
             return { isOk: true };
         }
         if (method === "chat.send") {
+            if (requestParameters.message === "fail chat") {
+                throw new Error("chat send rejected");
+            }
             return { runId: "acknowledged-run" };
         }
         if (method === "chat.history") {
@@ -373,7 +376,14 @@ describe("gateway behavior", () => {
             .mockImplementation(() => {
                 throw new Error("unexpected replay boundary capture");
             });
-        cleanupCallbacks.push(() => captureBoundary.mockRestore());
+        const failBoundary = jest.spyOn(
+            OpenClawChatBridge.prototype,
+            "handleFailedRequest"
+        );
+        cleanupCallbacks.push(
+            () => failBoundary.mockRestore(),
+            () => captureBoundary.mockRestore()
+        );
 
         gateway.init("request-boundary-token");
         const client = fakeClients.at(-1);
@@ -409,14 +419,60 @@ describe("gateway behavior", () => {
         await waitFor(() => (client?.requests.length ?? 0) > requestCount);
 
         expect(captureBoundary).not.toHaveBeenCalled();
+        const uncapturedParameters = {
+            idempotencyKey: "dashboard-chat-uncaptured-request",
+            message: "capture fails before forwarding",
+            sessionKey: "agent:main:main",
+        };
+        await expect(gateway.request("chat.send", uncapturedParameters)).rejects.toThrow(
+            "unexpected replay boundary capture"
+        );
+        expect(failBoundary).not.toHaveBeenCalled();
+        expect(
+            client?.requests.some(
+                ({ parameters }) =>
+                    parameters.idempotencyKey === uncapturedParameters.idempotencyKey
+            )
+        ).toBe(false);
+        expect(captureBoundary).toHaveBeenCalledTimes(1);
+
         captureBoundary.mockReturnValue(0);
+        const handleSuccessfulRequest = jest
+            .spyOn(OpenClawChatBridge.prototype, "handleSuccessfulRequest")
+            .mockReturnValueOnce({
+                event: "chat.runtimeIdentity",
+                payload: {
+                    runId: "provider-after-restart",
+                    sessionKey: "agent:main:main",
+                },
+                runtimeRecordedAt: Date.now(),
+                runtimeRunAliases: ["provider-before-restart"],
+                runtimeSequence: 0,
+                type: "event",
+            });
+        cleanupCallbacks.push(() => handleSuccessfulRequest.mockRestore());
         await expect(
             gateway.request("chat.send", {
                 message: "hello",
                 sessionKey: "agent:main:main",
             })
         ).resolves.toBeDefined();
-        expect(captureBoundary).toHaveBeenCalledTimes(1);
+        expect(captureBoundary).toHaveBeenCalledTimes(2);
+        expect(
+            socket.sent.some((raw) =>
+                raw.includes('"runtimeRunAliases":["provider-before-restart"]')
+            )
+        ).toBe(true);
+        const failedParameters = {
+            idempotencyKey: "dashboard-chat-failed-request",
+            message: "fail chat",
+            sessionKey: "agent:main:main",
+        };
+        await expect(gateway.request("chat.send", failedParameters)).rejects.toThrow(
+            "chat send rejected"
+        );
+        expect(failBoundary).toHaveBeenCalledWith("chat.send", failedParameters, 0);
+        expect(captureBoundary).toHaveBeenCalledTimes(3);
         socket.close();
     });
 

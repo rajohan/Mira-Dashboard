@@ -366,6 +366,8 @@ export interface ChatHistoryMessage {
     isFinal?: boolean;
     /** Stable identity for one transient runtime row inside a run. */
     runtimeKey?: string;
+    /** Canonical Gateway event order used only while reconciling runtime rows. */
+    runtimeSequence?: number;
 }
 
 /** Returns every image carried directly or by a nested tool result. */

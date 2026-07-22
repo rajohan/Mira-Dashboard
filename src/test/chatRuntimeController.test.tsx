@@ -148,6 +148,41 @@ describe("chat runtime controller", () => {
         ).toBe("Hello");
     });
 
+    it("applies a uniquely sequenced identity repair queued during a snapshot", async () => {
+        const snapshot = deferred<ChatRuntimeSnapshot>();
+        const fake = fakeTransport(snapshot.promise);
+        const { result } = renderHook(() =>
+            useChatRuntime({ selectedSessionKey: SELECTED, transport: fake.transport })
+        );
+        const interrupted = {
+            ...assistant(SELECTED, 32, "before restart", "replace"),
+            runId: "run-before-restart",
+        };
+
+        act(() =>
+            fake.emit({
+                kind: "identity",
+                runAliases: ["run-before-restart"],
+                runId: "run-after-restart",
+                sequence: 48,
+                sessionKey: SELECTED,
+                timestamp: "2026-07-16T12:00:01.000Z",
+            })
+        );
+        await act(async () => {
+            snapshot.resolve({
+                completed: false,
+                events: [interrupted],
+                throughSequence: 32,
+            });
+            await snapshot.promise;
+        });
+
+        const runs = result.current.state.sessions[SELECTED]?.runs || {};
+        expect(Object.keys(runs)).toEqual(["run-after-restart"]);
+        expect(runs["run-after-restart"]?.assistant?.text).toBe("before restart");
+    });
+
     it("preserves queued live events absent from the snapshot replay", async () => {
         const snapshot = deferred<ChatRuntimeSnapshot>();
         const fake = fakeTransport(snapshot.promise);

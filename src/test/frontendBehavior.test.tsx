@@ -4349,6 +4349,20 @@ describe("Mira Dashboard frontend behavior", () => {
             "result.png",
             "note.txt",
         ]);
+        expect(
+            normalizeOpenClawHistoryMessage({
+                content: "still working",
+                role: "assistant",
+                stopReason: "toolUse",
+            }).isFinal
+        ).toBeUndefined();
+        expect(
+            normalizeOpenClawHistoryMessage({
+                content: "done",
+                role: "assistant",
+                stopReason: "stop",
+            }).isFinal
+        ).toBe(true);
 
         const normalizedMediaReferences = normalizeOpenClawHistoryMessage({
             MediaPaths: ["/tmp/data.csv", "/tmp/readme.md", "/tmp/logo.svg"],
