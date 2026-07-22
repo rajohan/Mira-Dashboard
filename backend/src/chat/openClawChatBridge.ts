@@ -18,10 +18,12 @@ export interface OpenClawRuntimeEnvelope {
     event: unknown;
     payload: unknown;
     runtimeRecordedAt: number;
+    runtimeRunAliases?: string[];
     runtimeSequence: number;
 }
 
 export interface OpenClawRuntimeSnapshot {
+    acknowledgedRequestIds?: string[];
     completed: boolean;
     events: OpenClawRuntimeEnvelope[];
     firstSequenceByRun?: Record<string, number>;
@@ -65,7 +67,7 @@ interface RetainedRun {
 }
 
 interface RepairedInterruptedRun {
-    interruptedRunId: string;
+    interruptedRunIds: string[];
     providerRunId: string;
 }
 
@@ -839,35 +841,79 @@ function isPromotableRunlessUserLedRun(
 function isPromotableInterruptedConversationRun(
     run: RetainedRun,
     envelope: OpenClawRuntimeEnvelope,
-    runs: ReadonlyMap<string, RetainedRun>,
-    requestBoundary?: number,
-    providerRun?: RetainedRun
+    requestBoundary?: number
 ): boolean {
     const providerRunId = stringField(runtimePayloadView(envelope.payload), "runId");
     const resumeDelay = envelope.runtimeRecordedAt - (run.interruptedAt ?? run.updatedAt);
-    if (
-        !providerRunId ||
-        resumeDelay < -5000 ||
-        resumeDelay > INTERRUPTED_RUN_PROMOTION_WINDOW_MS ||
-        run.completed ||
-        !run.interruptionEligible ||
-        isProvisionalRunId(providerRunId) ||
-        !isConversationContinuationEvent(envelope.event, envelope.payload) ||
-        envelope.runtimeSequence <= lastSequence(run) ||
-        (requestBoundary !== undefined && firstSequence(run) <= requestBoundary)
-    ) {
-        return false;
-    }
+    return (
+        providerRunId !== undefined &&
+        providerRunId.length > 0 &&
+        resumeDelay >= -5000 &&
+        resumeDelay <= INTERRUPTED_RUN_PROMOTION_WINDOW_MS &&
+        !run.completed &&
+        run.interruptionEligible &&
+        !isProvisionalRunId(providerRunId) &&
+        isConversationContinuationEvent(envelope.event, envelope.payload) &&
+        envelope.runtimeSequence > lastSequence(run) &&
+        !(
+            requestBoundary !== undefined &&
+            requestBoundary < envelope.runtimeSequence &&
+            firstSequence(run) <= requestBoundary
+        )
+    );
+}
 
-    return runs
+function promotableInterruptedConversationRuns(
+    envelope: OpenClawRuntimeEnvelope,
+    runs: ReadonlyMap<string, RetainedRun>,
+    requestBoundary?: number,
+    providerRun?: RetainedRun
+): RetainedRun[] {
+    const candidates = runs
+        .values()
+        .filter(
+            (run) =>
+                run !== providerRun &&
+                isPromotableInterruptedConversationRun(run, envelope, requestBoundary)
+        )
+        .toArray();
+    if (candidates.length === 0) {
+        return [];
+    }
+    if (
+        candidates.length > 1 &&
+        candidates.some((run) => run.interruptedAt === undefined)
+    ) {
+        return [];
+    }
+    const candidateSet = new Set(candidates);
+    const coversEveryActiveConversation = runs
         .values()
         .every(
-            (candidate) =>
-                candidate === run ||
-                candidate === providerRun ||
-                candidate.completed ||
-                isCompactionOnlyRun(candidate)
+            (run) =>
+                run === providerRun ||
+                run.completed ||
+                isCompactionOnlyRun(run) ||
+                candidateSet.has(run)
         );
+    return coversEveryActiveConversation
+        ? candidates.toSorted(
+              (left, right) =>
+                  firstSequence(left) - firstSequence(right) ||
+                  left.runId.localeCompare(right.runId)
+          )
+        : [];
+}
+
+function isActiveConversationAtBoundary(
+    run: RetainedRun,
+    requestBoundary: number
+): boolean {
+    return (
+        !run.completed &&
+        !isCompactionOnlyRun(run) &&
+        firstSequence(run) <= requestBoundary
+    );
 }
 
 function isMatchingSessionEcho(
@@ -1215,6 +1261,15 @@ export class OpenClawChatBridge {
             hydratedRun.interruptionEligible = true;
             hydratedRun.interruptedAt = interruptedAt;
         }
+        const repairedRunIdentity = hydratedRuns
+            ? this.#repairInterruptedRunSplit(storedStorageKey, hydratedRuns)
+            : undefined;
+        if (repairedRunIdentity) {
+            for (const interruptedRunId of repairedRunIdentity.interruptedRunIds) {
+                this.#forgetRunSession(interruptedRunId, storedStorageKey);
+            }
+            this.#rememberRunSession(repairedRunIdentity.providerRunId, storedStorageKey);
+        }
         const prunedStaleRun = this.#pruneStaleActiveRuns(storedStorageKey);
         if (prunedStaleRun && !this.#runsBySession.has(storedStorageKey)) {
             const didPersist = this.#flushSessionPersistence(storedStorageKey);
@@ -1243,7 +1298,10 @@ export class OpenClawChatBridge {
             return true;
         }
         this.#enforceSessionLimit(storedStorageKey);
-        if (prunedStaleRun && !this.#flushSessionPersistence(storedStorageKey)) {
+        if (
+            (prunedStaleRun || repairedRunIdentity) &&
+            !this.#flushSessionPersistence(storedStorageKey)
+        ) {
             this.#hydratedSessionLookups.delete(storageSessionKey);
             return false;
         }
@@ -1764,10 +1822,9 @@ export class OpenClawChatBridge {
             }
         }
         if (repairedRunIdentity) {
-            this.#forgetRunSession(
-                repairedRunIdentity.interruptedRunId,
-                canonicalStorageKey
-            );
+            for (const interruptedRunId of repairedRunIdentity.interruptedRunIds) {
+                this.#forgetRunSession(interruptedRunId, canonicalStorageKey);
+            }
             this.#rememberRunSession(
                 repairedRunIdentity.providerRunId,
                 canonicalStorageKey
@@ -2129,15 +2186,25 @@ export class OpenClawChatBridge {
         if (!candidate) {
             return undefined;
         }
-        const repairedRun = this.#mergeRunEntry(
+        let repairedRun = runs.get(candidate.providerRunId);
+        if (!repairedRun) {
+            return undefined;
+        }
+        this.#clearSettledRequestBoundariesWithinRun(
             sessionKey,
-            runs,
-            candidate.interruptedRunId,
-            candidate.providerRunId
+            firstSequence(repairedRun)
         );
+        for (const interruptedRunId of candidate.interruptedRunIds) {
+            repairedRun = this.#mergeRunEntry(
+                sessionKey,
+                runs,
+                interruptedRunId,
+                candidate.providerRunId
+            );
+        }
         return repairedRun
             ? {
-                  interruptedRunId: candidate.interruptedRunId,
+                  interruptedRunIds: candidate.interruptedRunIds,
                   providerRunId: repairedRun.runId,
               }
             : undefined;
@@ -2147,11 +2214,8 @@ export class OpenClawChatBridge {
         sessionKey: string,
         runs: ReadonlyMap<string, RetainedRun>
     ): RepairedInterruptedRun | undefined {
-        const candidates: Array<{
-            interruptedRunId: string;
-            providerRunId: string;
-        }> = [];
-        const requestBoundary = this.#requestBoundaries.latest(sessionKey);
+        const candidates: RepairedInterruptedRun[] = [];
+        const requestBoundary = this.#requestBoundaries.blocking(sessionKey);
         for (const providerRun of runs.values()) {
             if (isProvisionalRunId(providerRun.runId)) {
                 continue;
@@ -2169,22 +2233,17 @@ export class OpenClawChatBridge {
             if (!continuationEnvelope) {
                 continue;
             }
-            for (const interruptedRun of runs.values()) {
-                if (
-                    interruptedRun !== providerRun &&
-                    isPromotableInterruptedConversationRun(
-                        interruptedRun,
-                        continuationEnvelope,
-                        runs,
-                        requestBoundary,
-                        providerRun
-                    )
-                ) {
-                    candidates.push({
-                        interruptedRunId: interruptedRun.runId,
-                        providerRunId: providerRun.runId,
-                    });
-                }
+            const interruptedRuns = promotableInterruptedConversationRuns(
+                continuationEnvelope,
+                runs,
+                requestBoundary,
+                providerRun
+            );
+            if (interruptedRuns.length > 0) {
+                candidates.push({
+                    interruptedRunIds: interruptedRuns.map((run) => run.runId),
+                    providerRunId: providerRun.runId,
+                });
             }
         }
         if (candidates.length !== 1) {
@@ -2212,13 +2271,39 @@ export class OpenClawChatBridge {
         if (candidates.length !== 1) {
             return undefined;
         }
-        const { candidate, sessionKey: candidateSessionKey } = candidates[0]!;
-        this.#promoteProvisionalRun(
-            candidateSessionKey,
-            candidate.providerRunId,
-            candidate.interruptedRunId
-        );
-        return candidate;
+        const { sessionKey: candidateSessionKey } = candidates[0]!;
+        const runs = this.#runsBySession.get(candidateSessionKey);
+        if (!runs) {
+            return undefined;
+        }
+        const repaired = this.#repairInterruptedRunSplit(candidateSessionKey, runs);
+        if (!repaired) {
+            return undefined;
+        }
+        for (const interruptedRunId of repaired.interruptedRunIds) {
+            this.#forgetRunSession(interruptedRunId, candidateSessionKey);
+        }
+        this.#rememberRunSession(repaired.providerRunId, candidateSessionKey);
+        this.#enforceReplayMemoryLimit(candidateSessionKey);
+        this.#flushSessionPersistence(candidateSessionKey);
+        return repaired;
+    }
+
+    #runtimeIdentityEnvelope(
+        sessionKey: string,
+        repaired: RepairedInterruptedRun
+    ): OpenClawRuntimeEnvelope {
+        return {
+            event: "chat.runtimeIdentity",
+            payload: {
+                runId: repaired.providerRunId,
+                sessionKey,
+            },
+            runtimeRecordedAt: Date.now(),
+            runtimeRunAliases: repaired.interruptedRunIds,
+            runtimeSequence: this.#sequence,
+            type: "event",
+        };
     }
 
     #promoteProvisionalRun(
@@ -2295,19 +2380,19 @@ export class OpenClawChatBridge {
         this.#flushSessionPersistence(storageSessionKey);
     }
 
-    #retain(envelope: OpenClawRuntimeEnvelope, shouldPersist = true): void {
+    #retain(envelope: OpenClawRuntimeEnvelope, shouldPersist = true): string[] {
         if (typeof envelope.event !== "string" || !RETAINED_EVENTS.has(envelope.event)) {
-            return;
+            return [];
         }
 
         const payload = asRecord(envelope.payload);
         const payloadView = runtimePayloadView(payload);
         if (!payload || !payloadView) {
-            return;
+            return [];
         }
         const sessionKey = stringField(payloadView, "sessionKey");
         if (!sessionKey) {
-            return;
+            return [];
         }
         const storageSessionKey = normalizedSessionKey(sessionKey);
 
@@ -2322,7 +2407,7 @@ export class OpenClawChatBridge {
             this.#rememberRunSession(explicitRunId, storageSessionKey);
         }
         if (!shouldRetainRuntimeEvent(envelope.event, payloadView)) {
-            return;
+            return [];
         }
         const serializedBytes = Buffer.byteLength(JSON.stringify(envelope));
         const retainedEnvelope =
@@ -2339,7 +2424,7 @@ export class OpenClawChatBridge {
                     }
                   : undefined;
         if (!retainedEnvelope) {
-            return;
+            return [];
         }
 
         const retainedBytes =
@@ -2347,7 +2432,7 @@ export class OpenClawChatBridge {
                 ? serializedBytes
                 : Buffer.byteLength(JSON.stringify(retainedEnvelope));
         if (retainedBytes > MAX_BYTES_PER_EVENT) {
-            return;
+            return [];
         }
 
         if (shouldPersist) {
@@ -2355,30 +2440,48 @@ export class OpenClawChatBridge {
         }
         const runs =
             this.#runsBySession.get(storageSessionKey) || new Map<string, RetainedRun>();
+        let runtimeRunAliases: string[] = [];
         if (explicitRunId && !runs.has(explicitRunId)) {
-            const pendingUserRuns = runs
-                .values()
-                .filter(
-                    (run) =>
-                        isPromotableRunlessUserLedRun(run, retainedEnvelope, runs) ||
-                        isPromotableInterruptedConversationRun(
-                            run,
-                            retainedEnvelope,
-                            runs,
-                            this.#requestBoundaries.latest(storageSessionKey)
-                        )
-                )
-                .toArray();
+            const interruptedRuns = promotableInterruptedConversationRuns(
+                retainedEnvelope,
+                runs,
+                this.#requestBoundaries.blocking(storageSessionKey)
+            );
+            runtimeRunAliases = interruptedRuns.map((run) => run.runId);
+            if (interruptedRuns.length > 0) {
+                this.#clearSettledRequestBoundariesWithinRun(
+                    storageSessionKey,
+                    Math.min(...interruptedRuns.map((run) => firstSequence(run)))
+                );
+            }
+            let promotedRun: RetainedRun | undefined;
+            for (const interruptedRun of interruptedRuns) {
+                promotedRun = this.#promoteRunEntry(
+                    storageSessionKey,
+                    runs,
+                    interruptedRun.runId,
+                    explicitRunId
+                );
+            }
+            const pendingUserRuns =
+                interruptedRuns.length > 0
+                    ? []
+                    : runs
+                          .values()
+                          .filter((run) =>
+                              isPromotableRunlessUserLedRun(run, retainedEnvelope, runs)
+                          )
+                          .toArray();
             if (pendingUserRuns.length === 1) {
-                const promotedRun = this.#promoteRunEntry(
+                promotedRun = this.#promoteRunEntry(
                     storageSessionKey,
                     runs,
                     pendingUserRuns[0]!.runId,
                     explicitRunId
                 );
-                if (promotedRun && !shouldPersist) {
-                    this.#queuePersistence(storageSessionKey);
-                }
+            }
+            if (promotedRun && !shouldPersist) {
+                this.#queuePersistence(storageSessionKey);
             }
         }
         const activeRuns = runs
@@ -2431,7 +2534,7 @@ export class OpenClawChatBridge {
             latestMeaningfulCompletion &&
             !hasNewerActiveRunlessWork
         ) {
-            return;
+            return [];
         }
         const metadataCompletionRun = isMetadataOnlyCompletion
             ? completedRuns.find((run) => isMetadataOnlyRunlessCompletion(run))
@@ -2550,6 +2653,7 @@ export class OpenClawChatBridge {
                 this.#queuePersistence(storageSessionKey);
             }
         }
+        return runtimeRunAliases;
     }
 
     #dropMemoryState(): void {
@@ -2580,6 +2684,19 @@ export class OpenClawChatBridge {
         }
     }
 
+    #clearSettledRequestBoundariesWithinRun(
+        sessionKey: string,
+        firstRunSequence: number
+    ): void {
+        const changedSessionKeys = this.#requestBoundaries.clearSettledWithinRun(
+            sessionKey,
+            firstRunSequence
+        );
+        for (const changedSessionKey of changedSessionKeys) {
+            this.#queuePersistence(changedSessionKey);
+        }
+    }
+
     #requestContinuesExistingRun(
         sessionKey: string,
         runId: string | undefined,
@@ -2588,7 +2705,7 @@ export class OpenClawChatBridge {
         if (requestBoundary === undefined) {
             return false;
         }
-        const activeCandidates: RetainedRun[] = [];
+        const activeCandidates = new Map<string, RetainedRun>();
         for (const [candidateSessionKey, runs] of this.#runsBySession) {
             if (!isSameSessionKey(candidateSessionKey, sessionKey)) {
                 continue;
@@ -2596,22 +2713,40 @@ export class OpenClawChatBridge {
             if (runId) {
                 const run = runs.get(runId);
                 if (run) {
-                    return firstSequence(run) <= requestBoundary;
+                    const isContinuation = firstSequence(run) <= requestBoundary;
+                    if (isContinuation) {
+                        this.#clearSettledRequestBoundariesWithinRun(
+                            sessionKey,
+                            firstSequence(run)
+                        );
+                    }
+                    return isContinuation;
                 }
                 continue;
             }
-            activeCandidates.push(
-                ...runs
-                    .values()
-                    .filter(
-                        (run) =>
-                            !run.completed &&
-                            !isCompactionOnlyRun(run) &&
-                            firstSequence(run) <= requestBoundary
-                    )
+            const matchingRuns = runs
+                .values()
+                .filter((run) => isActiveConversationAtBoundary(run, requestBoundary));
+            for (const run of matchingRuns) {
+                const existing = activeCandidates.get(run.runId);
+                if (!existing || lastSequence(run) > lastSequence(existing)) {
+                    activeCandidates.set(run.runId, run);
+                }
+            }
+        }
+        if (runId || activeCandidates.size === 0) {
+            return false;
+        }
+        const isContinuation =
+            activeCandidates.size === 1 ||
+            Boolean(this.#interruptedRunSplitCandidate(sessionKey, activeCandidates));
+        if (isContinuation) {
+            this.#clearSettledRequestBoundariesWithinRun(
+                sessionKey,
+                Math.min(...activeCandidates.values().map((run) => firstSequence(run)))
             );
         }
-        return !runId && activeCandidates.length === 1;
+        return isContinuation;
     }
 
     /** Flushes all coalesced replay writes at lifecycle boundaries. */
@@ -2826,7 +2961,7 @@ export class OpenClawChatBridge {
         parameters: Record<string, unknown>,
         payload: unknown,
         requestBoundary?: number
-    ): void {
+    ): OpenClawRuntimeEnvelope | undefined {
         if (method === "chat.abort") {
             const sessionKey = stringField(parameters, "sessionKey");
             if (sessionKey) {
@@ -2854,12 +2989,49 @@ export class OpenClawChatBridge {
         const runId = stringField(asRecord(payload), "runId");
         const provisionalRunId = stringField(parameters, "idempotencyKey");
         if (sessionKey) {
-            this.#ensureSessionLoaded(sessionKey);
+            if (!this.#ensureEquivalentSessionsLoaded(sessionKey)) {
+                // The provider has already accepted the send. Keep its durable
+                // pending boundary intact until a later matching user echo can
+                // hydrate and settle it; settling empty memory would strand a
+                // stale cutoff in SQLite after the next restart.
+                return;
+            }
             const continuesExistingRun = this.#requestContinuesExistingRun(
                 sessionKey,
                 runId,
                 requestBoundary
             );
+            const pendingRequestBoundary = this.#requestBoundaries.pending(
+                sessionKey,
+                provisionalRunId,
+                requestBoundary
+            );
+            if (
+                !continuesExistingRun &&
+                pendingRequestBoundary !== undefined &&
+                (!runId || isProvisionalRunId(runId))
+            ) {
+                // A successful chat.send acknowledgement means that OpenClaw
+                // accepted the request, not that its user event has entered the
+                // transcript. During restart recovery it may remain queued while
+                // the interrupted response resumes under another provider run.
+                // Keep the boundary pending until that user echo establishes its
+                // real position instead of turning the ACK into a false run split.
+                const changedSessionKeys = this.#requestBoundaries.acknowledge(
+                    sessionKey,
+                    provisionalRunId,
+                    requestBoundary
+                );
+                for (const changedSessionKey of changedSessionKeys) {
+                    if (this.#runsBySession.has(changedSessionKey)) {
+                        this.#flushSessionPersistence(changedSessionKey);
+                    }
+                }
+                const repaired = this.#repairInterruptedRunForSession(sessionKey);
+                return repaired
+                    ? this.#runtimeIdentityEnvelope(sessionKey, repaired)
+                    : undefined;
+            }
             let acknowledgedRunId =
                 runId || (continuesExistingRun ? undefined : provisionalRunId);
             if (acknowledgedRunId) {
@@ -2876,15 +3048,20 @@ export class OpenClawChatBridge {
                 requestBoundary,
                 continuesExistingRun
             );
+            let repaired: RepairedInterruptedRun | undefined;
             if (!acknowledgedRunId && continuesExistingRun) {
-                acknowledgedRunId =
-                    this.#repairInterruptedRunForSession(sessionKey)?.providerRunId;
+                repaired = this.#repairInterruptedRunForSession(sessionKey);
+                acknowledgedRunId = repaired?.providerRunId;
             }
             this.#clearCompletedRuns(sessionKey, acknowledgedRunId);
             if (acknowledgedRunId) {
                 this.#rememberRunSession(acknowledgedRunId, sessionKey);
             }
+            return repaired
+                ? this.#runtimeIdentityEnvelope(sessionKey, repaired)
+                : undefined;
         }
+        return undefined;
     }
 
     /** Removes a request boundary when the Gateway rejects or times out a send. */
@@ -2956,8 +3133,10 @@ export class OpenClawChatBridge {
                 );
             }
         }
-        this.#retain(envelope);
-        return envelope;
+        const runtimeRunAliases = this.#retain(envelope);
+        return runtimeRunAliases.length > 0
+            ? { ...envelope, runtimeRunAliases }
+            : envelope;
     }
 
     /** Returns active runs or the latest completed run for one session. */

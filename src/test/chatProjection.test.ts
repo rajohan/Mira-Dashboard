@@ -3437,6 +3437,140 @@ describe("chat projection", () => {
         ]);
     });
 
+    it("keeps Synthetic session tools before a mixed thinking final", () => {
+        const runId = "synthetic-heartbeat";
+        const history: ChatHistoryMessage[] = [
+            {
+                content: [{ text: "first thought", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ id: "thought-1", text: "first thought" }],
+                toolCalls: [
+                    {
+                        id: "call-1",
+                        name: "first-tool",
+                        toolResult: {
+                            content: "first result",
+                            id: "call-1",
+                            name: "first-tool",
+                        },
+                    },
+                ],
+            },
+            {
+                content: [{ text: "second thought", type: "thinking" }],
+                role: "assistant",
+                text: "",
+                thinking: [{ id: "thought-2", text: "second thought" }],
+                toolCalls: [
+                    {
+                        id: "call-2",
+                        name: "second-tool",
+                        toolResult: {
+                            content: "second result",
+                            id: "call-2",
+                            name: "second-tool",
+                        },
+                    },
+                ],
+            },
+            {
+                content: [
+                    { text: "final thought", type: "thinking" },
+                    { text: "HEARTBEAT_OK", type: "text" },
+                ],
+                role: "assistant",
+                text: "HEARTBEAT_OK",
+                thinking: [{ id: "thought-3", text: "final thought" }],
+            },
+        ];
+        const runtime = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "first thought", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-1", text: "first thought" }],
+                },
+                runId,
+            }),
+            event(17, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-1", name: "first-tool" }],
+                },
+                runId,
+                toolKey: "tool:call-1",
+            }),
+            event(32, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "second thought", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-2", text: "second thought" }],
+                },
+                runId,
+            }),
+            event(33, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "call-2", name: "second-tool" }],
+                },
+                runId,
+                toolKey: "tool:call-2",
+            }),
+            event(48, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "final thought", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "thought-3", text: "final thought" }],
+                },
+                runId,
+            }),
+            event(49, {
+                kind: "assistant",
+                message: message("assistant", "HEARTBEAT_OK", runId),
+                mode: "replace",
+                runId,
+                source: "session",
+            }),
+            event(50, {
+                kind: "finish",
+                outcome: "completed",
+                runId,
+            }),
+        ]);
+        const projection = projectChat(
+            history,
+            runtime,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        );
+
+        expect(
+            projection.rows.map(
+                (row) =>
+                    row.message.toolCalls?.[0]?.name ||
+                    (row.message.thinking?.length ? "thinking" : row.message.text)
+            )
+        ).toEqual(["first-tool", "second-tool", "thinking", "HEARTBEAT_OK"]);
+        expect(
+            projection.rows.filter((row) => row.message.thinking?.length)
+        ).toHaveLength(1);
+    });
+
     it("keeps unfinished unscoped thinking inside its response segment", () => {
         const visible = presentChatMessages(
             [
@@ -3586,6 +3720,103 @@ describe("chat projection", () => {
         expect(labels(completedRuntime)).toEqual([
             ...expectedActive.slice(0, -1),
             "done",
+        ]);
+    });
+
+    it("replaces a live restart run before projecting steers and thinking", () => {
+        const beforeRestart = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "user",
+                message: message("user", "question", "run-before-restart"),
+                runId: "run-before-restart",
+            }),
+            event(32, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "tool-before", name: "first-tool" }],
+                },
+                runId: "run-before-restart",
+                toolKey: "tool:tool-before",
+            }),
+            event(48, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "before", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "before", text: "before" }],
+                },
+                runId: "run-before-restart",
+            }),
+        ]);
+        const liveAfterRestart = reduceChatRuntime(beforeRestart, [
+            event(64, {
+                kind: "user",
+                message: message("user", "steer", "run-after-restart"),
+                runAliases: ["run-before-restart"],
+                runId: "run-after-restart",
+            }),
+            event(80, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "tool-after", name: "second-tool" }],
+                },
+                runId: "run-after-restart",
+                toolKey: "tool:tool-after",
+            }),
+            event(96, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "after", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "after", text: "after" }],
+                },
+                runId: "run-after-restart",
+            }),
+            event(112, {
+                kind: "status",
+                runId: "run-after-restart",
+                text: "Working",
+            }),
+        ]);
+        const rows = projectChat(
+            [],
+            liveAfterRestart,
+            SESSION,
+            createChatVisibility(true, true),
+            true,
+            new Set()
+        ).rows;
+        const labels = rows.map((row) =>
+            row.kind === "typing"
+                ? `status:${row.message.text}`
+                : row.message.toolCalls?.[0]?.name ||
+                  (row.message.thinking?.length ? "thinking" : row.message.text)
+        );
+
+        expect(Object.keys(liveAfterRestart.sessions[SESSION]?.runs || {})).toEqual([
+            "run-after-restart",
+        ]);
+        expect(labels).toEqual([
+            "question",
+            "first-tool",
+            "steer",
+            "second-tool",
+            "thinking",
+            "status:Working",
+        ]);
+        const thinkingRows = rows.filter((row) => row.message.thinking?.length);
+        expect(thinkingRows).toHaveLength(1);
+        expect(thinkingRows[0]?.message.thinking?.map((block) => block.text)).toEqual([
+            "before",
+            "after",
         ]);
     });
 

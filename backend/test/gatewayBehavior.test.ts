@@ -420,6 +420,20 @@ describe("gateway behavior", () => {
 
         expect(captureBoundary).not.toHaveBeenCalled();
         captureBoundary.mockReturnValue(0);
+        const handleSuccessfulRequest = jest
+            .spyOn(OpenClawChatBridge.prototype, "handleSuccessfulRequest")
+            .mockReturnValueOnce({
+                event: "chat.runtimeIdentity",
+                payload: {
+                    runId: "provider-after-restart",
+                    sessionKey: "agent:main:main",
+                },
+                runtimeRecordedAt: Date.now(),
+                runtimeRunAliases: ["provider-before-restart"],
+                runtimeSequence: 0,
+                type: "event",
+            });
+        cleanupCallbacks.push(() => handleSuccessfulRequest.mockRestore());
         await expect(
             gateway.request("chat.send", {
                 message: "hello",
@@ -427,6 +441,11 @@ describe("gateway behavior", () => {
             })
         ).resolves.toBeDefined();
         expect(captureBoundary).toHaveBeenCalledTimes(1);
+        expect(
+            socket.sent.some((raw) =>
+                raw.includes('"runtimeRunAliases":["provider-before-restart"]')
+            )
+        ).toBe(true);
         const failedParameters = {
             idempotencyKey: "dashboard-chat-failed-request",
             message: "fail chat",

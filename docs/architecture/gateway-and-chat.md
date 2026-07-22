@@ -281,22 +281,33 @@ replay cache.
 
 A Gateway transport disconnect marks every unfinished conversation run as
 eligible for interrupted-run recovery, including a run that already has a
-provider ID after an earlier reconnect. If the Gateway resumes the same response
-under a fresh provider run ID, the bridge rewrites the interrupted replay to that
-ID before retaining the new work. Recovery does not require a lifecycle-start:
+provider ID after an earlier reconnect. If repeated restarts split one response
+across several provider run IDs, the bridge repairs the complete unambiguous
+restart chain into the newest provider run instead of retaining one fragment per
+restart. Recovery does not require a lifecycle-start:
 the first non-user, non-compaction provider event can establish the continuation,
 which covers Codex preamble and tool events emitted first after startup. The
-promotion is allowed only for one unambiguous active conversation, inside the
-bounded restart window, and only when no newer `chat.send` request boundary
-exists. Each outgoing request records
+live envelope carries every replaced run ID. If that provider event has no
+visible chat draft, the frontend adapter emits an internal identity event so the
+live reducer still performs the replacement; the control event never projects a
+row. This keeps live state identical to the already-repaired persisted replay.
+Promotion is allowed only for one unambiguous logical active conversation,
+inside the bounded restart window, and only when no newer `chat.send` request
+boundary exists. Each outgoing request records
 its own boundary under the Dashboard idempotency key and flushes it to SQLite
 before forwarding the request; if persisted replay cannot be hydrated, the send
 fails instead of crossing an unknown boundary. A matching acknowledgement or user
-`session.message` echo removes only that request's pending boundary. If it
+`session.message` echo removes only that request's pending boundary. A
+`chat.send` acknowledgement carrying only the Dashboard idempotency key proves
+acceptance, not transcript placement, so the boundary remains pending until the
+user echo arrives. Pending boundaries do not split interrupted-run recovery;
+only a settled new-turn cutoff can do that. If the echo
 identifies a run that already existed at the boundary, the request is a steer;
 otherwise the boundary becomes the durable cutoff for a new turn. Runless steer
-acknowledgements may infer continuation only when exactly one active
-conversation existed before the boundary. A rejected or timed-out send first
+acknowledgements may infer continuation only when exactly one logical active
+conversation existed before the boundary. Equivalent alias copies and the
+provider-ID fragments of one repairable restart chain count as that one
+conversation. A rejected or timed-out send first
 rehydrates equivalent persisted owners after an eviction, then cancels only its
 own pending boundary. If a resumed provider lifecycle arrives before a
 runless steer acknowledgement, removing the steer boundary triggers the same
@@ -305,9 +316,12 @@ idempotency key from either the nested message or the top-level payload. A user 
 active run joins it only when that unfinished run is already retained for the
 same session; stale provider metadata cannot override the request identity.
 Equivalent canonical and short session keys contribute to the same logical
-boundary while retaining their own persisted owners until settlement flushes
-every changed row, so alias promotion and concurrent sends cannot clear or
-bypass each other. A partial alias promotion persists and restores the merged
+boundary while retaining their own persisted owners. New-turn settlement stores
+the settled cutoff on every changed owner before flushing every changed row, so
+alias promotion, eviction, and concurrent sends cannot clear or bypass each
+other. An accepted send hydrates every equivalent owner before it settles; if
+hydration fails, its durable pending boundary remains for the matching provider
+user echo to settle later. A partial alias promotion persists and restores the merged
 boundary metadata on both the canonical destination and any surviving source
 run. An id-less settlement selects only the synthetic request captured for that
 boundary and cannot consume a named concurrent request. Capture hydrates every
@@ -344,9 +358,11 @@ reconciliation, projection identifies each run's initiating prompt as its
 lowest-sequence runtime user entry, moves it into the run's first runtime-owned
 row slot, and reorders the remaining runtime-owned slots by sequence; canonical
 transcript-only rows remain anchored. Presentation then collapses all thinking
-for the run into exactly one bubble after the last tool or steer. The active status row is
-appended last, and a canonical final replaces it as the last row when the run
-completes. The resulting contract is therefore
+for the run into exactly one bubble after the last tool or steer. A completed
+assistant row uses the run's terminal sequence instead of an earlier recovered
+thinking sequence, including providers that combine thinking, tools, and final
+text in one message. The active status row is appended last, and a canonical
+final replaces it as the last row when the run completes. The resulting contract is therefore
 `start -> tools/steers in event order -> one thinking -> active status or final`,
 independent of wall-clock timestamps and identical after replay. Transcript
 order and runtime sequence also take precedence over message timestamps when a
@@ -467,8 +483,9 @@ When changing chat event handling, test these cases:
   SQLite;
 - Gateway, Dashboard, systemd, and abrupt VPS recovery keep one logical response
   while its identity moves from provisional to provider or from one provider ID
-  to another, even when preamble/tool work arrives before lifecycle metadata;
-  newer send boundaries and concurrent runs remain separate;
+  through several successive provider IDs, even when preamble/tool work arrives
+  before lifecycle metadata; newer send boundaries and concurrent runs remain
+  separate;
 - pending send boundaries survive Dashboard/systemd/VPS restart, overlapping
   requests settle only their own boundary, delayed old events cannot cross the
   settled new-turn cutoff, and a runless steer can clear only one unambiguous
@@ -479,7 +496,8 @@ When changing chat event handling, test these cases:
   their maximum cutoff, active alias owners remain protected beside completed
   exact replay, one alias eviction retains surviving boundary owners, failed
   sends rehydrate evicted boundaries, top-level user-echo idempotency settles the
-  matching request, partial alias promotion retains source-owner boundaries,
+  matching request, accepted sends retain their pending cutoff until equivalent
+  owners hydrate, partial alias promotion retains source-owner boundaries,
   id-less settlement selects only synthetic requests, and coalescing cannot move
   a run's durable first sequence;
 - live reduction and full replay both preserve
@@ -511,7 +529,8 @@ When changing chat event handling, test these cases:
 - hidden tool media remains attached to its completed final after compaction;
 - media-only finals keep compacted tools before retained thinking;
 - mixed Synthetic session messages split into tool/thinking/final rows, and only
-  `stopReason: "stop"` completes their replay run;
+  `stopReason: "stop"` completes their replay run; terminal sequence keeps the
+  final after its tools and one grouped thinking bubble;
 - large Synthetic messages retain their primary final and terminal event, compact
   replay keeps the stop marker, id-less thinking stays as separate blocks, and
   bounded draft loss emits development diagnostics;
@@ -553,7 +572,7 @@ When changing chat event handling, test these cases:
 - repeated short final answers in different user turns remain distinct;
 - hidden tool attachments never cross a user or run boundary;
 - socket reconnects, compaction replacement runs, and selected-session changes
-  cannot leak control or stream state between sessions.
+  cannot leak control or stream state between sessions;
 
 ## Local Debug Commands
 

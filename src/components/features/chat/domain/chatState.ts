@@ -59,6 +59,7 @@ export interface ChatRuntimeState {
 }
 
 interface RuntimeEventBase {
+    runAliases?: string[];
     runId?: string;
     sequence: number;
     sessionKey: string;
@@ -66,6 +67,9 @@ interface RuntimeEventBase {
 }
 
 export type ChatRuntimeEvent =
+    | (RuntimeEventBase & {
+          kind: "identity";
+      })
     | (RuntimeEventBase & {
           kind: "user";
           message: ChatHistoryMessage;
@@ -112,6 +116,7 @@ function runContentKind(event: ChatRuntimeEvent): ChatRunContentKind | undefined
         case "finish": {
             return event.message ? "assistant" : undefined;
         }
+        case "identity":
         case "status": {
             return undefined;
         }
@@ -921,6 +926,19 @@ export function reduceChatRuntime(
         (left, right) => left.sequence - right.sequence
     );
     for (const event of orderedEvents) {
+        if (event.runId) {
+            const runAliases = uniqueChatRunIds(event.runAliases || []);
+            for (const alias of runAliases) {
+                if (alias !== event.runId) {
+                    nextState = acknowledgeChatRun(
+                        nextState,
+                        event.sessionKey,
+                        alias,
+                        event.runId
+                    );
+                }
+            }
+        }
         const previousEntry = matchingSessionEntry(nextState, event.sessionKey);
         const previousSessionKey = previousEntry?.[0];
         const previousSession = previousEntry?.[1];
@@ -988,6 +1006,9 @@ export function reduceChatRuntime(
 
 function applyRunEvent(run: ChatRunState, event: ChatRuntimeEvent): ChatRunState {
     switch (event.kind) {
+        case "identity": {
+            return run;
+        }
         case "user": {
             return applyUserEvent(run, event);
         }

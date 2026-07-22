@@ -54,6 +54,7 @@ describe("OpenClaw chat snapshot store", () => {
             interruptedAtByRun: {
                 "persisted-run": 1_785_000_000_000,
             },
+            acknowledgedRequestIds: ["dashboard-chat-pending"],
             pendingRequestBoundaries: {
                 "dashboard-chat-pending": 7,
             },
@@ -446,6 +447,11 @@ describe("OpenClaw chat snapshot store", () => {
                     1,
                 ])
             );
+            metadata.acknowledgedRequestIds = Array.from(
+                { length: 101 },
+                (_, index) => `dashboard-chat-oversized-${index}`
+            );
+            metadata.requestBoundary = 2;
             database
                 .prepare(
                     `UPDATE chat_runtime_snapshots

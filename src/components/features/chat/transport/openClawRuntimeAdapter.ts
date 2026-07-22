@@ -1,6 +1,10 @@
 import type { ChatHistoryMessage, ChatToolCallDisplay } from "../chatTypes";
 import { stableChatStringify } from "../chatUtilities";
-import type { ChatRuntimeEvent, ChatTextSource } from "../domain/chatState";
+import {
+    type ChatRuntimeEvent,
+    type ChatTextSource,
+    uniqueChatRunIds,
+} from "../domain/chatState";
 import {
     asRecord,
     isNonWorkTool,
@@ -45,6 +49,7 @@ export interface OpenClawRuntimeEnvelope {
     event?: unknown;
     payload?: unknown;
     runtimeRecordedAt?: unknown;
+    runtimeRunAliases?: unknown;
     runtimeSequence?: unknown;
     type?: unknown;
 }
@@ -320,6 +325,12 @@ export function adaptOpenClawRuntimeEvent(
     }
     const common = { runId, sessionKey, timestamp };
     const eventPayload = openClawPayloadView(payload);
+    const rawRuntimeRunAliases = asRecord(raw)?.runtimeRunAliases;
+    const runtimeRunAliases = uniqueChatRunIds(
+        Array.isArray(rawRuntimeRunAliases)
+            ? rawRuntimeRunAliases.map((alias) => stringValue(alias))
+            : []
+    );
     const runtimeSequence = openClawSequence(raw, fallbackSequence);
     const sequence = runtimeSequence * 16;
     const drafts =
@@ -328,13 +339,19 @@ export function adaptOpenClawRuntimeEvent(
             : eventName === "session.message"
               ? sessionMessageDrafts(eventPayload, common, sequence)
               : runtimeStreamDrafts(eventName, eventPayload, common);
-    return boundedRuntimeDrafts(drafts, {
+    const boundedDrafts = boundedRuntimeDrafts(drafts, {
         eventName,
         runId,
         runtimeSequence,
         sessionKey,
-    }).map((draft, index) => ({
+    });
+    const normalizedDrafts: ChatRuntimeEventDraft[] =
+        runId && runtimeRunAliases.length > 0 && boundedDrafts.length === 0
+            ? [{ ...common, kind: "identity" }]
+            : boundedDrafts;
+    return normalizedDrafts.map((draft, index) => ({
         ...draft,
+        ...(runtimeRunAliases.length > 0 && { runAliases: runtimeRunAliases }),
         sequence: sequence + index,
     })) as ChatRuntimeEvent[];
 }

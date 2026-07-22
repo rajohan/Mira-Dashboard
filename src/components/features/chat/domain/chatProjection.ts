@@ -881,6 +881,12 @@ function transientMessage(
     };
 }
 
+function assistantRuntimeSequence(run: ChatRunState): number | undefined {
+    return run.phase === "active"
+        ? run.lastContentSequence
+        : (run.terminalSequence ?? run.lastContentSequence);
+}
+
 /** Orders runtime activity inside each turn while keeping its first prompt anchored. */
 function orderRuntimeMessages(messages: ChatHistoryMessage[]): ChatHistoryMessage[] {
     const slotsByRun = new Map<
@@ -1091,9 +1097,15 @@ export function reconcileChatMessages(
                 messages[finalIndex] = {
                     ...mergeChatMessageDetails(
                         canonical,
-                        transientMessage(run.assistant, run, "assistant")
+                        transientMessage(
+                            run.assistant,
+                            run,
+                            "assistant",
+                            assistantRuntimeSequence(run)
+                        )
                     ),
                     isFinal: canonical.isFinal || run.phase === "completed" || undefined,
+                    runtimeSequence: assistantRuntimeSequence(run),
                 };
             }
             messages.splice(finalIndex, 0, ...diagnostics);
@@ -1102,7 +1114,14 @@ export function reconcileChatMessages(
 
         const additions = [...diagnostics];
         if (run.assistant) {
-            additions.push(transientMessage(run.assistant, run, "assistant"));
+            additions.push(
+                transientMessage(
+                    run.assistant,
+                    run,
+                    "assistant",
+                    assistantRuntimeSequence(run)
+                )
+            );
         }
         messages.splice(segment.end, 0, ...additions);
     }

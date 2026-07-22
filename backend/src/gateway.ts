@@ -1032,12 +1032,15 @@ async function requestWithReplayBoundary(
     try {
         requestBoundary = captureChatSendRequestBoundary(method, parameters);
         const payload = await client.request(method, parameters, options);
-        chatReplayState.bridge.handleSuccessfulRequest(
+        const identityEnvelope = chatReplayState.bridge.handleSuccessfulRequest(
             method,
             parameters,
             payload,
             requestBoundary
         );
+        if (identityEnvelope) {
+            broadcast(identityEnvelope);
+        }
         return payload;
     } catch (error) {
         chatReplayState.bridge.handleFailedRequest(method, parameters, requestBoundary);

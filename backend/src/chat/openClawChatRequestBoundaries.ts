@@ -1,9 +1,11 @@
 export interface OpenClawChatRequestBoundaryMetadata {
+    acknowledgedRequestIds?: string[];
     pendingRequestBoundaries?: Record<string, number>;
     requestBoundary?: number;
 }
 
 interface RequestBoundaryState {
+    acknowledged: Set<string>;
     pending: Map<string, number>;
     settled?: number;
 }
@@ -36,7 +38,17 @@ function mergeRequestBoundaryMetadata(
     for (const [requestId, boundary] of rightPending) {
         pending.set(requestId, Math.max(pending.get(requestId) ?? -1, boundary));
     }
+    const acknowledged = new Set([
+        ...(left.acknowledgedRequestIds || []),
+        ...(right.acknowledgedRequestIds || []),
+    ]);
+    const acknowledgedRequestIds = [...acknowledged].filter((requestId) =>
+        pending.has(requestId)
+    );
     return {
+        ...(acknowledgedRequestIds.length > 0 && {
+            acknowledgedRequestIds,
+        }),
         ...(pending.size > 0 && {
             pendingRequestBoundaries: Object.fromEntries(pending),
         }),
@@ -56,6 +68,9 @@ function requestBoundaryStateMetadata(
         return {};
     }
     return {
+        ...(state.acknowledged.size > 0 && {
+            acknowledgedRequestIds: [...state.acknowledged],
+        }),
         ...(state.pending.size > 0 && {
             pendingRequestBoundaries: Object.fromEntries(state.pending),
         }),
@@ -88,6 +103,7 @@ export class OpenClawChatRequestBoundaries {
     }
 
     metadata(sessionKey: string): OpenClawChatRequestBoundaryMetadata {
+        const acknowledged = new Set<string>();
         const pending = new Map<string, number>();
         let settled: number | undefined;
         for (const [candidateSessionKey, state] of this.#states) {
@@ -97,11 +113,20 @@ export class OpenClawChatRequestBoundaries {
             if (state.settled !== undefined) {
                 settled = Math.max(settled ?? -1, state.settled);
             }
+            for (const requestId of state.acknowledged) {
+                acknowledged.add(requestId);
+            }
             for (const [requestId, boundary] of state.pending) {
                 pending.set(requestId, Math.max(pending.get(requestId) ?? -1, boundary));
             }
         }
+        const acknowledgedRequestIds = [...acknowledged].filter((requestId) =>
+            pending.has(requestId)
+        );
         return {
+            ...(acknowledgedRequestIds.length > 0 && {
+                acknowledgedRequestIds,
+            }),
             ...(pending.size > 0 && {
                 pendingRequestBoundaries: Object.fromEntries(pending),
             }),
@@ -132,6 +157,11 @@ export class OpenClawChatRequestBoundaries {
             return;
         }
         this.#states.set(storageSessionKey, {
+            acknowledged: new Set(
+                (merged.acknowledgedRequestIds || []).filter((requestId) =>
+                    Object.hasOwn(merged.pendingRequestBoundaries || {}, requestId)
+                )
+            ),
             pending: new Map(Object.entries(merged.pendingRequestBoundaries || {})),
             settled: merged.requestBoundary,
         });
@@ -144,6 +174,37 @@ export class OpenClawChatRequestBoundaries {
             ...Object.values(metadata.pendingRequestBoundaries || {}),
         ].filter((boundary): boundary is number => boundary !== undefined);
         return boundaries.length > 0 ? Math.max(...boundaries) : undefined;
+    }
+
+    blocking(sessionKey: string): number | undefined {
+        const metadata = this.metadata(sessionKey);
+        const acknowledged = new Set(metadata.acknowledgedRequestIds || []);
+        const boundaries = [
+            metadata.requestBoundary,
+            ...Object.entries(metadata.pendingRequestBoundaries || {}).flatMap(
+                ([requestId, boundary]) => (acknowledged.has(requestId) ? [] : [boundary])
+            ),
+        ].filter((boundary): boundary is number => boundary !== undefined);
+        return boundaries.length > 0 ? Math.max(...boundaries) : undefined;
+    }
+
+    clearSettledWithinRun(sessionKey: string, firstSequence: number): string[] {
+        const changedSessionKeys: string[] = [];
+        for (const [candidateSessionKey, state] of this.#states) {
+            if (
+                !this.isSameSessionKey(candidateSessionKey, sessionKey) ||
+                state.settled === undefined ||
+                state.settled < firstSequence
+            ) {
+                continue;
+            }
+            state.settled = undefined;
+            changedSessionKeys.push(candidateSessionKey);
+            if (state.pending.size === 0) {
+                this.#states.delete(candidateSessionKey);
+            }
+        }
+        return changedSessionKeys;
     }
 
     pending(
@@ -187,6 +248,7 @@ export class OpenClawChatRequestBoundaries {
     capture(sessionKey: string, requestId: string | undefined, boundary: number): void {
         const storageSessionKey = this.normalizeSessionKey(sessionKey);
         const state = this.#states.get(storageSessionKey) || {
+            acknowledged: new Set<string>(),
             pending: new Map<string, number>(),
         };
         let pendingRequestId = requestId?.trim();
@@ -199,8 +261,36 @@ export class OpenClawChatRequestBoundaries {
         if (!this.canCapture(storageSessionKey, pendingRequestId)) {
             throw new Error("Too many pending chat requests for one session");
         }
+        state.acknowledged.delete(pendingRequestId);
         state.pending.set(pendingRequestId, boundary);
         this.#states.set(storageSessionKey, state);
+    }
+
+    acknowledge(
+        sessionKey: string,
+        requestId: string | undefined,
+        fallbackBoundary?: number
+    ): string[] {
+        const requestBoundary = this.pending(sessionKey, requestId, fallbackBoundary);
+        if (requestBoundary === undefined) {
+            return [];
+        }
+        const changedSessionKeys: string[] = [];
+        for (const [candidateSessionKey, state] of this.#states) {
+            if (!this.isSameSessionKey(candidateSessionKey, sessionKey)) {
+                continue;
+            }
+            const acknowledgedRequestId =
+                requestId && state.pending.has(requestId)
+                    ? requestId
+                    : fallbackPendingEntry(state.pending, requestBoundary)?.[0];
+            if (!acknowledgedRequestId || state.acknowledged.has(acknowledgedRequestId)) {
+                continue;
+            }
+            state.acknowledged.add(acknowledgedRequestId);
+            changedSessionKeys.push(candidateSessionKey);
+        }
+        return changedSessionKeys;
     }
 
     settle(
@@ -214,7 +304,6 @@ export class OpenClawChatRequestBoundaries {
             return [];
         }
         const changedSessionKeys = new Set<string>();
-        let settlementSessionKey: string | undefined;
         for (const [candidateSessionKey, state] of this.#states) {
             if (!this.isSameSessionKey(candidateSessionKey, sessionKey)) {
                 continue;
@@ -225,22 +314,29 @@ export class OpenClawChatRequestBoundaries {
                 : fallbackPendingEntry(state.pending, requestBoundary);
             if (hasExact && requestId) {
                 state.pending.delete(requestId);
+                state.acknowledged.delete(requestId);
             } else if (fallbackEntry) {
                 state.pending.delete(fallbackEntry[0]);
+                state.acknowledged.delete(fallbackEntry[0]);
             } else {
                 continue;
             }
-            settlementSessionKey ||= candidateSessionKey;
             changedSessionKeys.add(candidateSessionKey);
         }
         if (!isContinuation) {
-            const owner = settlementSessionKey || this.normalizeSessionKey(sessionKey);
-            const state = this.#states.get(owner) || {
-                pending: new Map<string, number>(),
-            };
-            state.settled = Math.max(state.settled ?? -1, requestBoundary);
-            this.#states.set(owner, state);
-            changedSessionKeys.add(owner);
+            const owners =
+                changedSessionKeys.size > 0
+                    ? [...changedSessionKeys]
+                    : [this.normalizeSessionKey(sessionKey)];
+            for (const owner of owners) {
+                const state = this.#states.get(owner) || {
+                    acknowledged: new Set<string>(),
+                    pending: new Map<string, number>(),
+                };
+                state.settled = Math.max(state.settled ?? -1, requestBoundary);
+                this.#states.set(owner, state);
+                changedSessionKeys.add(owner);
+            }
         }
         for (const candidateSessionKey of changedSessionKeys) {
             const state = this.#states.get(candidateSessionKey);

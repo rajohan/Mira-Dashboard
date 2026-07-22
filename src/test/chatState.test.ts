@@ -79,6 +79,59 @@ describe("chat runtime state", () => {
         ).toBe("two");
     });
 
+    it("atomically replaces every interrupted live run alias on restart", () => {
+        const beforeRestart = reduceChatRuntime(createChatRuntimeState(), [
+            event(16, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "first", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "first", text: "first" }],
+                },
+                runId: "run-first",
+            }),
+            event(32, {
+                kind: "tool",
+                message: {
+                    content: "",
+                    role: "assistant",
+                    text: "",
+                    toolCalls: [{ id: "tool-second", name: "exec" }],
+                },
+                runId: "run-second",
+                toolKey: "tool:tool-second",
+            }),
+        ]);
+
+        const resumed = reduceChatRuntime(beforeRestart, [
+            event(48, {
+                kind: "identity",
+                runAliases: ["run-first", "run-second"],
+                runId: "run-after-restart",
+            }),
+            event(64, {
+                kind: "thinking",
+                message: {
+                    content: [{ text: "resumed", type: "thinking" }],
+                    role: "assistant",
+                    text: "",
+                    thinking: [{ id: "resumed", text: "resumed" }],
+                },
+                runId: "run-after-restart",
+            }),
+        ]);
+        const runs = resumed.sessions[SESSION]?.runs || {};
+
+        expect(Object.keys(runs)).toEqual(["run-after-restart"]);
+        expect(runs["run-after-restart"]?.aliases).toEqual([
+            "run-first",
+            "run-after-restart",
+            "run-second",
+        ]);
+        expect(runs["run-after-restart"]?.diagnostics).toHaveLength(2);
+    });
+
     it("promotes optimistic aliases and clears a failed send by either id", () => {
         const optimistic = addOptimisticChatRun(
             createChatRuntimeState(),

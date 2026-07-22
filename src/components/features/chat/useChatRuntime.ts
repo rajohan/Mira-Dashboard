@@ -660,5 +660,12 @@ export function useChatRuntime({
         updateState((current) => clearChatSessionRuntime(current, sessionKey));
     };
 
-    return { acknowledgeRun, beginRun, clearRun, clearSession, failRun, state };
+    return {
+        acknowledgeRun,
+        beginRun,
+        clearRun,
+        clearSession,
+        failRun,
+        state,
+    };
 }

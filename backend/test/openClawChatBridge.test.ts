@@ -132,6 +132,21 @@ function payloads(bridge: OpenClawChatBridge, sessionKey = MAIN) {
         .events.map((event) => event.payload as Record<string, unknown>);
 }
 
+function runtimeEnvelope(
+    runtimeSequence: number,
+    event: "agent" | "session.message" | "session.tool",
+    payload: Record<string, unknown>,
+    runtimeRecordedAt: number
+) {
+    return {
+        event,
+        payload,
+        runtimeRecordedAt,
+        runtimeSequence,
+        type: "event" as const,
+    };
+}
+
 function persistedSnapshot(
     sessionKey: string,
     runId: string,
@@ -2877,6 +2892,221 @@ describe("OpenClaw chat bridge", () => {
         ]);
     });
 
+    it("repairs every provider fragment in one persisted restart chain", () => {
+        const store = new MemorySnapshotStore();
+        const runIds = ["provider-first", "provider-second", "provider-third"] as const;
+        const now = Date.now();
+        store.snapshots.set(MAIN, {
+            completed: false,
+            events: [
+                runtimeEnvelope(
+                    1,
+                    "agent",
+                    {
+                        data: {
+                            item: { kind: "preamble", progressText: "first" },
+                            phase: "update",
+                            stream: "item",
+                        },
+                        runId: runIds[0],
+                        sessionKey: MAIN,
+                    },
+                    now - 3000
+                ),
+                runtimeEnvelope(
+                    2,
+                    "session.tool",
+                    { name: "first-tool", runId: runIds[0], sessionKey: MAIN },
+                    now - 2900
+                ),
+                runtimeEnvelope(
+                    3,
+                    "agent",
+                    {
+                        data: {
+                            item: { kind: "preamble", progressText: "second" },
+                            phase: "update",
+                            stream: "item",
+                        },
+                        runId: runIds[1],
+                        sessionKey: MAIN,
+                    },
+                    now - 2000
+                ),
+                runtimeEnvelope(
+                    4,
+                    "session.tool",
+                    { name: "second-tool", runId: runIds[1], sessionKey: MAIN },
+                    now - 1900
+                ),
+                runtimeEnvelope(
+                    5,
+                    "agent",
+                    {
+                        data: {
+                            item: { kind: "preamble", progressText: "third" },
+                            phase: "update",
+                            stream: "item",
+                        },
+                        runId: runIds[2],
+                        sessionKey: MAIN,
+                    },
+                    now - 1000
+                ),
+                runtimeEnvelope(
+                    7,
+                    "session.message",
+                    {
+                        message: { content: "steer", role: "user" },
+                        runId: runIds[2],
+                        sessionKey: MAIN,
+                    },
+                    now - 900
+                ),
+            ],
+            firstSequenceByRun: {
+                [runIds[0]!]: 1,
+                [runIds[1]!]: 3,
+                [runIds[2]!]: 5,
+            },
+            interruptedAtByRun: {
+                [runIds[0]!]: now - 1500,
+                [runIds[1]!]: now - 1500,
+            },
+            requestBoundary: 6,
+            throughSequence: 7,
+        });
+
+        const bridge = new OpenClawChatBridge(store);
+        const repaired = bridge.snapshot(MAIN);
+
+        expect(
+            repaired.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: repaired.events.length }, () => runIds[2]));
+        expect(repaired.events.map((event) => event.runtimeSequence)).toEqual([
+            1, 2, 3, 4, 5, 7,
+        ]);
+        expect(store.snapshots.get(MAIN)?.requestBoundary).toBeUndefined();
+
+        const steerRequestId = "dashboard-chat-after-chain-repair";
+        const steerBoundary = bridge.captureRequestBoundary(MAIN, steerRequestId);
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: steerRequestId,
+                message: "continue",
+                sessionKey: MAIN,
+            },
+            {},
+            steerBoundary
+        );
+        expect(store.snapshots.get(MAIN)?.requestBoundary).toBeUndefined();
+
+        bridge.markGatewayDisconnected(now);
+        const resumedEnvelope = bridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    item: { kind: "preamble", progressText: "fourth" },
+                    phase: "update",
+                    stream: "item",
+                },
+                runId: "provider-fourth",
+                sessionKey: MAIN,
+            },
+            []
+        );
+        expect(resumedEnvelope.runtimeRunAliases).toEqual([runIds[2]]);
+        const resumed = bridge.snapshot(MAIN);
+        expect(
+            resumed.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: resumed.events.length }, () => "provider-fourth"));
+    });
+
+    it("repairs a resumed run when a queued post-restart send left an earlier boundary", () => {
+        const store = new MemorySnapshotStore();
+        const bridge = new OpenClawChatBridge(store);
+        const interruptedRunId = "provider-before-restart-queue";
+        const resumedRunId = "provider-after-restart-queue";
+        const firstRequestId = "dashboard-chat-queued-after-restart";
+        const secondRequestId = "dashboard-chat-steer-after-restart";
+
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "before restart" },
+                runId: interruptedRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        bridge.markGatewayDisconnected();
+
+        const firstBoundary = bridge.captureRequestBoundary(MAIN, firstRequestId);
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: firstRequestId,
+                message: "queued until the interrupted response completes",
+                sessionKey: MAIN,
+            },
+            { runId: firstRequestId, status: "started" },
+            firstBoundary
+        );
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toEqual({
+            [firstRequestId]: firstBoundary,
+        });
+        expect(store.snapshots.get(MAIN)?.acknowledgedRequestIds).toEqual([
+            firstRequestId,
+        ]);
+        expect(store.snapshots.get(MAIN)?.requestBoundary).toBeUndefined();
+
+        const resumedBridge = new OpenClawChatBridge(store);
+        const firstResumedEnvelope = resumedBridge.recordEvent(
+            "agent",
+            {
+                data: {
+                    item: { kind: "preamble", progressText: "after restart" },
+                    phase: "update",
+                    stream: "item",
+                },
+                runId: resumedRunId,
+                sessionKey: MAIN,
+            },
+            []
+        );
+        expect(firstResumedEnvelope.runtimeRunAliases).toEqual([interruptedRunId]);
+
+        resumedBridge.captureRequestBoundary(MAIN, secondRequestId);
+        const steerEnvelope = resumedBridge.recordEvent(
+            "session.message",
+            {
+                activeRunIds: [resumedRunId],
+                message: {
+                    content: "steer after restart",
+                    idempotencyKey: `${secondRequestId}:user`,
+                    role: "user",
+                },
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(steerEnvelope.runtimeRunAliases).toBeUndefined();
+        const repaired = resumedBridge.snapshot(MAIN);
+        expect(
+            repaired.events.map((event) => (event.payload as { runId?: string }).runId)
+        ).toEqual(Array.from({ length: repaired.events.length }, () => resumedRunId));
+        expect(store.snapshots.get(MAIN)?.requestBoundary).toBeUndefined();
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toEqual({
+            [firstRequestId]: firstBoundary,
+        });
+        expect(store.snapshots.get(MAIN)?.acknowledgedRequestIds).toEqual([
+            firstRequestId,
+        ]);
+    });
+
     it("repairs one active provider run after an abrupt Dashboard restart", () => {
         const store = new MemorySnapshotStore();
         const providerRunId = "provider-before-dashboard-crash";
@@ -3224,6 +3454,57 @@ describe("OpenClaw chat bridge", () => {
         expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
     });
 
+    it("keeps an accepted send boundary durable until hydration can settle it", () => {
+        const store = new MemorySnapshotStore();
+        const requestId = "dashboard-chat-success-after-eviction";
+        const activeRunId = "provider-before-successful-eviction";
+        const bridge = new OpenClawChatBridge(store);
+        bridge.recordEvent(
+            "agent",
+            {
+                data: { delta: "work before memory eviction" },
+                runId: activeRunId,
+                sessionKey: MAIN,
+                stream: "thinking",
+            },
+            []
+        );
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, requestId);
+        expect(bridge.clearMemory()).toBe(true);
+        store.loadFailures = 1;
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: requestId,
+                message: "continue after eviction",
+                sessionKey: MAIN,
+            },
+            {},
+            requestBoundary
+        );
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toEqual({
+            [requestId]: requestBoundary,
+        });
+
+        bridge.recordEvent(
+            "session.message",
+            {
+                activeRunIds: [activeRunId],
+                message: {
+                    content: "continue after eviction",
+                    idempotencyKey: `${requestId}:user`,
+                    role: "user",
+                },
+                sessionKey: MAIN,
+            },
+            []
+        );
+
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+        expect(store.snapshots.get(MAIN)?.requestBoundary).toBeUndefined();
+    });
+
     it("settles only a synthetic fallback when the acknowledgement gains an id", () => {
         const store = new MemorySnapshotStore();
         const activeRunId = "dashboard-chat-synthetic-boundary-run";
@@ -3306,6 +3587,30 @@ describe("OpenClaw chat bridge", () => {
             "main",
         ]);
         expect(boundaries.metadata(MAIN)).toEqual({ requestBoundary: 20 });
+        boundaries.forgetExact(MAIN);
+        expect(boundaries.metadata("main")).toEqual({ requestBoundary: 20 });
+    });
+
+    it("blocks recovery only on unacknowledged pending requests", () => {
+        const boundaries = new OpenClawChatRequestBoundaries(
+            (sessionKey) => sessionKey.trim().toLowerCase(),
+            (left, right) => logicalMainSessionKey(left) === logicalMainSessionKey(right)
+        );
+        const acceptedRequestId = "dashboard-chat-accepted-unplaced";
+        const capturedRequestId = "dashboard-chat-captured-unacknowledged";
+        boundaries.restore(MAIN, {
+            acknowledgedRequestIds: [acceptedRequestId],
+            pendingRequestBoundaries: {
+                [acceptedRequestId]: 20,
+                [capturedRequestId]: 15,
+            },
+            requestBoundary: 5,
+        });
+
+        expect(boundaries.latest(MAIN)).toBe(20);
+        expect(boundaries.blocking(MAIN)).toBe(15);
+        expect(boundaries.acknowledge(MAIN, capturedRequestId)).toEqual([MAIN]);
+        expect(boundaries.blocking(MAIN)).toBe(5);
     });
 
     it("keeps an equivalent alias boundary when one owner is evicted", () => {
@@ -3536,7 +3841,7 @@ describe("OpenClaw chat bridge", () => {
             )
         ).toEqual(new Set([provisionalRunId, providerRunId]));
 
-        bridge.handleSuccessfulRequest(
+        const identityEnvelope = bridge.handleSuccessfulRequest(
             "chat.send",
             {
                 idempotencyKey: steerRequestId,
@@ -3547,6 +3852,10 @@ describe("OpenClaw chat bridge", () => {
             requestBoundary
         );
 
+        expect(identityEnvelope).toMatchObject({
+            payload: { runId: providerRunId, sessionKey: MAIN },
+            runtimeRunAliases: [provisionalRunId],
+        });
         const repaired = bridge.snapshot(MAIN);
         expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
         expect(
@@ -3919,6 +4228,44 @@ describe("OpenClaw chat bridge", () => {
         expect(
             snapshot.events.map((event) => (event.payload as { runId?: string }).runId)
         ).toEqual(Array.from({ length: snapshot.events.length }, () => providerRunId));
+    });
+
+    it("classifies duplicate active alias copies as one runless steer", () => {
+        const store = new MemorySnapshotStore();
+        const activeRunId = "provider-shared-across-aliases";
+        const requestId = "dashboard-chat-shared-alias-steer";
+        store.snapshots.set(
+            MAIN,
+            persistedSnapshot(MAIN, activeRunId, Date.now(), undefined, 2)
+        );
+        const shortAlias = persistedSnapshot(
+            "main",
+            activeRunId,
+            Date.now() - 1,
+            undefined,
+            1
+        );
+        shortAlias.requestBoundary = 2;
+        store.snapshots.set("main", shortAlias);
+        const bridge = new OpenClawChatBridge(store);
+        const requestBoundary = bridge.captureRequestBoundary(MAIN, requestId);
+
+        bridge.handleSuccessfulRequest(
+            "chat.send",
+            {
+                idempotencyKey: requestId,
+                message: "continue",
+                sessionKey: MAIN,
+            },
+            {},
+            requestBoundary
+        );
+        expect(bridge.flush()).toBe(true);
+
+        expect(store.snapshots.get(MAIN)?.pendingRequestBoundaries).toBeUndefined();
+        expect(store.snapshots.get(MAIN)?.requestBoundary).toBeUndefined();
+        expect(store.snapshots.get("main")?.pendingRequestBoundaries).toBeUndefined();
+        expect(store.snapshots.get("main")?.requestBoundary).toBeUndefined();
     });
 
     it("repairs an interrupted run split across persisted session aliases", () => {
