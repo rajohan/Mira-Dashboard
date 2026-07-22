@@ -239,9 +239,13 @@ tool-result rewrites replace stale cached rows without reloading older pages.
 
 The backend bridge keeps bounded replay state in memory and mirrors it to
 SQLite so active and completed thinking can survive a backend or VPS restart.
-Replay is partitioned by Gateway credential scope, normalized session key, and
-then run ID. Main and ops sessions therefore have independent caches, and each
-session can retain up to four runs.
+Replay is partitioned by Gateway credential scope, normalized session key,
+OpenClaw session instance, and then run ID. Main and ops sessions therefore have
+independent caches, and each session can retain up to four runs. OpenClaw may
+reuse a session key after creating a new transcript and `sessionId`; a newer
+lifecycle start (or initial user message) then replaces replay from the prior
+instance. A Gateway restart keeps the existing `sessionId`, so its pre- and
+post-restart events remain eligible for normal interrupted-run recovery.
 
 SQLite uses two related tables:
 
@@ -403,9 +407,12 @@ Synthetic can place thinking, a tool call, and assistant text inside one
 thinking, tool, and primary assistant events before it reaches the reducer. A
 Synthetic assistant message with `stopReason: "toolUse"` remains nonterminal;
 `stopReason: "stop"` completes the run in both the frontend adapter and backend
-replay bridge. Split id-less thinking blocks receive stable per-message identities
-so separate provider messages cannot concatenate unrelated reasoning. If one
-provider envelope exceeds the adapter event-slot limit, the primary assistant and
+replay bridge. History normalization carries that same explicit stop evidence
+into projection, so an intermediate assistant commentary row cannot terminate a
+completed response or split its thinking group. Split id-less thinking blocks
+receive stable per-message identities so separate provider messages cannot
+concatenate unrelated reasoning. If one provider envelope exceeds the adapter
+event-slot limit, the primary assistant and
 terminal finish events are retained ahead of excess diagnostics; development
 builds warn with envelope identity when that bound discards drafts. Oversized
 terminal replay payloads retain a compact assistant-role/stop marker so refresh

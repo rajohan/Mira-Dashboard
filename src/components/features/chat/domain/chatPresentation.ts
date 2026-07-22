@@ -196,27 +196,69 @@ function responseSegments(messages: ChatHistoryMessage[]): number[] {
         }
         return segment;
     });
-    let completedPromptIndex = -1;
+    let completedWindowStart = 0;
     for (const [finalIndex, message] of messages.entries()) {
-        if (completedPromptIndex === -1 && message.role.toLowerCase() === "user") {
-            completedPromptIndex = finalIndex;
-        }
-        if (!isPrimaryAssistantMessage(message)) {
+        if (!isExplicitFinalMessage(message)) {
             continue;
         }
-        if (completedPromptIndex !== -1) {
-            const completedSegment = segments[completedPromptIndex]!;
-            for (let index = completedPromptIndex; index <= finalIndex; index += 1) {
+        const userIndexes = messages
+            .slice(completedWindowStart, finalIndex)
+            .flatMap((candidate, offset) =>
+                candidate.role.toLowerCase() === "user"
+                    ? [completedWindowStart + offset]
+                    : []
+            );
+        const groupStart = completedResponseStart(messages, userIndexes);
+        if (groupStart !== undefined) {
+            const completedSegment = segments[groupStart]!;
+            for (let index = groupStart; index <= finalIndex; index += 1) {
                 segments[index] = completedSegment;
             }
         }
-        completedPromptIndex = -1;
+        completedWindowStart = finalIndex + 1;
     }
     return segments;
 }
 
+function completedResponseStart(
+    messages: ChatHistoryMessage[],
+    userIndexes: number[]
+): number | undefined {
+    let groupStart = userIndexes.at(-1);
+    for (let index = userIndexes.length - 2; index >= 0; index -= 1) {
+        const previousUser = userIndexes[index]!;
+        const nextUser = userIndexes[index + 1]!;
+        const previousUserMessage = messages[previousUser]!;
+        const nextUserMessage = messages[nextUser]!;
+        const isStartingNewRuntimeRun =
+            nextUserMessage.runtimeSequence !== undefined &&
+            nextUserMessage.runId !== undefined &&
+            nextUserMessage.runId !== previousUserMessage.runId;
+        if (isStartingNewRuntimeRun) {
+            return groupStart;
+        }
+        const hasContinuationEvidence = messages
+            .slice(previousUser + 1, nextUser)
+            .some((candidate) => hasToolDetails(candidate));
+        if (!hasContinuationEvidence) {
+            return groupStart;
+        }
+        groupStart = previousUser;
+    }
+    return groupStart;
+}
+
 function isPrimaryAssistantMessage(message: ChatHistoryMessage): boolean {
     return message.role.toLowerCase() === "assistant" && hasPrimaryAnswerContent(message);
+}
+
+function isExplicitFinalMessage(message: ChatHistoryMessage): boolean {
+    const role = message.role.toLowerCase();
+    return (
+        (role === "assistant" || role === "system") &&
+        message.isFinal === true &&
+        hasPrimaryAnswerContent(message)
+    );
 }
 
 function thinkingAnchorIndex(
@@ -233,12 +275,21 @@ function thinkingAnchorIndex(
             (isInGroup(message, index) || !message.runId)
     );
     const rangeStart = matchingUserBeforeThinking === -1 ? 0 : matchingUserBeforeThinking;
-    const finalIndex = messages.findIndex(
+    const explicitFinalIndex = messages.findIndex(
         (message, index) =>
             index >= group.firstIndex &&
             isInGroup(message, index) &&
-            isPrimaryAssistantMessage(message)
+            isExplicitFinalMessage(message)
     );
+    const finalIndex =
+        explicitFinalIndex === -1
+            ? messages.findIndex(
+                  (message, index) =>
+                      index >= group.firstIndex &&
+                      isInGroup(message, index) &&
+                      isPrimaryAssistantMessage(message)
+              )
+            : explicitFinalIndex;
     const nextSegmentIndex = group.runId
         ? -1
         : segments.findIndex(
@@ -322,7 +373,18 @@ function collapseRunThinking(messages: ChatHistoryMessage[]): ChatHistoryMessage
         number,
         Array<{ message: ChatHistoryMessage; order: number }>
     >();
+    const latestSegment = Math.max(0, ...segments);
     for (const group of groups.values()) {
+        const hasSettledAnswer = messages.some(
+            (message, index) =>
+                segments[index] === group.segment &&
+                (isExplicitFinalMessage(message) || isPrimaryAssistantMessage(message))
+        );
+        const isAbandonedUnscopedThinking =
+            !group.runId && group.segment < latestSegment && !hasSettledAnswer;
+        if (isAbandonedUnscopedThinking) {
+            continue;
+        }
         const anchorIndex = thinkingAnchorIndex(messages, segments, group);
         const anchoredGroups = groupsByAnchorIndex.get(anchorIndex) || [];
         anchoredGroups.push({
