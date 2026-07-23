@@ -103,6 +103,7 @@ import {
     useWalgBackup,
 } from "../hooks/useBackups";
 import {
+    cacheKeys,
     useCacheEntry,
     useCacheHeartbeat,
     useCacheStatus,
@@ -2451,6 +2452,65 @@ describe("Mira Dashboard frontend behavior", () => {
         await expect(
             refreshCache.result.current.mutateAsync(" weather.spydeberg ,, ")
         ).resolves.toMatchObject({ keys: ["weather.spydeberg"] });
+    });
+
+    it("attempts every requested cache refresh and retains partial successes", async () => {
+        const originalFetch = fetch;
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = typeof input === "string" ? input : input.toString();
+                if (init?.method !== "POST") {
+                    throw new Error(`Unexpected cache API call: ${init?.method} ${url}`);
+                }
+                if (url === "/api/cache/cache.fail/refresh") {
+                    return Response.json({ error: "refresh failed" }, { status: 500 });
+                }
+                const key = url.replace("/api/cache/", "").replace("/refresh", "");
+                return Response.json({
+                    entry: {
+                        consecutiveFailures: 0,
+                        data: { key },
+                        key,
+                        meta: {},
+                        source: "test",
+                        status: "fresh",
+                    },
+                    isOk: true,
+                });
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        try {
+            const refreshCache = renderHookWithQueryClient(() => useRefreshCacheEntry());
+            await expect(
+                refreshCache.result.current.mutateAsync(
+                    "cache.first,cache.fail,cache.last"
+                )
+            ).rejects.toThrow("refresh failed");
+
+            expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+                "/api/cache/cache.first/refresh",
+                "/api/cache/cache.fail/refresh",
+                "/api/cache/cache.last/refresh",
+            ]);
+            expect(
+                refreshCache.queryClient.getQueryData(cacheKeys.entry("cache.first"))
+            ).toMatchObject({ key: "cache.first" });
+            expect(
+                refreshCache.queryClient.getQueryData(cacheKeys.entry("cache.last"))
+            ).toMatchObject({ key: "cache.last" });
+        } finally {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
     });
 
     it("clears cached Docker stats once live containers report no stats", async () => {

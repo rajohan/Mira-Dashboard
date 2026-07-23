@@ -1,10 +1,9 @@
 import { json } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
-    clearNeedsAttentionBackupJob,
-    getCurrentBackupJob,
-    mapBackupJob,
-    startManualBackup,
+    clearPersistedBackupAttention,
+    getPersistedBackupJob,
+    queueManualBackup,
 } from "../services/backups.ts";
 
 type BackupType = "kopia" | "walg";
@@ -17,13 +16,12 @@ function backupResponseError(error: unknown, fallback: string): Response {
 }
 
 function backupStatus(type: BackupType): Response {
-    return json({ job: mapBackupJob(getCurrentBackupJob(type)) });
+    return json({ job: getPersistedBackupJob(type) });
 }
 
 async function runBackup(type: BackupType, fallback: string): Promise<Response> {
     try {
-        const job = await startManualBackup(type);
-        return json({ isOk: true, job: mapBackupJob(job) });
+        return json({ isOk: true, job: queueManualBackup(type) });
     } catch (error) {
         return backupResponseError(error, fallback);
     }
@@ -34,8 +32,8 @@ async function clearNeedsAttention(
     fallback: string
 ): Promise<Response> {
     try {
-        const job = await clearNeedsAttentionBackupJob(type);
-        return json({ cleared: mapBackupJob(job), isOk: true });
+        const job = await clearPersistedBackupAttention(type);
+        return json({ cleared: job, isOk: true });
     } catch (error) {
         return backupResponseError(error, fallback);
     }

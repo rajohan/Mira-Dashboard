@@ -2,19 +2,11 @@ import { getPersistedGatewayToken } from "./auth.ts";
 import gateway from "./gateway.ts";
 import { createServer, resolveListenPort } from "./server.ts";
 import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
-import { registerBackupScheduledJobs } from "./services/backups.ts";
-import { registerCacheRefreshScheduledJobs } from "./services/cacheRefresh.ts";
-import { registerDockerUpdaterScheduledJobs } from "./services/dockerUpdater.ts";
-import { registerGitHygieneScheduledJobs } from "./services/gitHygiene.ts";
-import { registerLogRotationScheduledJobs } from "./services/logRotation.ts";
-import {
-    startScheduledJobScheduler,
-    stopScheduledJobScheduler,
-} from "./services/scheduledJobs.ts";
+import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
+import { registerPullRequestJobLifecycleHandlers } from "./services/pullRequests.ts";
 
 const serverStartState: {
     activeServer: ReturnType<typeof createServer> | undefined;
-    stopSchedulerOnServerClose?: () => void;
     isStarting: boolean;
 } = {
     activeServer: undefined,
@@ -23,30 +15,18 @@ const serverStartState: {
 
 export { runLogRotationCli } from "./services/logRotation.ts";
 
-function installSchedulerCloseCleanup(): void {
-    if (serverStartState.stopSchedulerOnServerClose) {
-        return;
-    }
-    serverStartState.stopSchedulerOnServerClose = () => {
-        stopScheduledJobScheduler();
-        serverStartState.stopSchedulerOnServerClose = undefined;
-    };
-}
-
-function rollbackBackgroundServiceStartup(function_: () => void, label: string): void {
+function rollbackBackgroundServiceStartup(
+    function_: () => void | Promise<void>,
+    label: string
+): void {
     try {
-        function_();
+        const result = function_();
+        if (result instanceof Promise) {
+            void result.catch((cleanupError) => console.error(label, cleanupError));
+        }
     } catch (cleanupError) {
         console.error(label, cleanupError);
     }
-}
-
-function removeSchedulerCloseCleanup(): void {
-    if (!serverStartState.stopSchedulerOnServerClose) {
-        return;
-    }
-
-    serverStartState.stopSchedulerOnServerClose = undefined;
 }
 
 export function resolveGatewayToken(
@@ -64,8 +44,8 @@ export function resolveGatewayToken(
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let isGatewayStarted = false;
-    let isScheduledJobSchedulerStarted = false;
     try {
+        registerPullRequestJobLifecycleHandlers();
         const token = resolveGatewayToken();
         if (token) {
             gateway.init(token);
@@ -77,24 +57,10 @@ export function handleServerListening(): void {
         }
 
         if (shouldStartScheduledJobs()) {
-            registerBackupScheduledJobs();
-            registerCacheRefreshScheduledJobs();
-            registerDockerUpdaterScheduledJobs();
-            registerGitHygieneScheduledJobs();
-            registerLogRotationScheduledJobs();
-            startScheduledJobScheduler();
-            isScheduledJobSchedulerStarted = true;
-            installSchedulerCloseCleanup();
+            startDashboardJobWorker();
         }
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
-        if (isScheduledJobSchedulerStarted) {
-            removeSchedulerCloseCleanup();
-            rollbackBackgroundServiceStartup(
-                stopScheduledJobScheduler,
-                "[Backend] Failed to stop scheduled job scheduler:"
-            );
-        }
         if (isGatewayStarted) {
             rollbackBackgroundServiceStartup(
                 () => gateway.shutdown(),
@@ -135,8 +101,7 @@ export async function stopBackendServer(): Promise<void> {
     const server = serverStartState.activeServer;
     serverStartState.activeServer = undefined;
     try {
-        removeSchedulerCloseCleanup();
-        stopScheduledJobScheduler();
+        await stopDashboardJobWorker();
         gateway.shutdown();
     } finally {
         await server?.stop(true);

@@ -7,7 +7,7 @@ import { cacheKeys } from "./useCache";
 export interface BackupJob {
     id: string;
     type: "kopia" | "walg";
-    status: "running" | "done" | "needs_attention";
+    status: "running" | "done" | "needs_attention" | "failed" | "cancelled";
     code: number | undefined;
     stdout: string;
     stderr: string;

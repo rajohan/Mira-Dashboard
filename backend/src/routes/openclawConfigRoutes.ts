@@ -5,8 +5,12 @@ import path from "node:path";
 import gateway from "../gateway.ts";
 import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
-import { runProcess } from "../lib/processes.ts";
 import { objectFallback, stringFallback } from "../lib/values.ts";
+import { OPENCLAW_GATEWAY_RESTART_ACTION } from "../services/openclawActions.ts";
+import {
+    enqueueAndWaitForJobExecution,
+    successfulJobExecutionOutput,
+} from "../services/queuedJobExecution.ts";
 
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
 
@@ -81,14 +85,6 @@ function resolveOpenClawHome(): string | undefined {
     const homeDirectory =
         resolveSafeAbsolutePath(process.env.HOME) ?? os.homedir().trim();
     return resolveSafeAbsolutePath(path.join(homeDirectory, ".openclaw"));
-}
-
-function getOpenClawBin(): string {
-    const homeDirectory = process.env.HOME?.trim() || os.homedir();
-    return (
-        process.env.OPENCLAW_BIN?.trim() ||
-        path.join(homeDirectory, ".npm-global/bin/openclaw")
-    );
 }
 
 function readSkillDescription(skillPath: string): string | undefined {
@@ -310,23 +306,18 @@ export const openclawConfigRoutes = {
     "/api/restart": {
         POST: async () => {
             try {
-                const { code, stderr, stdout } = await runProcess(
-                    getOpenClawBin(),
-                    ["gateway", "restart"],
-                    {
-                        timeoutMs: 30_000,
-                    }
-                );
-                if (code !== 0) {
-                    throw new Error(
-                        stderr.trim() || stdout.trim() || `openclaw exited ${code}`
-                    );
-                }
+                const execution = await enqueueAndWaitForJobExecution({
+                    actionKey: OPENCLAW_GATEWAY_RESTART_ACTION,
+                    displayName: "Restart OpenClaw Gateway",
+                    resourceClass: "exclusive",
+                    timeoutMs: 60_000,
+                });
+                successfulJobExecutionOutput(execution);
                 return json({ isOk: true });
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Failed to restart gateway") },
-                    { status: 500 }
+                    { status: httpStatusCode(error) }
                 );
             }
         },

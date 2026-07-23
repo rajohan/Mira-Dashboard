@@ -179,12 +179,19 @@ export function LogRotationCard() {
                         isDryRun.isPending ||
                         realRun.isPending ||
                         !logRotationJob ||
+                        logRotationJob.isQueued ||
                         logRotationJob.isRunning
                     }
                     className="w-full justify-center"
                 >
                     <Play className="size-4" />
-                    {realRun.isPending ? "Running..." : "Run real now"}
+                    {realRun.isPending
+                        ? "Queueing..."
+                        : logRotationJob?.isQueued
+                          ? "Queued"
+                          : logRotationJob?.isRunning
+                            ? "Running..."
+                            : "Run real now"}
                 </Button>
             </div>
 

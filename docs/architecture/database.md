@@ -29,26 +29,30 @@ non-temporary paths and symlinked temp paths.
 
 ## Tables
 
-| Table                     | Purpose                                                         |
-| ------------------------- | --------------------------------------------------------------- |
-| `users`                   | Dashboard auth users.                                           |
-| `auth_sessions`           | Cookie-backed Dashboard sessions.                               |
-| `app_config`              | Small persistent config, currently including `gateway_token`.   |
-| `tasks`                   | Local task records.                                             |
-| `task_events`             | Audit/event records for task changes.                           |
-| `task_updates`            | Markdown progress updates on tasks.                             |
-| `notifications`           | Notification bell items, including report links and ops alerts. |
-| `reports`                 | Daily briefs, daily summaries, heartbeats, and custom reports.  |
-| `cache_entries`           | Cache refresh state and cached provider data.                   |
-| `quota_alert_state`       | Notification arming state for quota thresholds.                 |
-| `openclaw_alert_state`    | Notification arming state for OpenClaw update alerts.           |
-| `agent_task_history`      | Agent current/completed task history.                           |
-| `deployment_jobs`         | Dashboard deploy job state/output.                              |
-| `deployment_lock`         | Single active deployment lock.                                  |
-| `scheduled_jobs`          | Dashboard-local scheduled job definitions.                      |
-| `scheduled_job_runs`      | Scheduled job run history.                                      |
-| `docker_managed_services` | Docker updater managed service inventory.                       |
-| `docker_update_events`    | Docker updater event history.                                   |
+| Table                              | Purpose                                                               |
+| ---------------------------------- | --------------------------------------------------------------------- |
+| `users`                            | Dashboard auth users.                                                 |
+| `auth_sessions`                    | Cookie-backed Dashboard sessions.                                     |
+| `app_config`                       | Small persistent config, currently including `gateway_token`.         |
+| `tasks`                            | Local task records.                                                   |
+| `task_events`                      | Audit/event records for task changes.                                 |
+| `task_updates`                     | Markdown progress updates on tasks.                                   |
+| `notifications`                    | Notification bell items, including report links and ops alerts.       |
+| `reports`                          | Daily briefs, daily summaries, heartbeats, and custom reports.        |
+| `cache_entries`                    | Cache refresh state and cached provider data.                         |
+| `quota_alert_state`                | Notification arming state for quota thresholds.                       |
+| `openclaw_alert_state`             | Notification arming state for OpenClaw update alerts.                 |
+| `agent_task_history`               | Agent current/completed task history.                                 |
+| `deployment_jobs`                  | Dashboard deploy job state/output.                                    |
+| `deployment_lock`                  | Single active deployment lock.                                        |
+| `scheduled_jobs`                   | Dashboard-local scheduled job definitions.                            |
+| `scheduled_job_runs`               | Scheduled job run history.                                            |
+| `scheduled_job_execution_policies` | Resource class and timeout for each Dashboard job.                    |
+| `openclaw_cron_job_metadata`       | Disable intent and Dashboard metadata for OpenClaw cron jobs.         |
+| `job_executions`                   | Persistent execution queue with leases, heartbeats, and cancellation. |
+| `job_workers`                      | Worker capacity and liveness heartbeats.                              |
+| `docker_managed_services`          | Docker updater managed service inventory.                             |
+| `docker_update_events`             | Docker updater event history.                                         |
 
 ## Backup Before Manual DB Work
 

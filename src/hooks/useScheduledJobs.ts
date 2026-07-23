@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { JobDisableIntent } from "../types/job";
 import { apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
+import type { JobResourceClass } from "./useJobExecutions";
 
 /** Represents a backend-native scheduled job. */
 export interface ScheduledJob {
@@ -20,6 +21,9 @@ export interface ScheduledJob {
     createdAt: string;
     updatedAt: string;
     lastRun?: ScheduledJobRun | undefined;
+    resourceClass: JobResourceClass;
+    timeoutMs: number;
+    isQueued: boolean;
     isRunning: boolean;
 }
 
@@ -27,12 +31,17 @@ export interface ScheduledJob {
 export interface ScheduledJobRun {
     id: number;
     jobId: string;
-    status: "running" | "success" | "failed";
-    triggerType: "manual" | "schedule";
+    status: "queued" | "running" | "success" | "failed" | "cancelled";
+    triggerType: "manual" | "schedule" | "startup";
     startedAt: string;
+    queuedAt: string;
     finishedAt?: string | undefined;
     message?: string | undefined;
     output: Record<string, unknown>;
+    executionId?: string | undefined;
+    resourceClass: JobResourceClass;
+    cancelRequestedAt?: string | undefined;
+    cancellable: boolean;
 }
 
 export type ScheduledJobPatch = Partial<
@@ -49,6 +58,36 @@ interface ScheduledJobRunsResponse {
 
 interface ScheduledJobsResponse {
     jobs: ScheduledJob[];
+}
+
+const legacyScheduledJobTimeoutMs = 5 * 60 * 1000;
+
+function normalizeScheduledJobRun(
+    run: ScheduledJobRun,
+    resourceClass: JobResourceClass
+): ScheduledJobRun {
+    return {
+        ...run,
+        cancellable: run.cancellable ?? false,
+        queuedAt: run.queuedAt ?? run.startedAt,
+        resourceClass: run.resourceClass ?? resourceClass,
+    };
+}
+
+/** Keeps a new frontend usable during the brief old-backend deployment window. */
+function normalizeScheduledJob(job: ScheduledJob): ScheduledJob {
+    const resourceClass = job.resourceClass ?? "light";
+    const lastRun = job.lastRun
+        ? normalizeScheduledJobRun(job.lastRun, resourceClass)
+        : undefined;
+    return {
+        ...job,
+        isQueued: job.isQueued ?? lastRun?.status === "queued",
+        isRunning: job.isRunning ?? lastRun?.status === "running",
+        lastRun,
+        resourceClass,
+        timeoutMs: job.timeoutMs ?? legacyScheduledJobTimeoutMs,
+    };
 }
 
 /** Preserves a failed scheduled run so callers can surface its recorded output. */
@@ -74,8 +113,11 @@ export function useScheduledJobs() {
     return useQuery({
         queryKey: scheduledJobKeys.list(),
         queryFn: () => apiFetchRequired<ScheduledJobsResponse>("/jobs"),
-        select: (data) => data.jobs,
-        refetchInterval: 30_000,
+        select: (data) => data.jobs.map((job) => normalizeScheduledJob(job)),
+        refetchInterval: (query) =>
+            query.state.data?.jobs.some((job) => job.isQueued || job.isRunning)
+                ? 2000
+                : 30_000,
     });
 }
 
@@ -87,9 +129,14 @@ export function useScheduledJobRuns(id: string) {
             apiFetchRequired<ScheduledJobRunsResponse>(
                 `/jobs/${encodeURIComponent(id)}/runs`
             ),
-        select: (data) => data.runs,
+        select: (data) => data.runs.map((run) => normalizeScheduledJobRun(run, "light")),
         enabled: id.length > 0,
-        refetchInterval: 30_000,
+        refetchInterval: (query) =>
+            query.state.data?.runs.some(
+                (run) => run.status === "queued" || run.status === "running"
+            )
+                ? 2000
+                : 30_000,
     });
 }
 
@@ -121,7 +168,11 @@ export function useRunScheduledJobNow() {
             const result = await apiPostRequired<{ isOk: boolean; run: ScheduledJobRun }>(
                 `/jobs/${encodeURIComponent(id)}/run`
             );
-            if (!result.isOk || result.run.status === "failed") {
+            if (
+                !result.isOk ||
+                result.run.status === "failed" ||
+                result.run.status === "cancelled"
+            ) {
                 throw new ScheduledJobRunError(result.run);
             }
             return result;

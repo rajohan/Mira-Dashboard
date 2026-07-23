@@ -47,11 +47,14 @@ describe("git hygiene automation", () => {
         rememberEnvironment("MIRA_OPENCLAW_ROOT");
         process.env.MIRA_OPENCLAW_ROOT = createTemporaryRoot("mira-openclaw-sync-");
         const calls: Array<readonly string[]> = [];
+        const mutationEvents: string[] = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
+                if (command.startsWith("commit ")) mutationEvents.push("commit");
+                if (command.startsWith("push ")) mutationEvents.push("push");
                 if (command === "status --porcelain=v1 -z -uall") {
                     return {
                         code: 0,
@@ -84,12 +87,19 @@ describe("git hygiene automation", () => {
                 return { code: 0, stderr: "", stdout: "" };
             }) as typeof processModule.runProcess);
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+        const protectFromCancellation = jest.fn(() => {
+            mutationEvents.push("protect");
+        });
 
-        await expect(syncOpenClawWorkspaceSafePaths()).resolves.toEqual({
+        await expect(
+            syncOpenClawWorkspaceSafePaths(undefined, protectFromCancellation)
+        ).resolves.toEqual({
             changedPaths: ["workspace/MEMORY.md", "workspace/memory/2026-07-07.md"],
             commit: "abc1234",
             pushed: true,
         });
+        expect(protectFromCancellation).toHaveBeenCalledTimes(1);
+        expect(mutationEvents).toEqual(["protect", "commit", "push"]);
         expect(calls).toEqual(
             expect.arrayContaining([
                 [
@@ -357,11 +367,13 @@ describe("git hygiene automation", () => {
         rememberEnvironment("MIRA_OPENCLAW_ROOT");
         process.env.MIRA_OPENCLAW_ROOT = createTemporaryRoot("mira-openclaw-push-retry-");
         const calls: Array<readonly string[]> = [];
+        const mutationEvents: string[] = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
             .mockImplementation((async (_file, arguments_) => {
                 calls.push(arguments_);
                 const command = arguments_.join(" ");
+                if (command.startsWith("push ")) mutationEvents.push("push");
                 if (command === "status --porcelain=v1 -z -uall") {
                     return { code: 0, stderr: "", stdout: "" };
                 }
@@ -389,12 +401,19 @@ describe("git hygiene automation", () => {
                 return { code: 0, stderr: "", stdout: "" };
             }) as typeof processModule.runProcess);
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+        const protectFromCancellation = jest.fn(() => {
+            mutationEvents.push("protect");
+        });
 
-        await expect(syncOpenClawWorkspaceSafePaths()).resolves.toEqual({
+        await expect(
+            syncOpenClawWorkspaceSafePaths(undefined, protectFromCancellation)
+        ).resolves.toEqual({
             changedPaths: [],
             commit: "abc1234",
             pushed: true,
         });
+        expect(protectFromCancellation).toHaveBeenCalledTimes(1);
+        expect(mutationEvents).toEqual(["protect", "push"]);
         expect(calls).toEqual(
             expect.arrayContaining([
                 ["status", "--porcelain=v1", "-z", "-uall"],

@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import type { Server } from "bun";
 
 import { authUser, HttpError, isTrustedProxyAddress, json, requestIp } from "./http.ts";
+import { errorMessage, httpStatusCode } from "./lib/errors.ts";
 
 type BunHandler = (
     request: Request,
@@ -207,6 +208,13 @@ function secureHandler(routePath: string, handler: BunHandler | Response): BunHa
             }
             if (error instanceof SyntaxError) {
                 return json({ error: "Invalid JSON" }, { status: 400 });
+            }
+            const mappedStatus = httpStatusCode(error);
+            if (mappedStatus !== 500) {
+                return json(
+                    { error: errorMessage(error, "Request failed") },
+                    { status: mappedStatus }
+                );
             }
             console.error("[BunServer] Request failed:", error);
             return json({ error: "Internal server error" }, { status: 500 });

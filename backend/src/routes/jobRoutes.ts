@@ -5,11 +5,11 @@ import {
     normalizeJobDisableIntent,
 } from "../services/jobDisableIntent.ts";
 import {
+    enqueueScheduledJob,
     getScheduledJob,
     isScheduledJobValidationError,
     listScheduledJobRuns,
     listScheduledJobs,
-    runScheduledJob,
     type ScheduledJobScheduleType,
     updateScheduledJob,
 } from "../services/scheduledJobs.ts";
@@ -177,10 +177,10 @@ export const jobRoutes = {
     },
 
     "/api/jobs/:id/run": {
-        POST: async (request: ParametersRequest<"id">) => {
+        POST: (request: ParametersRequest<"id">) => {
             try {
-                const run = await runScheduledJob(String(request.params.id), "manual");
-                return json({ isOk: run.status === "success", run });
+                const run = enqueueScheduledJob(String(request.params.id), "manual");
+                return json({ isOk: true, run }, { status: 202 });
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Scheduled job run failed") },

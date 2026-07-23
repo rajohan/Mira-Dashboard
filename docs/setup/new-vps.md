@@ -77,41 +77,41 @@ minimum production setup normally needs:
 - optional provider keys for Moltbook, ElevenLabs, OpenRouter, and Synthetic
   health checks depending on enabled Dashboard features.
 
-## Create The Systemd User Service
+## Create The Systemd User Services
 
-Service path:
+Run this section from an interactive shell as the `ubuntu` user. Use `sudo` only
+for the explicit `loginctl` command; the install and `systemctl --user` commands
+must target `ubuntu`'s user manager.
 
-```text
-/home/ubuntu/.config/systemd/user/mira-dashboard.service
-```
-
-Current production shape:
-
-```ini
-[Unit]
-Description=Mira Dashboard
-After=network-online.target openclaw-gateway.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/home/ubuntu/projects/mira-dashboard/backend
-Environment=NODE_ENV=production
-ExecStart=/usr/local/bin/doppler run --config prd --project rajohan -- /home/ubuntu/.bun/bin/bun dist/serverStart.js
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-```
-
-Enable and start:
+Install the tracked web and worker units:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now mira-dashboard.service
-systemctl --user status mira-dashboard.service --no-pager
+cd /home/ubuntu/projects/mira-dashboard
+install -d -m 0755 /home/ubuntu/.config/systemd/user
+install -m 0644 systemd/mira-dashboard.service \
+  /home/ubuntu/.config/systemd/user/mira-dashboard.service
+install -m 0644 systemd/mira-dashboard-worker.service \
+  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
 ```
+
+The web role owns HTTP, WebSocket, and the Gateway bridge. The worker role owns
+scheduled-job registration, queue claims, cache startup seeds, and action
+execution. Both units have explicit CPU, IO, memory, and task guardrails. Heavy
+worker children are additionally placed in transient resource-class scopes.
+
+Enable and start both:
+
+```bash
+sudo loginctl enable-linger ubuntu
+loginctl show-user ubuntu -p Linger
+systemctl --user daemon-reload
+systemctl --user enable --now mira-dashboard.service mira-dashboard-worker.service
+systemctl --user status mira-dashboard.service --no-pager
+systemctl --user status mira-dashboard-worker.service --no-pager
+```
+
+Lingering keeps the user manager and both services running after the SSH/login
+session ends and across reboots.
 
 ## Bootstrap The First User
 
@@ -147,6 +147,7 @@ Expected after setup:
 curl http://127.0.0.1:3100/api/health
 systemctl --user status mira-dashboard.service --no-pager
 journalctl --user -u mira-dashboard.service -n 100 --no-pager
+journalctl --user -u mira-dashboard-worker.service -n 100 --no-pager
 ```
 
 Healthy response shape:
@@ -156,9 +157,13 @@ Healthy response shape:
     "status": "isOk",
     "gatewayConnected": true,
     "sessionCount": 9,
-    "backendCommit": "abc1234"
+    "backendCommit": "abc1234",
+    "workerOnline": true
 }
 ```
 
 If `gatewayConnected` is false, check the Gateway token, OpenClaw Gateway
 service, and `/api/auth/bootstrap` state before debugging the frontend.
+If `workerOnline` is false, inspect both Dashboard and
+`mira-dashboard-worker.service`; the worker heartbeat may be stale or queue
+telemetry may be unavailable.

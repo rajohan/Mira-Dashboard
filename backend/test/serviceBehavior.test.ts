@@ -20,7 +20,7 @@ import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import { database, sqlNullable } from "../src/database.ts";
 import * as processModule from "../src/lib/processes.ts";
 
-const cleanupCallbacks: Array<() => void> = [];
+const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
 function rememberEnvironment(key: string): void {
     const originalValue = process.env[key];
@@ -351,15 +351,29 @@ function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<vo
     });
 }
 
-afterEach(() => {
+async function startTestScheduledExecutor(): Promise<void> {
+    const { startScheduledJobExecutor, stopScheduledJobExecutor } =
+        await import("../src/services/scheduledJobs.ts");
+    startScheduledJobExecutor();
+    cleanupCallbacks.push(stopScheduledJobExecutor);
+}
+
+afterEach(async () => {
     const errors: unknown[] = [];
     while (cleanupCallbacks.length > 0) {
         try {
-            cleanupCallbacks.pop()?.();
+            await cleanupCallbacks.pop()?.();
         } catch (error) {
             errors.push(error);
         }
     }
+    database
+        .prepare(
+            `DELETE FROM job_executions
+             WHERE scheduled_job_id LIKE 'backup.%'
+                OR action_key = 'backup.clear-attention'`
+        )
+        .run();
     if (errors.length > 0) {
         throw new AggregateError(errors, "Test cleanup failed");
     }
@@ -843,6 +857,10 @@ describe("backend service behavior", () => {
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
 
+        const { registerCacheRefreshScheduledJobs } =
+            await import("../src/services/cacheRefresh.ts");
+        registerCacheRefreshScheduledJobs({ seedStrategy: "none" });
+        await startTestScheduledExecutor();
         const { cacheRoutes } = await import("../src/routes/cacheRoutes.ts");
         const response = await cacheRoutes["/api/cache/:key/refresh"].POST(
             Object.assign(
@@ -972,6 +990,189 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("keeps queued deployment locks active beyond the legacy stale window", async () => {
+        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const first = startDeployLatest();
+        let replacementId: string | undefined;
+        try {
+            database
+                .prepare("UPDATE deployment_jobs SET updated_at = ? WHERE id = ?")
+                .run("2026-01-01T00:00:00.000Z", first.id);
+            database
+                .prepare("UPDATE deployment_lock SET updated_at = ? WHERE job_id = ?")
+                .run("2026-01-01T00:00:00.000Z", first.id);
+
+            expect(() => startDeployLatest()).toThrow(
+                `Dashboard deploy already in progress (${first.id})`
+            );
+
+            const firstExecution = database
+                .prepare(
+                    `SELECT id
+                     FROM job_executions
+                     WHERE action_key = 'dashboard.deploy'
+                       AND json_extract(payload_json, '$.deploymentId') = ?`
+                )
+                .get(first.id) as { id: string };
+            cancelJobExecution(firstExecution.id);
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(first.id)
+            ).toEqual({
+                note: "Deploy cancelled before execution",
+                status: "failed",
+            });
+            expect(
+                database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+            ).toBeNull();
+
+            const replacement = startDeployLatest();
+            replacementId = replacement.id;
+            expect(replacement.id).not.toBe(first.id);
+        } finally {
+            const deploymentIds = [first.id, replacementId].filter((id): id is string =>
+                Boolean(id)
+            );
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            for (const deploymentId of deploymentIds) {
+                database
+                    .prepare(
+                        `DELETE FROM job_executions
+                         WHERE action_key = 'dashboard.deploy'
+                           AND json_extract(payload_json, '$.deploymentId') = ?`
+                    )
+                    .run(deploymentId);
+                database
+                    .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                    .run(deploymentId);
+            }
+        }
+    });
+
+    it("fails deployments and releases their locks when worker leases expire", async () => {
+        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        const { getJobExecution, recoverExpiredJobExecutions } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const deployment = startDeployLatest();
+        let replacementId: string | undefined;
+        try {
+            const execution = database
+                .prepare(
+                    `SELECT id
+                     FROM job_executions
+                     WHERE action_key = 'dashboard.deploy'
+                       AND json_extract(payload_json, '$.deploymentId') = ?`
+                )
+                .get(deployment.id) as { id: string };
+            database
+                .prepare(
+                    `UPDATE job_executions
+                     SET status = 'running', started_at = ?, heartbeat_at = ?,
+                         lease_owner = ?, lease_expires_at = ?, attempt = 1
+                     WHERE id = ?`
+                )
+                .run(
+                    "2100-01-01T00:00:00.000Z",
+                    "2100-01-01T00:00:00.000Z",
+                    "missing-deploy-worker",
+                    "2100-01-01T00:02:00.000Z",
+                    execution.id
+                );
+
+            expect(recoverExpiredJobExecutions("2100-01-01T00:03:00.000Z")).toBe(1);
+            expect(getJobExecution(execution.id)).toMatchObject({
+                message: "Job failed after its worker lease expired",
+                status: "failed",
+            });
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(deployment.id)
+            ).toEqual({
+                note: "Deploy failed after its worker lease expired",
+                status: "failed",
+            });
+            expect(
+                database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+            ).toBeNull();
+
+            const replacement = startDeployLatest();
+            replacementId = replacement.id;
+            expect(replacement.status).toBe("building");
+        } finally {
+            const deploymentIds = [deployment.id, replacementId].filter(
+                (id): id is string => Boolean(id)
+            );
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            for (const deploymentId of deploymentIds) {
+                database
+                    .prepare(
+                        `DELETE FROM job_executions
+                         WHERE action_key = 'dashboard.deploy'
+                           AND json_extract(payload_json, '$.deploymentId') = ?`
+                    )
+                    .run(deploymentId);
+                database
+                    .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                    .run(deploymentId);
+            }
+        }
+    });
+
+    it("reserves the deployment lock while a pull request approval is queued", async () => {
+        const { runPullRequestApproval, startDeployLatest } =
+            await import("../src/services/pullRequests.ts");
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const approval = runPullRequestApproval(11, false);
+        let approvalExecutionId: string | undefined;
+        let deploymentId: string | undefined;
+        try {
+            const execution = database
+                .prepare(
+                    `SELECT id
+                     FROM job_executions
+                     WHERE action_key = 'github.merge'
+                     ORDER BY queued_at DESC, id DESC
+                     LIMIT 1`
+                )
+                .get() as { id: string };
+            approvalExecutionId = execution.id;
+            expect(() => startDeployLatest()).toThrow(
+                "Dashboard deploy already in progress"
+            );
+
+            cancelJobExecution(execution.id);
+            await expect(approval).rejects.toThrow("Job cancelled before execution");
+
+            const deployment = startDeployLatest();
+            deploymentId = deployment.id;
+            expect(deployment.status).toBe("building");
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            if (approvalExecutionId) {
+                database
+                    .prepare("DELETE FROM job_executions WHERE id = ?")
+                    .run(approvalExecutionId);
+            }
+            if (deploymentId) {
+                database
+                    .prepare(
+                        `DELETE FROM job_executions
+                         WHERE action_key = 'dashboard.deploy'
+                           AND json_extract(payload_json, '$.deploymentId') = ?`
+                    )
+                    .run(deploymentId);
+                database
+                    .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                    .run(deploymentId);
+            }
+        }
+    });
+
     it("runs deploy latest build flow against an isolated checkout", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
@@ -1036,8 +1237,31 @@ printf 'scheduled\n'
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
 
-        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        const { registerPullRequestExecutionActions, startDeployLatest } =
+            await import("../src/services/pullRequests.ts");
+        const { enqueueJobExecution, getJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const { registerScheduledJobAction } =
+            await import("../src/services/scheduledJobs.ts");
+        registerPullRequestExecutionActions();
+        registerScheduledJobAction("test.after-deploy", async () => ({}));
+        await startTestScheduledExecutor();
         const job = startDeployLatest();
+        const deploymentExecution = database
+            .prepare(
+                `SELECT id
+                 FROM job_executions
+                 WHERE action_key = 'dashboard.deploy'
+                   AND json_extract(payload_json, '$.deploymentId') = ?`
+            )
+            .get(job.id) as { id: string };
+        const followUpExecution = enqueueJobExecution({
+            actionKey: "test.after-deploy",
+            displayName: "Must wait for restarted worker",
+            priority: 0,
+            resourceClass: "light",
+            timeoutMs: 1000,
+        });
 
         try {
             await waitFor(() => {
@@ -1054,7 +1278,12 @@ printf 'scheduled\n'
                       }
                     | undefined;
                 return row?.status === "restart-scheduled" && existsSync(systemdLog);
-            });
+            }, 5000);
+            await waitFor(
+                () => getJobExecution(deploymentExecution.id)?.status === "success",
+                5000
+            );
+            await Bun.sleep(25);
 
             const row = database
                 .prepare(
@@ -1084,13 +1313,48 @@ printf 'scheduled\n'
             await expect(Bun.file(systemdLog).text()).resolves.toContain(
                 `mira-dashboard-deploy-${job.id}`
             );
+            const restartCommand = await Bun.file(systemdLog).text();
+            expect(restartCommand).toContain("/api/health");
+            expect(restartCommand).toContain('"workerOnline":true');
+            expect(restartCommand).not.toContain("/api/job-executions");
             expect(existsSync(path.join(fakeRoot, "node_modules"))).toBe(false);
             expect(existsSync(path.join(fakeRoot, "backend", "node_modules"))).toBe(
                 false
             );
+            expect(getJobExecution(deploymentExecution.id)).toMatchObject({
+                cancellable: false,
+                status: "success",
+            });
+            expect(getJobExecution(followUpExecution.id)).toMatchObject({
+                status: "queued",
+            });
+            database
+                .prepare(
+                    `UPDATE deployment_jobs
+                     SET status = 'failed',
+                         updated_at = ?,
+                         note = 'Detached restart failed'
+                     WHERE id = ?`
+                )
+                .run(new Date().toISOString(), job.id);
+            await waitFor(
+                () => getJobExecution(followUpExecution.id)?.status === "success",
+                5000
+            );
+            expect(getJobExecution(followUpExecution.id)).toMatchObject({
+                status: "success",
+            });
         } finally {
+            database
+                .prepare("DELETE FROM job_executions WHERE id = ?")
+                .run(followUpExecution.id);
             database.prepare("DELETE FROM deployment_lock WHERE job_id = ?").run(job.id);
             database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(job.id);
+            database
+                .prepare(
+                    "DELETE FROM job_executions WHERE action_key = 'dashboard.deploy' AND payload_json LIKE ?"
+                )
+                .run(`%${job.id}%`);
         }
     });
 
@@ -1245,8 +1509,26 @@ fi
         process.env.RAJOHAN_GITHUB_TOKEN = "review-token";
         process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
 
-        const { approvePullRequestReview, rejectPullRequest, updatePullRequestBranch } =
-            await import("../src/services/pullRequests.ts");
+        const {
+            approvePullRequestReview,
+            registerPullRequestExecutionActions,
+            rejectPullRequest,
+            updatePullRequestBranch,
+        } = await import("../src/services/pullRequests.ts");
+        registerPullRequestExecutionActions();
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    `DELETE FROM job_executions
+                     WHERE action_key IN (
+                         'github.review-approval',
+                         'github.update-branch',
+                         'github.reject'
+                     )`
+                )
+                .run();
+        });
+        await startTestScheduledExecutor();
         const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
 
         await expect(approvePullRequestReview(3)).resolves.toMatchObject({
@@ -1313,6 +1595,34 @@ fi
             isOk: true,
             message: "PR #5 closed",
         });
+        const queuedMutations = database
+            .prepare(
+                `SELECT action_key AS actionKey, cancellable, status
+                 FROM job_executions
+                 WHERE action_key IN (
+                     'github.review-approval',
+                     'github.update-branch',
+                     'github.reject'
+                 )
+                 ORDER BY action_key, id`
+            )
+            .all() as Array<{
+            actionKey: string;
+            cancellable: number;
+            status: string;
+        }>;
+        expect(queuedMutations.map((execution) => execution.actionKey)).toEqual([
+            "github.reject",
+            "github.reject",
+            "github.review-approval",
+            "github.update-branch",
+        ]);
+        expect(
+            queuedMutations.every(
+                (execution) =>
+                    execution.cancellable === 0 && execution.status === "success"
+            )
+        ).toBe(true);
 
         const malformedApproveRoute = await pullRequestRoutes[
             "/api/pull-requests/:number/approve"
@@ -1391,9 +1701,11 @@ fi
         process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
 
         try {
-            const { approvePullRequest } =
+            const { registerPullRequestExecutionActions, runPullRequestApproval } =
                 await import("../src/services/pullRequests.ts");
-            const result = await approvePullRequest(11, false);
+            registerPullRequestExecutionActions();
+            await startTestScheduledExecutor();
+            const result = await runPullRequestApproval(11, false);
 
             expect(result).toMatchObject({
                 cleanup: {
@@ -1403,13 +1715,31 @@ fi
                 },
                 isOk: true,
                 message: "PR #11 merged",
-                syncError: undefined,
             });
             await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
             await expect(Bun.file(gitLog).text()).resolves.toContain("worktree remove");
             expect(existsSync(localWorktree)).toBe(false);
+            expect(
+                database
+                    .prepare(
+                        `SELECT cancellable, status
+                         FROM job_executions
+                         WHERE action_key = 'github.merge'
+                           AND json_extract(payload_json, '$.number') = 11
+                         ORDER BY queued_at DESC, id DESC
+                         LIMIT 1`
+                    )
+                    .get()
+            ).toEqual({ cancellable: 0, status: "success" });
         } finally {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database
+                .prepare(
+                    `DELETE FROM job_executions
+                     WHERE action_key = 'github.merge'
+                       AND json_extract(payload_json, '$.number') = 11`
+                )
+                .run();
             database
                 .prepare("DELETE FROM deployment_jobs WHERE id LIKE 'approve-%'")
                 .run();
@@ -2196,10 +2526,28 @@ fi
         await waitFor(() => weatherResponses === 1);
         const secondRefresh = refreshCacheProducer("weather.spydeberg");
         const abortController = new AbortController();
+        const abortedRefresh = refreshCacheProducer(
+            "weather.spydeberg",
+            abortController.signal
+        );
         abortController.abort();
-        await expect(
-            refreshCacheProducer("weather.spydeberg", abortController.signal)
-        ).rejects.toThrow("Cache refresh aborted");
+        const abortedRefreshState = (async () => {
+            try {
+                await abortedRefresh;
+                return "resolved" as const;
+            } catch (error) {
+                return error instanceof Error ? error.message : "rejected without error";
+            }
+        })();
+        expect(
+            await Promise.race([
+                abortedRefreshState,
+                (async () => {
+                    await Bun.sleep(10);
+                    return "pending" as const;
+                })(),
+            ])
+        ).toBe("pending");
         releaseWeather?.();
 
         await expect(firstRefresh).resolves.toEqual({
@@ -2208,6 +2556,7 @@ fi
         await expect(secondRefresh).resolves.toEqual({
             refreshed: ["weather.spydeberg"],
         });
+        await expect(abortedRefreshState).resolves.toBe("Cache refresh aborted");
         expect(weatherResponses).toBe(1);
     });
 
@@ -2509,13 +2858,18 @@ fi
         const fakeBin = createTemporaryRoot("mira-backup-docker-bin-");
         writeFakeDocker(path.join(fakeBin, "docker"));
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
-        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
-            await import("../src/services/backups.ts");
+        const {
+            clearNeedsAttentionBackupJob,
+            getCurrentBackupJob,
+            registerBackupScheduledJobs,
+            startManualBackup,
+        } = await import("../src/services/backups.ts");
         const { getScheduledJob, runScheduledJob, upsertScheduledJob } =
             await import("../src/services/scheduledJobs.ts");
 
         try {
             registerBackupScheduledJobs();
+            await startTestScheduledExecutor();
             expect(getScheduledJob("backup.walg")).toMatchObject({
                 actionKey: "backup.run",
                 enabled: true,
@@ -2546,23 +2900,10 @@ fi
                 stdout: expect.stringContaining("backup ok"),
                 type: "walg",
             });
-            expect(getCurrentBackupJob("walg")).toMatchObject({ status: "done" });
-            expect(getCurrentBackupJob("walg")).toBeUndefined();
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { status?: string } | undefined;
-                return row?.status === "success";
+            await expect(clearNeedsAttentionBackupJob("walg")).rejects.toMatchObject({
+                statusCode: 404,
             });
-            expect(
-                database
-                    .prepare(
-                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get()
-            ).toEqual({ status: "success" });
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -2585,17 +2926,6 @@ fi
                 statusCode: 503,
             });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { message?: string; status?: string } | undefined;
-                return (
-                    row?.status === "failed" &&
-                    row.message?.includes("pgrep failed") === true
-                );
-            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -2695,7 +3025,7 @@ fi
         }
     });
 
-    it("runs a manual backup without scheduled metadata and trims oversized output", async () => {
+    it("trims oversized output in the worker backup primitive", async () => {
         const { getCurrentBackupJob, startManualBackup } =
             await import("../src/services/backups.ts");
         const largeOutput = `${"x".repeat(100_200)}tail-marker\n`;
@@ -2739,7 +3069,6 @@ fi
             });
             expect(completed.stdout.length).toBeLessThanOrEqual(100_000);
             expect(completed.stdout).toEndWith("tail-marker\n");
-            expect(completed.manualScheduledRun).toBeUndefined();
             expect(
                 database
                     .prepare(
@@ -2804,17 +3133,6 @@ fi
             expect(completed.stdout).toContain("stdout before failure");
             expect(completed.stderr).toContain("stderr before failure");
             expect(completed.stderr).toContain("child process promise failed");
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { message: string; status: string } | undefined;
-                return (
-                    row?.status === "failed" &&
-                    row.message.includes("child process promise failed")
-                );
-            });
             expect(getCurrentBackupJob("walg")).toMatchObject({ status: "done" });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
         } finally {
@@ -2827,20 +3145,26 @@ fi
         }
     });
 
-    it("marks aborted scheduled backups failed before preflight starts", async () => {
+    it("cancels queued backups before worker preflight starts", async () => {
         const { getCurrentBackupJob, registerBackupScheduledJobs } =
             await import("../src/services/backups.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
-        const controller = new AbortController();
-        controller.abort();
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
 
         try {
             registerBackupScheduledJobs();
-            const run = await runScheduledJob("backup.walg", "manual", controller.signal);
-            expect(run).toMatchObject({
+            const run = enqueueScheduledJob("backup.walg", "manual");
+            cancelJobExecution(run.executionId as string);
+            expect(
+                database
+                    .prepare(
+                        "SELECT job_id AS jobId, status FROM scheduled_job_runs WHERE id = ?"
+                    )
+                    .get(run.id)
+            ).toMatchObject({
                 jobId: "backup.walg",
-                message: "Scheduled job aborted",
-                status: "failed",
+                status: "cancelled",
             });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
         } finally {
@@ -2888,6 +3212,7 @@ fi
 
         try {
             registerBackupScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("backup.walg");
 
             expect(run).toMatchObject({
@@ -2938,6 +3263,7 @@ fi
 
         try {
             registerBackupScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("backup.kopia");
 
             expect(run).toMatchObject({
@@ -2966,7 +3292,11 @@ fi
     it("terminates running WAL-G backups when a scheduled run is aborted", async () => {
         const { getCurrentBackupJob, registerBackupScheduledJobs } =
             await import("../src/services/backups.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const { waitForJobExecution } =
+            await import("../src/services/queuedJobExecution.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
         const exit = Promise.withResolvers<number>();
         const runProcessCalls: string[] = [];
         const runProcessSpy = jest
@@ -3002,22 +3332,20 @@ fi
                     stdout: readableUtf8Stream(""),
                 }) as unknown as processModule.BunProcess
         );
-        const controller = new AbortController();
-
         try {
             registerBackupScheduledJobs();
-            const runPromise = runScheduledJob(
-                "backup.walg",
-                "manual",
-                controller.signal
-            );
-            await waitFor(() => spawnSpy.mock.calls.length === 1);
-            controller.abort();
+            await startTestScheduledExecutor();
+            const run = enqueueScheduledJob("backup.walg", "manual");
+            await waitFor(() => spawnSpy.mock.calls.length === 1, 3000);
+            cancelJobExecution(run.executionId as string);
+            await waitFor(() => killSignals.includes("SIGTERM"), 3000);
             exit.resolve(143);
 
-            const run = await runPromise;
-            expect(run.status).toBe("failed");
-            expect(run.message).toBe("Scheduled job aborted");
+            const execution = await waitForJobExecution(run.executionId as string, {
+                timeoutMs: 3000,
+            });
+            expect(execution.status).toBe("cancelled");
+            expect(execution.message).toBe("Job cancelled");
             expect(killSignals).toContain("SIGTERM");
             expect(runProcessCalls).toEqual(
                 expect.arrayContaining([
@@ -3046,17 +3374,30 @@ fi
         writeRunningWalgPreflightDocker(path.join(fakeBin, "docker"));
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const {
-            clearNeedsAttentionBackupJob,
+            clearPersistedBackupAttention,
             getCurrentBackupJob,
+            getPersistedBackupJob,
             mapBackupJob,
             registerBackupScheduledJobs,
             startManualBackup,
         } = await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
 
         try {
             registerBackupScheduledJobs();
-            await expect(startManualBackup("walg")).rejects.toMatchObject({
-                statusCode: 409,
+            await startTestScheduledExecutor();
+            await expect(runScheduledJob("backup.walg")).resolves.toMatchObject({
+                output: {
+                    backup: {
+                        code: 130,
+                        status: "needs_attention",
+                        stderr: expect.stringContaining(
+                            "backup process is still running"
+                        ),
+                        type: "walg",
+                    },
+                },
+                status: "failed",
             });
             expect(mapBackupJob(getCurrentBackupJob("walg"))).toMatchObject({
                 code: 130,
@@ -3067,21 +3408,264 @@ fi
             await expect(startManualBackup("walg")).rejects.toThrow(
                 "WALG backup needs attention"
             );
+            expect(getPersistedBackupJob("walg")).toMatchObject({
+                code: 130,
+                status: "needs_attention",
+                stderr: expect.stringContaining("backup process is still running"),
+                type: "walg",
+            });
 
-            const clearedJob = await clearNeedsAttentionBackupJob("walg");
-            expect(mapBackupJob(clearedJob)).toMatchObject({
+            const clearedJob = await clearPersistedBackupAttention("walg");
+            expect(clearedJob).toMatchObject({
                 status: "needs_attention",
                 type: "walg",
             });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { status?: string } | undefined;
-                return row?.status === "failed";
+            expect(getPersistedBackupJob("walg")).toBeUndefined();
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("clears persisted backup attention without in-memory worker state", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-persisted-clear-bin-");
+        writeFakeDocker(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const {
+            clearPersistedBackupAttention,
+            getCurrentBackupJob,
+            getPersistedBackupJob,
+            queueManualBackup,
+            registerBackupScheduledJobs,
+        } = await import("../src/services/backups.ts");
+        const { enqueueScheduledJob, runScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            const run = enqueueScheduledJob("backup.walg", "manual");
+            const executionId = run.executionId;
+            if (!executionId) throw new Error("Backup execution id was missing");
+            const completedAt = "2026-07-22T02:00:00.000Z";
+            const backup = {
+                code: 130,
+                endedAt: Date.parse(completedAt),
+                id: Bun.randomUUIDv7(),
+                startedAt: Date.parse(completedAt),
+                status: "needs_attention",
+                stderr: "Worker restarted before attention was cleared",
+                stdout: "",
+                type: "walg",
+            };
+            database
+                .prepare(
+                    `UPDATE job_executions
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(completedAt, completedAt, JSON.stringify({ backup }), executionId);
+            database
+                .prepare(
+                    `UPDATE scheduled_job_runs
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(completedAt, completedAt, JSON.stringify({ backup }), run.id);
+
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+            expect(getPersistedBackupJob("walg")).toMatchObject(backup);
+            expect(() => queueManualBackup("walg")).toThrow(
+                "WALG backup needs attention"
+            );
+
+            await startTestScheduledExecutor();
+            await expect(runScheduledJob("backup.walg")).resolves.toMatchObject({
+                output: { backup },
+                status: "failed",
             });
+            expect(getPersistedBackupJob("walg")).toMatchObject(backup);
+            await expect(clearPersistedBackupAttention("walg")).resolves.toMatchObject({
+                code: backup.code,
+                endedAt: backup.endedAt,
+                id: backup.id,
+                startedAt: backup.startedAt,
+                status: backup.status,
+                stdout: backup.stdout,
+                type: backup.type,
+            });
+            expect(
+                database
+                    .prepare(
+                        `SELECT cancellable, status
+                         FROM job_executions
+                         WHERE action_key = 'backup.clear-attention'
+                         ORDER BY rowid DESC
+                         LIMIT 1`
+                    )
+                    .get()
+            ).toEqual({ cancellable: 0, status: "success" });
+            expect(getPersistedBackupJob("walg")).toBeUndefined();
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("reports recovered backup failures instead of stale running snapshots", async () => {
+        const { getPersistedBackupJob, registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const {
+            claimNextJobExecution,
+            recoverExpiredJobExecutions,
+            updateJobExecutionOutput,
+        } = await import("../src/services/jobExecutionQueue.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            const run = enqueueScheduledJob("backup.walg", "manual");
+            const executionId = run.executionId;
+            if (!executionId) throw new Error("Backup execution id was missing");
+            const workerId = `backup-recovery-${Bun.randomUUIDv7()}`;
+            const startedAt = new Date(Date.now() + 1000).toISOString();
+            const claimed = claimNextJobExecution(workerId, 1, startedAt, 1000);
+            expect(claimed?.id).toBe(executionId);
+            const backup = {
+                code: undefined,
+                endedAt: undefined,
+                id: Bun.randomUUIDv7(),
+                startedAt: Date.parse(startedAt),
+                status: "running",
+                stderr: "",
+                stdout: "backup started",
+                type: "walg",
+            };
+            updateJobExecutionOutput(executionId, workerId, { backup });
+            const recoveredAt = new Date(Date.parse(startedAt) + 2000).toISOString();
+
+            expect(recoverExpiredJobExecutions(recoveredAt)).toBe(1);
+            expect(getPersistedBackupJob("walg")).toMatchObject({
+                id: backup.id,
+                endedAt: Date.parse(recoveredAt),
+                status: "failed",
+                stderr: "Job failed after its worker lease expired",
+                stdout: backup.stdout,
+                type: "walg",
+            });
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("does not clear a newer persisted backup than the requested execution", async () => {
+        const {
+            clearPersistedBackupAttention,
+            getPersistedBackupJob,
+            registerBackupScheduledJobs,
+        } = await import("../src/services/backups.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            const oldRun = enqueueScheduledJob("backup.walg", "manual");
+            const oldExecutionId = oldRun.executionId;
+            if (!oldExecutionId) throw new Error("Old backup execution id was missing");
+            const oldBackup = {
+                code: 130,
+                endedAt: Date.parse("2026-07-22T02:00:00.000Z"),
+                id: Bun.randomUUIDv7(),
+                startedAt: Date.parse("2026-07-22T02:00:00.000Z"),
+                status: "needs_attention",
+                stderr: "Old backup needs attention",
+                stdout: "",
+                type: "walg",
+            };
+            database
+                .prepare(
+                    `UPDATE job_executions
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'Old WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(
+                    "2026-07-22T02:00:00.000Z",
+                    "2026-07-22T02:00:00.000Z",
+                    JSON.stringify({ backup: oldBackup }),
+                    oldExecutionId
+                );
+            database
+                .prepare(
+                    `UPDATE scheduled_job_runs
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'Old WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(
+                    "2026-07-22T02:00:00.000Z",
+                    "2026-07-22T02:00:00.000Z",
+                    JSON.stringify({ backup: oldBackup }),
+                    oldRun.id
+                );
+
+            const clearPromise = clearPersistedBackupAttention("walg");
+            const newerRun = enqueueScheduledJob("backup.walg", "manual");
+            const newerExecutionId = newerRun.executionId;
+            if (!newerExecutionId) {
+                throw new Error("Newer backup execution id was missing");
+            }
+            const newerBackup = {
+                ...oldBackup,
+                endedAt: Date.parse("2026-07-22T03:00:00.000Z"),
+                id: Bun.randomUUIDv7(),
+                startedAt: Date.parse("2026-07-22T03:00:00.000Z"),
+                stderr: "Newer backup needs attention",
+            };
+            database
+                .prepare(
+                    `UPDATE job_executions
+                     SET status = 'failed', queued_at = ?, started_at = ?,
+                         finished_at = ?, message = 'Newer WALG backup needs attention',
+                         output_json = ?
+                     WHERE id = ?`
+                )
+                .run(
+                    "2999-01-01T03:00:00.000Z",
+                    "2999-01-01T03:00:00.000Z",
+                    "2999-01-01T03:00:00.000Z",
+                    JSON.stringify({ backup: newerBackup }),
+                    newerExecutionId
+                );
+            database
+                .prepare(
+                    `UPDATE scheduled_job_runs
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'Newer WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(
+                    "2999-01-01T03:00:00.000Z",
+                    "2999-01-01T03:00:00.000Z",
+                    JSON.stringify({ backup: newerBackup }),
+                    newerRun.id
+                );
+
+            await startTestScheduledExecutor();
+            await expect(clearPromise).rejects.toMatchObject({
+                message: "WALG backup attention changed before clearing",
+                statusCode: 409,
+            });
+            expect(getPersistedBackupJob("walg")).toMatchObject(newerBackup);
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -3110,17 +3694,6 @@ fi
                 statusCode: 503,
             });
             expect(getCurrentBackupJob("kopia")).toBeUndefined();
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.kopia' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { message?: string; status?: string } | undefined;
-                return (
-                    row?.status === "failed" &&
-                    row.message?.includes("pgrep unavailable") === true
-                );
-            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -3168,14 +3741,6 @@ fi
             expect(readFileSync(pgrepLog, "utf8")).toContain(
                 "-f /opt/docker/apps/kopia/backup.sh"
             );
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.kopia' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { status?: string } | undefined;
-                return row?.status === "failed";
-            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -3773,6 +4338,7 @@ fi
 
         try {
             registerLogRotationScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("ops.log-rotation");
 
             expect(run.status).toBe("failed");
@@ -3830,6 +4396,7 @@ fi
 
         try {
             registerLogRotationScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("ops.log-rotation");
 
             expect(run.status).toBe("failed");
@@ -3895,9 +4462,11 @@ fi
 
         try {
             registerLogRotationScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("ops.log-rotation");
 
             expect(run.status).toBe("success");
+            expect(run.cancellable).toBe(false);
             expect(run.message).toBeUndefined();
             expect(run.output).toMatchObject({
                 logRotation: {
@@ -4507,7 +5076,7 @@ fi
     });
 
     it("starts, stops, and reports exec jobs through the service lifecycle", async () => {
-        const { getExecJob, startExecJob, stopExecJob } =
+        const { getExecJob, registerExecExecutionActions, startExecJob, stopExecJob } =
             await import("../src/services/execJobs.ts");
         const exit = Promise.withResolvers<number>();
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
@@ -4523,6 +5092,8 @@ fi
                 }) as unknown as processModule.BunProcess
         );
         try {
+            registerExecExecutionActions();
+            await startTestScheduledExecutor();
             const { jobId } = startExecJob({
                 command: "__mira_dashboard_shell_smoke_test__",
                 shell: true,
@@ -4531,14 +5102,12 @@ fi
                 jobId,
                 status: "running",
             });
+            await waitFor(() => spawnSpy.mock.calls.length === 1, 3000);
             expect(stopExecJob(jobId)).toEqual({
                 isSuccess: true,
                 message: "Stop signal sent",
             });
-            expect(getExecJob(jobId)).toMatchObject({
-                jobId,
-                status: "signaled",
-            });
+            await waitFor(() => getExecJob(jobId).status === "done", 3000);
             expect(() => stopExecJob(jobId)).toThrow("Job is not running");
         } finally {
             exit.resolve(0);
@@ -4547,8 +5116,8 @@ fi
         }
     });
 
-    it("rejects new exec jobs while the active job cap is full", async () => {
-        const { execErrorResponse, startExecJob } =
+    it("serializes concurrent exec jobs through global execution capacity", async () => {
+        const { registerExecExecutionActions, startExecJob } =
             await import("../src/services/execJobs.ts");
         const exits: Array<ReturnType<typeof Promise.withResolvers<number>>> = [];
         const spawnSpy = jest
@@ -4564,37 +5133,33 @@ fi
                     stdout: readableUtf8Stream(""),
                 } as unknown as processModule.BunProcess;
             });
-        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-
         try {
-            let capError: unknown;
-            for (let index = 0; !capError && index < 120; index += 1) {
-                try {
-                    startExecJob({
-                        command: "__mira_dashboard_shell_smoke_test__",
-                        shell: true,
-                    });
-                } catch (error) {
-                    capError = error;
-                }
-            }
-            expect(execErrorResponse(capError)).toEqual({
-                error: "Too many exec jobs",
-                status: 429,
+            registerExecExecutionActions();
+            await startTestScheduledExecutor();
+            const first = startExecJob({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
             });
-            expect(warnSpy).toHaveBeenCalled();
+            const second = startExecJob({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            });
+            expect(first.jobId).not.toBe(second.jobId);
+            await waitFor(() => exits.length === 1, 3000);
+            exits[0]?.resolve(0);
+            await waitFor(() => exits.length === 2, 3000);
+            exits[1]?.resolve(0);
         } finally {
             for (const exit of exits) {
                 exit.resolve(0);
             }
             await Bun.sleep(0);
             spawnSpy.mockRestore();
-            warnSpy.mockRestore();
         }
     });
 
     it("records exec process failures and trims oversized output", async () => {
-        const { getExecJob, runExecOnce, startExecJob } =
+        const { getExecJob, registerExecExecutionActions, runExecOnce, startExecJob } =
             await import("../src/services/execJobs.ts");
         const longOutput = `${"x".repeat(101_000)}tail`;
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
@@ -4609,6 +5174,8 @@ fi
         );
 
         try {
+            registerExecExecutionActions();
+            await startTestScheduledExecutor();
             const once = await runExecOnce({
                 command: "__mira_dashboard_shell_smoke_test__",
                 shell: true,
@@ -4890,9 +5457,31 @@ fi
             hash: "hash-1",
         });
 
+        const { registerOpenClawExecutionActions } =
+            await import("../src/services/openclawActions.ts");
+        registerOpenClawExecutionActions();
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    "DELETE FROM job_executions WHERE action_key = 'openclaw.gateway.restart'"
+                )
+                .run();
+        });
+        await startTestScheduledExecutor();
         const restartResponse = await openclawConfigRoutes["/api/restart"].POST();
         expect(restartResponse.status).toBe(200);
         await expect(restartResponse.json()).resolves.toEqual({ isOk: true });
+        expect(
+            database
+                .prepare(
+                    `SELECT cancellable, status
+                     FROM job_executions
+                     WHERE action_key = 'openclaw.gateway.restart'
+                     ORDER BY rowid DESC
+                     LIMIT 1`
+                )
+                .get()
+        ).toEqual({ cancellable: 0, status: "success" });
     });
 
     it("normalizes cron and session route contracts through a patched gateway", async () => {
@@ -5260,6 +5849,10 @@ fi
                 throw new Error("docker exec spawn failed");
             });
         try {
+            const { registerDockerExecutionActions } =
+                await import("../src/services/dockerActions.ts");
+            registerDockerExecutionActions();
+            await startTestScheduledExecutor();
             const execStart = await dockerRoutes["/api/docker/exec/start"].POST(
                 new Request("https://dashboard.test/api/docker/exec/start", {
                     body: JSON.stringify({
@@ -5270,6 +5863,12 @@ fi
                 })
             );
             const execStartBody = (await execStart.json()) as { jobId: string };
+            await waitFor(() => {
+                const row = database
+                    .prepare("SELECT status FROM job_executions WHERE id = ?")
+                    .get(execStartBody.jobId) as { status?: string } | undefined;
+                return row?.status === "failed";
+            }, 3000);
             const failedExec = dockerRoutes["/api/docker/exec/:jobId"].GET(
                 Object.assign(
                     new Request(
@@ -5435,8 +6034,9 @@ fi
                 ].join("\n")
             );
             process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
-            const { registerDockerUpdaterServices } =
+            const { registerDockerUpdaterScheduledJobs, registerDockerUpdaterServices } =
                 await import("../src/services/dockerUpdater.ts");
+            registerDockerUpdaterScheduledJobs();
             await expect(registerDockerUpdaterServices()).resolves.toMatchObject({
                 isOk: true,
             });
@@ -5479,7 +6079,7 @@ fi
         const scheduledDisabledId = `test-job-scheduled-disabled-${Bun.randomUUIDv7()}`;
         const {
             calculateNextRunAt,
-            finishScheduledJobRun,
+            enqueueScheduledJob,
             getScheduledJob,
             isScheduledJobValidationError,
             listScheduledJobs,
@@ -5487,12 +6087,16 @@ fi
             registerScheduledJobAction,
             removeScheduledJobsNotInAction,
             runScheduledJob,
-            createManualScheduledJobRun,
+            startScheduledJobExecutor,
+            stopScheduledJobExecutor,
             updateScheduledJob,
             upsertScheduledJob,
         } = await import("../src/services/scheduledJobs.ts");
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
 
         try {
+            startScheduledJobExecutor();
             expect(
                 calculateNextRunAt(
                     {
@@ -5638,11 +6242,11 @@ fi
                 nextRunAt: undefined,
             });
 
-            const manualRun = createManualScheduledJobRun(keepId);
-            expect(() => createManualScheduledJobRun(keepId)).toThrow(
-                "Scheduled job is already running"
+            const manualRun = enqueueScheduledJob(keepId);
+            expect(() => enqueueScheduledJob(keepId)).toThrow(
+                "Scheduled job is already queued or running"
             );
-            finishScheduledJobRun(manualRun, "success", undefined, { manual: true });
+            cancelJobExecution(manualRun.executionId as string);
 
             const result = await runScheduledJob(keepId);
             expect(result).toMatchObject({
@@ -5742,11 +6346,16 @@ fi
 
             const timeoutActionKey = `test-timeout-action-${Bun.randomUUIDv7()}`;
             const timeoutJobId = `test-job-timeout-${Bun.randomUUIDv7()}`;
+            let isTimeoutHandlerSettled = false;
             registerScheduledJobAction(
                 timeoutActionKey,
                 async () => {
-                    await Bun.sleep(50);
-                    return { late: true };
+                    try {
+                        await Bun.sleep(50);
+                        return { late: true };
+                    } finally {
+                        isTimeoutHandlerSettled = true;
+                    }
                 },
                 { timeoutMs: 1 }
             );
@@ -5765,6 +6374,7 @@ fi
                     output: {},
                     status: "failed",
                 });
+                expect(isTimeoutHandlerSettled).toBe(true);
             } finally {
                 warnSpy.mockRestore();
             }
@@ -5783,13 +6393,9 @@ fi
             controller.abort();
             await expect(
                 runScheduledJob(abortJobId, "manual", controller.signal)
-            ).resolves.toMatchObject({
-                jobId: abortJobId,
-                message: "Scheduled job aborted",
-                output: {},
-                status: "failed",
-            });
+            ).rejects.toHaveProperty("name", "AbortError");
         } finally {
+            await stopScheduledJobExecutor();
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'test-job-%'")
                 .run();

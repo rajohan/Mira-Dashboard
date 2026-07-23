@@ -203,6 +203,21 @@ async function createTestServer(
     throw lastError;
 }
 
+async function withTestScheduledExecutor<T>(
+    registerActions: () => void,
+    operation: () => Promise<T>
+): Promise<T> {
+    const { startScheduledJobExecutor, stopScheduledJobExecutor } =
+        await import("../src/services/scheduledJobs.ts");
+    registerActions();
+    startScheduledJobExecutor();
+    try {
+        return await operation();
+    } finally {
+        await stopScheduledJobExecutor();
+    }
+}
+
 describe("Mira Dashboard backend integration", () => {
     beforeAll(async () => {
         testState.originalEnv = Object.fromEntries(
@@ -282,10 +297,15 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("reports health and auth bootstrap state without production data", async () => {
-        const health = await api<{ status: string; sessionCount: number }>("/api/health");
+        const health = await api<{
+            status: string;
+            sessionCount: number;
+            workerOnline: boolean;
+        }>("/api/health");
         expect(health.status).toBe(200);
         expect(health.body.status).toBe("isOk");
         expect(health.body.sessionCount).toBe(0);
+        expect(health.body.workerOnline).toBe(false);
 
         const bootstrap = await api<{
             isBootstrapRequired: boolean;
@@ -1361,12 +1381,18 @@ describe("Mira Dashboard backend integration", () => {
         expect(directExec.status).toBe(400);
         expect(directExec.body.error).toBe("command executable is not approved");
 
-        const shellExec = await api<{ code: number; stderr: string; stdout: string }>(
-            "/api/exec",
-            json("POST", {
-                command: "__mira_dashboard_shell_smoke_test__",
-                shell: true,
-            })
+        const { registerExecExecutionActions } =
+            await import("../src/services/execJobs.ts");
+        const shellExec = await withTestScheduledExecutor(
+            registerExecExecutionActions,
+            () =>
+                api<{ code: number; stderr: string; stdout: string }>(
+                    "/api/exec",
+                    json("POST", {
+                        command: "__mira_dashboard_shell_smoke_test__",
+                        shell: true,
+                    })
+                )
         );
         expect(shellExec.status).toBe(200);
         expect(shellExec.body.code).not.toBe(0);
@@ -1496,21 +1522,64 @@ describe("Mira Dashboard backend integration", () => {
         const run = await api<{
             isOk: boolean;
             run: {
+                executionId: string;
                 jobId: string;
                 output: Record<string, unknown>;
                 status: string;
                 triggerType: string;
             };
         }>("/api/jobs/functional.test.job/run", { method: "POST" });
-        expect(run.status).toBe(200);
+        expect(run.status).toBe(202);
         expect(run.body).toMatchObject({
             isOk: true,
             run: {
                 jobId: "functional.test.job",
-                output: { result: "ran from integration test" },
-                status: "success",
+                output: {},
+                status: "queued",
                 triggerType: "manual",
             },
+        });
+
+        const queue = await api<{
+            executions: Array<{ id: string; scheduledJobId?: string; status: string }>;
+            summary: { queued: number; running: number };
+        }>("/api/job-executions");
+        expect(queue.status).toBe(200);
+        expect(queue.body.summary).toMatchObject({ queued: 1, running: 0 });
+        expect(queue.body.executions).toContainEqual(
+            expect.objectContaining({
+                id: run.body.run.executionId,
+                scheduledJobId: "functional.test.job",
+                status: "queued",
+            })
+        );
+
+        const detail = await api<{
+            execution: { id: string; output: Record<string, unknown>; status: string };
+        }>(`/api/job-executions/${run.body.run.executionId}`);
+        expect(detail.status).toBe(200);
+        expect(detail.body.execution).toMatchObject({
+            id: run.body.run.executionId,
+            output: {},
+            status: "queued",
+        });
+
+        const invalidExecutionId = await api<{ error: string }>(
+            "/api/job-executions/not-a-uuid"
+        );
+        expect(invalidExecutionId.status).toBe(400);
+        expect(invalidExecutionId.body.error).toBe("Invalid job execution id");
+
+        const cancelled = await api<{
+            execution: { id: string; status: string };
+            isOk: boolean;
+        }>(`/api/job-executions/${run.body.run.executionId}/cancel`, {
+            method: "POST",
+        });
+        expect(cancelled.status).toBe(200);
+        expect(cancelled.body).toMatchObject({
+            execution: { id: run.body.run.executionId, status: "cancelled" },
+            isOk: true,
         });
 
         const runs = await api<{
@@ -1520,7 +1589,7 @@ describe("Mira Dashboard backend integration", () => {
         expect(runs.body.runs).toContainEqual(
             expect.objectContaining({
                 jobId: "functional.test.job",
-                status: "success",
+                status: "cancelled",
                 triggerType: "manual",
             })
         );
@@ -1709,9 +1778,14 @@ describe("Mira Dashboard backend integration", () => {
         expect(walg.status).toBe(200);
         expect(walg.body).toEqual({});
 
-        const clearKopia = await api<{ error: string }>(
-            "/api/backups/kopia/clear-needs-attention",
-            { method: "POST" }
+        const { registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const clearKopia = await withTestScheduledExecutor(
+            registerBackupScheduledJobs,
+            () =>
+                api<{ error: string }>("/api/backups/kopia/clear-needs-attention", {
+                    method: "POST",
+                })
         );
         expect(clearKopia.status).toBe(404);
         expect(clearKopia.body.error).toBe("KOPIA backup job not found");
@@ -2262,9 +2336,15 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("allows valid dotted Docker Compose service names", async () => {
-        const result = await api<{ output: string }>(
-            "/api/docker/stack/action",
-            json("POST", { action: "restart", service: "api.v1" })
+        const { registerDockerExecutionActions } =
+            await import("../src/services/dockerActions.ts");
+        const result = await withTestScheduledExecutor(
+            registerDockerExecutionActions,
+            () =>
+                api<{ output: string }>(
+                    "/api/docker/stack/action",
+                    json("POST", { action: "restart", service: "api.v1" })
+                )
         );
 
         expect(result.status).toBe(200);

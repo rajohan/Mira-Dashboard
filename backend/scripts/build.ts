@@ -8,7 +8,10 @@ await rm(outdir, { force: true, recursive: true });
 await mkdir(outdir, { recursive: true });
 
 const result = await Bun.build({
-    entrypoints: [path.join(backendDirectory, "src/serverStart.ts")],
+    entrypoints: [
+        path.join(backendDirectory, "src/serverStart.ts"),
+        path.join(backendDirectory, "src/workerStart.ts"),
+    ],
     format: "esm",
     outdir,
     packages: "external",

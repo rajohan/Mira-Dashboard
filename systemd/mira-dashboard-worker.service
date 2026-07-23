@@ -1,0 +1,26 @@
+[Unit]
+Description=Mira Dashboard job worker
+After=network-online.target openclaw-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/projects/mira-dashboard/backend
+Environment=NODE_ENV=production
+Environment=MIRA_DASHBOARD_EXECUTION_ROLE=worker
+Environment=MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1
+Environment=MIRA_DASHBOARD_JOB_SCOPE_OWNER=mira-dashboard-worker.service
+ExecStart=/usr/local/bin/doppler run --config prd --project rajohan -- /home/ubuntu/.bun/bin/bun dist/workerStart.js
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=45
+Nice=10
+CPUWeight=20
+IOWeight=20
+MemoryHigh=4G
+MemoryMax=6G
+TasksMax=256
+
+[Install]
+WantedBy=default.target

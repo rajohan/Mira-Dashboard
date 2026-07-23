@@ -21,6 +21,7 @@ interface GitSyncResult {
 
 interface GitCommandOptions {
     cwd: string;
+    signal?: AbortSignal;
     timeoutMs?: number;
 }
 
@@ -105,6 +106,7 @@ async function git(arguments_: string[], options: GitCommandOptions): Promise<st
         cwd: options.cwd,
         env: process.env,
         maxBuffer: 10 * 1024 * 1024,
+        signal: options.signal,
         timeoutMs: options.timeoutMs ?? GIT_SYNC_TIMEOUT_MS,
     });
     if (result.code !== 0) {
@@ -143,9 +145,14 @@ function isDockerUpdaterSafePath(
     return relativeToApps !== undefined && DOCKER_COMPOSE_FILE_RE.test(relativeToApps);
 }
 
-async function resolveDockerGitScope(): Promise<{ appsPath: string; repoPath: string }> {
+async function resolveDockerGitScope(
+    signal?: AbortSignal
+): Promise<{ appsPath: string; repoPath: string }> {
     const appsRoot = realpathSync(getDockerAppsRoot());
-    const repoPath = await git(["rev-parse", "--show-toplevel"], { cwd: appsRoot });
+    const repoPath = await git(["rev-parse", "--show-toplevel"], {
+        cwd: appsRoot,
+        signal,
+    });
     const appsPath = relativePath(repoPath, appsRoot);
     if (!appsPath) {
         throw new Error(`Docker apps root is outside git repository: ${appsRoot}`);
@@ -153,15 +160,18 @@ async function resolveDockerGitScope(): Promise<{ appsPath: string; repoPath: st
     return { appsPath, repoPath };
 }
 
-async function dockerGitScope(): Promise<{ appsPath: string; repoPath: string }> {
-    return await resolveDockerGitScope();
+async function dockerGitScope(
+    signal?: AbortSignal
+): Promise<{ appsPath: string; repoPath: string }> {
+    return await resolveDockerGitScope(signal);
 }
 
 export async function dirtyDockerUpdaterPaths(
-    paths: string[]
+    paths: string[],
+    signal?: AbortSignal
 ): Promise<Set<string> | undefined> {
     try {
-        const scope = await dockerGitScope();
+        const scope = await dockerGitScope(signal);
         const statusPathspecs = normalizeDockerChangedPaths(scope.repoPath, paths) ?? [];
         if (statusPathspecs.length === 0) return new Set();
         const status = await git(
@@ -172,7 +182,7 @@ export async function dirtyDockerUpdaterPaths(
                 "--",
                 ...statusPathspecs.map((path_) => literalPathspec(path_)),
             ],
-            { cwd: scope.repoPath }
+            { cwd: scope.repoPath, signal }
         );
         return new Set(
             parseStatusPaths(status).map((statusPath) =>
@@ -180,6 +190,7 @@ export async function dirtyDockerUpdaterPaths(
             )
         );
     } catch {
+        signal?.throwIfAborted();
         return undefined;
     }
 }
@@ -199,16 +210,18 @@ function normalizeDockerChangedPaths(
 async function commitAndPushPaths(
     repoPath: string,
     paths: string[],
-    message: string
+    message: string,
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
 ): Promise<GitSyncResult> {
     const changedPaths = uniqueSorted(paths);
     if (changedPaths.length === 0) {
         return { changedPaths, pushed: false, skippedReason: "no safe changes" };
     }
 
-    await assertPendingCommitsAreAutomation(repoPath, [message]);
+    await assertPendingCommitsAreAutomation(repoPath, [message], signal);
     const changedPathspecs = changedPaths.map((path_) => literalPathspec(path_));
-    await git(["add", "--", ...changedPathspecs], { cwd: repoPath });
+    await git(["add", "--", ...changedPathspecs], { cwd: repoPath, signal });
     try {
         const stagedDiff = await runProcess(
             "git",
@@ -216,6 +229,7 @@ async function commitAndPushPaths(
             {
                 cwd: repoPath,
                 env: process.env,
+                signal,
                 timeoutMs: GIT_SYNC_TIMEOUT_MS,
             }
         );
@@ -230,20 +244,26 @@ async function commitAndPushPaths(
             );
         }
 
+        protectFromCancellation?.();
         await git(["commit", "--only", "-m", message, "--", ...changedPathspecs], {
             cwd: repoPath,
+            signal,
         });
     } catch (error) {
         await git(["restore", "--staged", "--", ...changedPathspecs], { cwd: repoPath });
         throw error;
     }
-    const upstream = await inspectUpstream(repoPath);
+    const upstream = await inspectUpstream(repoPath, signal);
     if (!upstream) {
         throw new Error("Refusing to push without an inspectable upstream");
     }
-    const commit = await git(["rev-parse", "--short", "HEAD"], { cwd: repoPath });
+    const commit = await git(["rev-parse", "--short", "HEAD"], {
+        cwd: repoPath,
+        signal,
+    });
     await git(["push", upstream.remote, upstream.refspec], {
         cwd: repoPath,
+        signal,
         timeoutMs: GIT_PUSH_TIMEOUT_MS,
     });
     return { changedPaths, commit, pushed: true };
@@ -255,13 +275,17 @@ interface InspectedUpstream {
     remote: string;
 }
 
-async function inspectUpstream(repoPath: string): Promise<InspectedUpstream | undefined> {
+async function inspectUpstream(
+    repoPath: string,
+    signal?: AbortSignal
+): Promise<InspectedUpstream | undefined> {
     const upstream = await runProcess(
         "git",
         ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         {
             cwd: repoPath,
             env: process.env,
+            signal,
             timeoutMs: GIT_SYNC_TIMEOUT_MS,
         }
     );
@@ -277,21 +301,24 @@ async function inspectUpstream(repoPath: string): Promise<InspectedUpstream | un
 }
 
 async function pendingCommitState(
-    repoPath: string
+    repoPath: string,
+    signal?: AbortSignal
 ): Promise<{ subjects: string[]; upstream: InspectedUpstream } | undefined> {
-    const upstream = await inspectUpstream(repoPath);
+    const upstream = await inspectUpstream(repoPath, signal);
     if (!upstream) return undefined;
     const subjects = await git(["log", "--format=%s", `${upstream.name}..HEAD`], {
         cwd: repoPath,
+        signal,
     });
     return { subjects: subjects.split("\n").filter(Boolean), upstream };
 }
 
 async function assertPendingCommitsAreAutomation(
     repoPath: string,
-    allowedMessages: string[]
+    allowedMessages: string[],
+    signal?: AbortSignal
 ): Promise<void> {
-    const pendingState = await pendingCommitState(repoPath);
+    const pendingState = await pendingCommitState(repoPath, signal);
     if (pendingState === undefined) {
         throw new Error("Refusing to push without an inspectable upstream");
     }
@@ -302,9 +329,11 @@ async function assertPendingCommitsAreAutomation(
 
 async function pushPendingAutomationCommits(
     repoPath: string,
-    allowedMessages: string[]
+    allowedMessages: string[],
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
 ): Promise<GitSyncResult | undefined> {
-    const pendingState = await pendingCommitState(repoPath);
+    const pendingState = await pendingCommitState(repoPath, signal);
     if (
         pendingState === undefined ||
         pendingState.subjects.length === 0 ||
@@ -313,17 +342,23 @@ async function pushPendingAutomationCommits(
         return undefined;
     }
 
+    protectFromCancellation?.();
     await git(["push", pendingState.upstream.remote, pendingState.upstream.refspec], {
         cwd: repoPath,
+        signal,
         timeoutMs: GIT_PUSH_TIMEOUT_MS,
     });
-    const commit = await git(["rev-parse", "--short", "HEAD"], { cwd: repoPath });
+    const commit = await git(["rev-parse", "--short", "HEAD"], {
+        cwd: repoPath,
+        signal,
+    });
     return { changedPaths: [], commit, pushed: true };
 }
 
 async function withGitSyncLock<T>(
     repoPath: string,
-    action: () => Promise<T>
+    action: () => Promise<T>,
+    signal?: AbortSignal
 ): Promise<T> {
     const wasPrevious = gitSyncLocks.get(repoPath)?.promise ?? Promise.resolve();
     const current = Promise.withResolvers<void>();
@@ -336,6 +371,7 @@ async function withGitSyncLock<T>(
     gitSyncLocks.set(repoPath, next);
     await wasPrevious;
     try {
+        signal?.throwIfAborted();
         return await action();
     } finally {
         release();
@@ -345,64 +381,107 @@ async function withGitSyncLock<T>(
     }
 }
 
-export async function syncOpenClawWorkspaceSafePaths(): Promise<GitSyncResult> {
+export async function syncOpenClawWorkspaceSafePaths(
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
+): Promise<GitSyncResult> {
     const repoPath = getOpenClawRoot();
-    return withGitSyncLock(repoPath, async () => {
-        const status = await git(["status", "--porcelain=v1", "-z", "-uall"], {
-            cwd: repoPath,
-        });
-        const changedPaths = parseStatusPaths(status);
-        const safePaths = changedPaths.filter((path_) => isOpenClawSafePath(path_));
-        if (safePaths.length === 0) {
-            const pushedPending = await pushPendingAutomationCommits(repoPath, [
+    return withGitSyncLock(
+        repoPath,
+        async () => {
+            const status = await git(["status", "--porcelain=v1", "-z", "-uall"], {
+                cwd: repoPath,
+                signal,
+            });
+            const changedPaths = parseStatusPaths(status);
+            const safePaths = changedPaths.filter((path_) => isOpenClawSafePath(path_));
+            if (safePaths.length === 0) {
+                const pushedPending = await pushPendingAutomationCommits(
+                    repoPath,
+                    [OPENCLAW_SYNC_COMMIT_MESSAGE],
+                    signal,
+                    protectFromCancellation
+                );
+                if (pushedPending) return pushedPending;
+                return {
+                    changedPaths: [],
+                    pushed: false,
+                    skippedReason: "no safe changes",
+                };
+            }
+            return commitAndPushPaths(
+                repoPath,
+                safePaths,
                 OPENCLAW_SYNC_COMMIT_MESSAGE,
-            ]);
-            if (pushedPending) return pushedPending;
-            return { changedPaths: [], pushed: false, skippedReason: "no safe changes" };
-        }
-        return commitAndPushPaths(repoPath, safePaths, OPENCLAW_SYNC_COMMIT_MESSAGE);
-    });
+                signal,
+                protectFromCancellation
+            );
+        },
+        signal
+    );
 }
 
-export async function syncDockerUpdaterChanges(paths?: string[]): Promise<GitSyncResult> {
-    const scope = await dockerGitScope();
+export async function syncDockerUpdaterChanges(
+    paths?: string[],
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
+): Promise<GitSyncResult> {
+    const scope = await dockerGitScope(signal);
     const { appsPath, repoPath } = scope;
-    return withGitSyncLock(repoPath, async () => {
-        const statusPathspecs = normalizeDockerChangedPaths(repoPath, paths);
-        const safePaths =
-            statusPathspecs?.length === 0
-                ? []
-                : parseStatusPaths(
-                      await git(
-                          [
-                              "status",
-                              "--porcelain=v1",
-                              "-z",
-                              "--",
-                              ...(statusPathspecs ?? [appsPath]).map((path_) =>
-                                  literalPathspec(path_)
-                              ),
-                          ],
-                          {
-                              cwd: repoPath,
-                          }
-                      )
-                  ).filter((path_) =>
-                      isDockerUpdaterSafePath(
-                          path_,
-                          appsPath,
-                          statusPathspecs !== undefined
-                      )
-                  );
-        if (safePaths.length === 0) {
-            const pushedPending = await pushPendingAutomationCommits(repoPath, [
+    return withGitSyncLock(
+        repoPath,
+        async () => {
+            const statusPathspecs = normalizeDockerChangedPaths(repoPath, paths);
+            const safePaths =
+                statusPathspecs?.length === 0
+                    ? []
+                    : parseStatusPaths(
+                          await git(
+                              [
+                                  "status",
+                                  "--porcelain=v1",
+                                  "-z",
+                                  "--",
+                                  ...(statusPathspecs ?? [appsPath]).map((path_) =>
+                                      literalPathspec(path_)
+                                  ),
+                              ],
+                              {
+                                  cwd: repoPath,
+                                  signal,
+                              }
+                          )
+                      ).filter((path_) =>
+                          isDockerUpdaterSafePath(
+                              path_,
+                              appsPath,
+                              statusPathspecs !== undefined
+                          )
+                      );
+            if (safePaths.length === 0) {
+                const pushedPending = await pushPendingAutomationCommits(
+                    repoPath,
+                    [DOCKER_SYNC_COMMIT_MESSAGE],
+                    signal,
+                    protectFromCancellation
+                );
+                if (pushedPending) return pushedPending;
+                return {
+                    changedPaths: [],
+                    pushed: false,
+                    skippedReason: "no safe changes",
+                };
+            }
+            return commitAndPushPaths(
+                repoPath,
+                safePaths,
                 DOCKER_SYNC_COMMIT_MESSAGE,
-            ]);
-            if (pushedPending) return pushedPending;
-            return { changedPaths: [], pushed: false, skippedReason: "no safe changes" };
-        }
-        return commitAndPushPaths(repoPath, safePaths, DOCKER_SYNC_COMMIT_MESSAGE);
-    });
+                signal,
+                protectFromCancellation
+            );
+        },
+        signal
+    );
 }
 
 export function registerGitHygieneScheduledJobs(): void {
@@ -415,11 +494,15 @@ export function registerGitHygieneScheduledJobs(): void {
         timeOfDay: "05:20",
         actionKey: "git.openclaw.workspace-sync",
         actionPayload: {},
+        resourceClass: "host-heavy",
     } as const;
     registerScheduledJobAction(
         "git.openclaw.workspace-sync",
-        async () => {
-            const result = await syncOpenClawWorkspaceSafePaths();
+        async (_job, signal, context) => {
+            const result = await syncOpenClawWorkspaceSafePaths(
+                signal,
+                context.protectFromCancellation
+            );
             return { ...result };
         },
         { timeoutMs: GIT_WORKSPACE_SYNC_TIMEOUT_MS }

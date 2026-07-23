@@ -1265,9 +1265,26 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     createdAt: "2026-06-24T08:00:00.000Z",
                     updatedAt: "2026-06-24T08:00:00.000Z",
                     lastRun: jobsApiState.heartbeatRuns[0],
+                    resourceClass: "light",
+                    timeoutMs: 300_000,
+                    isQueued: false,
                     isRunning: false,
                 },
             ],
+        });
+    }
+
+    if (url === "/api/job-executions") {
+        return Response.json({
+            executions: [],
+            summary: {
+                activeResourceClasses: [],
+                queued: 0,
+                running: 0,
+                workerCapacity: 1,
+                workerCount: 1,
+                workerOnline: true,
+            },
         });
     }
 
@@ -1333,6 +1350,9 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     actionPayload: {},
                     createdAt: "2026-06-24T08:00:00.000Z",
                     updatedAt: "2026-06-24T08:05:00.000Z",
+                    resourceClass: "light",
+                    timeoutMs: 300_000,
+                    isQueued: false,
                     isRunning: false,
                 },
             });
@@ -1360,6 +1380,9 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 actionPayload: {},
                 createdAt: "2026-06-24T08:00:00.000Z",
                 updatedAt: "2026-06-24T08:05:00.000Z",
+                resourceClass: "light",
+                timeoutMs: 300_000,
+                isQueued: false,
                 isRunning: false,
             },
         });

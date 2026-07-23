@@ -305,6 +305,60 @@ CREATE TABLE IF NOT EXISTS scheduled_job_runs (
 CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_started
     ON scheduled_job_runs(job_id, started_at DESC);
 
+CREATE TABLE IF NOT EXISTS scheduled_job_execution_policies (
+    job_id TEXT PRIMARY KEY,
+    resource_class TEXT NOT NULL,
+    timeout_ms INTEGER NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(job_id) REFERENCES scheduled_jobs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS job_workers (
+    id TEXT PRIMARY KEY,
+    capacity INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_workers_heartbeat
+    ON job_workers(heartbeat_at DESC);
+
+CREATE TABLE IF NOT EXISTS job_executions (
+    id TEXT PRIMARY KEY,
+    scheduled_job_id TEXT,
+    scheduled_run_id INTEGER,
+    action_key TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    resource_class TEXT NOT NULL,
+    priority INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    queued_at TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    lease_owner TEXT,
+    lease_expires_at TEXT,
+    heartbeat_at TEXT,
+    cancel_requested_at TEXT,
+    cancellable INTEGER NOT NULL DEFAULT 1,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    timeout_ms INTEGER NOT NULL,
+    message TEXT,
+    output_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_executions_queue
+    ON job_executions(status, available_at, priority DESC, queued_at);
+
+CREATE INDEX IF NOT EXISTS idx_job_executions_scheduled_run
+    ON job_executions(scheduled_run_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_executions_active_scheduled_job
+    ON job_executions(scheduled_job_id)
+    WHERE scheduled_job_id IS NOT NULL AND status IN ('queued', 'running');
+
 CREATE TABLE IF NOT EXISTS chat_runtime_snapshots (
     gateway_scope TEXT NOT NULL,
     session_key TEXT NOT NULL,

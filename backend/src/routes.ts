@@ -13,6 +13,7 @@ import { databaseRoutes } from "./routes/databaseRoutes.ts";
 import { dockerRoutes } from "./routes/dockerRoutes.ts";
 import { execRoutes } from "./routes/execRoutes.ts";
 import { fileRoutes } from "./routes/fileRoutes.ts";
+import { jobExecutionRoutes } from "./routes/jobExecutionRoutes.ts";
 import { jobRoutes } from "./routes/jobRoutes.ts";
 import { logRoutes } from "./routes/logRoutes.ts";
 import { mediaRoutes } from "./routes/mediaRoutes.ts";
@@ -29,6 +30,7 @@ import { sttRoutes } from "./routes/sttRoutes.ts";
 import { taskRoutes } from "./routes/taskRoutes.ts";
 import { terminalRoutes } from "./routes/terminalRoutes.ts";
 import { ttsRoutes } from "./routes/ttsRoutes.ts";
+import { getJobExecutionSummary } from "./services/jobExecutionQueue.ts";
 
 const BACKEND_COMMIT = (() => {
     try {
@@ -49,12 +51,22 @@ function backendCommit(): string {
     return BACKEND_COMMIT;
 }
 
+function isWorkerOnline(): boolean {
+    try {
+        return getJobExecutionSummary().workerOnline;
+    } catch (error) {
+        console.warn("[Health] Failed to read job worker telemetry:", error);
+        return false;
+    }
+}
+
 function health() {
     return json({
         status: "isOk",
         gatewayConnected: gateway.isConnected(),
         sessionCount: gateway.getSessions().length,
         backendCommit: backendCommit() || "unknown",
+        workerOnline: isWorkerOnline(),
     });
 }
 
@@ -83,6 +95,7 @@ const routeTable = {
     ...execRoutes,
     ...fileRoutes,
     ...jobRoutes,
+    ...jobExecutionRoutes,
     ...logRoutes,
     ...mediaRoutes,
     ...metricsRoutes,

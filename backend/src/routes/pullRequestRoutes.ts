@@ -1,16 +1,14 @@
 import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
-    approvePullRequest,
-    approvePullRequestReview,
-    ensureProductionCheckout,
-    ensureProductionReadyForDeploy,
     getProductionCheckoutStatus,
     listDashboardPullRequests,
+    prepareAndStartDeployLatest,
     readDeploymentJobs,
-    rejectPullRequest,
-    startDeployLatest,
-    updatePullRequestBranch,
+    runPullRequestApproval,
+    runPullRequestBranchUpdate,
+    runPullRequestRejection,
+    runPullRequestReviewApproval,
     validatePrNumber,
 } from "../services/pullRequests.ts";
 
@@ -52,7 +50,7 @@ export const pullRequestRoutes = {
                 const body = request.body
                     ? await readJson<{ deploy?: unknown } | undefined>(request)
                     : undefined;
-                return json(await approvePullRequest(number, body?.deploy === true));
+                return json(await runPullRequestApproval(number, body?.deploy === true));
             } catch (error) {
                 return routeError(error);
             }
@@ -70,7 +68,7 @@ export const pullRequestRoutes = {
                     typeof body?.comment === "string" && body.comment.trim()
                         ? body.comment.trim()
                         : "Closed from Mira Dashboard after Rajohan rejected it.";
-                return json(await rejectPullRequest(number, comment));
+                return json(await runPullRequestRejection(number, comment));
             } catch (error) {
                 return routeError(error);
             }
@@ -81,7 +79,7 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                return json(await approvePullRequestReview(number));
+                return json(await runPullRequestReviewApproval(number));
             } catch (error) {
                 return routeError(error);
             }
@@ -92,7 +90,7 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                return json(await updatePullRequestBranch(number));
+                return json(await runPullRequestBranchUpdate(number));
             } catch (error) {
                 return routeError(error);
             }
@@ -101,9 +99,10 @@ export const pullRequestRoutes = {
     "/api/pull-requests/deploy": {
         POST: async () => {
             try {
-                await ensureProductionCheckout();
-                await ensureProductionReadyForDeploy();
-                return json({ deployment: startDeployLatest(), isOk: true });
+                return json({
+                    deployment: await prepareAndStartDeployLatest(),
+                    isOk: true,
+                });
             } catch (error) {
                 return routeError(error);
             }
