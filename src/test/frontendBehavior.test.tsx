@@ -152,6 +152,7 @@ import {
 } from "../hooks/usePullRequests";
 import { hasQuotaStatus, useQuotas } from "../hooks/useQuotas";
 import {
+    scheduledJobKeys,
     useRunScheduledJobNow,
     useScheduledJobRuns,
     useScheduledJobs,
@@ -2098,9 +2099,20 @@ describe("Mira Dashboard frontend behavior", () => {
         await waitFor(() => expect(walg.result.current.data?.job).toBeUndefined());
 
         const runKopia = renderHookWithQueryClient(() => useRunKopiaBackup());
+        runKopia.queryClient.setQueryData(scheduledJobKeys.list(), { jobs: [] });
+        runKopia.queryClient.setQueryData(scheduledJobKeys.runs("backup.kopia"), {
+            runs: [],
+        });
         await expect(runKopia.result.current.mutateAsync()).resolves.toEqual(
             expect.objectContaining({ isOk: true })
         );
+        expect(
+            runKopia.queryClient.getQueryState(scheduledJobKeys.list())?.isInvalidated
+        ).toBe(true);
+        expect(
+            runKopia.queryClient.getQueryState(scheduledJobKeys.runs("backup.kopia"))
+                ?.isInvalidated
+        ).toBe(true);
 
         const pullRequests = renderHookWithQueryClient(() => usePullRequests());
         await waitFor(() =>
@@ -2464,9 +2476,13 @@ describe("Mira Dashboard frontend behavior", () => {
         );
 
         const refreshCache = renderHookWithQueryClient(() => useRefreshCacheEntry());
+        refreshCache.queryClient.setQueryData(scheduledJobKeys.list(), { jobs: [] });
         await expect(
             refreshCache.result.current.mutateAsync(" weather.spydeberg ,, ")
         ).resolves.toMatchObject({ keys: ["weather.spydeberg"] });
+        expect(
+            refreshCache.queryClient.getQueryState(scheduledJobKeys.list())?.isInvalidated
+        ).toBe(true);
     });
 
     it("attempts every requested cache refresh and retains partial successes", async () => {
@@ -3525,9 +3541,20 @@ describe("Mira Dashboard frontend behavior", () => {
         });
 
         const runWalg = renderHookWithQueryClient(() => useRunWalgBackup());
+        runWalg.queryClient.setQueryData(scheduledJobKeys.list(), { jobs: [] });
+        runWalg.queryClient.setQueryData(scheduledJobKeys.runs("backup.walg"), {
+            runs: [],
+        });
         await expect(runWalg.result.current.mutateAsync()).resolves.toMatchObject({
             job: { id: "walg-1", status: "running" },
         });
+        expect(
+            runWalg.queryClient.getQueryState(scheduledJobKeys.list())?.isInvalidated
+        ).toBe(true);
+        expect(
+            runWalg.queryClient.getQueryState(scheduledJobKeys.runs("backup.walg"))
+                ?.isInvalidated
+        ).toBe(true);
 
         const clearKopia = renderHookWithQueryClient(() =>
             useClearKopiaBackupAttention()

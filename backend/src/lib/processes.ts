@@ -1,4 +1,4 @@
-import { scopedJobProcessCommand } from "./jobResources.ts";
+import { scopedJobProcessCommand, scopedJobProcessEnvironment } from "./jobResources.ts";
 
 export interface RunProcessOptions {
     cwd?: string;
@@ -63,7 +63,7 @@ export function spawnProcess(
         cmd: [command.executable, ...command.arguments],
         cwd: options.cwd,
         detached: options.detached ?? true,
-        env: options.env,
+        env: scopedJobProcessEnvironment(command.executable, options.env),
         stderr: "pipe",
         stdin: "ignore",
         stdout: "pipe",

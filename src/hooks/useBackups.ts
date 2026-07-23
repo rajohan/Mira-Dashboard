@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetchRequired, apiPostRequired } from "./useApi";
 import { cacheKeys } from "./useCache";
 import { jobExecutionKeys } from "./useJobExecutions";
+import { scheduledJobKeys } from "./useScheduledJobs";
 
 /** Represents backup job. */
 export interface BackupJob {
@@ -69,6 +70,10 @@ export function useRunKopiaBackup() {
                 }),
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
                 queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all }),
+                queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() }),
+                queryClient.invalidateQueries({
+                    queryKey: scheduledJobKeys.runs("backup.kopia"),
+                }),
             ]);
         },
     });
@@ -110,6 +115,10 @@ export function useRunWalgBackup() {
                 }),
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
                 queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all }),
+                queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() }),
+                queryClient.invalidateQueries({
+                    queryKey: scheduledJobKeys.runs("backup.walg"),
+                }),
             ]);
         },
     });

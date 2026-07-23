@@ -818,7 +818,10 @@ describe("backend service behavior", () => {
         }
         cleanupCallbacks.push(() => {
             database
-                .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
+                .prepare(
+                    `DELETE FROM cache_entries
+                     WHERE key IN ('weather.spydeberg', 'log_rotation.state')`
+                )
                 .run();
         });
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
@@ -857,9 +860,26 @@ describe("backend service behavior", () => {
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
 
-        const { registerCacheRefreshScheduledJobs } =
+        const { cacheRefreshScheduledJobId, registerCacheRefreshScheduledJobs } =
             await import("../src/services/cacheRefresh.ts");
+        expect(cacheRefreshScheduledJobId("weather.spydeberg")).toBe("cache.weather");
+        expect(cacheRefreshScheduledJobId("moltbook.home")).toBe("cache.moltbook");
+        expect(cacheRefreshScheduledJobId("system.openclaw")).toBe("cache.system");
+        expect(cacheRefreshScheduledJobId("log_rotation.state")).toBeUndefined();
         registerCacheRefreshScheduledJobs({ seedStrategy: "none" });
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    `DELETE FROM job_executions
+                     WHERE scheduled_job_id = 'cache.weather'
+                        OR (action_key = 'cache.refresh'
+                            AND json_extract(payload_json, '$.key') = 'log_rotation.state')`
+                )
+                .run();
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id = 'cache.weather'")
+                .run();
+        });
         await startTestScheduledExecutor();
         const { cacheRoutes } = await import("../src/routes/cacheRoutes.ts");
         const response = await cacheRoutes["/api/cache/:key/refresh"].POST(
@@ -886,6 +906,32 @@ describe("backend service behavior", () => {
             },
             isOk: true,
         });
+        expect(
+            database
+                .prepare(
+                    `SELECT job_id AS jobId, status, trigger_type AS triggerType
+                     FROM scheduled_job_runs
+                     WHERE job_id = 'cache.weather'
+                     ORDER BY id DESC
+                     LIMIT 1`
+                )
+                .get()
+        ).toEqual({
+            jobId: "cache.weather",
+            status: "success",
+            triggerType: "manual",
+        });
+
+        const logRotationState = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request(
+                    "https://dashboard.test/api/cache/log_rotation.state/refresh",
+                    { method: "POST" }
+                ),
+                { params: { key: "log_rotation.state" } }
+            )
+        );
+        expect(logRotationState.status).toBe(200);
     });
 
     it("maps recent deployment jobs in newest-first order", async () => {

@@ -8,13 +8,19 @@ import {
 } from "../lib/cacheStore.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { stringFallback } from "../lib/values.ts";
-import { cacheRefreshResourceClass } from "../services/cacheRefresh.ts";
+import {
+    cacheRefreshResourceClass,
+    cacheRefreshScheduledJobId,
+} from "../services/cacheRefresh.ts";
 import {
     enqueueAndWaitForJobExecution,
     successfulJobExecutionOutput,
+    waitForJobExecution,
 } from "../services/queuedJobExecution.ts";
-import { listScheduledJobs } from "../services/scheduledJobs.ts";
+import { enqueueScheduledJob, listScheduledJobs } from "../services/scheduledJobs.ts";
 import { getHeartbeatAutomationSnapshot } from "../services/taskAutomation.ts";
+
+const CACHE_REFRESH_TIMEOUT_MS = 5 * 60 * 1000;
 
 function parseJsonFieldOrValue(value: string) {
     const parsed = parseJsonField<unknown>(value);
@@ -254,6 +260,36 @@ async function refreshedCacheEntry(key: string, result: Record<string, unknown>)
     return mapCacheRowForResponse(row);
 }
 
+async function enqueueAndWaitForCacheRefresh(
+    key: string,
+    resourceClass: ReturnType<typeof cacheRefreshResourceClass>,
+    signal: AbortSignal
+) {
+    const scheduledJobId = cacheRefreshScheduledJobId(key);
+    if (!scheduledJobId) {
+        return await enqueueAndWaitForJobExecution(
+            {
+                actionKey: "cache.refresh",
+                displayName: `Refresh cache: ${key}`,
+                payload: { key },
+                resourceClass,
+                timeoutMs: CACHE_REFRESH_TIMEOUT_MS,
+            },
+            { signal }
+        );
+    }
+    const run = enqueueScheduledJob(scheduledJobId, "manual");
+    if (!run.executionId) {
+        throw Object.assign(new Error("Scheduled cache refresh was not queued"), {
+            statusCode: 500,
+        });
+    }
+    return await waitForJobExecution(run.executionId, {
+        signal,
+        timeoutMs: CACHE_REFRESH_TIMEOUT_MS,
+    });
+}
+
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
 
 export const cacheRoutes = {
@@ -312,15 +348,10 @@ export const cacheRoutes = {
             if (!key) return json({ error: "Missing cache key" }, { status: 400 });
             try {
                 const resourceClass = cacheRefreshResourceClass(key);
-                const execution = await enqueueAndWaitForJobExecution(
-                    {
-                        actionKey: "cache.refresh",
-                        displayName: `Refresh cache: ${key}`,
-                        payload: { key },
-                        resourceClass,
-                        timeoutMs: 5 * 60 * 1000,
-                    },
-                    { signal: request.signal }
+                const execution = await enqueueAndWaitForCacheRefresh(
+                    key,
+                    resourceClass,
+                    request.signal
                 );
                 const entry = await refreshedCacheEntry(
                     key,

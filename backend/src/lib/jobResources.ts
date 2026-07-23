@@ -98,6 +98,31 @@ export function withJobResourceClass<T>(
     return resourceContext.run({ resourceClass }, operation);
 }
 
+function isSystemdRunExecutable(executable: string): boolean {
+    return executable === "systemd-run" || executable.endsWith("/systemd-run");
+}
+
+/** Keeps the user-bus variables needed by a scoped launcher without widening child env. */
+export function scopedJobProcessEnvironment(
+    executable: string,
+    environment: Record<string, string | undefined> | undefined,
+    inheritedEnvironment: Record<string, string | undefined> = process.env
+): Record<string, string | undefined> | undefined {
+    if (environment === undefined || !isSystemdRunExecutable(executable)) {
+        return environment;
+    }
+    const busAddress =
+        environment.DBUS_SESSION_BUS_ADDRESS ||
+        inheritedEnvironment.DBUS_SESSION_BUS_ADDRESS;
+    const runtimeDirectory =
+        environment.XDG_RUNTIME_DIR || inheritedEnvironment.XDG_RUNTIME_DIR;
+    return {
+        ...environment,
+        ...(busAddress && { DBUS_SESSION_BUS_ADDRESS: busAddress }),
+        ...(runtimeDirectory && { XDG_RUNTIME_DIR: runtimeDirectory }),
+    };
+}
+
 function scopeOwnerProperties(environment: Record<string, string | undefined>): string[] {
     const owner = environment.MIRA_DASHBOARD_JOB_SCOPE_OWNER?.trim();
     if (!owner || !/^[A-Za-z0-9_.@-]+\.service$/u.test(owner)) return [];
@@ -113,9 +138,8 @@ export function scopedJobProcessCommand(
     const context = resourceContext.getStore();
     if (
         !context ||
-        executable === "systemd-run" ||
-        environment.MIRA_DASHBOARD_ENABLE_JOB_SCOPES !== "1" ||
-        executable.endsWith("/systemd-run")
+        isSystemdRunExecutable(executable) ||
+        environment.MIRA_DASHBOARD_ENABLE_JOB_SCOPES !== "1"
     ) {
         return { arguments: [...arguments_], executable };
     }

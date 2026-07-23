@@ -2270,6 +2270,14 @@ const cacheRefreshScheduledJobs = [
     },
 ] as const;
 
+export function cacheRefreshScheduledJobId(key: string): string | undefined {
+    const scheduledKey = MOLTBOOK_CACHE_KEYS.has(key)
+        ? "moltbook"
+        : cacheRefreshScopeKey(key);
+    return cacheRefreshScheduledJobs.find((job) => job.actionPayload.key === scheduledKey)
+        ?.id;
+}
+
 function getScheduledCacheKey(job: ScheduledJob): string {
     const key = job.actionPayload.key;
     if (typeof key !== "string" || key.trim() === "") {

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { database } from "../src/database.ts";
 import {
     scopedJobProcessCommand,
+    scopedJobProcessEnvironment,
     withJobResourceClass,
 } from "../src/lib/jobResources.ts";
 import {
@@ -170,6 +171,46 @@ describe("persistent job execution queue", () => {
                 'printf "%s" "$JOB_COMMAND"',
             ])
         );
+    });
+
+    it("preserves only user-bus variables for scoped children with restricted env", () => {
+        const restrictedEnvironment = { PATH: "/usr/bin" };
+        const inheritedEnvironment = {
+            DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+            INTERNAL_SECRET: "must-not-leak",
+            XDG_RUNTIME_DIR: "/run/user/1000",
+        };
+
+        const expectedEnvironment = {
+            DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+            PATH: "/usr/bin",
+            XDG_RUNTIME_DIR: "/run/user/1000",
+        };
+
+        expect(
+            scopedJobProcessEnvironment(
+                "systemd-run",
+                restrictedEnvironment,
+                inheritedEnvironment
+            )
+        ).toEqual(expectedEnvironment);
+        expect(
+            scopedJobProcessEnvironment(
+                "/usr/bin/systemd-run",
+                restrictedEnvironment,
+                inheritedEnvironment
+            )
+        ).toEqual(expectedEnvironment);
+        expect(
+            scopedJobProcessEnvironment(
+                "bash",
+                restrictedEnvironment,
+                inheritedEnvironment
+            )
+        ).toBe(restrictedEnvironment);
+        expect(
+            scopedJobProcessEnvironment("systemd-run", undefined, inheritedEnvironment)
+        ).toBeUndefined();
     });
 
     it("allows queued cancellation but protects a running mutation", () => {
