@@ -55,6 +55,7 @@ server may need manual inspection.
 | `gatewayConnected` | Whether the backend Gateway client is authenticated and connected. |
 | `sessionCount`     | Gateway session count known to Dashboard.                          |
 | `backendCommit`    | Git commit served by the backend when available.                   |
+| `workerOnline`     | Whether the persistent job worker has a fresh heartbeat.           |
 
 If `gatewayConnected:false`, check:
 

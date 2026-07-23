@@ -23,6 +23,7 @@ import {
     enqueueScheduledJob,
     recoverOrphanedScheduledJobRuns,
     registerScheduledJobAction,
+    removeScheduledJobsNotInAction,
     ScheduledJobActionError,
     startScheduledJobExecutor,
     stopScheduledJobExecutor,
@@ -278,6 +279,43 @@ describe("persistent job execution queue", () => {
             message: "Scheduled job was disabled before execution",
             status: "cancelled",
         });
+    });
+
+    it("cancels queued work when its scheduled job is removed", async () => {
+        const actionKey = `test.removed-job-${Bun.randomUUIDv7()}`;
+        const jobId = `test-queue-removed-${Bun.randomUUIDv7()}`;
+        let actionCalls = 0;
+        testJobIds.add(jobId);
+        registerScheduledJobAction(actionKey, () => {
+            actionCalls += 1;
+            return { unexpected: true };
+        });
+        upsertScheduledJob({
+            actionKey,
+            enabled: true,
+            id: jobId,
+            intervalSeconds: 3600,
+            name: "Removed scheduled test job",
+            scheduleType: "interval",
+        });
+        const run = enqueueScheduledJob(jobId, "startup");
+        testExecutionIds.add(run.executionId as string);
+        removeScheduledJobsNotInAction(actionKey, []);
+
+        startScheduledJobExecutor();
+        const execution = await waitForJobExecution(run.executionId as string, {
+            pollIntervalMs: 10,
+            timeoutMs: 5000,
+        });
+
+        expect(execution).toMatchObject({
+            message: "Scheduled job was removed before execution",
+            status: "cancelled",
+        });
+        expect(actionCalls).toBe(0);
+        expect(
+            database.prepare("SELECT id FROM scheduled_job_runs WHERE id = ?").get(run.id)
+        ).toBeNull();
     });
 
     it("fails legacy running scheduled runs without an execution lease", () => {

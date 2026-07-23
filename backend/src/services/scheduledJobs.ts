@@ -971,6 +971,15 @@ async function executeClaimedJobExecution(
     const currentJob = execution.scheduledJobId
         ? getScheduledJob(execution.scheduledJobId)
         : undefined;
+    if (!currentJob && execution.scheduledJobId) {
+        return finishJobExecution(
+            execution.id,
+            workerId,
+            "cancelled",
+            "Scheduled job was removed before execution",
+            {}
+        );
+    }
     if (
         currentJob &&
         !currentJob.enabled &&

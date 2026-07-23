@@ -251,6 +251,31 @@ export function getLatestScheduledJobExecution(
     );
 }
 
+export function getPreviousScheduledJobExecution(
+    scheduledJobId: string,
+    executionId: string
+): JobExecution | undefined {
+    return mapExecution(
+        database
+            .prepare(
+                `SELECT candidate.*
+                 FROM job_executions candidate
+                 JOIN job_executions current ON current.id = ?
+                 WHERE candidate.scheduled_job_id = ?
+                   AND (
+                       candidate.queued_at < current.queued_at
+                       OR (
+                           candidate.queued_at = current.queued_at
+                           AND candidate.id < current.id
+                       )
+                   )
+                 ORDER BY candidate.queued_at DESC, candidate.id DESC
+                 LIMIT 1`
+            )
+            .get(executionId, scheduledJobId) as JobExecutionRow | undefined
+    );
+}
+
 /** Adds non-scheduled work to the same persistent queue used by the scheduler. */
 export function enqueueJobExecution(
     input: EnqueueJobExecutionInput,

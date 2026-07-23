@@ -157,9 +157,11 @@ Healthy response shape:
     "status": "isOk",
     "gatewayConnected": true,
     "sessionCount": 9,
-    "backendCommit": "abc1234"
+    "backendCommit": "abc1234",
+    "workerOnline": true
 }
 ```
 
 If `gatewayConnected` is false, check the Gateway token, OpenClaw Gateway
-service, and `/api/auth/bootstrap` state before debugging the frontend.
+service, and `/api/auth/bootstrap` state before debugging the frontend. If
+`workerOnline` is false, inspect `mira-dashboard-worker.service`.

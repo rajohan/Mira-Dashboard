@@ -172,13 +172,15 @@ Healthy `/api/health`:
     "status": "isOk",
     "gatewayConnected": true,
     "sessionCount": 9,
-    "backendCommit": "abc1234"
+    "backendCommit": "abc1234",
+    "workerOnline": true
 }
 ```
 
 Important failures:
 
 - `gatewayConnected: false`: check OpenClaw Gateway service and Gateway token.
+- `workerOnline: false`: check `mira-dashboard-worker.service` and its logs.
 - HTTP `503 Frontend Not Built`: build root frontend with `bun run build`.
 - `Unauthorized` on API routes: auth/session or cookie issue.
 - `database is locked`: another process is holding SQLite; retry after

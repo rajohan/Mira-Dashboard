@@ -297,10 +297,15 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("reports health and auth bootstrap state without production data", async () => {
-        const health = await api<{ status: string; sessionCount: number }>("/api/health");
+        const health = await api<{
+            status: string;
+            sessionCount: number;
+            workerOnline: boolean;
+        }>("/api/health");
         expect(health.status).toBe(200);
         expect(health.body.status).toBe("isOk");
         expect(health.body.sessionCount).toBe(0);
+        expect(health.body.workerOnline).toBe(false);
 
         const bootstrap = await api<{
             isBootstrapRequired: boolean;

@@ -12,6 +12,7 @@ import {
     enqueueJobExecution,
     getJobExecution,
     getLatestScheduledJobExecution,
+    getPreviousScheduledJobExecution,
     type JobExecution,
 } from "./jobExecutionQueue.ts";
 import {
@@ -24,6 +25,7 @@ import {
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
     type ScheduledJobActionContext,
+    ScheduledJobActionError,
     upsertScheduledJob,
 } from "./scheduledJobs.ts";
 const MAX_OUTPUT_CHARS = 100_000;
@@ -756,6 +758,19 @@ async function startScheduledBackup(
     if (signal?.aborted) {
         throw new Error("Backup aborted by scheduler");
     }
+    const previousExecution = getPreviousScheduledJobExecution(
+        scheduledBackupJobId(type),
+        context.executionId
+    );
+    const persistedJob = persistedBackupViewFromExecution(type, previousExecution);
+    if (persistedJob?.status === "needs_attention") {
+        throw Object.assign(
+            new ScheduledJobActionError(`${type.toUpperCase()} backup needs attention`, {
+                backup: persistedJob,
+            }),
+            { statusCode: 409 }
+        );
+    }
     const currentJob = getCurrentBackupJob(type);
     if (currentJob?.status === "running" || currentJob?.status === "needs_attention") {
         throw Object.assign(
@@ -835,10 +850,19 @@ function backupViewFromExecution(
     } as const;
 }
 
-export function getPersistedBackupJob(type: BackupJob["type"]) {
-    const execution = getLatestScheduledJobExecution(scheduledBackupJobId(type));
+function persistedBackupViewFromExecution(
+    type: BackupJob["type"],
+    execution: JobExecution | undefined
+) {
     if (!execution || wasBackupAttentionClearedAfter(type, execution)) return;
     return backupViewFromExecution(type, execution);
+}
+
+export function getPersistedBackupJob(type: BackupJob["type"]) {
+    return persistedBackupViewFromExecution(
+        type,
+        getLatestScheduledJobExecution(scheduledBackupJobId(type))
+    );
 }
 
 function wasBackupAttentionClearedAfter(
@@ -863,6 +887,11 @@ function wasBackupAttentionClearedAfter(
 }
 
 export function queueManualBackup(type: BackupJob["type"]) {
+    if (getPersistedBackupJob(type)?.status === "needs_attention") {
+        throw Object.assign(new Error(`${type.toUpperCase()} backup needs attention`), {
+            statusCode: 409,
+        });
+    }
     const scheduledRun = enqueueScheduledJob(scheduledBackupJobId(type), "manual");
     return backupViewFromExecution(
         type,

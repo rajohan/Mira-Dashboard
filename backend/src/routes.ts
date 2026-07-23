@@ -30,6 +30,7 @@ import { sttRoutes } from "./routes/sttRoutes.ts";
 import { taskRoutes } from "./routes/taskRoutes.ts";
 import { terminalRoutes } from "./routes/terminalRoutes.ts";
 import { ttsRoutes } from "./routes/ttsRoutes.ts";
+import { getJobExecutionSummary } from "./services/jobExecutionQueue.ts";
 
 const BACKEND_COMMIT = (() => {
     try {
@@ -56,6 +57,7 @@ function health() {
         gatewayConnected: gateway.isConnected(),
         sessionCount: gateway.getSessions().length,
         backendCommit: backendCommit() || "unknown",
+        workerOnline: getJobExecutionSummary().workerOnline,
     });
 }
 

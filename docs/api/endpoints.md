@@ -7,8 +7,8 @@ route files under `backend/src/routes/` for exact validation details.
 
 | Method | Path            | Purpose                               |
 | ------ | --------------- | ------------------------------------- |
-| `GET`  | `/health`       | Public health check.                  |
-| `GET`  | `/api/health`   | Public API health check.              |
+| `GET`  | `/health`       | Public health and worker check.       |
+| `GET`  | `/api/health`   | Public API health and worker check.   |
 | `GET`  | `/api/sessions` | Legacy/session snapshot from Gateway. |
 
 ## Auth

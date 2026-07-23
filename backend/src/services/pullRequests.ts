@@ -1470,7 +1470,7 @@ async function scheduleRestartHealthCheck(
         "restart_status=0",
         `systemctl --user restart ${DASHBOARD_SERVICES.join(" ")} || restart_status=$?`,
         "sleep 4",
-        `if [ "$restart_status" -eq 0 ] && curl -fsS http://127.0.0.1:3100/api/health >/dev/null && curl -fsS http://127.0.0.1:3100/api/job-executions | grep -Fq '"workerOnline":true'; then`,
+        `if [ "$restart_status" -eq 0 ] && curl -fsS http://127.0.0.1:3100/api/health | grep -Fq '"workerOnline":true'; then`,
         `  ${deploymentJobUpdateCommand(okJob)}`,
         "else",
         `  ${deploymentJobUpdateCommand(failedJob)}`,

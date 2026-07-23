@@ -1288,6 +1288,10 @@ printf 'scheduled\n'
             await expect(Bun.file(systemdLog).text()).resolves.toContain(
                 `mira-dashboard-deploy-${job.id}`
             );
+            const restartCommand = await Bun.file(systemdLog).text();
+            expect(restartCommand).toContain("/api/health");
+            expect(restartCommand).toContain('"workerOnline":true');
+            expect(restartCommand).not.toContain("/api/job-executions");
             expect(existsSync(path.join(fakeRoot, "node_modules"))).toBe(false);
             expect(existsSync(path.join(fakeRoot, "backend", "node_modules"))).toBe(
                 false
@@ -3313,9 +3317,11 @@ fi
             clearPersistedBackupAttention,
             getCurrentBackupJob,
             getPersistedBackupJob,
+            queueManualBackup,
             registerBackupScheduledJobs,
         } = await import("../src/services/backups.ts");
-        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const { enqueueScheduledJob, runScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
 
         try {
             registerBackupScheduledJobs();
@@ -3352,8 +3358,16 @@ fi
 
             expect(getCurrentBackupJob("walg")).toBeUndefined();
             expect(getPersistedBackupJob("walg")).toMatchObject(backup);
+            expect(() => queueManualBackup("walg")).toThrow(
+                "WALG backup needs attention"
+            );
 
             await startTestScheduledExecutor();
+            await expect(runScheduledJob("backup.walg")).resolves.toMatchObject({
+                output: { backup },
+                status: "failed",
+            });
+            expect(getPersistedBackupJob("walg")).toMatchObject(backup);
             await expect(clearPersistedBackupAttention("walg")).resolves.toMatchObject({
                 code: backup.code,
                 endedAt: backup.endedAt,
