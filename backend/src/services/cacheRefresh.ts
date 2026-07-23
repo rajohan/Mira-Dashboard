@@ -2270,6 +2270,12 @@ const cacheRefreshScheduledJobs = [
     },
 ] as const;
 
+export function cacheRefreshScheduledJobId(key: string): string | undefined {
+    const scheduledKey = cacheRefreshScopeKey(key);
+    return cacheRefreshScheduledJobs.find((job) => job.actionPayload.key === scheduledKey)
+        ?.id;
+}
+
 function getScheduledCacheKey(job: ScheduledJob): string {
     const key = job.actionPayload.key;
     if (typeof key !== "string" || key.trim() === "") {
@@ -2380,7 +2386,7 @@ export function registerCacheRefreshScheduledJobs(
         return { key, ...result };
     });
     const seedJobs: Array<{ id: string; key: string }> = [];
-    database.run("BEGIN");
+    database.run("BEGIN IMMEDIATE");
     try {
         removeScheduledJobsNotInAction(
             "cache.refresh",

@@ -442,6 +442,35 @@ function runSchemaSql(databaseConnection: DatabaseSync, schemaSql: string): void
     }
 }
 
+export function enableRequiredWalJournalMode(
+    databaseConnection: DatabaseSync,
+    databasePath: string
+): void {
+    let journalModeRow: { journal_mode?: unknown } | null;
+    try {
+        journalModeRow = databaseConnection.query("PRAGMA journal_mode = WAL").get() as {
+            journal_mode?: unknown;
+        } | null;
+    } catch (error) {
+        try {
+            databaseConnection.close();
+        } catch {
+            // Preserve the original SQLite error.
+        }
+        throw error;
+    }
+    const journalMode =
+        typeof journalModeRow?.journal_mode === "string"
+            ? journalModeRow.journal_mode
+            : undefined;
+    if (journalMode?.toLowerCase() !== "wal") {
+        databaseConnection.close();
+        throw new Error(
+            `SQLite WAL journal mode is required for ${databasePath}; got ${journalMode ?? "unknown"}`
+        );
+    }
+}
+
 function initializeDatabase(databasePath: string): DatabaseSync {
     const { configuredDatabasePath } = resolveDatabasePath();
     assertTestDatabasePath(databasePath, configuredDatabasePath);
@@ -451,6 +480,7 @@ function initializeDatabase(databasePath: string): DatabaseSync {
     const initializedDatabase = new Database(databasePath);
     initializedDatabase.run("PRAGMA foreign_keys = ON");
     initializedDatabase.run("PRAGMA busy_timeout = 5000");
+    enableRequiredWalJournalMode(initializedDatabase, databasePath);
     runSchemaSql(initializedDatabase, SCHEMA_SQL);
 
     return initializedDatabase;

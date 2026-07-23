@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetchRequired, apiPostRequired } from "./useApi";
+import { jobExecutionKeys } from "./useJobExecutions";
+import { scheduledJobKeys } from "./useScheduledJobs";
 
 /** Represents cache envelope. */
 export interface CacheEnvelope<T> {
@@ -148,6 +150,8 @@ export function useRefreshCacheEntry() {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
                 queryClient.invalidateQueries({ queryKey: cacheKeys.status() }),
+                queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all }),
+                queryClient.invalidateQueries({ queryKey: scheduledJobKeys.all }),
                 ...keys.map((key) =>
                     queryClient.invalidateQueries({ queryKey: cacheKeys.entry(key) })
                 ),

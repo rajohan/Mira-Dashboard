@@ -153,15 +153,33 @@ but the schema uses `CREATE TABLE IF NOT EXISTS`. Existing tables are not
 altered automatically. Any change that adds/removes columns, changes
 constraints, or backfills data needs an explicit migration/manual rollout plan.
 
-Before risky auth/database changes, copy the configured live DB first:
+Before risky auth/database changes, create and verify a consistent SQLite
+backup. Use SQLite's online backup API so committed WAL contents are included:
 
 ```bash
+set -euo pipefail
 backend_dir=/home/ubuntu/projects/mira-dashboard/backend
-db_path="$(cd "$backend_dir" && /usr/local/bin/doppler run --config prd --project rajohan -- printenv MIRA_DASHBOARD_DB_PATH || true)"
-db_path="${db_path:-$backend_dir/data/mira-dashboard.db}"
+configured_db_path="$(
+  cd "$backend_dir"
+  /usr/local/bin/doppler run --config prd --project rajohan -- \
+    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
+)"
+if [[ -z "$configured_db_path" ]]; then
+  db_path="$backend_dir/data/mira-dashboard.db"
+elif [[ "$configured_db_path" = /* ]]; then
+  db_path="$configured_db_path"
+else
+  db_path="$backend_dir/$configured_db_path"
+fi
 mkdir -p "$backend_dir/data/backups"
-cp "$db_path" "$backend_dir/data/backups/mira-dashboard-before-change-$(date +%Y%m%d-%H%M%S).db"
+backup_path="$backend_dir/data/backups/mira-dashboard-before-change-$(date +%Y%m%d-%H%M%S).db"
+sqlite3 -readonly -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
+chmod 0600 "$backup_path"
+test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
 ```
+
+Do not copy only the main `.db` file while Dashboard is running. WAL mode may
+hold committed writes in the `-wal` sidecar until a checkpoint.
 
 ## Health Signals
 
@@ -186,5 +204,4 @@ Important failures:
 - `Unauthorized` on API routes: auth/session or cookie issue.
 - `database is locked`: another process is holding SQLite; retry after
   background jobs settle, then inspect both service logs. Dashboard uses a
-  five-second SQLite busy timeout; WAL remains a separate storage-lifecycle
-  decision that must be paired with a tested backup/checkpoint plan.
+  five-second SQLite busy timeout and requires WAL mode.

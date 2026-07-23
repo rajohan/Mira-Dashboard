@@ -507,7 +507,7 @@ export function registerGitHygieneScheduledJobs(): void {
         },
         { timeoutMs: GIT_WORKSPACE_SYNC_TIMEOUT_MS }
     );
-    database.run("BEGIN");
+    database.run("BEGIN IMMEDIATE");
     try {
         removeScheduledJobsNotInAction("git.openclaw.workspace-sync", [job.id]);
         const existing = getScheduledJob(job.id);

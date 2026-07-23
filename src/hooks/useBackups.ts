@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetchRequired, apiPostRequired } from "./useApi";
 import { cacheKeys } from "./useCache";
+import { jobExecutionKeys } from "./useJobExecutions";
+import { scheduledJobKeys } from "./useScheduledJobs";
 
 /** Represents backup job. */
 export interface BackupJob {
@@ -67,6 +69,11 @@ export function useRunKopiaBackup() {
                     queryKey: cacheKeys.entry("backup.kopia.status"),
                 }),
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
+                queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all }),
+                queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() }),
+                queryClient.invalidateQueries({
+                    queryKey: scheduledJobKeys.runs("backup.kopia"),
+                }),
             ]);
         },
     });
@@ -87,6 +94,7 @@ export function useClearKopiaBackupAttention() {
                 queryClient.invalidateQueries({
                     queryKey: cacheKeys.entry("backup.kopia.status"),
                 }),
+                queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all }),
             ]);
         },
     });
@@ -106,6 +114,11 @@ export function useRunWalgBackup() {
                     queryKey: cacheKeys.entry("backup.walg.status"),
                 }),
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
+                queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all }),
+                queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() }),
+                queryClient.invalidateQueries({
+                    queryKey: scheduledJobKeys.runs("backup.walg"),
+                }),
             ]);
         },
     });
@@ -126,6 +139,7 @@ export function useClearWalgBackupAttention() {
                 queryClient.invalidateQueries({
                     queryKey: cacheKeys.entry("backup.walg.status"),
                 }),
+                queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all }),
             ]);
         },
     });

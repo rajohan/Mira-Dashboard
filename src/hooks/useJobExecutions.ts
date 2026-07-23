@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetchRequired, apiPostRequired } from "./useApi";
-import { scheduledJobKeys } from "./useScheduledJobs";
 
 export type JobResourceClass =
     "interactive" | "light" | "network" | "host-heavy" | "exclusive";
@@ -50,14 +49,15 @@ export const jobExecutionKeys = {
     list: () => [...jobExecutionKeys.all, "list"] as const,
 };
 
+const JOB_EXECUTION_REFRESH_MS = 5000;
+
 export function useJobExecutions() {
     return useQuery({
         queryKey: jobExecutionKeys.list(),
         queryFn: () => apiFetchRequired<JobExecutionsResponse>("/job-executions"),
-        refetchInterval: (query) => {
-            const summary = query.state.data?.summary;
-            return summary && (summary.queued > 0 || summary.running > 0) ? 2000 : 15_000;
-        },
+        refetchInterval: JOB_EXECUTION_REFRESH_MS,
+        refetchIntervalInBackground: false,
+        staleTime: 500,
     });
 }
 
@@ -70,10 +70,10 @@ export function useCancelJobExecution() {
             ),
         onSuccess: (result) => {
             void queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all });
-            void queryClient.invalidateQueries({ queryKey: scheduledJobKeys.list() });
+            void queryClient.invalidateQueries({ queryKey: ["scheduled-jobs"] });
             if (result.execution.scheduledJobId) {
                 void queryClient.invalidateQueries({
-                    queryKey: scheduledJobKeys.runs(result.execution.scheduledJobId),
+                    queryKey: ["scheduled-jobs", "runs", result.execution.scheduledJobId],
                 });
             }
         },

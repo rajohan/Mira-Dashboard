@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { JobDisableIntent } from "../types/job";
 import { apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
-import type { JobResourceClass } from "./useJobExecutions";
+import { jobExecutionKeys, type JobResourceClass } from "./useJobExecutions";
 
 /** Represents a backend-native scheduled job. */
 export interface ScheduledJob {
@@ -182,6 +182,7 @@ export function useRunScheduledJobNow() {
             void queryClient.invalidateQueries({
                 queryKey: scheduledJobKeys.runs(variables.id),
             });
+            void queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all });
         },
     });
 }

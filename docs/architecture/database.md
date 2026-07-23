@@ -22,10 +22,15 @@ EXISTS` schema SQL at startup. It sets:
 ```sql
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;
+PRAGMA journal_mode = WAL;
 ```
 
 Tests must use temp databases. When `NODE_ENV=test`, the database guard refuses
 non-temporary paths and symlinked temp paths.
+
+WAL mode creates `-wal` and `-shm` sidecars while the database is in use. They
+are runtime files managed by SQLite and must not be removed while Dashboard is
+running.
 
 ## Tables
 
@@ -57,10 +62,30 @@ non-temporary paths and symlinked temp paths.
 ## Backup Before Manual DB Work
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
-mkdir -p data/backups
-cp data/mira-dashboard.db "data/backups/mira-dashboard-before-manual-change-$(date +%Y%m%d-%H%M%S).db"
+set -euo pipefail
+backend_dir=/home/ubuntu/projects/mira-dashboard/backend
+configured_db_path="$(
+  cd "$backend_dir"
+  /usr/local/bin/doppler run --config prd --project rajohan -- \
+    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
+)"
+if [[ -z "$configured_db_path" ]]; then
+  db_path="$backend_dir/data/mira-dashboard.db"
+elif [[ "$configured_db_path" = /* ]]; then
+  db_path="$configured_db_path"
+else
+  db_path="$backend_dir/$configured_db_path"
+fi
+mkdir -p "$backend_dir/data/backups"
+backup_path="$backend_dir/data/backups/mira-dashboard-before-manual-change-$(date +%Y%m%d-%H%M%S).db"
+sqlite3 -readonly -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
+chmod 0600 "$backup_path"
+test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
 ```
+
+SQLite's online backup API creates a consistent single-file snapshot that
+includes committed WAL contents. Do not copy only the main `.db` file while
+Dashboard is running.
 
 ## Useful Inspection Commands
 
@@ -81,11 +106,27 @@ retry. The application already uses a 5 second busy timeout.
 Use this only when Raymond explicitly wants to re-run setup.
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
-mkdir -p data/backups
-cp data/mira-dashboard.db "data/backups/mira-dashboard-before-bootstrap-reset-$(date +%Y%m%d-%H%M%S).db"
-sqlite3 data/mira-dashboard.db "DELETE FROM auth_sessions; DELETE FROM users; DELETE FROM app_config WHERE key='gateway_token';"
-sqlite3 data/mira-dashboard.db "PRAGMA integrity_check;"
+set -euo pipefail
+backend_dir=/home/ubuntu/projects/mira-dashboard/backend
+configured_db_path="$(
+  cd "$backend_dir"
+  /usr/local/bin/doppler run --config prd --project rajohan -- \
+    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
+)"
+if [[ -z "$configured_db_path" ]]; then
+  db_path="$backend_dir/data/mira-dashboard.db"
+elif [[ "$configured_db_path" = /* ]]; then
+  db_path="$configured_db_path"
+else
+  db_path="$backend_dir/$configured_db_path"
+fi
+mkdir -p "$backend_dir/data/backups"
+backup_path="$backend_dir/data/backups/mira-dashboard-before-bootstrap-reset-$(date +%Y%m%d-%H%M%S).db"
+sqlite3 -readonly -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
+chmod 0600 "$backup_path"
+test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
+sqlite3 -cmd ".timeout 5000" "$db_path" "DELETE FROM auth_sessions; DELETE FROM users; DELETE FROM app_config WHERE key='gateway_token';"
+sqlite3 -cmd ".timeout 5000" "$db_path" "PRAGMA integrity_check;"
 curl http://127.0.0.1:3100/api/auth/bootstrap
 ```
 

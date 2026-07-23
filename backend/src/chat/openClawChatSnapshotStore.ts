@@ -531,7 +531,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                 .prepare("DELETE FROM chat_runtime_snapshots WHERE gateway_scope = ?")
                 .run(this.#gatewayScope);
         });
-        clearScope();
+        clearScope.immediate();
     }
 
     delete(sessionKey: string): void {
@@ -544,7 +544,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
                 )
                 .run(this.#gatewayScope, normalizedKey);
         });
-        deleteSnapshot();
+        deleteSnapshot.immediate();
     }
 
     keys(): string[] {
@@ -688,7 +688,7 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             }
             this.#pruneSnapshots();
         });
-        persist();
+        persist.immediate();
     }
 
     save(sessionKey: string, snapshot: OpenClawRuntimeSnapshot): void {
@@ -699,6 +699,6 @@ export class SqliteOpenClawChatSnapshotStore implements OpenClawChatSnapshotStor
             this.#persistSnapshot(normalizedKey, snapshot, this.#now());
             this.#pruneSnapshots();
         });
-        persist();
+        persist.immediate();
     }
 }

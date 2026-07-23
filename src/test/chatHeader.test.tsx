@@ -57,8 +57,11 @@ describe("ChatHeader", () => {
         );
 
         expect(screen.getByText(/less than 5 seconds ago/u)).toBeInTheDocument();
+        expect(screen.getByText("Model: gpt-5.6-sol")).toBeInTheDocument();
         expect(screen.getByText("Thinking: medium")).toBeInTheDocument();
         expect(screen.getByText("Speed: Default (Auto)")).toBeInTheDocument();
+        expect(screen.queryByText(/MAIN/u)).not.toBeInTheDocument();
+        expect(screen.queryByText(/gpt-5\.6-sol · Context:/u)).not.toBeInTheDocument();
 
         act(() => {
             jest.advanceTimersByTime(10_000);

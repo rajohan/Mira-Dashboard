@@ -1984,7 +1984,7 @@ export function registerLogRotationScheduledJobs(): void {
         }
         return { logRotation };
     });
-    database.run("BEGIN");
+    database.run("BEGIN IMMEDIATE");
     try {
         removeScheduledJobsNotInAction(LOG_ROTATION_JOB_ID, [LOG_ROTATION_JOB_ID]);
         const existing = getScheduledJob(LOG_ROTATION_JOB_ID);

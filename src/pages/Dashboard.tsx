@@ -30,6 +30,7 @@ import {
     ReportsOverviewCard,
     ServiceActionsCard,
 } from "../components/features/dashboard";
+import { JobExecutionQueueCard } from "../components/features/jobs/JobExecutionQueueCard";
 import { Alert } from "../components/ui/Alert";
 import { Card } from "../components/ui/Card";
 import { MetricCard } from "../components/ui/MetricCard";
@@ -313,7 +314,10 @@ export function Dashboard() {
 
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-6">
                 <BackupOverviewCard />
-                <ServiceActionsCard />
+                <div className="grid gap-4 xl:min-h-0 xl:grid-rows-2 xl:gap-6">
+                    <JobExecutionQueueCard className="xl:h-full xl:min-h-0 xl:overflow-auto" />
+                    <ServiceActionsCard className="xl:h-full xl:min-h-0 xl:overflow-auto" />
+                </div>
             </div>
         </div>
     );
