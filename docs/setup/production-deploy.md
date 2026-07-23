@@ -157,12 +157,23 @@ Before risky auth/database changes, create and verify a consistent SQLite
 backup. Use SQLite's online backup API so committed WAL contents are included:
 
 ```bash
+set -euo pipefail
 backend_dir=/home/ubuntu/projects/mira-dashboard/backend
-db_path="$(cd "$backend_dir" && /usr/local/bin/doppler run --config prd --project rajohan -- printenv MIRA_DASHBOARD_DB_PATH || true)"
-db_path="${db_path:-$backend_dir/data/mira-dashboard.db}"
+configured_db_path="$(
+  cd "$backend_dir"
+  /usr/local/bin/doppler run --config prd --project rajohan -- \
+    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
+)"
+if [[ -z "$configured_db_path" ]]; then
+  db_path="$backend_dir/data/mira-dashboard.db"
+elif [[ "$configured_db_path" = /* ]]; then
+  db_path="$configured_db_path"
+else
+  db_path="$backend_dir/$configured_db_path"
+fi
 mkdir -p "$backend_dir/data/backups"
 backup_path="$backend_dir/data/backups/mira-dashboard-before-change-$(date +%Y%m%d-%H%M%S).db"
-sqlite3 -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
+sqlite3 -readonly -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
 chmod 0600 "$backup_path"
 test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
 ```

@@ -279,11 +279,13 @@ async function enqueueAndWaitForCacheRefresh(
             { signal }
         );
     }
+    let shouldCancelQueuedOnTimeout = true;
     let executionId: string | undefined;
     try {
         executionId = enqueueScheduledJob(scheduledJobId, "manual").executionId;
     } catch (error) {
         if (httpStatusCode(error) !== 409) throw error;
+        shouldCancelQueuedOnTimeout = false;
         executionId = getLatestScheduledJobExecution(scheduledJobId)?.id;
         if (!executionId) throw error;
     }
@@ -293,6 +295,7 @@ async function enqueueAndWaitForCacheRefresh(
         });
     }
     return await waitForJobExecution(executionId, {
+        cancelQueuedOnTimeout: shouldCancelQueuedOnTimeout,
         signal,
         timeoutMs: CACHE_REFRESH_TIMEOUT_MS,
     });

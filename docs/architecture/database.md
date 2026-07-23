@@ -78,7 +78,7 @@ else
 fi
 mkdir -p "$backend_dir/data/backups"
 backup_path="$backend_dir/data/backups/mira-dashboard-before-manual-change-$(date +%Y%m%d-%H%M%S).db"
-sqlite3 -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
+sqlite3 -readonly -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
 chmod 0600 "$backup_path"
 test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
 ```
@@ -122,7 +122,7 @@ else
 fi
 mkdir -p "$backend_dir/data/backups"
 backup_path="$backend_dir/data/backups/mira-dashboard-before-bootstrap-reset-$(date +%Y%m%d-%H%M%S).db"
-sqlite3 -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
+sqlite3 -readonly -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
 chmod 0600 "$backup_path"
 test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
 sqlite3 -cmd ".timeout 5000" "$db_path" "DELETE FROM auth_sessions; DELETE FROM users; DELETE FROM app_config WHERE key='gateway_token';"

@@ -11,6 +11,7 @@ const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface WaitForJobExecutionOptions {
+    cancelQueuedOnTimeout?: boolean;
     pollIntervalMs?: number;
     signal?: AbortSignal;
     timeoutMs?: number;
@@ -55,7 +56,11 @@ export async function waitForJobExecution(
         }
         if (isTerminalJobExecution(execution)) return execution;
         if (Date.now() - startedAt >= timeoutMs) {
-            if (execution.status === "queued" && execution.cancellable) {
+            if (
+                options.cancelQueuedOnTimeout !== false &&
+                execution.status === "queued" &&
+                execution.cancellable
+            ) {
                 try {
                     cancelJobExecution(id);
                 } catch (error) {

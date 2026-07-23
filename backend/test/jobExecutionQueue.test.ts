@@ -117,6 +117,30 @@ describe("persistent job execution queue", () => {
         });
     });
 
+    it("keeps shared queued work when its observer times out", async () => {
+        const queued = enqueueJobExecution({
+            actionKey: `test.shared-wait-timeout-${Bun.randomUUIDv7()}`,
+            displayName: "Shared timed out wait",
+            resourceClass: "network",
+            timeoutMs: 60_000,
+        });
+        testExecutionIds.add(queued.id);
+
+        await expect(
+            waitForJobExecution(queued.id, {
+                cancelQueuedOnTimeout: false,
+                pollIntervalMs: 10,
+                timeoutMs: 0,
+            })
+        ).rejects.toMatchObject({
+            executionId: queued.id,
+            statusCode: 504,
+        });
+        expect(getJobExecution(queued.id)).toMatchObject({
+            status: "queued",
+        });
+    });
+
     it("reports only fresh worker heartbeats as online", () => {
         const workerId = `test-worker-${Bun.randomUUIDv7()}`;
         registerJobWorker(workerId, 1, "2026-07-22T10:00:00.000Z");
