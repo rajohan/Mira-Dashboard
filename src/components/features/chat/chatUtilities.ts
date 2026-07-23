@@ -289,16 +289,20 @@ export function selectedChatThinkingLabel(session: Session | undefined): string 
 }
 
 /** Returns the OpenClaw fast-mode choices. */
-export function chatSpeedOptions(session?: Session): ChatSettingOption[] {
+function effectiveChatSpeedLabel(session?: Session): string | undefined {
     const effectiveMode = session?.effectiveFastMode;
-    const effectiveLabel =
-        effectiveMode === "auto"
-            ? "Auto"
-            : effectiveMode === true
-              ? "Fast"
-              : effectiveMode === false
-                ? "Standard"
-                : undefined;
+    return effectiveMode === "auto"
+        ? "Auto"
+        : effectiveMode === true
+          ? "Fast"
+          : effectiveMode === false
+            ? "Standard"
+            : undefined;
+}
+
+/** Returns the OpenClaw fast-mode choices. */
+export function chatSpeedOptions(session?: Session): ChatSettingOption[] {
+    const effectiveLabel = effectiveChatSpeedLabel(session);
     return [
         { label: effectiveLabel ? `Default (${effectiveLabel})` : "Default", value: "" },
         { label: "Fast", value: "on" },
@@ -318,6 +322,10 @@ export function selectedChatSpeed(session: Session | undefined): string {
 /** Returns the label shown for the selected speed setting. */
 export function selectedChatSpeedLabel(session: Session | undefined): string {
     const selectedValue = selectedChatSpeed(session);
+    if (selectedValue === "") {
+        return effectiveChatSpeedLabel(session) || "Default";
+    }
+
     return (
         chatSpeedOptions(session).find((option) => option.value === selectedValue)
             ?.label || "Unknown"

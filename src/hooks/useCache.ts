@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetchRequired, apiPostRequired } from "./useApi";
-import { jobExecutionKeys } from "./useJobExecutions";
+import {
+    jobExecutionKeys,
+    refreshJobExecutionQueueWhilePending,
+} from "./useJobExecutions";
 import { scheduledJobKeys } from "./useScheduledJobs";
 
 /** Represents cache envelope. */
@@ -117,10 +120,13 @@ export function useRefreshCacheEntry() {
             const errors: unknown[] = [];
             for (const key of keys) {
                 try {
-                    const response = await apiPostRequired<{
-                        isOk: boolean;
-                        entry: CacheEnvelope<unknown>;
-                    }>(`/cache/${encodeURIComponent(key)}/refresh`);
+                    const response = await refreshJobExecutionQueueWhilePending(
+                        queryClient,
+                        apiPostRequired<{
+                            isOk: boolean;
+                            entry: CacheEnvelope<unknown>;
+                        }>(`/cache/${encodeURIComponent(key)}/refresh`)
+                    );
                     results.push(response);
                     if (response.entry?.key) {
                         queryClient.setQueryData(

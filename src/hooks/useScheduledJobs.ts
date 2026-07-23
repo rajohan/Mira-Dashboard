@@ -2,7 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type { JobDisableIntent } from "../types/job";
 import { apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
-import { jobExecutionKeys, type JobResourceClass } from "./useJobExecutions";
+import {
+    jobExecutionKeys,
+    type JobResourceClass,
+    refreshJobExecutionQueueWhilePending,
+} from "./useJobExecutions";
 
 /** Represents a backend-native scheduled job. */
 export interface ScheduledJob {
@@ -165,8 +169,11 @@ export function useRunScheduledJobNow() {
 
     return useMutation({
         mutationFn: async ({ id }: { id: string }) => {
-            const result = await apiPostRequired<{ isOk: boolean; run: ScheduledJobRun }>(
-                `/jobs/${encodeURIComponent(id)}/run`
+            const result = await refreshJobExecutionQueueWhilePending(
+                queryClient,
+                apiPostRequired<{ isOk: boolean; run: ScheduledJobRun }>(
+                    `/jobs/${encodeURIComponent(id)}/run`
+                )
             );
             if (
                 !result.isOk ||

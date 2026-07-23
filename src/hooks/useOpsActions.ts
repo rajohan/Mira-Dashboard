@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetchRequired, apiPostRequired } from "./useApi";
-import { jobExecutionKeys } from "./useJobExecutions";
+import {
+    jobExecutionKeys,
+    refreshJobExecutionQueueWhilePending,
+} from "./useJobExecutions";
 
 /** Defines ops action id. */
 export type OpsActionId =
@@ -110,10 +113,13 @@ export function useStartOpsAction() {
 
     return useMutation({
         mutationFn: async (action: OpsActionDefinition) =>
-            apiPostRequired<{ jobId: string }>("/exec/start", {
-                command: action.command,
-                shell: true,
-            }),
+            refreshJobExecutionQueueWhilePending(
+                queryClient,
+                apiPostRequired<{ jobId: string }>("/exec/start", {
+                    command: action.command,
+                    shell: true,
+                })
+            ),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all });
         },
