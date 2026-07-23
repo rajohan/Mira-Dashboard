@@ -446,9 +446,19 @@ export function enableRequiredWalJournalMode(
     databaseConnection: DatabaseSync,
     databasePath: string
 ): void {
-    const journalModeRow = databaseConnection
-        .query("PRAGMA journal_mode = WAL")
-        .get() as { journal_mode?: unknown } | null;
+    let journalModeRow: { journal_mode?: unknown } | null;
+    try {
+        journalModeRow = databaseConnection.query("PRAGMA journal_mode = WAL").get() as {
+            journal_mode?: unknown;
+        } | null;
+    } catch (error) {
+        try {
+            databaseConnection.close();
+        } catch {
+            // Preserve the original SQLite error.
+        }
+        throw error;
+    }
     const journalMode =
         typeof journalModeRow?.journal_mode === "string"
             ? journalModeRow.journal_mode

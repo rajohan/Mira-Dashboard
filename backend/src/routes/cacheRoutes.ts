@@ -12,6 +12,7 @@ import {
     cacheRefreshResourceClass,
     cacheRefreshScheduledJobId,
 } from "../services/cacheRefresh.ts";
+import { getLatestScheduledJobExecution } from "../services/jobExecutionQueue.ts";
 import {
     enqueueAndWaitForJobExecution,
     successfulJobExecutionOutput,
@@ -278,13 +279,20 @@ async function enqueueAndWaitForCacheRefresh(
             { signal }
         );
     }
-    const run = enqueueScheduledJob(scheduledJobId, "manual");
-    if (!run.executionId) {
+    let executionId: string | undefined;
+    try {
+        executionId = enqueueScheduledJob(scheduledJobId, "manual").executionId;
+    } catch (error) {
+        if (httpStatusCode(error) !== 409) throw error;
+        executionId = getLatestScheduledJobExecution(scheduledJobId)?.id;
+        if (!executionId) throw error;
+    }
+    if (!executionId) {
         throw Object.assign(new Error("Scheduled cache refresh was not queued"), {
             statusCode: 500,
         });
     }
-    return await waitForJobExecution(run.executionId, {
+    return await waitForJobExecution(executionId, {
         signal,
         timeoutMs: CACHE_REFRESH_TIMEOUT_MS,
     });

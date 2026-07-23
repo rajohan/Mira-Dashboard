@@ -52,15 +52,27 @@ openclaw status
 Use only when Raymond wants to re-run bootstrap.
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
-mkdir -p data/backups
-db_path=data/mira-dashboard.db
-backup_path="data/backups/mira-dashboard-before-auth-reset-$(date +%Y%m%d-%H%M%S).db"
+set -euo pipefail
+backend_dir=/home/ubuntu/projects/mira-dashboard/backend
+configured_db_path="$(
+  cd "$backend_dir"
+  /usr/local/bin/doppler run --config prd --project rajohan -- \
+    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
+)"
+if [[ -z "$configured_db_path" ]]; then
+  db_path="$backend_dir/data/mira-dashboard.db"
+elif [[ "$configured_db_path" = /* ]]; then
+  db_path="$configured_db_path"
+else
+  db_path="$backend_dir/$configured_db_path"
+fi
+mkdir -p "$backend_dir/data/backups"
+backup_path="$backend_dir/data/backups/mira-dashboard-before-auth-reset-$(date +%Y%m%d-%H%M%S).db"
 sqlite3 -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
 chmod 0600 "$backup_path"
 test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
-sqlite3 "$db_path" "DELETE FROM auth_sessions; DELETE FROM users;"
-sqlite3 "$db_path" "PRAGMA integrity_check;"
+sqlite3 -cmd ".timeout 5000" "$db_path" "DELETE FROM auth_sessions; DELETE FROM users;"
+sqlite3 -cmd ".timeout 5000" "$db_path" "PRAGMA integrity_check;"
 curl http://127.0.0.1:3100/api/auth/bootstrap
 ```
 

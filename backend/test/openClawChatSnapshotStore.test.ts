@@ -29,6 +29,25 @@ function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnaps
 }
 
 describe("OpenClaw chat snapshot store", () => {
+    it("preserves a WAL activation error when connection cleanup also fails", () => {
+        const pragmaError = new Error("WAL PRAGMA failed");
+        let closeCalls = 0;
+        const failingDatabase = {
+            close: () => {
+                closeCalls += 1;
+                throw new Error("close failed");
+            },
+            query: () => {
+                throw pragmaError;
+            },
+        } as unknown as Database;
+
+        expect(() => enableRequiredWalJournalMode(failingDatabase, "failing.db")).toThrow(
+            pragmaError
+        );
+        expect(closeCalls).toBe(1);
+    });
+
     it("fails fast when a database cannot enable WAL", () => {
         const memoryDatabase = new Database(":memory:");
 

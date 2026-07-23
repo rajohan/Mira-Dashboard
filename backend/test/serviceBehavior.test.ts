@@ -862,6 +862,7 @@ describe("backend service behavior", () => {
 
         const { cacheRefreshScheduledJobId, registerCacheRefreshScheduledJobs } =
             await import("../src/services/cacheRefresh.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
         expect(cacheRefreshScheduledJobId("weather.spydeberg")).toBe("cache.weather");
         expect(cacheRefreshScheduledJobId("moltbook.home")).toBe("cache.moltbook");
         expect(cacheRefreshScheduledJobId("system.openclaw")).toBe("cache.system");
@@ -920,6 +921,32 @@ describe("backend service behavior", () => {
             jobId: "cache.weather",
             status: "success",
             triggerType: "manual",
+        });
+
+        const existingRun = enqueueScheduledJob("cache.weather", "startup");
+        const reusedRefresh = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request(
+                    "https://dashboard.test/api/cache/weather.spydeberg/refresh",
+                    { method: "POST" }
+                ),
+                { params: { key: "weather.spydeberg" } }
+            )
+        );
+        expect(reusedRefresh.status).toBe(200);
+        expect(
+            database
+                .prepare(
+                    `SELECT id, trigger_type AS triggerType
+                     FROM scheduled_job_runs
+                     WHERE job_id = 'cache.weather'
+                     ORDER BY id DESC
+                     LIMIT 1`
+                )
+                .get()
+        ).toEqual({
+            id: existingRun.id,
+            triggerType: "startup",
         });
 
         const logRotationState = await cacheRoutes["/api/cache/:key/refresh"].POST(
