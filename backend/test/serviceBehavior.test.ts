@@ -3483,6 +3483,17 @@ fi
                 stdout: backup.stdout,
                 type: backup.type,
             });
+            expect(
+                database
+                    .prepare(
+                        `SELECT cancellable, status
+                         FROM job_executions
+                         WHERE action_key = 'backup.clear-attention'
+                         ORDER BY rowid DESC
+                         LIMIT 1`
+                    )
+                    .get()
+            ).toEqual({ cancellable: 0, status: "success" });
             expect(getPersistedBackupJob("walg")).toBeUndefined();
         } finally {
             database
@@ -5433,10 +5444,28 @@ fi
         const { registerOpenClawExecutionActions } =
             await import("../src/services/openclawActions.ts");
         registerOpenClawExecutionActions();
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    "DELETE FROM job_executions WHERE action_key = 'openclaw.gateway.restart'"
+                )
+                .run();
+        });
         await startTestScheduledExecutor();
         const restartResponse = await openclawConfigRoutes["/api/restart"].POST();
         expect(restartResponse.status).toBe(200);
         await expect(restartResponse.json()).resolves.toEqual({ isOk: true });
+        expect(
+            database
+                .prepare(
+                    `SELECT cancellable, status
+                     FROM job_executions
+                     WHERE action_key = 'openclaw.gateway.restart'
+                     ORDER BY rowid DESC
+                     LIMIT 1`
+                )
+                .get()
+        ).toEqual({ cancellable: 0, status: "success" });
     });
 
     it("normalizes cron and session route contracts through a patched gateway", async () => {

@@ -2467,12 +2467,17 @@ async function pruneDanglingImagesBestEffort(signal?: AbortSignal): Promise<void
 
 async function syncDockerUpdaterChangesBestEffort(
     steps: DockerUpdaterStepResult[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
 ): Promise<void> {
     const updateSteps = steps.filter((step) => step.step.includes("-update:"));
     if (updateSteps.length === 0) {
         try {
-            const pendingResult = await syncDockerUpdaterChanges([], signal);
+            const pendingResult = await syncDockerUpdaterChanges(
+                [],
+                signal,
+                protectFromCancellation
+            );
             if (pendingResult.pushed) {
                 steps.push({
                     step: "git-sync:docker",
@@ -2495,7 +2500,11 @@ async function syncDockerUpdaterChangesBestEffort(
     const changedPaths = updateSteps.flatMap((step) => step.changedPaths ?? []);
     if (changedPaths.length === 0) {
         try {
-            const pendingResult = await syncDockerUpdaterChanges([], signal);
+            const pendingResult = await syncDockerUpdaterChanges(
+                [],
+                signal,
+                protectFromCancellation
+            );
             steps.push({
                 step: "git-sync:docker",
                 isOk: true,
@@ -2522,7 +2531,11 @@ async function syncDockerUpdaterChangesBestEffort(
         return;
     }
     try {
-        const result = await syncDockerUpdaterChanges(changedPaths, signal);
+        const result = await syncDockerUpdaterChanges(
+            changedPaths,
+            signal,
+            protectFromCancellation
+        );
         steps.push({
             step: "git-sync:docker",
             isOk: true,
@@ -2546,11 +2559,11 @@ export async function runDockerUpdaterService(
     protectFromCancellation?: () => void
 ): Promise<DockerUpdaterStepResult[]> {
     signal?.throwIfAborted();
-    let isApplyProtected = false;
-    const protectApply = () => {
-        if (isApplyProtected) return;
+    let isMutationProtected = false;
+    const protectMutation = () => {
+        if (isMutationProtected) return;
         protectFromCancellation?.();
-        isApplyProtected = true;
+        isMutationProtected = true;
     };
     const requestedService =
         serviceId === undefined
@@ -2691,13 +2704,13 @@ export async function runDockerUpdaterService(
                 },
             ];
         }
-        protectApply();
+        protectMutation();
         const apply = await applyServiceUpdate(refreshedService, "manual", signal);
         if (apply.isOk) {
             await pruneDanglingImagesBestEffort(signal);
         }
         const steps = [register, poll, apply];
-        await syncDockerUpdaterChangesBestEffort(steps, signal);
+        await syncDockerUpdaterChangesBestEffort(steps, signal, protectMutation);
         return steps;
     }
     const blockedAppSlugs = failedDiscoveryAppSlugs(register);
@@ -2719,14 +2732,14 @@ export async function runDockerUpdaterService(
         ) {
             continue;
         }
-        protectApply();
+        protectMutation();
         applyResults.push(await applyServiceUpdate(service, "auto", signal));
     }
     if (applyResults.some((step) => step.isOk)) {
         await pruneDanglingImagesBestEffort(signal);
     }
     const steps = [register, poll, ...applyResults];
-    await syncDockerUpdaterChangesBestEffort(steps, signal);
+    await syncDockerUpdaterChangesBestEffort(steps, signal, protectMutation);
     return steps;
 }
 

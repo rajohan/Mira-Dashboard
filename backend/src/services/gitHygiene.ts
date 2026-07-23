@@ -211,7 +211,8 @@ async function commitAndPushPaths(
     repoPath: string,
     paths: string[],
     message: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
 ): Promise<GitSyncResult> {
     const changedPaths = uniqueSorted(paths);
     if (changedPaths.length === 0) {
@@ -243,6 +244,7 @@ async function commitAndPushPaths(
             );
         }
 
+        protectFromCancellation?.();
         await git(["commit", "--only", "-m", message, "--", ...changedPathspecs], {
             cwd: repoPath,
             signal,
@@ -328,7 +330,8 @@ async function assertPendingCommitsAreAutomation(
 async function pushPendingAutomationCommits(
     repoPath: string,
     allowedMessages: string[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
 ): Promise<GitSyncResult | undefined> {
     const pendingState = await pendingCommitState(repoPath, signal);
     if (
@@ -339,6 +342,7 @@ async function pushPendingAutomationCommits(
         return undefined;
     }
 
+    protectFromCancellation?.();
     await git(["push", pendingState.upstream.remote, pendingState.upstream.refspec], {
         cwd: repoPath,
         signal,
@@ -378,7 +382,8 @@ async function withGitSyncLock<T>(
 }
 
 export async function syncOpenClawWorkspaceSafePaths(
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
 ): Promise<GitSyncResult> {
     const repoPath = getOpenClawRoot();
     return withGitSyncLock(
@@ -394,7 +399,8 @@ export async function syncOpenClawWorkspaceSafePaths(
                 const pushedPending = await pushPendingAutomationCommits(
                     repoPath,
                     [OPENCLAW_SYNC_COMMIT_MESSAGE],
-                    signal
+                    signal,
+                    protectFromCancellation
                 );
                 if (pushedPending) return pushedPending;
                 return {
@@ -407,7 +413,8 @@ export async function syncOpenClawWorkspaceSafePaths(
                 repoPath,
                 safePaths,
                 OPENCLAW_SYNC_COMMIT_MESSAGE,
-                signal
+                signal,
+                protectFromCancellation
             );
         },
         signal
@@ -416,7 +423,8 @@ export async function syncOpenClawWorkspaceSafePaths(
 
 export async function syncDockerUpdaterChanges(
     paths?: string[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
 ): Promise<GitSyncResult> {
     const scope = await dockerGitScope(signal);
     const { appsPath, repoPath } = scope;
@@ -454,7 +462,8 @@ export async function syncDockerUpdaterChanges(
                 const pushedPending = await pushPendingAutomationCommits(
                     repoPath,
                     [DOCKER_SYNC_COMMIT_MESSAGE],
-                    signal
+                    signal,
+                    protectFromCancellation
                 );
                 if (pushedPending) return pushedPending;
                 return {
@@ -467,7 +476,8 @@ export async function syncDockerUpdaterChanges(
                 repoPath,
                 safePaths,
                 DOCKER_SYNC_COMMIT_MESSAGE,
-                signal
+                signal,
+                protectFromCancellation
             );
         },
         signal
@@ -488,8 +498,11 @@ export function registerGitHygieneScheduledJobs(): void {
     } as const;
     registerScheduledJobAction(
         "git.openclaw.workspace-sync",
-        async (_job, signal) => {
-            const result = await syncOpenClawWorkspaceSafePaths(signal);
+        async (_job, signal, context) => {
+            const result = await syncOpenClawWorkspaceSafePaths(
+                signal,
+                context.protectFromCancellation
+            );
             return { ...result };
         },
         { timeoutMs: GIT_WORKSPACE_SYNC_TIMEOUT_MS }

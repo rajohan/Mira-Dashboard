@@ -272,6 +272,62 @@ describe("Docker updater tag patterns", () => {
         expect(runProcessSpy).not.toHaveBeenCalled();
     });
 
+    it("protects a pending updater git push when no service apply is needed", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-pending-sync-");
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        const mutationEvents: string[] = [];
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation((async (file, arguments_) => {
+                const command = arguments_.join(" ");
+                if (file === "git" && command === "rev-parse --show-toplevel") {
+                    return { code: 0, stderr: "", stdout: `${appsRoot}\n` };
+                }
+                if (
+                    file === "git" &&
+                    command === "rev-parse --abbrev-ref --symbolic-full-name @{u}"
+                ) {
+                    return { code: 0, stderr: "", stdout: "origin/main\n" };
+                }
+                if (file === "git" && command === "log --format=%s origin/main..HEAD") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: "chore: update managed app images\n",
+                    };
+                }
+                if (file === "git" && command === "push origin HEAD:refs/heads/main") {
+                    mutationEvents.push("push");
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+                if (file === "git" && command === "rev-parse --short HEAD") {
+                    return { code: 0, stderr: "", stdout: "abc1234\n" };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            }) as typeof processModule.runProcess);
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+        const protectFromCancellation = jest.fn(() => {
+            mutationEvents.push("protect");
+        });
+
+        const steps = await runDockerUpdaterService(
+            undefined,
+            undefined,
+            protectFromCancellation
+        );
+
+        expect(protectFromCancellation).toHaveBeenCalledTimes(1);
+        expect(mutationEvents).toEqual(["protect", "push"]);
+        expect(steps).toContainEqual(
+            expect.objectContaining({
+                isOk: true,
+                step: "git-sync:docker",
+                stdout: expect.stringContaining('"pushed":true'),
+            })
+        );
+    });
+
     it("registers partial compose discoveries as nonblocking warnings", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");

@@ -1070,19 +1070,28 @@ export function registerBackupScheduledJobs(): void {
         },
         { timeoutMs: SCHEDULED_BACKUP_TIMEOUT_MS }
     );
-    registerScheduledJobAction("backup.clear-attention", async (job) => {
-        const type = getScheduledBackupType(job.actionPayload);
-        if (type !== "kopia" && type !== "walg") {
-            throw Object.assign(new Error("Invalid backup type"), { statusCode: 400 });
+    registerScheduledJobAction(
+        "backup.clear-attention",
+        async (job, _signal, context) => {
+            const type = getScheduledBackupType(job.actionPayload);
+            if (type !== "kopia" && type !== "walg") {
+                throw Object.assign(new Error("Invalid backup type"), {
+                    statusCode: 400,
+                });
+            }
+            const backupExecutionId = job.actionPayload.backupExecutionId;
+            if (
+                typeof backupExecutionId !== "string" ||
+                backupExecutionId.trim() === ""
+            ) {
+                throw Object.assign(new Error("Backup execution id is missing"), {
+                    statusCode: 400,
+                });
+            }
+            context.protectFromCancellation();
+            return { backup: await clearBackupAttention(type, backupExecutionId) };
         }
-        const backupExecutionId = job.actionPayload.backupExecutionId;
-        if (typeof backupExecutionId !== "string" || backupExecutionId.trim() === "") {
-            throw Object.assign(new Error("Backup execution id is missing"), {
-                statusCode: 400,
-            });
-        }
-        return { backup: await clearBackupAttention(type, backupExecutionId) };
-    });
+    );
     database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction(

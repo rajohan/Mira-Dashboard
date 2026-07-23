@@ -17,7 +17,8 @@ function getOpenClawBin(): string {
 export function registerOpenClawExecutionActions(): void {
     registerScheduledJobAction(
         OPENCLAW_GATEWAY_RESTART_ACTION,
-        async (_job, signal) => {
+        async (_job, signal, context) => {
+            context.protectFromCancellation();
             const result = await runProcess(getOpenClawBin(), ["gateway", "restart"], {
                 signal,
                 timeoutMs: 30_000,
