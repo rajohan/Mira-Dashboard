@@ -1328,6 +1328,22 @@ printf 'scheduled\n'
             expect(getJobExecution(followUpExecution.id)).toMatchObject({
                 status: "queued",
             });
+            database
+                .prepare(
+                    `UPDATE deployment_jobs
+                     SET status = 'failed',
+                         updated_at = ?,
+                         note = 'Detached restart failed'
+                     WHERE id = ?`
+                )
+                .run(new Date().toISOString(), job.id);
+            await waitFor(
+                () => getJobExecution(followUpExecution.id)?.status === "success",
+                5000
+            );
+            expect(getJobExecution(followUpExecution.id)).toMatchObject({
+                status: "success",
+            });
         } finally {
             database
                 .prepare("DELETE FROM job_executions WHERE id = ?")

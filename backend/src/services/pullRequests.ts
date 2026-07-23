@@ -55,6 +55,8 @@ const RECENT_DEPLOYMENTS_LIMIT = 10;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
+const DEPLOYMENT_RESTART_STATUS_POLL_MS = 1000;
+const DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS = 2 * 60 * 1000;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
@@ -1577,6 +1579,47 @@ async function runDeploymentJob(
     }
 }
 
+function resumeWorkerClaimsWhenDeploymentRestartSettles(
+    deploymentId: string,
+    resumeWorkerClaims: () => void
+): void {
+    let isSettled = false;
+    const settle = () => {
+        if (isSettled) return;
+        isSettled = true;
+        clearInterval(restartPoll);
+        clearTimeout(failSafe);
+        resumeWorkerClaims();
+    };
+    const checkRestartStatus = () => {
+        try {
+            const deployment = readDeploymentJob(deploymentId);
+            if (!deployment || !ACTIVE_DEPLOYMENT_STATUSES.has(deployment.status)) {
+                settle();
+            }
+        } catch (error) {
+            console.warn(
+                "[PullRequests] Failed to inspect detached deployment restart:",
+                error
+            );
+        }
+    };
+    const restartPoll = setInterval(
+        checkRestartStatus,
+        DEPLOYMENT_RESTART_STATUS_POLL_MS
+    );
+    restartPoll.unref();
+    const failSafe = setTimeout(() => {
+        console.warn(
+            "[PullRequests] Resuming worker claims after deployment restart pause timed out",
+            { deploymentId }
+        );
+        settle();
+    }, DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS);
+    failSafe.unref();
+    queueMicrotask(checkRestartStatus);
+}
+
 /** Persists a deployment and puts its execution behind the worker lease. */
 export function startDeployLatest(lockHeldBy?: string): DeploymentJob {
     registerPullRequestJobLifecycleHandlers();
@@ -1914,7 +1957,8 @@ export function registerPullRequestExecutionActions(): void {
                 deploymentId,
             });
         }
-        context.pauseWorkerClaims();
+        const resumeWorkerClaims = context.pauseWorkerClaims();
+        resumeWorkerClaimsWhenDeploymentRestartSettles(deploymentId, resumeWorkerClaims);
         return { deploymentId };
     });
     registerScheduledJobAction("github.merge", executePullRequestMerge);

@@ -46,6 +46,7 @@ const scheduledJobRuntimeState: {
     scheduler: NodeJS.Timeout | undefined;
     executor: NodeJS.Timeout | undefined;
     workerHeartbeat: NodeJS.Timeout | undefined;
+    executorClaimPauseGeneration: number;
     isSchedulerTickRunning: boolean;
     isExecutorClaimingPaused: boolean;
     isExecutorTickRunning: boolean;
@@ -54,6 +55,7 @@ const scheduledJobRuntimeState: {
     scheduler: undefined,
     executor: undefined,
     workerHeartbeat: undefined,
+    executorClaimPauseGeneration: 0,
     isSchedulerTickRunning: false,
     isExecutorClaimingPaused: false,
     isExecutorTickRunning: false,
@@ -66,7 +68,7 @@ export type ScheduledJobRunStatus =
 export type ScheduledJobTriggerType = "manual" | "schedule" | "startup";
 export interface ScheduledJobActionContext {
     executionId: string;
-    pauseWorkerClaims: () => void;
+    pauseWorkerClaims: () => () => void;
     protectFromCancellation: () => void;
     updateOutput: (output: Record<string, unknown>) => void;
 }
@@ -1062,9 +1064,7 @@ async function executeClaimedJobExecution(
                     job,
                     {
                         executionId: execution.id,
-                        pauseWorkerClaims: () => {
-                            scheduledJobRuntimeState.isExecutorClaimingPaused = true;
-                        },
+                        pauseWorkerClaims: pauseExecutorClaims,
                         protectFromCancellation: () => {
                             protectRunningJobExecutionFromCancellation(execution.id);
                         },
@@ -1234,6 +1234,26 @@ async function observeClaimedExecution(
     }
 }
 
+function pauseExecutorClaims(): () => void {
+    const generation = ++scheduledJobRuntimeState.executorClaimPauseGeneration;
+    scheduledJobRuntimeState.isExecutorClaimingPaused = true;
+    let isResumed = false;
+    return () => {
+        if (isResumed) return;
+        isResumed = true;
+        if (scheduledJobRuntimeState.executorClaimPauseGeneration !== generation) {
+            return;
+        }
+        scheduledJobRuntimeState.isExecutorClaimingPaused = false;
+        queueMicrotask(executorTick);
+    };
+}
+
+function resetExecutorClaimPause(): void {
+    scheduledJobRuntimeState.executorClaimPauseGeneration += 1;
+    scheduledJobRuntimeState.isExecutorClaimingPaused = false;
+}
+
 function executorTick(): void {
     if (
         !scheduledJobRuntimeState.executor ||
@@ -1288,7 +1308,7 @@ export function startScheduledJobScheduler(): void {
 
 export function startScheduledJobExecutor(): void {
     if (scheduledJobRuntimeState.executor) return;
-    scheduledJobRuntimeState.isExecutorClaimingPaused = false;
+    resetExecutorClaimPause();
     const timestamp = nowIso();
     const recoveredLegacyRuns = recoverOrphanedScheduledJobRuns(timestamp);
     if (recoveredLegacyRuns > 0) {
@@ -1357,5 +1377,5 @@ export async function stopScheduledJobExecutor(): Promise<void> {
     activeExecutionControllers.clear();
     activeExecutionRuns.clear();
     unregisterJobWorker(scheduledJobRuntimeState.workerId);
-    scheduledJobRuntimeState.isExecutorClaimingPaused = false;
+    resetExecutorClaimPause();
 }
