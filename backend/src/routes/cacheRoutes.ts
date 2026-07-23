@@ -18,7 +18,11 @@ import {
     successfulJobExecutionOutput,
     waitForJobExecution,
 } from "../services/queuedJobExecution.ts";
-import { enqueueScheduledJob, listScheduledJobs } from "../services/scheduledJobs.ts";
+import {
+    enqueueScheduledJob,
+    getScheduledJob,
+    listScheduledJobs,
+} from "../services/scheduledJobs.ts";
 import { getHeartbeatAutomationSnapshot } from "../services/taskAutomation.ts";
 
 const CACHE_REFRESH_TIMEOUT_MS = 5 * 60 * 1000;
@@ -266,9 +270,8 @@ async function enqueueAndWaitForCacheRefresh(
     resourceClass: ReturnType<typeof cacheRefreshResourceClass>,
     signal: AbortSignal
 ) {
-    const scheduledJobId = cacheRefreshScheduledJobId(key);
-    if (!scheduledJobId) {
-        return await enqueueAndWaitForJobExecution(
+    const enqueueUnscheduledRefresh = async () =>
+        await enqueueAndWaitForJobExecution(
             {
                 actionKey: "cache.refresh",
                 displayName: `Refresh cache: ${key}`,
@@ -278,6 +281,9 @@ async function enqueueAndWaitForCacheRefresh(
             },
             { signal }
         );
+    const scheduledJobId = cacheRefreshScheduledJobId(key);
+    if (!scheduledJobId) {
+        return await enqueueUnscheduledRefresh();
     }
     let shouldCancelQueuedOnTimeout = true;
     let executionId: string | undefined;
@@ -285,20 +291,39 @@ async function enqueueAndWaitForCacheRefresh(
         executionId = enqueueScheduledJob(scheduledJobId, "manual").executionId;
     } catch (error) {
         if (httpStatusCode(error) !== 409) throw error;
+        const existingExecution = getLatestScheduledJobExecution(scheduledJobId);
+        if (!existingExecution) throw error;
+        const scheduledJob = getScheduledJob(scheduledJobId);
+        const canReuseExecution =
+            existingExecution.status === "running" ||
+            (existingExecution.status === "queued" &&
+                scheduledJob !== undefined &&
+                (existingExecution.triggerType === "manual" || scheduledJob.enabled));
+        if (!canReuseExecution) {
+            return await enqueueUnscheduledRefresh();
+        }
         shouldCancelQueuedOnTimeout = false;
-        executionId = getLatestScheduledJobExecution(scheduledJobId)?.id;
-        if (!executionId) throw error;
+        executionId = existingExecution.id;
     }
     if (!executionId) {
         throw Object.assign(new Error("Scheduled cache refresh was not queued"), {
             statusCode: 500,
         });
     }
-    return await waitForJobExecution(executionId, {
+    const execution = await waitForJobExecution(executionId, {
         cancelQueuedOnTimeout: shouldCancelQueuedOnTimeout,
         signal,
         timeoutMs: CACHE_REFRESH_TIMEOUT_MS,
     });
+    if (
+        !shouldCancelQueuedOnTimeout &&
+        execution.status === "cancelled" &&
+        (execution.message === "Scheduled job was disabled before execution" ||
+            execution.message === "Scheduled job was removed before execution")
+    ) {
+        return await enqueueUnscheduledRefresh();
+    }
+    return execution;
 }
 
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };

@@ -2271,9 +2271,7 @@ const cacheRefreshScheduledJobs = [
 ] as const;
 
 export function cacheRefreshScheduledJobId(key: string): string | undefined {
-    const scheduledKey = MOLTBOOK_CACHE_KEYS.has(key)
-        ? "moltbook"
-        : cacheRefreshScopeKey(key);
+    const scheduledKey = cacheRefreshScopeKey(key);
     return cacheRefreshScheduledJobs.find((job) => job.actionPayload.key === scheduledKey)
         ?.id;
 }

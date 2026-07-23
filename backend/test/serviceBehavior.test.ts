@@ -810,6 +810,8 @@ describe("backend service behavior", () => {
     });
 
     it("refreshes supported cache keys through the cache route", async () => {
+        rememberEnvironment("MOLTBOOK_API_KEY");
+        process.env.MOLTBOOK_API_KEY = "moltbook-key";
         const { waitForLocalCacheSeed } = await import("../src/services/cacheRefresh.ts");
         try {
             await waitForLocalCacheSeed("weather.spydeberg");
@@ -820,7 +822,11 @@ describe("backend service behavior", () => {
             database
                 .prepare(
                     `DELETE FROM cache_entries
-                     WHERE key IN ('weather.spydeberg', 'log_rotation.state')`
+                     WHERE key IN (
+                         'weather.spydeberg',
+                         'log_rotation.state',
+                         'moltbook.home'
+                     )`
                 )
                 .run();
         });
@@ -856,15 +862,31 @@ describe("backend service behavior", () => {
                     ],
                 });
             }
+            if (url === "https://www.moltbook.com/api/v1/home") {
+                return Response.json({
+                    activity_on_your_posts: [],
+                    posts_from_accounts_you_follow: [],
+                    what_to_do_next: [],
+                    your_direct_messages: {
+                        pending_request_count: 0,
+                        unread_message_count: 0,
+                    },
+                });
+            }
             return new Response("not found", { status: 404 });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
 
         const { cacheRefreshScheduledJobId, registerCacheRefreshScheduledJobs } =
             await import("../src/services/cacheRefresh.ts");
-        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const {
+            enqueueScheduledJob,
+            startScheduledJobExecutor,
+            stopScheduledJobExecutor,
+            updateScheduledJob,
+        } = await import("../src/services/scheduledJobs.ts");
         expect(cacheRefreshScheduledJobId("weather.spydeberg")).toBe("cache.weather");
-        expect(cacheRefreshScheduledJobId("moltbook.home")).toBe("cache.moltbook");
+        expect(cacheRefreshScheduledJobId("moltbook.home")).toBeUndefined();
         expect(cacheRefreshScheduledJobId("system.openclaw")).toBe("cache.system");
         expect(cacheRefreshScheduledJobId("log_rotation.state")).toBeUndefined();
         registerCacheRefreshScheduledJobs({ seedStrategy: "none" });
@@ -874,7 +896,11 @@ describe("backend service behavior", () => {
                     `DELETE FROM job_executions
                      WHERE scheduled_job_id = 'cache.weather'
                         OR (action_key = 'cache.refresh'
-                            AND json_extract(payload_json, '$.key') = 'log_rotation.state')`
+                            AND json_extract(payload_json, '$.key') IN (
+                                'log_rotation.state',
+                                'moltbook.home',
+                                'weather.spydeberg'
+                            ))`
                 )
                 .run();
             database
@@ -949,6 +975,124 @@ describe("backend service behavior", () => {
             triggerType: "startup",
         });
 
+        const moltbookHome = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request("https://dashboard.test/api/cache/moltbook.home/refresh", {
+                    method: "POST",
+                }),
+                { params: { key: "moltbook.home" } }
+            )
+        );
+        expect(moltbookHome.status).toBe(200);
+        expect(
+            database
+                .prepare(
+                    `SELECT scheduled_job_id IS NULL AS isUnscheduled, status,
+                            trigger_type AS triggerType
+                     FROM job_executions
+                     WHERE action_key = 'cache.refresh'
+                       AND json_extract(payload_json, '$.key') = 'moltbook.home'
+                     ORDER BY queued_at DESC, id DESC
+                     LIMIT 1`
+                )
+                .get()
+        ).toEqual({
+            isUnscheduled: 1,
+            status: "success",
+            triggerType: "manual",
+        });
+
+        await stopScheduledJobExecutor();
+        const disabledRun = enqueueScheduledJob("cache.weather", "startup");
+        expect(updateScheduledJob("cache.weather", { enabled: false })).toMatchObject({
+            enabled: false,
+        });
+        cleanupCallbacks.push(() => {
+            updateScheduledJob("cache.weather", { enabled: true });
+        });
+        const disabledRefreshPromise = cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request(
+                    "https://dashboard.test/api/cache/weather.spydeberg/refresh",
+                    { method: "POST" }
+                ),
+                { params: { key: "weather.spydeberg" } }
+            )
+        );
+        await waitFor(
+            () =>
+                database
+                    .prepare(
+                        `SELECT 1
+                         FROM job_executions
+                         WHERE scheduled_job_id IS NULL
+                           AND action_key = 'cache.refresh'
+                           AND json_extract(payload_json, '$.key') = 'weather.spydeberg'
+                           AND status = 'queued'`
+                    )
+                    .get() !== undefined
+        );
+        startScheduledJobExecutor();
+        const disabledRefresh = await disabledRefreshPromise;
+        expect(disabledRefresh.status).toBe(200);
+        expect(
+            database
+                .prepare(
+                    `SELECT status
+                     FROM scheduled_job_runs
+                     WHERE id = ?`
+                )
+                .get(disabledRun.id)
+        ).toEqual({ status: "cancelled" });
+        expect(
+            database
+                .prepare(
+                    `SELECT scheduled_job_id IS NULL AS isUnscheduled, status,
+                            trigger_type AS triggerType
+                     FROM job_executions
+                     WHERE scheduled_job_id IS NULL
+                       AND action_key = 'cache.refresh'
+                       AND json_extract(payload_json, '$.key') = 'weather.spydeberg'
+                     ORDER BY queued_at DESC, id DESC
+                     LIMIT 1`
+                )
+                .get()
+        ).toEqual({
+            isUnscheduled: 1,
+            status: "success",
+            triggerType: "manual",
+        });
+
+        expect(updateScheduledJob("cache.weather", { enabled: true })).toMatchObject({
+            enabled: true,
+        });
+        await stopScheduledJobExecutor();
+        const disabledAfterReuseRun = enqueueScheduledJob("cache.weather", "startup");
+        const disabledAfterReusePromise = cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request(
+                    "https://dashboard.test/api/cache/weather.spydeberg/refresh",
+                    { method: "POST" }
+                ),
+                { params: { key: "weather.spydeberg" } }
+            )
+        );
+        expect(updateScheduledJob("cache.weather", { enabled: false })).toMatchObject({
+            enabled: false,
+        });
+        startScheduledJobExecutor();
+        const disabledAfterReuseRefresh = await disabledAfterReusePromise;
+        expect(disabledAfterReuseRefresh.status).toBe(200);
+        expect(
+            database
+                .prepare(
+                    `SELECT status
+                     FROM scheduled_job_runs
+                     WHERE id = ?`
+                )
+                .get(disabledAfterReuseRun.id)
+        ).toEqual({ status: "cancelled" });
+
         const logRotationState = await cacheRoutes["/api/cache/:key/refresh"].POST(
             Object.assign(
                 new Request(
@@ -959,7 +1103,7 @@ describe("backend service behavior", () => {
             )
         );
         expect(logRotationState.status).toBe(200);
-    });
+    }, 10_000);
 
     it("maps recent deployment jobs in newest-first order", async () => {
         const olderId = `test-deploy-older-${Bun.randomUUIDv7()}`;
