@@ -2996,9 +2996,9 @@ describe("Mira Dashboard pages", () => {
         });
 
         await waitFor(() => {
-            expect(
-                screen.getByText(/MAIN · codex · Context: 0.5k \/ 1k \(53%\)/)
-            ).toBeInTheDocument();
+            expect(screen.getByText(/Context: 0.5k \/ 1k \(53%\)/)).toBeInTheDocument();
+            expect(screen.getByText("Model: codex")).toBeInTheDocument();
+            expect(screen.queryByText(/MAIN ·/u)).not.toBeInTheDocument();
         });
         await waitFor(() => {
             expect(view.router.state.location.search).toEqual({
