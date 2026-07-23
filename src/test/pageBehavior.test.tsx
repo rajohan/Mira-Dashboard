@@ -319,6 +319,13 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         return Response.json({ entry: { key: "docker.summary" }, isOk: true });
     }
 
+    if (method === "POST" && url.startsWith("/api/cache/") && url.endsWith("/refresh")) {
+        const key = decodeURIComponent(
+            url.slice("/api/cache/".length, -"/refresh".length)
+        );
+        return Response.json({ entry: { key }, isOk: true });
+    }
+
     if (method === "POST" && url === "/api/docker/exec/start") {
         expect(parseRequestBody(init)).toMatchObject({
             command: "echo hello",
@@ -2222,7 +2229,9 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
-    it("links git workspace repositories to GitHub remotes", async () => {
+    it("links git workspace repositories and refreshes every Moltbook cache", async () => {
+        const user = userEvent.setup();
+        const fetchMock = fetch as unknown as ReturnType<typeof jest.fn>;
         const view = renderPage(createElement(Dashboard), { withSocket: true });
 
         const dashboardRepoLink = await screen.findByRole("link", {
@@ -2232,6 +2241,22 @@ describe("Mira Dashboard pages", () => {
             "href",
             "https://github.com/rajohan/Mira-Dashboard"
         );
+
+        await user.click(screen.getByRole("button", { name: /force update moltbook/i }));
+        await waitFor(() => {
+            for (const key of [
+                "moltbook.home",
+                "moltbook.feed.hot",
+                "moltbook.feed.new",
+                "moltbook.profile",
+                "moltbook.my-content",
+            ]) {
+                expect(fetchMock).toHaveBeenCalledWith(
+                    `/api/cache/${key}/refresh`,
+                    expect.objectContaining({ method: "POST" })
+                );
+            }
+        });
 
         view.unmount();
         view.queryClient.clear();

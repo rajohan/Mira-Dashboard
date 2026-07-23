@@ -1093,6 +1093,49 @@ describe("backend service behavior", () => {
                 .get(disabledAfterReuseRun.id)
         ).toEqual({ status: "cancelled" });
 
+        expect(updateScheduledJob("cache.weather", { enabled: true })).toMatchObject({
+            enabled: true,
+        });
+        cleanupCallbacks.push(() => {
+            registerCacheRefreshScheduledJobs({ seedStrategy: "none" });
+        });
+        const unscheduledWeatherCountBefore = (
+            database
+                .prepare(
+                    `SELECT COUNT(*) AS count
+                     FROM job_executions
+                     WHERE scheduled_job_id IS NULL
+                       AND action_key = 'cache.refresh'
+                       AND json_extract(payload_json, '$.key') = 'weather.spydeberg'`
+                )
+                .get() as { count: number }
+        ).count;
+        database.prepare("DELETE FROM scheduled_jobs WHERE id = 'cache.weather'").run();
+        const missingScheduleRefresh = await cacheRoutes["/api/cache/:key/refresh"].POST(
+            Object.assign(
+                new Request(
+                    "https://dashboard.test/api/cache/weather.spydeberg/refresh",
+                    { method: "POST" }
+                ),
+                { params: { key: "weather.spydeberg" } }
+            )
+        );
+        expect(missingScheduleRefresh.status).toBe(200);
+        expect(
+            (
+                database
+                    .prepare(
+                        `SELECT COUNT(*) AS count
+                         FROM job_executions
+                         WHERE scheduled_job_id IS NULL
+                           AND action_key = 'cache.refresh'
+                           AND json_extract(payload_json, '$.key') = 'weather.spydeberg'`
+                    )
+                    .get() as { count: number }
+            ).count
+        ).toBe(unscheduledWeatherCountBefore + 1);
+        registerCacheRefreshScheduledJobs({ seedStrategy: "none" });
+
         const logRotationState = await cacheRoutes["/api/cache/:key/refresh"].POST(
             Object.assign(
                 new Request(

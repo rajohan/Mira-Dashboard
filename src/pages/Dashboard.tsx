@@ -279,6 +279,13 @@ export function Dashboard() {
                             label: "Moltbook",
                             description:
                                 "Refresh home, feed, profile, and my content caches",
+                            refreshKeys: [
+                                "moltbook.home",
+                                "moltbook.feed.hot",
+                                "moltbook.feed.new",
+                                "moltbook.profile",
+                                "moltbook.my-content",
+                            ],
                         },
                         {
                             key: "git.workspace",

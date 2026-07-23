@@ -290,7 +290,11 @@ async function enqueueAndWaitForCacheRefresh(
     try {
         executionId = enqueueScheduledJob(scheduledJobId, "manual").executionId;
     } catch (error) {
-        if (httpStatusCode(error) !== 409) throw error;
+        const statusCode = httpStatusCode(error);
+        if (statusCode === 404) {
+            return await enqueueUnscheduledRefresh();
+        }
+        if (statusCode !== 409) throw error;
         const existingExecution = getLatestScheduledJobExecution(scheduledJobId);
         if (!existingExecution) throw error;
         const scheduledJob = getScheduledJob(scheduledJobId);
