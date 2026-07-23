@@ -204,6 +204,7 @@ describe("database overview service", () => {
 
             expect(overview.overview).toMatchObject({
                 totalDatabaseSizeBytes: 15_728_640,
+                managedDatabaseCount: 3,
                 totalBackends: 3,
                 averageCacheHitRatio: 82.5,
                 connections: { active: 2, idle: 1 },
@@ -218,6 +219,19 @@ describe("database overview service", () => {
                     avgTransactionTime: 10,
                 },
             });
+            expect(overview.sqlite).toMatchObject({
+                attention: ["No verified SQLite backup exists"],
+                backup: { count: 0, current: false, reviewAgeHours: 48 },
+                foreignKeysEnabled: true,
+                journalMode: "wal",
+                migrations: { applied: 3, current: true, latest: 3 },
+                permissions: { secure: true },
+                status: "review",
+                walAutoCheckpointPages: 1000,
+            });
+            expect(overview.overview.totalManagedDatabaseSizeBytes).toBeGreaterThan(
+                overview.overview.totalDatabaseSizeBytes
+            );
             expect(overview.databases).toHaveLength(2);
             expect(overview.deadTuples).toHaveLength(25);
             expect(

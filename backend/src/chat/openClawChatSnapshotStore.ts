@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { database } from "../database.ts";
 import {
     MAX_CHAT_RUNTIME_SESSIONS,
@@ -112,7 +110,7 @@ function isRuntimeEnvelope(value: unknown): value is OpenClawRuntimeEnvelope {
 }
 
 function eventFingerprint(envelopeJson: string): string {
-    return createHash("sha256").update(envelopeJson).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(envelopeJson).digest("hex");
 }
 
 function isStoredEventFingerprint(value: unknown): value is StoredEventFingerprint {

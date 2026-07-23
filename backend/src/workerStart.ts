@@ -2,11 +2,8 @@ import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobW
 
 const WORKER_KEEP_ALIVE_INTERVAL_MS = 60_000;
 
-export function isDirectWorkerEntrypoint(
-    argvPath = process.argv[1],
-    moduleUrl = import.meta.url
-): boolean {
-    return Boolean(argvPath && moduleUrl === Bun.pathToFileURL(argvPath).href);
+export function isDirectWorkerEntrypoint(isMain = import.meta.main): boolean {
+    return isMain;
 }
 
 /** Keeps the dedicated worker process referenced while its runtime timers are idle. */

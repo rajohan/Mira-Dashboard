@@ -52,19 +52,8 @@ database manually.
 
 Intentional-disable metadata never belongs in `action_payload_json`, which is
 reserved for input passed to the scheduled action handler. Existing databases
-must be updated manually before deploying code that reads the new schema:
-
-```sql
-ALTER TABLE scheduled_jobs ADD COLUMN disable_intent_json TEXT;
-CREATE TABLE openclaw_cron_job_metadata (
-    job_id TEXT PRIMARY KEY,
-    disable_intent_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-```
-
-There is deliberately no runtime migration or fallback for these fields.
+are updated through the numbered migration registry; do not apply ad-hoc DDL
+that bypasses `schema_migrations`.
 
 ## Built-In Startup Jobs
 
@@ -72,6 +61,7 @@ When enabled, worker startup registers jobs for:
 
 - backup refresh/status;
 - cache refresh;
+- Dashboard SQLite backup, retention, optimization, and passive checkpoint;
 - Docker update checks;
 - OpenClaw workspace git sync for known safe generated workspace state;
 - log rotation;
@@ -156,6 +146,10 @@ The heartbeat response also exposes these top-level operational projections:
 - `tasks`: only open heartbeat-relevant tasks. Task automation contains its
   linked `cronJobId`; cron runtime and disable state remain canonical in
   `cronJobs` rather than being duplicated on tasks.
+- compact `database.summary`: PostgreSQL maintenance plus Dashboard SQLite
+  migration, WAL, permission, backup-freshness, maintenance, size, and
+  `attention.sources` state. SQLite review is identified as
+  `dashboard-sqlite`.
 
 Completed tasks are excluded from the heartbeat task projection. A disabled
 Dashboard or OpenClaw cron job remains quiet while an `indefinite` annotation
@@ -201,6 +195,34 @@ Long-running backup jobs can run for hours. Restarting the web service does not
 interrupt them. Do not restart the worker while a backup is active unless the
 intent is to abort it; first inspect the execution row and host logs.
 
+Dashboard's own SQLite backups are separate from those host backup surfaces.
+The `database.maintenance` job is enabled by default at `02:40`, uses the
+`host-heavy` class, and:
+
+1. creates a WAL-consistent `scheduled` snapshot;
+2. copies it into an isolated restore directory and validates `quick_check` and
+   migration history;
+3. removes expired/beyond-count history in one transaction;
+4. runs `PRAGMA optimize`;
+5. requests `PRAGMA wal_checkpoint(PASSIVE)`;
+6. prunes only recognized Dashboard backup names.
+
+History retention keeps:
+
+| Data                                        | Retention                            |
+| ------------------------------------------- | ------------------------------------ |
+| completed scheduled runs and job executions | 90 days and at most 20,000 rows each |
+| non-active deployment jobs                  | 90 days and at most 500 rows         |
+| completed agent task history                | 90 days and at most 10,000 rows      |
+| reports                                     | 365 days and at most 5,000 rows      |
+| Docker update events                        | 180 days and at most 5,000 rows      |
+| stale worker heartbeats                     | 7 days                               |
+| expired auth sessions                       | removed after expiry                 |
+
+Active, queued, and running execution/deployment rows are preserved. SQLite
+snapshot retention is 14 scheduled/14 days, 20 pre-deploy/90 days, and 20
+pre-migration/180 days. The job does not run automatic `VACUUM`.
+
 ## Operational Checks
 
 List scheduled job tables:
@@ -217,6 +239,16 @@ Inspect recent runs:
 cd /home/ubuntu/projects/mira-dashboard/backend
 sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
   "SELECT job_id, status, started_at, finished_at FROM scheduled_job_runs ORDER BY id DESC LIMIT 20;"
+```
+
+Inspect SQLite lifecycle state:
+
+```bash
+cd /home/ubuntu/projects/mira-dashboard/backend
+sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
+  "SELECT version, name, applied_at FROM schema_migrations ORDER BY version;"
+sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
+  "SELECT job_id, status, started_at, finished_at, message FROM scheduled_job_runs WHERE job_id = 'database.maintenance' ORDER BY id DESC LIMIT 5;"
 ```
 
 Inspect cache freshness:

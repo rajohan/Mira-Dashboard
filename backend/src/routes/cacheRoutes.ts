@@ -68,7 +68,39 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
             };
         }
         case "database.summary": {
+            const overview =
+                value.overview && typeof value.overview === "object"
+                    ? (value.overview as Record<string, unknown>)
+                    : {};
+            const maintenance =
+                overview.maintenance && typeof overview.maintenance === "object"
+                    ? (overview.maintenance as Record<string, unknown>)
+                    : {};
+            const sqlite =
+                value.sqlite && typeof value.sqlite === "object"
+                    ? (value.sqlite as Record<string, unknown>)
+                    : {};
+            const sqliteMigrations =
+                sqlite.migrations && typeof sqlite.migrations === "object"
+                    ? (sqlite.migrations as Record<string, unknown>)
+                    : {};
+            const sqlitePermissions =
+                sqlite.permissions && typeof sqlite.permissions === "object"
+                    ? (sqlite.permissions as Record<string, unknown>)
+                    : {};
+            const sqliteBackup =
+                sqlite.backup && typeof sqlite.backup === "object"
+                    ? (sqlite.backup as Record<string, unknown>)
+                    : {};
+            const attentionSources = [
+                ...(maintenance.status === "review" ? ["postgresql"] : []),
+                ...(sqlite.status === "review" ? ["dashboard-sqlite"] : []),
+            ];
             return {
+                attention: {
+                    needsReview: attentionSources.length > 0,
+                    sources: attentionSources,
+                },
                 checkedAt: value.checkedAt,
                 databases: Array.isArray(value.databases)
                     ? value.databases.map((database) => {
@@ -81,11 +113,34 @@ export function compactHeartbeatData(key: string, data: unknown): unknown {
                           };
                       })
                     : [],
-                maintenance:
-                    value.overview && typeof value.overview === "object"
-                        ? (value.overview as Record<string, unknown>).maintenance
-                        : undefined,
-                overview: value.overview,
+                maintenance: overview.maintenance,
+                overview,
+                sqlite: {
+                    attention: sqlite.attention,
+                    backup: {
+                        count: sqliteBackup.count,
+                        current: sqliteBackup.current,
+                        latest: sqliteBackup.latest,
+                        latestAgeHours: sqliteBackup.latestAgeHours,
+                        reviewAgeHours: sqliteBackup.reviewAgeHours,
+                    },
+                    databaseBytes: sqlite.databaseBytes,
+                    freeBytes: sqlite.freeBytes,
+                    freePercent: sqlite.freePercent,
+                    journalMode: sqlite.journalMode,
+                    lastMaintenance: sqlite.lastMaintenance,
+                    migrations: {
+                        applied: sqliteMigrations.applied,
+                        current: sqliteMigrations.current,
+                        latest: sqliteMigrations.latest,
+                    },
+                    permissions: {
+                        secure: sqlitePermissions.secure,
+                    },
+                    status: sqlite.status,
+                    storageBytes: sqlite.storageBytes,
+                    walBytes: sqlite.walBytes,
+                },
             };
         }
         case "docker.summary": {

@@ -5,6 +5,8 @@ export interface DatabaseOverviewResponse {
     checkedAt?: string;
     overview: {
         totalDatabaseSizeBytes: number;
+        managedDatabaseCount?: number;
+        totalManagedDatabaseSizeBytes?: number;
         totalBackends: number;
         averageCacheHitRatio: number;
         connections: Record<string, number>;
@@ -98,6 +100,53 @@ export interface DatabaseOverviewResponse {
         total_received: string;
         total_sent: string;
     }>;
+    sqlite?: {
+        attention: string[];
+        backup: {
+            count: number;
+            current: boolean;
+            latest?: {
+                bytes: number;
+                createdAt: string;
+                kind: "pre-deploy" | "pre-migration" | "scheduled";
+                name: string;
+            };
+            latestAgeHours?: number;
+            reviewAgeHours: number;
+        };
+        databaseBytes: number;
+        fileName: string;
+        freeBytes: number;
+        freePages: number;
+        freePercent: number;
+        foreignKeysEnabled: boolean;
+        journalMode: string;
+        lastMaintenance?: {
+            finishedAt?: string;
+            message?: string;
+            startedAt: string;
+            status: string;
+        };
+        migrations: {
+            applied: number;
+            current: boolean;
+            latest: number;
+        };
+        pageCount: number;
+        pageSize: number;
+        permissions: {
+            dataDirectory?: string;
+            database?: string;
+            secure: boolean;
+            shm?: string;
+            wal?: string;
+        };
+        shmBytes: number;
+        status: "healthy" | "review";
+        storageBytes: number;
+        walAutoCheckpointPages: number;
+        walBytes: number;
+    };
 }
 
 function isDatabaseOverviewResponse(value: unknown): value is DatabaseOverviewResponse {

@@ -23,6 +23,8 @@ This is a single-host service:
 - `mira-dashboard-worker.service` runs the persistent scheduler/executor from
   `bun dist/workerStart.js` through Doppler;
 - SQLite state lives under `backend/data/` unless `MIRA_DASHBOARD_DB_PATH` is set.
+- both units use `UMask=0077`; startup enforces `0700` on the SQLite directory
+  and `0600` on database/sidecar files.
 
 Both tracked units preserve the production environment contract by launching
 through Doppler project/config `rajohan/prd`. Auth and origin settings such as
@@ -31,24 +33,25 @@ remain owned by Doppler; do not duplicate their values in unit files.
 
 There is no container image for the Dashboard service today.
 
-## Build
+## Prepare Deployment
 
-From repo root:
+Install both dependency sets:
 
 ```bash
 cd /home/ubuntu/projects/mira-dashboard
 git pull --ff-only
 bun install --frozen-lockfile
-bun run build
-```
-
-From backend:
-
-```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
+cd backend
 bun install --frozen-lockfile
-bun run build
+cd ..
+/usr/local/bin/doppler run --config prd --project rajohan -- \
+  bun run deploy:prepare
 ```
+
+`deploy:prepare` builds the frontend and backend, then runs `db:preflight`
+before service restart. Keep ordinary `build` commands side-effect free; use
+this combined command for every supported manual or Dashboard-driven deploy so
+the database safety gate cannot be skipped accidentally.
 
 ## Install Or Refresh Units
 
@@ -148,38 +151,35 @@ entrypoint does not exist.
 Do not use `git reset --hard` casually in normal work. It is a rollback
 procedure for production incidents after an explicit decision.
 
-`backend/src/database.ts` creates missing SQLite tables and indexes on startup,
-but the schema uses `CREATE TABLE IF NOT EXISTS`. Existing tables are not
-altered automatically. Any change that adds/removes columns, changes
-constraints, or backfills data needs an explicit migration/manual rollout plan.
+## SQLite Deploy Lifecycle
 
-Before risky auth/database changes, create and verify a consistent SQLite
-backup. Use SQLite's online backup API so committed WAL contents are included:
+SQLite schema changes are numbered, immutable migrations recorded in
+`schema_migrations`. Build/deploy preflight:
 
-```bash
-set -euo pipefail
-backend_dir=/home/ubuntu/projects/mira-dashboard/backend
-configured_db_path="$(
-  cd "$backend_dir"
-  /usr/local/bin/doppler run --config prd --project rajohan -- \
-    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
-)"
-if [[ -z "$configured_db_path" ]]; then
-  db_path="$backend_dir/data/mira-dashboard.db"
-elif [[ "$configured_db_path" = /* ]]; then
-  db_path="$configured_db_path"
-else
-  db_path="$backend_dir/$configured_db_path"
-fi
-mkdir -p "$backend_dir/data/backups"
-backup_path="$backend_dir/data/backups/mira-dashboard-before-change-$(date +%Y%m%d-%H%M%S).db"
-sqlite3 -readonly -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
-chmod 0600 "$backup_path"
-test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
-```
+1. requires the live database to be in WAL mode;
+2. rejects unknown migration versions, gaps, names, or checksum drift;
+3. creates a WAL-consistent `pre-deploy` backup with `VACUUM INTO`;
+4. copies that snapshot to an isolated restore location and requires
+   `PRAGMA quick_check = ok` plus valid migration history;
+5. applies bounded backup retention.
+
+On restart, web and worker independently validate history. `BEGIN IMMEDIATE`
+serializes pending migrations and the second process revalidates after waiting
+for the first. An existing schema receives a separate restore-verified
+`pre-migration` backup before any migration SQL runs.
+
+The first deployment that introduces this lifecycle cannot make the
+already-running old worker call the new preflight command. Its new startup path
+therefore creates the verified `pre-migration` backup before adopting the
+legacy schema. Subsequent Dashboard deploys run both protections.
 
 Do not copy only the main `.db` file while Dashboard is running. WAL mode may
 hold committed writes in the `-wal` sidecar until a checkpoint.
+
+Code rollback and data rollback are separate decisions. A code rollback may use
+the migrated database only when the older code is schema-compatible. Otherwise
+stop both Dashboard units and restore the selected matching snapshot using the
+[SQLite restore runbook](../operations/runbooks.md#restore-dashboard-sqlite).
 
 ## Health Signals
 

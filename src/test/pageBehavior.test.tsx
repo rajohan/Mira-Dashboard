@@ -825,6 +825,48 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 ],
                 pgbouncerPools: [],
                 pgbouncerStats: [],
+                sqlite: {
+                    attention: [],
+                    backup: {
+                        count: 1,
+                        current: true,
+                        latest: {
+                            bytes: 512,
+                            createdAt: "2026-06-24T07:00:00.000Z",
+                            kind: "scheduled",
+                            name: "mira-dashboard-scheduled.db",
+                        },
+                        latestAgeHours: 1,
+                        reviewAgeHours: 48,
+                    },
+                    databaseBytes: 1024,
+                    fileName: "mira-dashboard.db",
+                    freeBytes: 256,
+                    freePages: 1,
+                    freePercent: 25,
+                    foreignKeysEnabled: true,
+                    journalMode: "wal",
+                    lastMaintenance: {
+                        finishedAt: "2026-06-24T07:01:00.000Z",
+                        startedAt: "2026-06-24T07:00:00.000Z",
+                        status: "success",
+                    },
+                    migrations: { applied: 3, current: true, latest: 3 },
+                    pageCount: 4,
+                    pageSize: 256,
+                    permissions: {
+                        dataDirectory: "0700",
+                        database: "0600",
+                        secure: true,
+                        shm: "0600",
+                        wal: "0600",
+                    },
+                    shmBytes: 32,
+                    status: "healthy",
+                    storageBytes: 1184,
+                    walAutoCheckpointPages: 1000,
+                    walBytes: 128,
+                },
             },
         });
     }
@@ -2096,6 +2138,29 @@ describe("Mira Dashboard pages", () => {
             )
         ).toBeInTheDocument();
         expect(screen.getAllByText("metabase").length).toBeGreaterThan(0);
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("switches database sources without mixing SQLite and PostgreSQL metrics", async () => {
+        const user = userEvent.setup();
+        const view = renderPage(createElement(Database));
+
+        const initialPostgresRows = await screen.findAllByText("metabase");
+        expect(initialPostgresRows.length).toBeGreaterThan(0);
+        expect(screen.queryByText("Reusable space")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Dashboard SQLite" }));
+
+        expect(await screen.findByText("Reusable space")).toBeInTheDocument();
+        expect(screen.getByText("SQLite runtime")).toBeInTheDocument();
+        expect(screen.queryByText("metabase")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "PostgreSQL (1)" }));
+        const restoredPostgresRows = await screen.findAllByText("metabase");
+        expect(restoredPostgresRows.length).toBeGreaterThan(0);
+        expect(screen.queryByText("SQLite runtime")).not.toBeInTheDocument();
 
         view.unmount();
         view.queryClient.clear();

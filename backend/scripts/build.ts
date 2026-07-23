@@ -11,6 +11,7 @@ const result = await Bun.build({
     entrypoints: [
         path.join(backendDirectory, "src/serverStart.ts"),
         path.join(backendDirectory, "src/workerStart.ts"),
+        path.join(backendDirectory, "src/databasePreflight.ts"),
     ],
     format: "esm",
     outdir,

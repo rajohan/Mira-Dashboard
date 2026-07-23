@@ -4868,6 +4868,30 @@ describe("shared component helpers", () => {
                         topQueries: [],
                         pgbouncerPools: [],
                         pgbouncerStats: [],
+                        sqlite: {
+                            attention: [],
+                            backup: {
+                                count: 2,
+                                current: true,
+                                reviewAgeHours: 48,
+                            },
+                            databaseBytes: 37_748_736,
+                            freeBytes: 27_238_400,
+                            freePages: 6650,
+                            freePercent: 72.2,
+                            fileName: "mira-dashboard.db",
+                            foreignKeysEnabled: true,
+                            journalMode: "wal",
+                            migrations: { applied: 3, current: true, latest: 3 },
+                            pageCount: 9215,
+                            pageSize: 4096,
+                            permissions: { secure: true },
+                            shmBytes: 32_768,
+                            status: "healthy",
+                            storageBytes: 48_238_096,
+                            walAutoCheckpointPages: 1000,
+                            walBytes: 10_456_592,
+                        },
                     },
                     key: "database.summary",
                     meta: {},
@@ -4880,7 +4904,9 @@ describe("shared component helpers", () => {
 
         const view = renderWithQueryClient(<DatabaseOverviewCard />);
 
-        expect(await screen.findByText("Review · 3 hints")).toBeInTheDocument();
+        expect(await screen.findByText("3 hints")).toBeInTheDocument();
+        expect(screen.getByText("Dashboard SQLite")).toBeInTheDocument();
+        expect(screen.getByText("3/3")).toBeInTheDocument();
         view.unmount();
         view.queryClient.clear();
     });

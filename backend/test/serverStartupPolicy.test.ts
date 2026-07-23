@@ -56,13 +56,8 @@ describe("server start scheduler policy", () => {
         );
         expect(resolveGatewayToken({}, () => "")).toBeUndefined();
 
-        expect(
-            isDirectEntrypoint("/tmp/serverStart.ts", "file:///tmp/serverStart.ts")
-        ).toBe(true);
-        expect(isDirectEntrypoint("/tmp/other.ts", "file:///tmp/serverStart.ts")).toBe(
-            false
-        );
-        expect(isDirectEntrypoint(undefined, "file:///tmp/serverStart.ts")).toBe(false);
+        expect(isDirectEntrypoint(true)).toBe(true);
+        expect(isDirectEntrypoint(false)).toBe(false);
 
         expect(shouldStartOnImport("1", false)).toBe(true);
         expect(shouldStartOnImport(undefined, true)).toBe(true);
@@ -73,12 +68,8 @@ describe("server start scheduler policy", () => {
         const { createWorkerKeepAliveHandle, isDirectWorkerEntrypoint } =
             await import("../src/workerStart.ts");
 
-        expect(
-            isDirectWorkerEntrypoint("/tmp/workerStart.ts", "file:///tmp/workerStart.ts")
-        ).toBe(true);
-        expect(
-            isDirectWorkerEntrypoint("/tmp/serverStart.ts", "file:///tmp/workerStart.ts")
-        ).toBe(false);
+        expect(isDirectWorkerEntrypoint(true)).toBe(true);
+        expect(isDirectWorkerEntrypoint(false)).toBe(false);
 
         const keepAlive = createWorkerKeepAliveHandle();
         try {

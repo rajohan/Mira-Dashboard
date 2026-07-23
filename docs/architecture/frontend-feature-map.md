@@ -24,7 +24,7 @@ cannot infer.
 | `/docker`        | `Docker.tsx`            | Docker inventory/updater APIs              |
 | `/files`         | `Files.tsx`             | workspace file APIs                        |
 | `/logs`          | `Logs.tsx`              | log file APIs                              |
-| `/database`      | `Database.tsx`          | Postgres/PgBouncer probes                  |
+| `/database`      | `Database.tsx`          | Postgres/PgBouncer + Dashboard SQLite      |
 | `/moltbook`      | `Moltbook.tsx`          | Moltbook cache/API data                    |
 | `/settings`      | `Settings.tsx`          | OpenClaw config and Dashboard settings     |
 | `/terminal`      | `Terminal.tsx`          | terminal helper APIs                       |
@@ -37,7 +37,8 @@ cannot infer.
 - Tasks also keep the last successful collection visible during transient
   refresh failures; the error is non-blocking when cached rows exist.
 - Database metrics keep the last successful cache entry visible during transient
-  refresh failures and show a non-blocking warning.
+  refresh failures and show a non-blocking warning. PostgreSQL and Dashboard
+  SQLite use a source picker so their domain-specific metrics are not mixed.
 - Jobs keep the active view's last successful list visible during transient
   refresh failures and show a non-blocking warning.
 - The Jobs overview card reports enabled and disabled totals across Dashboard
@@ -104,8 +105,10 @@ For destructive actions:
 - The Git workspace card distinguishes an explicitly missing repository
   (`exists === false`) from legacy cache rows where `exists` is absent. Missing
   repositories do not count as off-main checkouts.
-- The Database page shows Comet and Bitmagnet torrent totals plus conservative
-  Postgres maintenance/bloat assessment.
+- The Database page shows either Postgres/PgBouncer (including Comet/Bitmagnet
+  totals and conservative maintenance assessment) or Dashboard SQLite
+  lifecycle state. The Dashboard Database card shows both sources in equal
+  halves on wide layouts.
 - Docker container statistics refresh independently from cached inventory so
   live CPU and memory values do not remain frozen after the page loads.
 - Docker console commands use the shared single-line input; Enter submits and a

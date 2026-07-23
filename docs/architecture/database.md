@@ -16,14 +16,20 @@ MIRA_DASHBOARD_DB_PATH=/absolute/path/to/mira-dashboard.db
 
 ## Startup Behavior
 
-`backend/src/database.ts` opens the database and applies `CREATE TABLE IF NOT
-EXISTS` schema SQL at startup. It sets:
+`backend/src/database.ts` secures storage, opens the database, validates WAL,
+and applies numbered migrations before exposing the shared database proxy. It
+sets:
 
 ```sql
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;
+PRAGMA wal_autocheckpoint = 1000;
 ```
+
+The data directory is enforced as `0700`; the database and any present
+`-wal`/`-shm` sidecars are enforced as `0600`. Both production systemd units
+also use `UMask=0077`.
 
 Tests must use temp databases. When `NODE_ENV=test`, the database guard refuses
 non-temporary paths and symlinked temp paths.
@@ -32,12 +38,32 @@ WAL mode creates `-wal` and `-shm` sidecars while the database is in use. They
 are runtime files managed by SQLite and must not be removed while Dashboard is
 running.
 
+## Migrations
+
+Migrations live in `backend/src/databaseMigrations/` and are immutable after
+release. `schema_migrations` records the contiguous version, name, SHA-256
+checksum, and application timestamp.
+
+Startup behavior is fail-closed:
+
+1. validate every recorded version/name/checksum against the registry;
+2. create and restore-verify a `pre-migration` backup when adopting or changing
+   an existing application schema;
+3. acquire `BEGIN IMMEDIATE`, then revalidate after the write lock;
+4. apply all pending migrations in one transaction;
+5. stop startup on unknown versions, gaps, checksum drift, or SQL failure.
+
+The second validation makes simultaneous web/worker startup safe: one process
+applies migrations while the other waits and then observes the completed
+history. Never edit a released migration. Add the next numbered file instead.
+
 ## Tables
 
 | Table                              | Purpose                                                               |
 | ---------------------------------- | --------------------------------------------------------------------- |
+| `schema_migrations`                | Applied migration versions and immutable checksums.                   |
 | `users`                            | Dashboard auth users.                                                 |
-| `auth_sessions`                    | Cookie-backed Dashboard sessions.                                     |
+| `auth_sessions`                    | Selector plus hashed-validator Dashboard sessions.                    |
 | `app_config`                       | Small persistent config, currently including `gateway_token`.         |
 | `tasks`                            | Local task records.                                                   |
 | `task_events`                      | Audit/event records for task changes.                                 |
@@ -56,36 +82,45 @@ running.
 | `openclaw_cron_job_metadata`       | Disable intent and Dashboard metadata for OpenClaw cron jobs.         |
 | `job_executions`                   | Persistent execution queue with leases, heartbeats, and cancellation. |
 | `job_workers`                      | Worker capacity and liveness heartbeats.                              |
+| `chat_runtime_snapshots`           | Durable OpenClaw chat replay/session snapshots.                       |
+| `chat_runtime_snapshot_events`     | Ordered durable replay events for those snapshots.                    |
 | `docker_managed_services`          | Docker updater managed service inventory.                             |
 | `docker_update_events`             | Docker updater event history.                                         |
 
-## Backup Before Manual DB Work
+## Automated Backup And Restore Verification
+
+The deploy flow uses one combined build/preflight command before restart:
 
 ```bash
-set -euo pipefail
-backend_dir=/home/ubuntu/projects/mira-dashboard/backend
-configured_db_path="$(
-  cd "$backend_dir"
-  /usr/local/bin/doppler run --config prd --project rajohan -- \
-    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
-)"
-if [[ -z "$configured_db_path" ]]; then
-  db_path="$backend_dir/data/mira-dashboard.db"
-elif [[ "$configured_db_path" = /* ]]; then
-  db_path="$configured_db_path"
-else
-  db_path="$backend_dir/$configured_db_path"
-fi
-mkdir -p "$backend_dir/data/backups"
-backup_path="$backend_dir/data/backups/mira-dashboard-before-manual-change-$(date +%Y%m%d-%H%M%S).db"
-sqlite3 -readonly -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
-chmod 0600 "$backup_path"
-test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
+cd /home/ubuntu/projects/mira-dashboard
+/usr/local/bin/doppler run --config prd --project rajohan -- \
+  bun run deploy:prepare
 ```
 
-SQLite's online backup API creates a consistent single-file snapshot that
-includes committed WAL contents. Do not copy only the main `.db` file while
-Dashboard is running.
+This builds the frontend and backend before invoking the backend
+`db:preflight`. Preflight requires the live database to be in WAL mode,
+validates its recorded migration prefix, creates a `pre-deploy` snapshot with
+`VACUUM INTO`, copies the snapshot to an isolated temporary restore directory,
+opens that copy read-only, and requires `PRAGMA quick_check = ok` plus valid
+migration history. Ordinary builds remain side-effect free.
+
+The enabled `database.maintenance` worker job runs daily at `02:40`. It creates
+and restore-verifies a `scheduled` backup before pruning bounded history, runs
+`PRAGMA optimize`, and requests a passive WAL checkpoint. It deliberately does
+not run automatic `VACUUM`; freelist pages are reusable by SQLite and are not a
+hard size limit.
+
+Snapshots live beside the database under `data/backups/` by default:
+
+| Kind            | Maximum age | Maximum count |
+| --------------- | ----------- | ------------- |
+| `scheduled`     | 14 days     | 14            |
+| `pre-deploy`    | 90 days     | 20            |
+| `pre-migration` | 180 days    | 20            |
+
+Only recognized Dashboard snapshot names are pruned. Unrelated files are never
+removed. Do not copy only the main `.db` file while Dashboard is running;
+committed data may still be in `-wal`.
 
 ## Useful Inspection Commands
 
@@ -93,6 +128,8 @@ Dashboard is running.
 cd /home/ubuntu/projects/mira-dashboard/backend
 sqlite3 data/mira-dashboard.db ".tables"
 sqlite3 data/mira-dashboard.db "PRAGMA integrity_check;"
+sqlite3 data/mira-dashboard.db \
+  "SELECT version, name, applied_at FROM schema_migrations ORDER BY version;"
 sqlite3 data/mira-dashboard.db "SELECT COUNT(*) FROM users;"
 sqlite3 data/mira-dashboard.db "SELECT COUNT(*) FROM auth_sessions;"
 sqlite3 data/mira-dashboard.db "SELECT key, length(value), updated_at FROM app_config;"
@@ -100,6 +137,12 @@ sqlite3 data/mira-dashboard.db "SELECT key, length(value), updated_at FROM app_c
 
 If SQLite reports `database is locked`, wait for background jobs to settle and
 retry. The application already uses a 5 second busy timeout.
+
+The Database page has separate **PostgreSQL** and **Dashboard SQLite** sources.
+The SQLite source reports migration state, WAL/SHM size, reusable space,
+permissions, verified-backup freshness, and the latest maintenance run. Its
+compact `database.summary` heartbeat projection marks `dashboard-sqlite` for
+review when lifecycle checks need attention.
 
 ## Bootstrap Reset
 
@@ -120,11 +163,9 @@ elif [[ "$configured_db_path" = /* ]]; then
 else
   db_path="$backend_dir/$configured_db_path"
 fi
-mkdir -p "$backend_dir/data/backups"
-backup_path="$backend_dir/data/backups/mira-dashboard-before-bootstrap-reset-$(date +%Y%m%d-%H%M%S).db"
-sqlite3 -readonly -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
-chmod 0600 "$backup_path"
-test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
+cd "$backend_dir"
+/usr/local/bin/doppler run --config prd --project rajohan -- \
+  bun run db:preflight
 sqlite3 -cmd ".timeout 5000" "$db_path" "DELETE FROM auth_sessions; DELETE FROM users; DELETE FROM app_config WHERE key='gateway_token';"
 sqlite3 -cmd ".timeout 5000" "$db_path" "PRAGMA integrity_check;"
 curl http://127.0.0.1:3100/api/auth/bootstrap

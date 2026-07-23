@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+UMask=0077
 WorkingDirectory=/home/ubuntu/projects/mira-dashboard/backend
 Environment=NODE_ENV=production
 Environment=MIRA_DASHBOARD_EXECUTION_ROLE=worker

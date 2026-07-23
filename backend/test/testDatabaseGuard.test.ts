@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -78,6 +78,35 @@ async function closeAndReuseDatabaseInChild(databasePath: string): Promise<{
     return { exitCode, stderr };
 }
 
+async function runPreflightInChild(databasePath: string): Promise<{
+    exitCode: number;
+    stderr: string;
+}> {
+    const preflightModuleUrl = pathToFileURL(
+        path.resolve(import.meta.dirname, "../src/databasePreflight.ts")
+    ).href;
+    const child = Bun.spawn({
+        cmd: [
+            process.execPath,
+            "--eval",
+            `const { runDatabasePreflight } = await import(${JSON.stringify(preflightModuleUrl)}); await runDatabasePreflight();`,
+        ],
+        env: {
+            ...process.env,
+            MIRA_DASHBOARD_DB_PATH: databasePath,
+            NODE_ENV: "test",
+        },
+        stderr: "pipe",
+        stdout: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+        child.exited,
+        readText(child.stderr),
+        readText(child.stdout),
+    ]);
+    return { exitCode, stderr };
+}
+
 describe("database test safety guard", () => {
     it("allows fresh database paths inside new temporary subdirectories", async () => {
         const temporaryRoot = await mkdtemp(path.join(tmpdir(), "mira-db-guard-fresh-"));
@@ -109,6 +138,35 @@ describe("database test safety guard", () => {
                     "Refusing to open non-temporary Dashboard test database"
                 );
                 expect(existsSync(unsafeDatabasePath)).toBe(false);
+            } finally {
+                await rm(root, { force: true, recursive: true });
+            }
+        }
+    );
+
+    nonTemporaryTest(
+        "refuses preflight access to a non-temporary database while running tests",
+        async () => {
+            const root = await mkdtemp(
+                path.join(realHomeRoot, ".mira-db-preflight-guard-test-")
+            );
+            const unsafeDatabasePath = path.join(root, "mira-dashboard.db");
+
+            try {
+                await writeFile(unsafeDatabasePath, "must remain untouched");
+                await chmod(unsafeDatabasePath, 0o644);
+                const { exitCode, stderr } =
+                    await runPreflightInChild(unsafeDatabasePath);
+
+                expect(exitCode).not.toBe(0);
+                expect(stderr).toContain(
+                    "Refusing to open non-temporary Dashboard test database"
+                );
+                expect(await Bun.file(unsafeDatabasePath).text()).toBe(
+                    "must remain untouched"
+                );
+                const fileStat = await stat(unsafeDatabasePath);
+                expect(fileStat.mode & 0o777).toBe(0o644);
             } finally {
                 await rm(root, { force: true, recursive: true });
             }
