@@ -221,18 +221,22 @@ upstream download metadata.
 | `GET`  | `/api/cache/:key`                          | Reads one cache entry.                                                                           |
 | `POST` | `/api/cache/:key/refresh`                  | Queues and observes one cache refresh.                                                           |
 | `GET`  | `/api/metrics`                             | Reads host metrics.                                                                              |
-| `GET`  | `/api/database/overview`                   | Reads Postgres/PgBouncer overview.                                                               |
+| `GET`  | `/api/database/overview`                   | Reads Postgres/PgBouncer plus Dashboard SQLite lifecycle overview.                               |
 | `GET`  | `/api/ops/log-rotation/status`             | Reads log rotation status.                                                                       |
 | `POST` | `/api/ops/log-rotation/dry-run`            | Queues and observes log rotation dry-run.                                                        |
 | `POST` | `/api/ops/log-rotation/run`                | Queues and observes log rotation.                                                                |
 
-`/api/database/overview` includes Comet/Bitmagnet torrent counts and a
-conservative Postgres maintenance assessment. Bloat is marked for review at an
+`/api/database/overview` includes Comet/Bitmagnet torrent counts, a
+conservative Postgres maintenance assessment, and Dashboard SQLite migration,
+WAL, permissions, reusable-space, verified-backup, and maintenance state.
+Bloat is marked for review at an
 estimated 5 GiB reclaimable, or at 1 GiB plus 25% of assessed heap. At least
 1 GiB of heap that cannot be assessed produces `not_assessed` unless an
 actionable review signal already exists. High dead tuples contribute a review
 signal only for tables with at least 64 MiB of heap, 1,000 dead tuples, and a
 20% dead-tuple ratio. `VACUUM FULL` remains a manual, approval-only operation.
+The compact heartbeat projection identifies SQLite lifecycle attention with
+the `dashboard-sqlite` source.
 
 `/api/cache/heartbeat` and `/api/cache/status` are not interchangeable. See
 [Scheduler, cache, and backups](../operations/scheduler-cache-backups.md) for

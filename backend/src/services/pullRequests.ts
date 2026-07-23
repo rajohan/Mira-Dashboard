@@ -1516,11 +1516,6 @@ async function runDeploymentJob(
             timeoutMs: 180_000,
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
-        await runCommand("bun", ["run", "build"], {
-            signal,
-            timeoutMs: 180_000,
-        });
-        currentJob = refreshDeploymentHeartbeat(currentJob);
         await rm(path.join(dashboardRoot, "backend", "node_modules"), {
             force: true,
             recursive: true,
@@ -1531,10 +1526,9 @@ async function runDeploymentJob(
             timeoutMs: 120_000,
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
-        await runCommand("bun", ["run", "build"], {
-            cwd: path.join(dashboardRoot, "backend"),
+        await runCommand("bun", ["run", "deploy:prepare"], {
             signal,
-            timeoutMs: 120_000,
+            timeoutMs: 12 * 60 * 1000,
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
         const { stdout: commit } = await runCommand(

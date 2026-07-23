@@ -423,16 +423,53 @@ describe("backend service behavior", () => {
             });
 
             const sessionId = createSession(user.id);
+            expect(sessionId).toMatch(/^[a-f0-9]{32}\.[a-f0-9]{64}$/u);
+            const sessionSelector = sessionId.split(".", 1)[0] as string;
+            const storedSession = database
+                .prepare(
+                    `SELECT id, validator_hash
+                     FROM auth_sessions
+                     WHERE id = ?`
+                )
+                .get(sessionSelector) as {
+                id: string;
+                validator_hash: string;
+            };
+            expect(storedSession.id).toBe(sessionSelector);
+            expect(storedSession.validator_hash).toMatch(/^[a-f0-9]{64}$/u);
+            expect(storedSession.validator_hash).not.toBe(sessionId.split(".", 2)[1]);
             expect(getAuthUserFromSessionId(sessionId)).toEqual(user);
+            const wrongSessionId = `${sessionId.slice(0, -1)}${
+                sessionId.endsWith("a") ? "b" : "a"
+            }`;
+            expect(getAuthUserFromSessionId(wrongSessionId)).toBeUndefined();
             deleteSession(sessionId);
             expect(getAuthUserFromSessionId(sessionId)).toBeUndefined();
 
             const expiredSessionId = createSession(user.id);
+            const expiredSessionSelector = expiredSessionId.split(".", 1)[0] as string;
             database
                 .prepare("UPDATE auth_sessions SET expires_at = ? WHERE id = ?")
-                .run("2000-01-01T00:00:00.000Z", expiredSessionId);
+                .run("2000-01-01T00:00:00.000Z", expiredSessionSelector);
             cleanupExpiredSessions();
             expect(getAuthUserFromSessionId(expiredSessionId)).toBeUndefined();
+
+            const legacySessionId = "a".repeat(64);
+            database
+                .prepare(
+                    `INSERT INTO auth_sessions (
+                        id, user_id, created_at, expires_at, validator_hash
+                     ) VALUES (?, ?, ?, ?, NULL)`
+                )
+                .run(
+                    legacySessionId,
+                    user.id,
+                    "2026-07-23T00:00:00.000Z",
+                    "2099-01-01T00:00:00.000Z"
+                );
+            expect(getAuthUserFromSessionId(legacySessionId)).toEqual(user);
+            deleteSession(legacySessionId);
+            expect(getAuthUserFromSessionId(legacySessionId)).toBeUndefined();
 
             persistGatewayToken("token-one");
             expect(getPersistedGatewayToken()).toBe("token-one");
@@ -1474,7 +1511,7 @@ fi
             String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s|%s\n' "$PWD" "$*" >> ${JSON.stringify(bunLog)}
-if [[ "$*" == "install --frozen-lockfile" || "$*" == "run build" ]]; then
+if [[ "$*" == "install --frozen-lockfile" || "$*" == "run deploy:prepare" ]]; then
   printf 'ok\n'
 else
   echo "unexpected bun args: $*" >&2
@@ -1568,7 +1605,7 @@ printf 'scheduled\n'
                 `${fakeRoot}|install --frozen-lockfile`
             );
             await expect(Bun.file(bunLog).text()).resolves.toContain(
-                `${path.join(fakeRoot, "backend")}|run build`
+                `${fakeRoot}|run deploy:prepare`
             );
             await expect(Bun.file(systemdLog).text()).resolves.toContain(
                 `mira-dashboard-deploy-${job.id}`

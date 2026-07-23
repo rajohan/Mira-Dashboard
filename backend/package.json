@@ -7,6 +7,8 @@
     "packageManager": "bun@1.3.14",
     "scripts": {
         "build": "bun node_modules/@typescript/native/bin/tsc --noEmit && bun scripts/build.ts",
+        "db:preflight": "bun dist/databasePreflight.js",
+        "deploy:prepare": "bun run build && bun run db:preflight",
         "start": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/serverStart.js",
         "start:worker": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/workerStart.js",
         "dev": "MIRA_DASHBOARD_DISABLE_SCHEDULER=1 doppler run --config prd --project rajohan -- bun --watch src/serverStart.ts",

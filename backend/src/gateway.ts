@@ -1,4 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
@@ -197,7 +196,7 @@ const chatReplayState: {
     scope: string | undefined;
 } = {
     bridge: new OpenClawChatBridge(),
-    generation: randomUUID(),
+    generation: Bun.randomUUIDv7(),
     scope: undefined,
 };
 type GatewayClientConstructor = new (
@@ -219,8 +218,10 @@ const gatewayRuntime = {
 };
 
 function chatReplayGatewayScope(endpoint: string, token: string): string {
-    const credentialFingerprint = createHash("sha256").update(token).digest("hex");
-    return createHash("sha256")
+    const credentialFingerprint = new Bun.CryptoHasher("sha256")
+        .update(token)
+        .digest("hex");
+    return new Bun.CryptoHasher("sha256")
         .update("mira-dashboard:openclaw-chat-replay:v1\0")
         .update(endpoint.trim())
         .update("\0")
@@ -241,7 +242,7 @@ function didSelectChatReplayScope(endpoint: string, token: string): boolean {
         new SqliteOpenClawChatSnapshotStore(gatewayScope)
     );
     chatReplayState.scope = gatewayScope;
-    chatReplayState.generation = randomUUID();
+    chatReplayState.generation = Bun.randomUUIDv7();
     chatReplayState.bridge.hydratePersistedSessions();
     return true;
 }
@@ -542,10 +543,10 @@ function shouldRetrySessionIndexSubscription(attempt: number): boolean {
 }
 
 /** Performs read raw transcript image messages. */
-function readRawTranscriptImageMessages(
+async function readRawTranscriptImageMessages(
     sessionKey: string,
     sessionId?: string
-): RawTranscriptImageMessage[] {
+): Promise<RawTranscriptImageMessage[]> {
     const transcriptPath = getTranscriptPath(sessionKey, sessionId);
     if (!transcriptPath) {
         return [];
@@ -553,7 +554,7 @@ function readRawTranscriptImageMessages(
 
     let raw: string;
     try {
-        raw = fs.readFileSync(transcriptPath, "utf8");
+        raw = await Bun.file(transcriptPath).text();
     } catch {
         return [];
     }
@@ -622,10 +623,10 @@ function readRawTranscriptImageMessages(
 }
 
 /** Performs hydrate omitted chat history images. */
-function hydrateOmittedChatHistoryImages(
+async function hydrateOmittedChatHistoryImages(
     payload: unknown,
     requestedSessionKey?: string
-): unknown {
+): Promise<unknown> {
     const history = asRecord(payload) as ChatHistoryPayload | undefined;
     const sessionKey = history?.sessionKey || requestedSessionKey;
 
@@ -633,7 +634,7 @@ function hydrateOmittedChatHistoryImages(
         return payload;
     }
 
-    const rawImageMessages = readRawTranscriptImageMessages(
+    const rawImageMessages = await readRawTranscriptImageMessages(
         sessionKey,
         history.sessionId
     );
@@ -1085,7 +1086,7 @@ async function forwardRequest(
                 requestOptions
             );
             if (method === "chat.history") {
-                payload = hydrateOmittedChatHistoryImages(
+                payload = await hydrateOmittedChatHistoryImages(
                     payload,
                     typeof parameters.sessionKey === "string"
                         ? parameters.sessionKey

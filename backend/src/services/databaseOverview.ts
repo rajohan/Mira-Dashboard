@@ -2,6 +2,7 @@ import { isIP } from "node:net";
 
 import { runProcess } from "../lib/processes.ts";
 import { stringFallback } from "../lib/values.ts";
+import { getDashboardSqliteOverview } from "./sqliteOverview.ts";
 
 const DOCKER_EXEC_TIMEOUT_MS = 30_000;
 const BLOAT_REVIEW_BYTES = 5 * 1024 * 1024 * 1024;
@@ -558,10 +559,13 @@ export async function getDatabaseOverview() {
             ? sumBy(pgBouncerStats, (row) => numberFrom(row.avg_xact_time)) /
               pgBouncerStats.length
             : 0;
+    const sqlite = getDashboardSqliteOverview();
 
     return {
         overview: {
             totalDatabaseSizeBytes,
+            managedDatabaseCount: databaseRows.length + 1,
+            totalManagedDatabaseSizeBytes: totalDatabaseSizeBytes + sqlite.storageBytes,
             totalBackends,
             averageCacheHitRatio,
             connections,
@@ -615,5 +619,6 @@ export async function getDatabaseOverview() {
         topQueries,
         pgbouncerPools: pgBouncerPools,
         pgbouncerStats: pgBouncerStats,
+        sqlite,
     };
 }

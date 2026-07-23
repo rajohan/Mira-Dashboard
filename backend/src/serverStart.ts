@@ -108,11 +108,8 @@ export async function stopBackendServer(): Promise<void> {
     }
 }
 
-export function isDirectEntrypoint(
-    argvPath = process.argv[1],
-    moduleUrl = import.meta.url
-): boolean {
-    return Boolean(argvPath && moduleUrl === Bun.pathToFileURL(argvPath).href);
+export function isDirectEntrypoint(isMain = import.meta.main): boolean {
+    return isMain;
 }
 
 export function shouldStartOnImport(

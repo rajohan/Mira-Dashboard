@@ -1,6 +1,10 @@
 import { database } from "./database.ts";
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const SESSION_SELECTOR_BYTES = 16;
+const SESSION_VALIDATOR_BYTES = 32;
+const SESSION_TOKEN_PATTERN = /^([a-f0-9]{32})\.([a-f0-9]{64})$/u;
+const SESSION_HASH_PATTERN = /^[a-f0-9]{64}$/u;
 
 /** Represents one user row. */
 interface UserRow {
@@ -15,6 +19,10 @@ interface UserRow {
 export interface AuthUser {
     id: number;
     username: string;
+}
+
+interface SessionUserRow extends AuthUser {
+    validator_hash: string | null;
 }
 
 /** Performs now iso. */
@@ -37,7 +45,36 @@ export async function hashPassword(password: string): Promise<string> {
 function randomHex(byteLength: number): string {
     const bytes = new Uint8Array(byteLength);
     crypto.getRandomValues(bytes);
-    return Buffer.from(bytes).toString("hex");
+    return bytes.toHex();
+}
+
+function hashSessionValidator(validator: string): string {
+    return new Bun.CryptoHasher("sha256").update(validator).digest("hex");
+}
+
+function parseSessionToken(
+    sessionToken: string
+): { selector: string; validatorHash: string } | undefined {
+    const match = sessionToken.match(SESSION_TOKEN_PATTERN);
+    const selector = match?.[1];
+    const validator = match?.[2];
+    if (!selector || !validator) {
+        return undefined;
+    }
+    return { selector, validatorHash: hashSessionValidator(validator) };
+}
+
+function areSessionHashesEqual(storedHash: string, candidateHash: string): boolean {
+    if (
+        !SESSION_HASH_PATTERN.test(storedHash) ||
+        !SESSION_HASH_PATTERN.test(candidateHash)
+    ) {
+        return false;
+    }
+    return crypto.timingSafeEqual(
+        Uint8Array.fromHex(storedHash),
+        Uint8Array.fromHex(candidateHash)
+    );
 }
 
 /** Verifies a password with Bun's runtime password hashing API. */
@@ -169,24 +206,42 @@ export function getPersistedGatewayToken(): string | undefined {
 
 /** Creates session. */
 export function createSession(userId: number): string {
-    const sessionId = randomHex(32);
+    const selector = randomHex(SESSION_SELECTOR_BYTES);
+    const validator = randomHex(SESSION_VALIDATOR_BYTES);
+    const validatorHash = hashSessionValidator(validator);
     const expiresAtDate = new Date(Date.now() + SESSION_TTL_MS);
     const expiresAt = expiresAtDate.toISOString();
     const createdAt = nowIso();
 
     database
         .prepare(
-            `INSERT INTO auth_sessions (id, user_id, created_at, expires_at)
-         VALUES (?, ?, ?, ?)`
+            `INSERT INTO auth_sessions (
+                id, user_id, created_at, expires_at, validator_hash
+             ) VALUES (?, ?, ?, ?, ?)`
         )
-        .run(sessionId, userId, createdAt, expiresAt);
+        .run(selector, userId, createdAt, expiresAt, validatorHash);
 
-    return sessionId;
+    return `${selector}.${validator}`;
 }
 
 /** Performs delete session. */
-export function deleteSession(sessionId: string): void {
-    database.prepare("DELETE FROM auth_sessions WHERE id = ?").run(sessionId);
+export function deleteSession(sessionToken: string): void {
+    const parsedToken = parseSessionToken(sessionToken);
+    if (parsedToken) {
+        database
+            .prepare(
+                `DELETE FROM auth_sessions
+                 WHERE id = ? AND validator_hash = ?`
+            )
+            .run(parsedToken.selector, parsedToken.validatorHash);
+        return;
+    }
+    database
+        .prepare(
+            `DELETE FROM auth_sessions
+             WHERE id = ? AND validator_hash IS NULL`
+        )
+        .run(sessionToken);
 }
 
 /** Performs cleanup expired sessions. */
@@ -195,17 +250,32 @@ export function cleanupExpiredSessions(): void {
 }
 
 /** Returns auth user from session ID. */
-export function getAuthUserFromSessionId(sessionId: string): AuthUser | undefined {
+export function getAuthUserFromSessionId(sessionToken: string): AuthUser | undefined {
     cleanupExpiredSessions();
 
+    const parsedToken = parseSessionToken(sessionToken);
+    const sessionId = parsedToken?.selector ?? sessionToken;
     const row = database
         .prepare(
-            `SELECT u.id, u.username
+            `SELECT u.id, u.username, s.validator_hash
              FROM auth_sessions s
              JOIN users u ON u.id = s.user_id
              WHERE s.id = ? AND s.expires_at > ?`
         )
-        .get(sessionId, nowIso()) as AuthUser | undefined;
+        .get(sessionId, nowIso()) as SessionUserRow | undefined;
+    if (!row) {
+        return undefined;
+    }
+    if (parsedToken) {
+        if (
+            !row.validator_hash ||
+            !areSessionHashesEqual(row.validator_hash, parsedToken.validatorHash)
+        ) {
+            return undefined;
+        }
+    } else if (row.validator_hash !== null) {
+        return undefined;
+    }
 
-    return row || undefined;
+    return { id: row.id, username: row.username };
 }

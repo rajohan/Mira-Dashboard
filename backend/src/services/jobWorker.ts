@@ -13,6 +13,7 @@ import {
     stopScheduledJobExecutor,
     stopScheduledJobScheduler,
 } from "./scheduledJobs.ts";
+import { registerSqliteMaintenanceScheduledJob } from "./sqliteMaintenance.ts";
 
 const workerState: {
     isStarted: boolean;
@@ -48,6 +49,7 @@ function registerScheduledActions(): void {
     registerLogRotationScheduledJobs();
     registerOpenClawExecutionActions();
     registerPullRequestExecutionActions();
+    registerSqliteMaintenanceScheduledJob();
 }
 
 /** Starts the persistent queue scheduler and its single-concurrency executor. */

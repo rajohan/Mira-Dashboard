@@ -133,9 +133,33 @@ describe("backend service utilities", () => {
                         estimatedReclaimableBytes: 6_442_450_944,
                     },
                 },
+                sqlite: {
+                    attention: ["SQLite storage permissions are not secure"],
+                    backup: {
+                        count: 2,
+                        current: true,
+                        latest: { createdAt: "backup-time", kind: "scheduled" },
+                        latestAgeHours: 1,
+                        reviewAgeHours: 48,
+                    },
+                    databaseBytes: 200,
+                    freeBytes: 50,
+                    freePercent: 25,
+                    journalMode: "wal",
+                    lastMaintenance: { status: "failed" },
+                    migrations: { applied: 3, current: true, latest: 3 },
+                    permissions: { database: "0600", secure: false },
+                    status: "review",
+                    storageBytes: 250,
+                    walBytes: 40,
+                },
                 topQueries: ["omitted"],
             })
         ).toEqual({
+            attention: {
+                needsReview: true,
+                sources: ["postgresql", "dashboard-sqlite"],
+            },
             checkedAt: "checked",
             databases: [
                 {
@@ -155,6 +179,26 @@ describe("backend service utilities", () => {
                     status: "review",
                     estimatedReclaimableBytes: 6_442_450_944,
                 },
+            },
+            sqlite: {
+                attention: ["SQLite storage permissions are not secure"],
+                backup: {
+                    count: 2,
+                    current: true,
+                    latest: { createdAt: "backup-time", kind: "scheduled" },
+                    latestAgeHours: 1,
+                    reviewAgeHours: 48,
+                },
+                databaseBytes: 200,
+                freeBytes: 50,
+                freePercent: 25,
+                journalMode: "wal",
+                lastMaintenance: { status: "failed" },
+                migrations: { applied: 3, current: true, latest: 3 },
+                permissions: { secure: false },
+                status: "review",
+                storageBytes: 250,
+                walBytes: 40,
             },
         });
 

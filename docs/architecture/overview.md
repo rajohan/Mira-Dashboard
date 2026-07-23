@@ -51,7 +51,7 @@ Primary pages:
 | `/pull-requests` | Dashboard PR review/deploy operations.                   |
 | `/files`         | Workspace file browser/editor.                           |
 | `/docker`        | Docker state and managed updater.                        |
-| `/database`      | Postgres/PgBouncer overview.                             |
+| `/database`      | Postgres/PgBouncer and Dashboard SQLite overview.        |
 | `/moltbook`      | Moltbook dashboard.                                      |
 | `/settings`      | OpenClaw/Dashboard settings.                             |
 | `/terminal`      | Terminal helper/completion UI.                           |
@@ -63,20 +63,29 @@ The backend is native Bun:
 - `Bun.serve({ routes, fetch, websocket })`
 - `bun:sqlite`
 - `Bun.spawn` / `Bun.spawnSync`
+- `Bun.CryptoHasher`, `Bun.randomUUIDv7`, `Bun.file`, `Bun.write`, and
+  `import.meta.main` where their contracts fit
 - no Express server
+
+Bun's documented Node compatibility layer remains intentional for APIs Bun
+does not expose directly: path manipulation, host/temporary-directory
+information, directory enumeration, permission/no-follow filesystem
+operations, and synchronous Ed25519 key handling.
 
 Key files:
 
-| File                           | Responsibility                                                    |
-| ------------------------------ | ----------------------------------------------------------------- |
-| `backend/src/server.ts`        | HTTP server, static frontend serving, `/ws` upgrade.              |
-| `backend/src/routes.ts`        | Route table assembly.                                             |
-| `backend/src/requestPolicy.ts` | Auth requirement, rate limiting, error wrapper.                   |
-| `backend/src/http.ts`          | JSON helpers, cookies, origin/proxy/IP helpers.                   |
-| `backend/src/gateway.ts`       | OpenClaw Gateway client lifecycle and Dashboard WebSocket fanout. |
-| `backend/src/database.ts`      | SQLite path, schema, PRAGMAs, database proxy.                     |
-| `backend/src/serverStart.ts`   | HTTP/WebSocket production startup (or combined fallback role).    |
-| `backend/src/workerStart.ts`   | Dedicated scheduler/executor production startup.                  |
+| File                                     | Responsibility                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| `backend/src/server.ts`                  | HTTP server, static frontend serving, `/ws` upgrade.              |
+| `backend/src/routes.ts`                  | Route table assembly.                                             |
+| `backend/src/requestPolicy.ts`           | Auth requirement, rate limiting, error wrapper.                   |
+| `backend/src/http.ts`                    | JSON helpers, cookies, origin/proxy/IP helpers.                   |
+| `backend/src/gateway.ts`                 | OpenClaw Gateway client lifecycle and Dashboard WebSocket fanout. |
+| `backend/src/database.ts`                | SQLite path, PRAGMAs, migration startup, database proxy.          |
+| `backend/src/databaseMigrationRunner.ts` | Version/checksum validation and transactional migrations.         |
+| `backend/src/sqliteBackup.ts`            | WAL-safe snapshots, restore verification, and retention.          |
+| `backend/src/serverStart.ts`             | HTTP/WebSocket production startup (or combined fallback role).    |
+| `backend/src/workerStart.ts`             | Dedicated scheduler/executor production startup.                  |
 
 ## Authentication
 
@@ -129,6 +138,7 @@ Worker startup registers scheduled jobs for:
 
 - backups;
 - cache refresh;
+- Dashboard SQLite backup, retention, optimization, and passive checkpoint;
 - Docker updater;
 - log rotation;
 - quota notifications;

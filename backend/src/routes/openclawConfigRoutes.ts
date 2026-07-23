@@ -87,9 +87,9 @@ function resolveOpenClawHome(): string | undefined {
     return resolveSafeAbsolutePath(path.join(homeDirectory, ".openclaw"));
 }
 
-function readSkillDescription(skillPath: string): string | undefined {
+async function readSkillDescription(skillPath: string): Promise<string | undefined> {
     try {
-        const content = fs.readFileSync(path.join(skillPath, "SKILL.md"), "utf8");
+        const content = await Bun.file(path.join(skillPath, "SKILL.md")).text();
         const description = content.match(/^description:\s*(.+)$/m)?.[1];
         if (description) {
             return description.replaceAll(/^['"]|['"]$/g, "");
@@ -148,13 +148,15 @@ function getConfiguredSkillEntries(config?: Record<string, unknown>) {
     return entries as Record<string, unknown>;
 }
 
-function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
+async function getSkills(
+    config: Record<string, unknown> | undefined
+): Promise<SkillInfo[]> {
     const entries = getConfiguredSkillEntries(config);
     const skillsByName = new Map<string, SkillInfo>();
     const openClawHome = resolveOpenClawHome();
     const openClawPackageRoot = resolveSafeAbsolutePath(getOpenClawPackageRoot());
 
-    const addSkill = (skillPath: string, source: SkillSource) => {
+    const addSkill = async (skillPath: string, source: SkillSource) => {
         const name = path.basename(skillPath);
         const entry = objectFallback(entries[name] as object | undefined) as {
             description?: string;
@@ -164,7 +166,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
             description:
                 typeof entry.description === "string"
                     ? entry.description
-                    : readSkillDescription(skillPath),
+                    : await readSkillDescription(skillPath),
             enabled: entry.enabled !== false,
             name,
             path: `skills.entries.${name}`,
@@ -177,7 +179,7 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
             path.join(openClawHome, "workspace/skills")
         );
         for (const skillPath of workspaceSkillDirectories) {
-            addSkill(skillPath, "workspace");
+            await addSkill(skillPath, "workspace");
         }
     }
 
@@ -186,10 +188,10 @@ function getSkills(config: Record<string, unknown> | undefined): SkillInfo[] {
             path.join(openClawPackageRoot, "skills")
         );
         for (const skillPath of builtinSkillDirectories) {
-            addSkill(skillPath, "builtin");
+            await addSkill(skillPath, "builtin");
         }
         for (const skillPath of collectExtraSkillDirectories(openClawPackageRoot)) {
-            addSkill(skillPath, "extra");
+            await addSkill(skillPath, "extra");
         }
     }
 
@@ -275,7 +277,7 @@ export const openclawConfigRoutes = {
         GET: async () => {
             try {
                 const snapshot = await getConfigSnapshot();
-                return json({ skills: getSkills(snapshot.parsed) });
+                return json({ skills: await getSkills(snapshot.parsed) });
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Failed to load skills") },

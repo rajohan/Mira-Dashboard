@@ -88,11 +88,25 @@ Use the smallest meaningful gate for the change you are making. For docs-only ch
 
 Frontend and backend tests run directly with Bun. Coverage LCOV files are uploaded to Codecov from CI for PR status, diff coverage, and trend visibility.
 
+Production preparation is deliberately separate from ordinary builds:
+
+```bash
+/usr/local/bin/doppler run --config prd --project rajohan -- \
+  bun run deploy:prepare
+```
+
+This builds both applications and runs the restore-verified SQLite preflight.
+Use it before a production restart; plain `build` remains safe for CI and local
+verification.
+
 ## Runtime notes
 
 - Backend default port: `3100`.
 - Frontend dev port: `5173`.
 - Health endpoints: `/health` and `/api/health`.
+- Dashboard SQLite uses WAL, numbered checksum-validated migrations,
+  restrictive storage modes, deploy/maintenance snapshots, and automated
+  restore checks.
 - Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
 - Auth is enforced by the backend request policy for API routes except `/api/auth/*` and `/api/health`; route modules should assume authenticated access unless explicitly public.
