@@ -5,6 +5,7 @@ import {
     useCancelJobExecution,
     useJobExecutions,
 } from "../../../hooks";
+import { cn } from "../../../utils/cn";
 import { formatDate, formatDuration } from "../../../utils/format";
 import { Alert } from "../../ui/Alert";
 import { Badge } from "../../ui/Badge";
@@ -22,14 +23,25 @@ function resourceLabel(resourceClass: JobExecution["resourceClass"]): string {
     return resourceClass.replace("-", " ");
 }
 
+interface JobExecutionQueueCardProperties {
+    className?: string;
+}
+
 /** Shows global queue pressure and cancellation controls for active executions. */
-export function JobExecutionQueueCard() {
+export function JobExecutionQueueCard({
+    className,
+}: JobExecutionQueueCardProperties = {}) {
     const queue = useJobExecutions();
     const cancelExecution = useCancelJobExecution();
     const summary = queue.data?.summary;
     const activeExecutions = (queue.data?.executions ?? []).filter(
         (execution) => execution.status === "queued" || execution.status === "running"
     );
+    const recentExecutions = (queue.data?.executions ?? [])
+        .filter(
+            (execution) => execution.status !== "queued" && execution.status !== "running"
+        )
+        .slice(0, 3);
     const activeClasses = summary?.activeResourceClasses
         .map((resourceClass) => resourceLabel(resourceClass))
         .join(", ");
@@ -41,7 +53,7 @@ export function JobExecutionQueueCard() {
         : "None";
 
     return (
-        <Card variant="bordered" className="space-y-3 p-3 sm:p-4">
+        <Card variant="bordered" className={cn("space-y-3 p-3 sm:p-4", className)}>
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <CardTitle>Execution queue</CardTitle>
@@ -167,6 +179,48 @@ export function JobExecutionQueueCard() {
             ) : (
                 <p className="text-sm text-primary-400">No queued or running jobs.</p>
             )}
+
+            {recentExecutions.length > 0 ? (
+                <div className="space-y-2 border-t border-primary-700 pt-3">
+                    <p className="text-xs font-semibold tracking-wide text-primary-400 uppercase">
+                        Recent executions
+                    </p>
+                    <div className="space-y-2" aria-label="Recent job executions">
+                        {recentExecutions.map((execution) => {
+                            const completedAt =
+                                execution.finishedAt ||
+                                execution.startedAt ||
+                                execution.queuedAt;
+                            return (
+                                <div
+                                    key={execution.id}
+                                    className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-primary-700 bg-primary-900/30 px-3 py-2"
+                                >
+                                    <div className="min-w-0">
+                                        <div className="truncate text-sm font-medium text-primary-100">
+                                            {execution.displayName}
+                                        </div>
+                                        <div className="mt-0.5 text-xs text-primary-400">
+                                            Finished {formatDate(completedAt)}
+                                        </div>
+                                    </div>
+                                    <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                                        <Badge variant={statusVariant(execution)}>
+                                            {execution.status}
+                                        </Badge>
+                                        <Badge
+                                            variant="default"
+                                            className="hidden capitalize sm:inline-flex"
+                                        >
+                                            {resourceLabel(execution.resourceClass)}
+                                        </Badge>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            ) : undefined}
         </Card>
     );
 }

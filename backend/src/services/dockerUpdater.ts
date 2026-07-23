@@ -2066,7 +2066,7 @@ export async function registerDockerUpdaterServices(
     let isTxnStarted = false;
     try {
         signal?.throwIfAborted();
-        database.run("BEGIN");
+        database.run("BEGIN IMMEDIATE");
         isTxnStarted = true;
         const discoveredAppSlugs = new Set(
             successfulOrPartialDiscoveries.map((item) => item.appSlug)
@@ -2803,7 +2803,7 @@ export function registerDockerUpdaterScheduledJobs(): void {
         },
         { timeoutMs: 30 * 60 * 1000 }
     );
-    database.run("BEGIN");
+    database.run("BEGIN IMMEDIATE");
     try {
         removeScheduledJobsNotInAction("docker.updater", [job.id]);
         const existing = getScheduledJob(job.id);

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import type { Session } from "../../../types/session";
 import { cn } from "../../../utils/cn";
 import { formatDuration, formatTokens, getTokenPercent } from "../../../utils/format";
-import { formatSessionType } from "../../../utils/sessionUtilities";
 import { Badge } from "../../ui/Badge";
 import { Select } from "../../ui/Select";
 import { selectedChatSpeedLabel, selectedChatThinkingLabel } from "./chatUtilities";
@@ -51,13 +50,10 @@ function formatHeaderStatus(
             ? selectedSession.updatedAt
             : 0;
 
-    return `${formatSessionType(selectedSession)} · ${selectedSession.model || "Unknown"} · Context: ${contextText} · ${formatDuration(
-        selectedSession.updatedAt,
-        {
-            includeSeconds: true,
-            referenceTime: Math.max(referenceTime, updatedAtReference),
-        }
-    )}`;
+    return `Context: ${contextText} · ${formatDuration(selectedSession.updatedAt, {
+        includeSeconds: true,
+        referenceTime: Math.max(referenceTime, updatedAtReference),
+    })}`;
 }
 
 /** Renders the chat header UI. */
@@ -94,6 +90,9 @@ export function ChatHeader({
                         </p>
                         {selectedSession ? (
                             <>
+                                <Badge className="whitespace-nowrap">
+                                    Model: {selectedSession.model || "Unknown"}
+                                </Badge>
                                 <Badge className="whitespace-nowrap">
                                     Thinking: {selectedChatThinkingLabel(selectedSession)}
                                 </Badge>

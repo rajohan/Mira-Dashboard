@@ -28,6 +28,63 @@ function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnaps
 }
 
 describe("OpenClaw chat snapshot store", () => {
+    it("uses WAL and waits for a competing writer before updating a snapshot", async () => {
+        const databasePath = process.env.MIRA_DASHBOARD_DB_PATH;
+        if (!databasePath) throw new Error("Test database path is required");
+
+        const journalMode = database.query("PRAGMA journal_mode").get() as {
+            journal_mode: string;
+        };
+        expect(journalMode.journal_mode).toBe("wal");
+
+        const gatewayScope = `gateway-scope-${crypto.randomUUID()}`;
+        const store = new SqliteOpenClawChatSnapshotStore(gatewayScope);
+        const sessionKey = `agent:test:${crypto.randomUUID()}`;
+        store.save(sessionKey, snapshotFor(sessionKey, 1));
+
+        const competingWriter = Bun.spawn(
+            [
+                process.execPath,
+                "--eval",
+                `
+                    import { Database } from "bun:sqlite";
+                    const database = new Database(process.env.TEST_DATABASE_PATH);
+                    database.run("PRAGMA busy_timeout = 5000");
+                    database.run("BEGIN IMMEDIATE");
+                    console.log("locked");
+                    await Bun.sleep(250);
+                    database.run("COMMIT");
+                    database.close();
+                `,
+            ],
+            {
+                env: { ...process.env, TEST_DATABASE_PATH: databasePath },
+                stderr: "pipe",
+                stdout: "pipe",
+            }
+        );
+
+        try {
+            const outputReader = competingWriter.stdout.getReader();
+            const lockOutput = await outputReader.read();
+            outputReader.releaseLock();
+            expect(new TextDecoder().decode(lockOutput.value)).toContain("locked");
+
+            const updatedSnapshot = snapshotFor(sessionKey, 2);
+            store.save(sessionKey, updatedSnapshot);
+
+            const exitCode = await competingWriter.exited;
+            const stderr = await new Response(competingWriter.stderr).text();
+            expect(stderr).toBe("");
+            expect(exitCode).toBe(0);
+            expect(store.load(sessionKey)).toEqual(updatedSnapshot);
+        } finally {
+            competingWriter.kill();
+            await competingWriter.exited;
+            store.clear();
+        }
+    });
+
     it("round-trips and deletes a bounded runtime snapshot", () => {
         const store = new SqliteOpenClawChatSnapshotStore(
             `gateway-scope-${crypto.randomUUID()}`

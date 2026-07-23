@@ -451,6 +451,7 @@ function initializeDatabase(databasePath: string): DatabaseSync {
     const initializedDatabase = new Database(databasePath);
     initializedDatabase.run("PRAGMA foreign_keys = ON");
     initializedDatabase.run("PRAGMA busy_timeout = 5000");
+    initializedDatabase.run("PRAGMA journal_mode = WAL");
     runSchemaSql(initializedDatabase, SCHEMA_SQL);
 
     return initializedDatabase;

@@ -2380,7 +2380,7 @@ export function registerCacheRefreshScheduledJobs(
         return { key, ...result };
     });
     const seedJobs: Array<{ id: string; key: string }> = [];
-    database.run("BEGIN");
+    database.run("BEGIN IMMEDIATE");
     try {
         removeScheduledJobsNotInAction(
             "cache.refresh",

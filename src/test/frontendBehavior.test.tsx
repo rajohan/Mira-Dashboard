@@ -129,6 +129,7 @@ import { useDatabaseOverview } from "../hooks/useDatabase";
 import { useDockerContainers } from "../hooks/useDocker";
 import { useFileContent, useFiles, useSaveFile } from "../hooks/useFiles";
 import { useHealth } from "../hooks/useHealth";
+import { jobExecutionKeys } from "../hooks/useJobExecutions";
 import { useLogContent, useLogFiles } from "../hooks/useLogs";
 import { useMetrics } from "../hooks/useMetrics";
 import { useMoltbookData } from "../hooks/useMoltbook";
@@ -2072,9 +2073,23 @@ describe("Mira Dashboard frontend behavior", () => {
         });
 
         const runJob = renderHookWithQueryClient(() => useRunScheduledJobNow());
+        runJob.queryClient.setQueryData(jobExecutionKeys.list(), {
+            executions: [],
+            summary: {
+                activeResourceClasses: [],
+                queued: 0,
+                running: 0,
+                workerCapacity: 1,
+                workerCount: 1,
+                workerOnline: true,
+            },
+        });
         await expect(runJob.result.current.mutateAsync({ id: "job-1" })).resolves.toEqual(
             expect.objectContaining({ isOk: true })
         );
+        expect(
+            runJob.queryClient.getQueryState(jobExecutionKeys.list())?.isInvalidated
+        ).toBe(true);
 
         const kopia = renderHookWithQueryClient(() => useKopiaBackup());
         await waitFor(() => expect(kopia.result.current.data?.job?.id).toBe("kopia-1"));

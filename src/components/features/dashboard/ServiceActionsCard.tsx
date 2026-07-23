@@ -14,8 +14,12 @@ import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
 import { ConfirmModal } from "../../ui/ConfirmModal";
 
+interface ServiceActionsCardProperties {
+    className?: string;
+}
+
 /** Renders the service actions card UI. */
-export function ServiceActionsCard() {
+export function ServiceActionsCard({ className }: ServiceActionsCardProperties = {}) {
     const startAction = useStartOpsAction();
     const refreshCache = useRefreshCacheEntry();
     const { data: systemHost } = useCacheEntry<{
@@ -151,7 +155,7 @@ export function ServiceActionsCard() {
 
     return (
         <>
-            <Card>
+            <Card className={className}>
                 <div className="mb-3 flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">
                         Actions

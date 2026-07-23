@@ -1092,7 +1092,7 @@ export function registerBackupScheduledJobs(): void {
             return { backup: await clearBackupAttention(type, backupExecutionId) };
         }
     );
-    database.run("BEGIN");
+    database.run("BEGIN IMMEDIATE");
     try {
         removeScheduledJobsNotInAction(
             "backup.run",

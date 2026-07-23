@@ -3261,6 +3261,8 @@ describe("shared component helpers", () => {
             expect(
                 screen.queryByRole("button", { name: "Cancel Host backup" })
             ).not.toBeInTheDocument();
+            expect(screen.getByText("Recent executions")).toBeInTheDocument();
+            expect(screen.getByText("cancelled")).toBeInTheDocument();
         });
 
         queryClient.clear();
