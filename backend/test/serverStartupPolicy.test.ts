@@ -69,8 +69,9 @@ describe("server start scheduler policy", () => {
         expect(shouldStartOnImport("0", false)).toBe(false);
     });
 
-    it("resolves the dedicated worker entrypoint without starting it on import", async () => {
-        const { isDirectWorkerEntrypoint } = await import("../src/workerStart.ts");
+    it("resolves the dedicated worker entrypoint and keeps its event loop referenced", async () => {
+        const { createWorkerKeepAliveHandle, isDirectWorkerEntrypoint } =
+            await import("../src/workerStart.ts");
 
         expect(
             isDirectWorkerEntrypoint("/tmp/workerStart.ts", "file:///tmp/workerStart.ts")
@@ -78,6 +79,13 @@ describe("server start scheduler policy", () => {
         expect(
             isDirectWorkerEntrypoint("/tmp/serverStart.ts", "file:///tmp/workerStart.ts")
         ).toBe(false);
+
+        const keepAlive = createWorkerKeepAliveHandle();
+        try {
+            expect(keepAlive.hasRef()).toBe(true);
+        } finally {
+            clearInterval(keepAlive);
+        }
     });
 
     it("keeps worker startup blocked until failed executor cleanup is retried", async () => {

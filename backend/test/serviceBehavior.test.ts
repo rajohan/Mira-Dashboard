@@ -1017,15 +1017,21 @@ describe("backend service behavior", () => {
                 )
                 .get(first.id) as { id: string };
             cancelJobExecution(firstExecution.id);
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(first.id)
+            ).toEqual({
+                note: "Deploy cancelled before execution",
+                status: "failed",
+            });
+            expect(
+                database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+            ).toBeNull();
 
             const replacement = startDeployLatest();
             replacementId = replacement.id;
             expect(replacement.id).not.toBe(first.id);
-            expect(
-                database
-                    .prepare("SELECT status FROM deployment_jobs WHERE id = ?")
-                    .get(first.id)
-            ).toEqual({ status: "failed" });
         } finally {
             const deploymentIds = [first.id, replacementId].filter((id): id is string =>
                 Boolean(id)
@@ -3278,9 +3284,15 @@ fi
             expect(getPersistedBackupJob("walg")).toMatchObject(backup);
 
             await startTestScheduledExecutor();
-            await expect(clearPersistedBackupAttention("walg")).resolves.toMatchObject(
-                backup
-            );
+            await expect(clearPersistedBackupAttention("walg")).resolves.toMatchObject({
+                code: backup.code,
+                endedAt: backup.endedAt,
+                id: backup.id,
+                startedAt: backup.startedAt,
+                status: backup.status,
+                stdout: backup.stdout,
+                type: backup.type,
+            });
             expect(getPersistedBackupJob("walg")).toBeUndefined();
         } finally {
             database

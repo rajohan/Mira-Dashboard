@@ -1,5 +1,7 @@
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
 
+const WORKER_KEEP_ALIVE_INTERVAL_MS = 60_000;
+
 export function isDirectWorkerEntrypoint(
     argvPath = process.argv[1],
     moduleUrl = import.meta.url
@@ -7,10 +9,16 @@ export function isDirectWorkerEntrypoint(
     return Boolean(argvPath && moduleUrl === Bun.pathToFileURL(argvPath).href);
 }
 
+/** Keeps the dedicated worker process referenced while its runtime timers are idle. */
+export function createWorkerKeepAliveHandle(): NodeJS.Timeout {
+    return setInterval(() => 0, WORKER_KEEP_ALIVE_INTERVAL_MS);
+}
+
 export async function runDashboardWorker(): Promise<void> {
     startDashboardJobWorker();
     const shutdown = Promise.withResolvers<NodeJS.Signals>();
     const stop = (signal: NodeJS.Signals) => shutdown.resolve(signal);
+    const keepAlive = createWorkerKeepAliveHandle();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
@@ -18,7 +26,11 @@ export async function runDashboardWorker(): Promise<void> {
     } finally {
         process.removeListener("SIGINT", stop);
         process.removeListener("SIGTERM", stop);
-        await stopDashboardJobWorker();
+        try {
+            await stopDashboardJobWorker();
+        } finally {
+            clearInterval(keepAlive);
+        }
     }
 }
 

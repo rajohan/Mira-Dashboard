@@ -1,5 +1,6 @@
 import { errorMessage } from "../lib/errors.ts";
 import {
+    cancelJobExecution,
     enqueueJobExecution,
     type EnqueueJobExecutionInput,
     getJobExecution,
@@ -37,7 +38,7 @@ export function isTerminalJobExecution(execution: JobExecution): boolean {
     return ["success", "failed", "cancelled"].includes(execution.status);
 }
 
-/** Observes a persisted result. Aborting the observer never cancels the execution. */
+/** Observes a persisted result. Observer aborts do not cancel the execution. */
 export async function waitForJobExecution(
     id: string,
     options: WaitForJobExecutionOptions = {}
@@ -54,6 +55,17 @@ export async function waitForJobExecution(
         }
         if (isTerminalJobExecution(execution)) return execution;
         if (Date.now() - startedAt >= timeoutMs) {
+            if (execution.status === "queued" && execution.cancellable) {
+                try {
+                    cancelJobExecution(id);
+                } catch (error) {
+                    const current = getJobExecution(id);
+                    if (current && isTerminalJobExecution(current)) {
+                        return current;
+                    }
+                    throw error;
+                }
+            }
             throw Object.assign(
                 new Error("Timed out while waiting for the queued job result"),
                 { executionId: id, statusCode: 504 }

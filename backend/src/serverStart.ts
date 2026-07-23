@@ -3,6 +3,7 @@ import gateway from "./gateway.ts";
 import { createServer, resolveListenPort } from "./server.ts";
 import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
+import { registerPullRequestCancellationHandlers } from "./services/pullRequests.ts";
 
 const serverStartState: {
     activeServer: ReturnType<typeof createServer> | undefined;
@@ -43,8 +44,8 @@ export function resolveGatewayToken(
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
 export function handleServerListening(): void {
     let isGatewayStarted = false;
-    let isJobWorkerStarted = false;
     try {
+        registerPullRequestCancellationHandlers();
         const token = resolveGatewayToken();
         if (token) {
             gateway.init(token);
@@ -57,16 +58,9 @@ export function handleServerListening(): void {
 
         if (shouldStartScheduledJobs()) {
             startDashboardJobWorker();
-            isJobWorkerStarted = true;
         }
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
-        if (isJobWorkerStarted) {
-            rollbackBackgroundServiceStartup(
-                () => stopDashboardJobWorker(),
-                "[Backend] Failed to stop job worker:"
-            );
-        }
         if (isGatewayStarted) {
             rollbackBackgroundServiceStartup(
                 () => gateway.shutdown(),

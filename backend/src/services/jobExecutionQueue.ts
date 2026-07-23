@@ -81,6 +81,18 @@ export interface EnqueueJobExecutionInput {
     triggerType?: JobExecutionTriggerType;
 }
 
+type QueuedJobCancellationHandler = (execution: JobExecution, timestamp: string) => void;
+
+const queuedJobCancellationHandlers = new Map<string, QueuedJobCancellationHandler>();
+
+/** Registers domain cleanup that participates in a queued cancellation transaction. */
+export function registerQueuedJobCancellationHandler(
+    actionKey: string,
+    handler: QueuedJobCancellationHandler
+): void {
+    queuedJobCancellationHandlers.set(actionKey, handler);
+}
+
 interface JobExecutionRow {
     id: string;
     scheduled_job_id: string | null | undefined;
@@ -609,6 +621,11 @@ export function cancelJobExecution(id: string, timestamp = nowIso()): JobExecuti
                          WHERE id = ? AND status = 'queued'`
                     )
                     .run(timestamp, row.scheduled_run_id);
+            }
+            const cancellationHandler = queuedJobCancellationHandlers.get(row.action_key);
+            const execution = mapExecution(row);
+            if (cancellationHandler && execution) {
+                cancellationHandler(execution, timestamp);
             }
         } else if (row.status === "running") {
             database

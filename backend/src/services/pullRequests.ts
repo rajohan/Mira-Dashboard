@@ -10,7 +10,11 @@ import {
     spawnProcess,
 } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
-import { enqueueJobExecution, type JobExecution } from "./jobExecutionQueue.ts";
+import {
+    enqueueJobExecution,
+    type JobExecution,
+    registerQueuedJobCancellationHandler,
+} from "./jobExecutionQueue.ts";
 import {
     successfulJobExecutionOutput,
     waitForJobExecution,
@@ -349,6 +353,54 @@ function releaseDeploymentLock(jobId: string): void {
     } catch {
         // Best-effort cleanup; stale locks are validated before starting deploys.
     }
+}
+
+function cleanupQueuedDeploymentCancellation(
+    execution: JobExecution,
+    timestamp: string
+): void {
+    if (execution.actionKey === "dashboard.deploy") {
+        const deploymentId = execution.payload.deploymentId;
+        if (typeof deploymentId !== "string" || deploymentId.trim() === "") {
+            return;
+        }
+        const deployment = readDeploymentJob(deploymentId);
+        if (deployment && ACTIVE_DEPLOYMENT_STATUSES.has(deployment.status)) {
+            writeDeploymentJob({
+                ...deployment,
+                note: "Deploy cancelled before execution",
+                status: "failed",
+                updatedAt: timestamp,
+            });
+        }
+        database
+            .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
+            .run(deploymentId);
+        return;
+    }
+
+    const deploymentLockId = execution.payload.deploymentLockId;
+    if (typeof deploymentLockId === "string" && deploymentLockId.trim() !== "") {
+        database
+            .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
+            .run(deploymentLockId);
+    }
+}
+
+/** Restores action-specific cleanup for queued deployment cancellations. */
+export function registerPullRequestCancellationHandlers(): void {
+    registerQueuedJobCancellationHandler(
+        "dashboard.deploy",
+        cleanupQueuedDeploymentCancellation
+    );
+    registerQueuedJobCancellationHandler(
+        "github.merge",
+        cleanupQueuedDeploymentCancellation
+    );
+    registerQueuedJobCancellationHandler(
+        "github.merge-deploy",
+        cleanupQueuedDeploymentCancellation
+    );
 }
 
 /** Ensures no active deploy owns the production checkout. */
@@ -1494,6 +1546,7 @@ async function runDeploymentJob(
 
 /** Persists a deployment and puts its execution behind the worker lease. */
 export function startDeployLatest(lockHeldBy?: string): DeploymentJob {
+    registerPullRequestCancellationHandlers();
     const now = dateToISOString(new Date());
     const job: DeploymentJob = {
         id: Bun.randomUUIDv7(),
@@ -1633,6 +1686,7 @@ function queuedPullRequestResult<T>(execution: JobExecution): T {
 
 /** Runs PR merge/deploy through the shared persistent execution plane. */
 export async function runPullRequestApproval(number: number, willDeploy: boolean) {
+    registerPullRequestCancellationHandlers();
     const deploymentLockId = `approve-${Bun.randomUUIDv7()}`;
     acquireDeploymentLock(deploymentLockId);
     let execution: JobExecution;
@@ -1804,6 +1858,7 @@ async function executePullRequestMerge(
 
 /** Registers every mutating GitHub/deploy action exclusively in the worker. */
 export function registerPullRequestExecutionActions(): void {
+    registerPullRequestCancellationHandlers();
     registerScheduledJobAction("dashboard.deploy", async (job, signal) => {
         const deploymentId = job.actionPayload.deploymentId;
         if (typeof deploymentId !== "string" || deploymentId.trim() === "") {
