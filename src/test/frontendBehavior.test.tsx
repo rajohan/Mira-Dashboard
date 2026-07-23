@@ -129,7 +129,10 @@ import { useDatabaseOverview } from "../hooks/useDatabase";
 import { useDockerContainers } from "../hooks/useDocker";
 import { useFileContent, useFiles, useSaveFile } from "../hooks/useFiles";
 import { useHealth } from "../hooks/useHealth";
-import { jobExecutionKeys } from "../hooks/useJobExecutions";
+import {
+    jobExecutionKeys,
+    refreshJobExecutionQueueWhilePending,
+} from "../hooks/useJobExecutions";
 import { useLogContent, useLogFiles } from "../hooks/useLogs";
 import { useMetrics } from "../hooks/useMetrics";
 import { useMoltbookData } from "../hooks/useMoltbook";
@@ -2541,6 +2544,201 @@ describe("Mira Dashboard frontend behavior", () => {
                 value: originalFetch,
                 writable: true,
             });
+        }
+    });
+
+    it("refreshes the execution queue before dashboard job requests settle", async () => {
+        const originalFetch = fetch;
+        const cacheResponse = Promise.withResolvers<Response>();
+        const backupResponse = Promise.withResolvers<Response>();
+        const scheduledResponse = Promise.withResolvers<Response>();
+        const actionResponse = Promise.withResolvers<Response>();
+        const fetchMock = jest.fn(
+            (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (method !== "POST") {
+                    throw new Error(
+                        `Unexpected queue refresh API call: ${method} ${url}`
+                    );
+                }
+                if (url === "/api/cache/quotas.summary/refresh") {
+                    return cacheResponse.promise;
+                }
+                if (url === "/api/backups/kopia/run") {
+                    return backupResponse.promise;
+                }
+                if (url === "/api/jobs/ops.log-rotation/run") {
+                    return scheduledResponse.promise;
+                }
+                if (url === "/api/exec/start") {
+                    return actionResponse.promise;
+                }
+                throw new Error(`Unexpected queue refresh API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        try {
+            const cache = renderHookWithQueryClient(() => useRefreshCacheEntry());
+            const cacheInvalidations = jest.spyOn(cache.queryClient, "invalidateQueries");
+            let cacheRequest!: Promise<unknown>;
+            act(() => {
+                cacheRequest = cache.result.current.mutateAsync("quotas.summary");
+            });
+            await waitFor(() =>
+                expect(fetchMock).toHaveBeenCalledWith(
+                    "/api/cache/quotas.summary/refresh",
+                    expect.objectContaining({ method: "POST" })
+                )
+            );
+            expect(cacheInvalidations).toHaveBeenCalledWith({
+                queryKey: jobExecutionKeys.all,
+            });
+            cacheResponse.resolve(
+                Response.json({
+                    entry: { key: "quotas.summary", status: "fresh" },
+                    isOk: true,
+                })
+            );
+            await act(async () => {
+                await cacheRequest;
+            });
+            cache.unmount();
+            cache.queryClient.clear();
+
+            const backup = renderHookWithQueryClient(() => useRunKopiaBackup());
+            const backupInvalidations = jest.spyOn(
+                backup.queryClient,
+                "invalidateQueries"
+            );
+            let backupRequest!: Promise<unknown>;
+            act(() => {
+                backupRequest = backup.result.current.mutateAsync();
+            });
+            await waitFor(() =>
+                expect(fetchMock).toHaveBeenCalledWith(
+                    "/api/backups/kopia/run",
+                    expect.objectContaining({ method: "POST" })
+                )
+            );
+            expect(backupInvalidations).toHaveBeenCalledWith({
+                queryKey: jobExecutionKeys.all,
+            });
+            backupResponse.resolve(
+                Response.json({
+                    isOk: true,
+                    job: {
+                        id: "backup-1",
+                        startedAt: 1,
+                        status: "running",
+                        stderr: "",
+                        stdout: "",
+                        type: "kopia",
+                    },
+                })
+            );
+            await act(async () => {
+                await backupRequest;
+            });
+            backup.unmount();
+            backup.queryClient.clear();
+
+            const scheduled = renderHookWithQueryClient(() => useRunScheduledJobNow());
+            const scheduledInvalidations = jest.spyOn(
+                scheduled.queryClient,
+                "invalidateQueries"
+            );
+            let scheduledRequest!: Promise<unknown>;
+            act(() => {
+                scheduledRequest = scheduled.result.current.mutateAsync({
+                    id: "ops.log-rotation",
+                });
+            });
+            await waitFor(() =>
+                expect(fetchMock).toHaveBeenCalledWith(
+                    "/api/jobs/ops.log-rotation/run",
+                    expect.objectContaining({ method: "POST" })
+                )
+            );
+            expect(scheduledInvalidations).toHaveBeenCalledWith({
+                queryKey: jobExecutionKeys.all,
+            });
+            scheduledResponse.resolve(
+                Response.json({
+                    isOk: true,
+                    run: {
+                        id: 1,
+                        jobId: "ops.log-rotation",
+                        status: "queued",
+                        triggerType: "manual",
+                    },
+                })
+            );
+            await act(async () => {
+                await scheduledRequest;
+            });
+            scheduled.unmount();
+            scheduled.queryClient.clear();
+
+            const action = renderHookWithQueryClient(() => useStartOpsAction());
+            const actionInvalidations = jest.spyOn(
+                action.queryClient,
+                "invalidateQueries"
+            );
+            let actionRequest!: Promise<unknown>;
+            act(() => {
+                actionRequest = action.result.current.mutateAsync(OPS_ACTIONS[0]!);
+            });
+            await waitFor(() =>
+                expect(fetchMock).toHaveBeenCalledWith(
+                    "/api/exec/start",
+                    expect.objectContaining({ method: "POST" })
+                )
+            );
+            expect(actionInvalidations).toHaveBeenCalledWith({
+                queryKey: jobExecutionKeys.all,
+            });
+            actionResponse.resolve(Response.json({ jobId: "action-1" }));
+            await act(async () => {
+                await actionRequest;
+            });
+            action.unmount();
+            action.queryClient.clear();
+        } finally {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
+    });
+
+    it("refreshes the execution queue again while a job request remains pending", async () => {
+        jest.useFakeTimers();
+        const queryClient = new QueryClient();
+        const invalidations = jest.spyOn(queryClient, "invalidateQueries");
+        const request = Promise.withResolvers<void>();
+
+        try {
+            const trackedRequest = refreshJobExecutionQueueWhilePending(
+                queryClient,
+                request.promise
+            );
+            expect(invalidations).toHaveBeenCalledTimes(1);
+
+            jest.advanceTimersByTime(500);
+            expect(invalidations).toHaveBeenCalledTimes(2);
+
+            request.resolve();
+            await trackedRequest;
+        } finally {
+            jest.useRealTimers();
+            queryClient.clear();
         }
     });
 

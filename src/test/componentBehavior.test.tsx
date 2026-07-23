@@ -3253,6 +3253,7 @@ describe("shared component helpers", () => {
         expect(await screen.findByText("Host backup")).toBeInTheDocument();
         expect(screen.getByText("host heavy")).toBeInTheDocument();
         expect(screen.getByText("Worker idle")).toBeInTheDocument();
+        expect(screen.getByText("Active class").querySelector("svg")).not.toBeNull();
 
         await userEvent.click(screen.getByRole("button", { name: "Cancel Host backup" }));
 
@@ -3263,6 +3264,9 @@ describe("shared component helpers", () => {
             ).not.toBeInTheDocument();
             expect(screen.getByText("Recent executions")).toBeInTheDocument();
             expect(screen.getByText("cancelled")).toBeInTheDocument();
+            expect(
+                screen.getByText("No queued or running jobs.").parentElement
+            ).toHaveClass("text-center");
         });
 
         queryClient.clear();

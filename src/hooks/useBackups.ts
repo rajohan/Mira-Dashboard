@@ -2,7 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetchRequired, apiPostRequired } from "./useApi";
 import { cacheKeys } from "./useCache";
-import { jobExecutionKeys } from "./useJobExecutions";
+import {
+    jobExecutionKeys,
+    refreshJobExecutionQueueWhilePending,
+} from "./useJobExecutions";
 import { scheduledJobKeys } from "./useScheduledJobs";
 
 /** Represents backup job. */
@@ -61,7 +64,10 @@ export function useRunKopiaBackup() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ isOk: boolean; job: BackupJob }>("/backups/kopia/run"),
+            refreshJobExecutionQueueWhilePending(
+                queryClient,
+                apiPostRequired<{ isOk: boolean; job: BackupJob }>("/backups/kopia/run")
+            ),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: backupKeys.kopia() }),
@@ -85,8 +91,11 @@ export function useClearKopiaBackupAttention() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ isOk: boolean; cleared: BackupJob }>(
-                "/backups/kopia/clear-needs-attention"
+            refreshJobExecutionQueueWhilePending(
+                queryClient,
+                apiPostRequired<{ isOk: boolean; cleared: BackupJob }>(
+                    "/backups/kopia/clear-needs-attention"
+                )
             ),
         onSuccess: async () => {
             await Promise.all([
@@ -106,7 +115,10 @@ export function useRunWalgBackup() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ isOk: boolean; job: BackupJob }>("/backups/walg/run"),
+            refreshJobExecutionQueueWhilePending(
+                queryClient,
+                apiPostRequired<{ isOk: boolean; job: BackupJob }>("/backups/walg/run")
+            ),
         onSuccess: async () => {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: backupKeys.walg() }),
@@ -130,8 +142,11 @@ export function useClearWalgBackupAttention() {
 
     return useMutation({
         mutationFn: () =>
-            apiPostRequired<{ isOk: boolean; cleared: BackupJob }>(
-                "/backups/walg/clear-needs-attention"
+            refreshJobExecutionQueueWhilePending(
+                queryClient,
+                apiPostRequired<{ isOk: boolean; cleared: BackupJob }>(
+                    "/backups/walg/clear-needs-attention"
+                )
             ),
         onSuccess: async () => {
             await Promise.all([

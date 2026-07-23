@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+    type QueryClient,
+    useMutation,
+    useQuery,
+    useQueryClient,
+} from "@tanstack/react-query";
 
 import { apiFetchRequired, apiPostRequired } from "./useApi";
 
@@ -50,6 +55,27 @@ export const jobExecutionKeys = {
 };
 
 const JOB_EXECUTION_REFRESH_MS = 5000;
+const JOB_EXECUTION_ENQUEUE_REFRESH_DELAY_MS = 250;
+
+/**
+ * Refreshes the active queue immediately after a request is dispatched and once
+ * more if the request is still waiting for the queued execution to finish.
+ */
+export async function refreshJobExecutionQueueWhilePending<T>(
+    queryClient: QueryClient,
+    request: Promise<T>
+): Promise<T> {
+    void queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all });
+    const delayedRefresh = setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all });
+    }, JOB_EXECUTION_ENQUEUE_REFRESH_DELAY_MS);
+
+    try {
+        return await request;
+    } finally {
+        clearTimeout(delayedRefresh);
+    }
+}
 
 export function useJobExecutions() {
     return useQuery({

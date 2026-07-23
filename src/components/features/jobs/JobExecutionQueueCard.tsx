@@ -1,4 +1,4 @@
-import { Activity, Clock3, Layers3, XCircle } from "lucide-react";
+import { Activity, Clock3, Cpu, Layers3, XCircle } from "lucide-react";
 
 import {
     type JobExecution,
@@ -11,6 +11,7 @@ import { Alert } from "../../ui/Alert";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Card, CardTitle } from "../../ui/Card";
+import { EmptyState } from "../../ui/EmptyState";
 
 function statusVariant(execution: JobExecution) {
     if (execution.status === "failed") return "error" as const;
@@ -117,7 +118,9 @@ export function JobExecutionQueueCard({
                     </div>
                 </div>
                 <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
-                    <div className="text-xs text-primary-400">Active class</div>
+                    <div className="flex items-center gap-2 text-xs text-primary-400">
+                        <Cpu className="size-4" /> Active class
+                    </div>
                     <div className="mt-1 text-sm font-semibold text-primary-100 capitalize">
                         {activeClasses || "None"}
                     </div>
@@ -177,7 +180,7 @@ export function JobExecutionQueueCard({
                     })}
                 </div>
             ) : (
-                <p className="text-sm text-primary-400">No queued or running jobs.</p>
+                <EmptyState message="No queued or running jobs." />
             )}
 
             {recentExecutions.length > 0 ? (

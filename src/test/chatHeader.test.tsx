@@ -59,7 +59,7 @@ describe("ChatHeader", () => {
         expect(screen.getByText(/less than 5 seconds ago/u)).toBeInTheDocument();
         expect(screen.getByText("Model: gpt-5.6-sol")).toBeInTheDocument();
         expect(screen.getByText("Thinking: medium")).toBeInTheDocument();
-        expect(screen.getByText("Speed: Default (Auto)")).toBeInTheDocument();
+        expect(screen.getByText("Speed: Auto")).toBeInTheDocument();
         expect(screen.queryByText(/MAIN/u)).not.toBeInTheDocument();
         expect(screen.queryByText(/gpt-5\.6-sol · Context:/u)).not.toBeInTheDocument();
 
@@ -68,6 +68,23 @@ describe("ChatHeader", () => {
         });
 
         expect(screen.getByText(/less than 20 seconds ago/u)).toBeInTheDocument();
+    });
+
+    it("shows the effective standard speed without the default wrapper", () => {
+        render(
+            <ChatHeader
+                selectedSession={{ ...session(Date.now()), effectiveFastMode: false }}
+                selectedAgentId="main"
+                selectedSessionKey="agent:main:main"
+                agentOptions={[]}
+                sessionOptions={[{ label: "Main session", value: "agent:main:main" }]}
+                onSelectAgent={jest.fn()}
+                onSelectSession={jest.fn()}
+            />
+        );
+
+        expect(screen.getByText("Speed: Standard")).toBeInTheDocument();
+        expect(screen.queryByText("Speed: Default (Standard)")).not.toBeInTheDocument();
     });
 
     it("preserves ISO session timestamps while refreshing their relative age", () => {
