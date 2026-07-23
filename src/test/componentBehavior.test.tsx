@@ -4882,7 +4882,7 @@ describe("shared component helpers", () => {
                             fileName: "mira-dashboard.db",
                             foreignKeysEnabled: true,
                             journalMode: "wal",
-                            migrations: { applied: 3, current: true, latest: 3 },
+                            migrations: { applied: 4, current: true, latest: 4 },
                             pageCount: 9215,
                             pageSize: 4096,
                             permissions: { secure: true },
@@ -4906,7 +4906,23 @@ describe("shared component helpers", () => {
 
         expect(await screen.findByText("3 hints")).toBeInTheDocument();
         expect(screen.getByText("Dashboard SQLite")).toBeInTheDocument();
-        expect(screen.getByText("3/3")).toBeInTheDocument();
+        expect(screen.getByText("4/4")).toBeInTheDocument();
+        const postgresqlSection = screen
+            .getByRole("heading", { name: "PostgreSQL" })
+            .closest("section");
+        const sqliteSection = screen
+            .getByRole("heading", { name: "Dashboard SQLite" })
+            .closest("section");
+        expect(postgresqlSection).not.toBeNull();
+        expect(sqliteSection).not.toBeNull();
+        expect(postgresqlSection?.nextElementSibling).toBe(sqliteSection);
+        expect(sqliteSection).toHaveClass("border-t");
+        const postgresqlText = postgresqlSection?.textContent ?? "";
+        const sqliteText = sqliteSection?.textContent ?? "";
+        expect(postgresqlText.indexOf("Size")).toBeLessThan(
+            postgresqlText.indexOf("Databases")
+        );
+        expect(sqliteText.indexOf("Size")).toBeLessThan(sqliteText.indexOf("WAL"));
         view.unmount();
         view.queryClient.clear();
     });

@@ -45,8 +45,8 @@ export function DatabaseOverviewCard() {
             ) : !database || !overview ? (
                 <div className="text-sm text-rose-300">Database cache unavailable.</div>
             ) : (
-                <div className="grid gap-4 text-sm text-primary-200 xl:grid-cols-2 xl:divide-x xl:divide-primary-700">
-                    <section className="space-y-2 xl:pr-4">
+                <div className="space-y-4 text-sm text-primary-200">
+                    <section className="space-y-2 pb-4">
                         <div className="mb-3 flex items-center justify-between gap-2">
                             <h4 className="font-medium text-primary-100">PostgreSQL</h4>
                             <span
@@ -66,15 +66,15 @@ export function DatabaseOverviewCard() {
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
-                            <span>Databases</span>
-                            <span className="font-semibold text-primary-50">
-                                {database.databases.length}
-                            </span>
-                        </div>
-                        <div className="flex items-center justify-between">
                             <span>Size</span>
                             <span className="text-primary-100">
                                 {formatBytes(overview.totalDatabaseSizeBytes)}
+                            </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span>Databases</span>
+                            <span className="font-semibold text-primary-50">
+                                {database.databases.length}
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
@@ -109,7 +109,7 @@ export function DatabaseOverviewCard() {
                         ) : undefined}
                     </section>
 
-                    <section className="space-y-2 border-t border-primary-700 pt-4 xl:border-t-0 xl:pt-0 xl:pl-4">
+                    <section className="space-y-2 border-t border-primary-700 pt-4">
                         <div className="mb-3 flex items-center justify-between gap-2">
                             <h4 className="font-medium text-primary-100">
                                 Dashboard SQLite
@@ -131,7 +131,7 @@ export function DatabaseOverviewCard() {
                         {sqlite ? (
                             <>
                                 <div className="flex items-center justify-between">
-                                    <span>Database</span>
+                                    <span>Size</span>
                                     <span className="text-primary-100">
                                         {formatBytes(sqlite.databaseBytes)}
                                     </span>

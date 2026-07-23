@@ -274,7 +274,13 @@ Replay limits are:
 - four runs per session;
 - 100 pending outgoing request boundaries per session;
 - 50 persisted sessions per Gateway scope;
+- 200 persisted sessions across all historical Gateway scopes, with snapshots
+  older than 30 days removed by daily SQLite maintenance;
 - 256,000,000 serialized bytes across in-process replay state.
+
+Daily maintenance removes matching event rows before expired/beyond-cap
+snapshots and also deletes orphan event rows. This global safety net covers old
+credential scopes that the active per-scope cache no longer visits.
 
 When the process-wide memory budget is exceeded, completed sessions are evicted
 before active sessions, oldest first. The current session is preferred while

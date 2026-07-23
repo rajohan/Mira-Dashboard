@@ -197,6 +197,10 @@ describe("database overview service", () => {
             process.env.FAKE_DOCKER_INVOCATION_LOG = invocationLog;
             process.env.PGBOUNCER_HOST = "pgbouncer";
             process.env.PGBOUNCER_PORT = "6432";
+            const { database } = await import("../src/database.ts");
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'database.maintenance'")
+                .run();
             const overview = await getDatabaseOverview();
             const { databaseRoutes } = await import("../src/routes/databaseRoutes.ts");
             const routeResponse = await databaseRoutes["/api/database/overview"].GET();
@@ -220,11 +224,14 @@ describe("database overview service", () => {
                 },
             });
             expect(overview.sqlite).toMatchObject({
-                attention: ["No verified SQLite backup exists"],
+                attention: [
+                    "No verified SQLite backup exists",
+                    "SQLite maintenance job is not registered",
+                ],
                 backup: { count: 0, current: false, reviewAgeHours: 48 },
                 foreignKeysEnabled: true,
                 journalMode: "wal",
-                migrations: { applied: 3, current: true, latest: 3 },
+                migrations: { applied: 4, current: true, latest: 4 },
                 permissions: { secure: true },
                 status: "review",
                 walAutoCheckpointPages: 1000,
@@ -308,6 +315,93 @@ describe("database overview service", () => {
                 }
             }
             rmSync(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
+    it("requests review for missing, disabled, stale, failed, and compaction states", async () => {
+        const { database } = await import("../src/database.ts");
+        const { getDashboardSqliteOverview } =
+            await import("../src/services/sqliteOverview.ts");
+        const now = new Date("2026-07-23T12:00:00.000Z");
+        try {
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'database.maintenance'")
+                .run();
+            expect(getDashboardSqliteOverview(now).attention).toContain(
+                "SQLite maintenance job is not registered"
+            );
+
+            database
+                .prepare(
+                    `INSERT INTO scheduled_jobs (
+                         id, name, enabled, schedule_type, interval_seconds,
+                         action_key, action_payload_json, created_at, updated_at
+                     ) VALUES (
+                         'database.maintenance', 'SQLite maintenance', 0, 'daily',
+                         86400, 'database.maintenance', '{}', ?, ?
+                     )`
+                )
+                .run(now.toISOString(), now.toISOString());
+            const disabled = getDashboardSqliteOverview(now);
+            expect(disabled.attention).toContain("SQLite maintenance job is disabled");
+            expect(disabled.attention).toContain(
+                "SQLite maintenance has never completed successfully"
+            );
+
+            database
+                .prepare(
+                    "UPDATE scheduled_jobs SET enabled = 1 WHERE id = 'database.maintenance'"
+                )
+                .run();
+            database
+                .prepare(
+                    `INSERT INTO scheduled_job_runs (
+                         job_id, status, trigger_type, started_at, finished_at
+                     ) VALUES ('database.maintenance', 'success', 'schedule', ?, ?)`
+                )
+                .run("2026-07-20T11:00:00.000Z", "2026-07-20T11:01:00.000Z");
+            expect(getDashboardSqliteOverview(now).attention).toContain(
+                "Latest successful SQLite maintenance is older than 48 hours"
+            );
+
+            database
+                .prepare(
+                    `INSERT INTO scheduled_job_runs (
+                         job_id, status, trigger_type, started_at, finished_at
+                     ) VALUES
+                       ('database.maintenance', 'success', 'schedule', ?, ?),
+                       ('database.maintenance', 'failed', 'schedule', ?, ?)`
+                )
+                .run(
+                    "2026-07-23T11:00:00.000Z",
+                    "2026-07-23T11:01:00.000Z",
+                    "2026-07-23T11:30:00.000Z",
+                    "2026-07-23T11:31:00.000Z"
+                );
+            const failed = getDashboardSqliteOverview(now);
+            expect(failed.attention).not.toContain(
+                "Latest successful SQLite maintenance is older than 48 hours"
+            );
+            expect(failed.attention).toContain("Latest SQLite maintenance failed");
+
+            database.run(
+                "CREATE TABLE overview_reclaimable_fixture (payload BLOB NOT NULL)"
+            );
+            database.run(
+                "INSERT INTO overview_reclaimable_fixture VALUES (zeroblob(20971520))"
+            );
+            database.run("DROP TABLE overview_reclaimable_fixture");
+            expect(
+                getDashboardSqliteOverview(now).attention.some((reason) =>
+                    reason.startsWith("SQLite can reclaim ")
+                )
+            ).toBe(true);
+        } finally {
+            database.run("DROP TABLE IF EXISTS overview_reclaimable_fixture");
+            database
+                .prepare("DELETE FROM scheduled_jobs WHERE id = 'database.maintenance'")
+                .run();
+            database.run("VACUUM");
         }
     });
 

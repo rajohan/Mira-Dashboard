@@ -851,7 +851,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                         startedAt: "2026-06-24T07:00:00.000Z",
                         status: "success",
                     },
-                    migrations: { applied: 3, current: true, latest: 3 },
+                    migrations: { applied: 4, current: true, latest: 4 },
                     pageCount: 4,
                     pageSize: 256,
                     permissions: {

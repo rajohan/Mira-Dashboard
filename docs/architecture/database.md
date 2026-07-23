@@ -62,33 +62,33 @@ edit a released migration. Add the next numbered file instead.
 
 ## Tables
 
-| Table                              | Purpose                                                               |
-| ---------------------------------- | --------------------------------------------------------------------- |
-| `schema_migrations`                | Applied migration versions and immutable checksums.                   |
-| `users`                            | Dashboard auth users.                                                 |
-| `auth_sessions`                    | Selector plus hashed-validator Dashboard sessions.                    |
-| `app_config`                       | Small persistent config, currently including `gateway_token`.         |
-| `tasks`                            | Local task records.                                                   |
-| `task_events`                      | Audit/event records for task changes.                                 |
-| `task_updates`                     | Markdown progress updates on tasks.                                   |
-| `notifications`                    | Notification bell items, including report links and ops alerts.       |
-| `reports`                          | Daily briefs, daily summaries, heartbeats, and custom reports.        |
-| `cache_entries`                    | Cache refresh state and cached provider data.                         |
-| `quota_alert_state`                | Notification arming state for quota thresholds.                       |
-| `openclaw_alert_state`             | Notification arming state for OpenClaw update alerts.                 |
-| `agent_task_history`               | Agent current/completed task history.                                 |
-| `deployment_jobs`                  | Dashboard deploy job state/output.                                    |
-| `deployment_lock`                  | Single active deployment lock.                                        |
-| `scheduled_jobs`                   | Dashboard-local scheduled job definitions.                            |
-| `scheduled_job_runs`               | Scheduled job run history.                                            |
-| `scheduled_job_execution_policies` | Resource class and timeout for each Dashboard job.                    |
-| `openclaw_cron_job_metadata`       | Disable intent and Dashboard metadata for OpenClaw cron jobs.         |
-| `job_executions`                   | Persistent execution queue with leases, heartbeats, and cancellation. |
-| `job_workers`                      | Worker capacity and liveness heartbeats.                              |
-| `chat_runtime_snapshots`           | Durable OpenClaw chat replay/session snapshots.                       |
-| `chat_runtime_snapshot_events`     | Ordered durable replay events for those snapshots.                    |
-| `docker_managed_services`          | Docker updater managed service inventory.                             |
-| `docker_update_events`             | Docker updater event history.                                         |
+| Table                              | Purpose                                                               | Lifecycle                                                                |
+| ---------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `schema_migrations`                | Applied migration versions and immutable checksums.                   | Immutable audit history; never age-pruned.                               |
+| `users`                            | Dashboard auth users.                                                 | Authoritative records; removed only by explicit auth flows.              |
+| `auth_sessions`                    | Selector plus hashed-validator Dashboard sessions.                    | Removed after `expires_at`.                                              |
+| `app_config`                       | Small persistent config, currently including `gateway_token`.         | Keyed upsert or explicit removal; naturally bounded.                     |
+| `tasks`                            | Local task records.                                                   | Done tasks are removed after 365 idle days.                              |
+| `task_events`                      | Audit/event records for task changes.                                 | Follows old done tasks; otherwise at most 5,000 rows per task.           |
+| `task_updates`                     | Markdown progress updates on tasks.                                   | Follows old done tasks; otherwise at most 5,000 rows per task.           |
+| `notifications`                    | Notification bell items, including report links and ops alerts.       | Read: 14 days/300 rows; unread retained; report links follow reports.    |
+| `reports`                          | Daily briefs, daily summaries, heartbeats, and custom reports.        | 365 days and at most 5,000 rows.                                         |
+| `cache_entries`                    | Cache refresh state and cached provider data.                         | Fixed producer keys updated in place.                                    |
+| `quota_alert_state`                | Notification arming state for quota thresholds.                       | Finite provider/bucket keys updated in place.                            |
+| `openclaw_alert_state`             | Notification arming state for OpenClaw update alerts.                 | Singleton row.                                                           |
+| `agent_task_history`               | Agent current/completed task history.                                 | Completed: 90 days/10,000 rows; active rows retained.                    |
+| `deployment_jobs`                  | Dashboard deploy job state/output.                                    | Non-active: 90 days/500 rows; active rows retained.                      |
+| `deployment_lock`                  | Single active deployment lock.                                        | Singleton removed when the owning deploy releases it.                    |
+| `scheduled_jobs`                   | Dashboard-local scheduled job definitions.                            | Reconciled against registered actions; explicit operator state retained. |
+| `scheduled_job_runs`               | Scheduled job run history.                                            | Completed: 90 days/20,000 rows; active rows retained.                    |
+| `scheduled_job_execution_policies` | Resource class and timeout for each Dashboard job.                    | One row per job; cascades when the job is removed.                       |
+| `openclaw_cron_job_metadata`       | Disable intent and Dashboard metadata for OpenClaw cron jobs.         | Keyed operator intent; removed explicitly when intent is cleared.        |
+| `job_executions`                   | Persistent execution queue with leases, heartbeats, and cancellation. | Terminal: 90 days/20,000 rows; queued/running rows retained.             |
+| `job_workers`                      | Worker capacity and liveness heartbeats.                              | Stale heartbeats removed after 24 hours.                                 |
+| `chat_runtime_snapshots`           | Durable OpenClaw chat replay/session snapshots.                       | Per-scope live cap plus global 30-day/200-row maintenance safety net.    |
+| `chat_runtime_snapshot_events`     | Ordered durable replay events for those snapshots.                    | Follows retained snapshots; orphan rows are removed.                     |
+| `docker_managed_services`          | Docker updater managed service inventory.                             | Reconciled with current Compose inventory.                               |
+| `docker_update_events`             | Docker updater event history.                                         | 180 days and at most 5,000 rows.                                         |
 
 ## Automated Backup And Restore Verification
 
@@ -110,10 +110,12 @@ retained `pre-deploy` snapshot and live database remain unchanged. Ordinary
 builds remain side-effect free.
 
 The enabled `database.maintenance` worker job runs daily at `02:40`. It creates
-and restore-verifies a `scheduled` backup before pruning bounded history, runs
+and restore-verifies a `scheduled` backup before pruning bounded history,
+including global chat replay and read-notification safety nets, runs
 `PRAGMA optimize`, and requests a passive WAL checkpoint. It deliberately does
 not run automatic `VACUUM`; freelist pages are reusable by SQLite and are not a
-hard size limit.
+hard size limit. Lifecycle status recommends a planned compaction only when at
+least 16 MiB and 25% of the database are simultaneously reusable.
 
 Snapshots live beside the database under `data/backups/` by default:
 
@@ -154,9 +156,9 @@ retry. The application already uses a 5 second busy timeout.
 
 The Database page has separate **PostgreSQL** and **Dashboard SQLite** sources.
 The SQLite source reports migration state, WAL/SHM size, reusable space,
-permissions, verified-backup freshness, and the latest maintenance run. Its
-compact `database.summary` heartbeat projection marks `dashboard-sqlite` for
-review when lifecycle checks need attention.
+permissions, verified-backup freshness, and maintenance registration, outcome,
+and freshness. Its compact `database.summary` heartbeat projection marks
+`dashboard-sqlite` for review when lifecycle checks need attention.
 
 ## Bootstrap Reset
 
