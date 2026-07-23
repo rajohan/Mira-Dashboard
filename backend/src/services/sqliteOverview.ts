@@ -8,6 +8,10 @@ import { getSqliteBackupInventory } from "../sqliteBackup.ts";
 import { SQLITE_MAINTENANCE_JOB_ID } from "./sqliteMaintenance.ts";
 
 const SQLITE_BACKUP_REVIEW_AGE_HOURS = 48;
+const SQLITE_MAINTENANCE_REVIEW_AGE_HOURS = 48;
+const SQLITE_REUSABLE_SPACE_REVIEW_BYTES = 16 * 1024 * 1024;
+const SQLITE_REUSABLE_SPACE_REVIEW_PERCENT = 25;
+const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
 
 function fileBytes(filePath: string): number {
     try {
@@ -36,7 +40,7 @@ function pragmaNumber(name: "freelist_count" | "page_count" | "page_size"): numb
     return Number(row[name] ?? 0);
 }
 
-export function getDashboardSqliteOverview() {
+export function getDashboardSqliteOverview(now = new Date()) {
     const databasePath = getMiraDatabasePath();
     database.query("SELECT 1").get();
     const databaseBytes = fileBytes(databasePath);
@@ -57,6 +61,9 @@ export function getDashboardSqliteOverview() {
     const appliedMigrations = validateDatabaseMigrationHistory(database);
     const latestMigration = databaseMigrations.length;
     const backup = getSqliteBackupInventory(databasePath);
+    const maintenanceJob = database
+        .prepare("SELECT enabled FROM scheduled_jobs WHERE id = ?")
+        .get(SQLITE_MAINTENANCE_JOB_ID) as { enabled: number } | undefined;
     const lastMaintenance = database
         .prepare(
             `SELECT status, started_at, finished_at, message
@@ -73,6 +80,21 @@ export function getDashboardSqliteOverview() {
               status: string;
           }
         | undefined;
+    const lastSuccessfulMaintenance = database
+        .prepare(
+            `SELECT finished_at
+             FROM scheduled_job_runs
+             WHERE job_id = ?
+               AND status = 'success'
+               AND finished_at IS NOT NULL
+             ORDER BY finished_at DESC, id DESC
+             LIMIT 1`
+        )
+        .get(SQLITE_MAINTENANCE_JOB_ID) as
+        | {
+              finished_at: string;
+          }
+        | undefined;
     const permissions = {
         dataDirectory: fileMode(path.dirname(databasePath)),
         database: fileMode(databasePath),
@@ -85,16 +107,26 @@ export function getDashboardSqliteOverview() {
         (permissions.shm === undefined || permissions.shm === "0600") &&
         (permissions.wal === undefined || permissions.wal === "0600");
     const areMigrationsCurrent = appliedMigrations === latestMigration;
+    const freeBytes = freePages * pageSize;
+    const freePercent = pageCount > 0 ? (freePages / pageCount) * 100 : 0;
     const latestBackupAgeHours = backup.latest
         ? Math.max(
               0,
-              (Date.now() - new Date(backup.latest.createdAt).getTime()) /
-                  (60 * 60 * 1000)
+              (now.getTime() - new Date(backup.latest.createdAt).getTime()) /
+                  MILLISECONDS_PER_HOUR
           )
         : undefined;
     const isBackupCurrent =
         latestBackupAgeHours !== undefined &&
         latestBackupAgeHours <= SQLITE_BACKUP_REVIEW_AGE_HOURS;
+    const latestSuccessfulMaintenanceAgeHours = lastSuccessfulMaintenance
+        ? Math.max(
+              0,
+              (now.getTime() -
+                  new Date(lastSuccessfulMaintenance.finished_at).getTime()) /
+                  MILLISECONDS_PER_HOUR
+          )
+        : undefined;
     const attention: string[] = [];
     if (journalMode.journal_mode.toLowerCase() !== "wal") {
         attention.push("Journal mode is not WAL");
@@ -115,6 +147,22 @@ export function getDashboardSqliteOverview() {
             `Latest verified SQLite backup is older than ${SQLITE_BACKUP_REVIEW_AGE_HOURS} hours`
         );
     }
+    if (maintenanceJob) {
+        if (maintenanceJob.enabled !== 1) {
+            attention.push("SQLite maintenance job is disabled");
+        }
+        if (latestSuccessfulMaintenanceAgeHours === undefined) {
+            attention.push("SQLite maintenance has never completed successfully");
+        } else if (
+            latestSuccessfulMaintenanceAgeHours > SQLITE_MAINTENANCE_REVIEW_AGE_HOURS
+        ) {
+            attention.push(
+                `Latest successful SQLite maintenance is older than ${SQLITE_MAINTENANCE_REVIEW_AGE_HOURS} hours`
+            );
+        }
+    } else {
+        attention.push("SQLite maintenance job is not registered");
+    }
     if (
         lastMaintenance &&
         lastMaintenance.status !== "queued" &&
@@ -122,6 +170,14 @@ export function getDashboardSqliteOverview() {
         lastMaintenance.status !== "success"
     ) {
         attention.push(`Latest SQLite maintenance ${lastMaintenance.status}`);
+    }
+    if (
+        freeBytes >= SQLITE_REUSABLE_SPACE_REVIEW_BYTES &&
+        freePercent >= SQLITE_REUSABLE_SPACE_REVIEW_PERCENT
+    ) {
+        attention.push(
+            `SQLite can reclaim ${(freeBytes / (1024 * 1024)).toFixed(1)} MiB (${freePercent.toFixed(1)}%); consider a planned VACUUM`
+        );
     }
 
     return {
@@ -134,9 +190,9 @@ export function getDashboardSqliteOverview() {
         },
         databaseBytes,
         fileName: path.basename(databasePath),
-        freeBytes: freePages * pageSize,
+        freeBytes,
         freePages,
-        freePercent: pageCount > 0 ? (freePages / pageCount) * 100 : 0,
+        freePercent,
         foreignKeysEnabled: foreignKeys.foreign_keys === 1,
         journalMode: journalMode.journal_mode,
         lastMaintenance: lastMaintenance

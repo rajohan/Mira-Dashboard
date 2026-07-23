@@ -184,6 +184,40 @@ the migrated database only when the older code is schema-compatible. Otherwise
 stop both Dashboard units and restore the selected matching snapshot using the
 [SQLite restore runbook](../operations/runbooks.md#restore-dashboard-sqlite).
 
+### Schema Compatibility And Release Rollback Contract
+
+Classify every future migration before release:
+
+- **expand/backward-compatible:** the previous retained release can safely read
+  and write the migrated schema. An immutable release manager may switch code
+  back without restoring data;
+- **contract/incompatible:** older code cannot safely use the resulting schema
+  or data semantics. Automatic code-only rollback must be blocked.
+
+Prefer expand/migrate/contract across separate releases. Add new structures
+first, deploy code that tolerates both representations, backfill with a bounded
+and resumable job, then remove the old representation only after the previous
+release has left the rollback window. The contract migration gets a new
+forward-only version; released migration files are never edited.
+
+If an incompatible change cannot be phased, treat activation as a coordinated
+code-and-data cutover:
+
+1. record the release SHA, supported schema range, and selected verified
+   pre-deploy/pre-migration snapshot in the release manifest;
+2. stop both Dashboard units for the cutover and verify the execution queue is
+   idle;
+3. activate the immutable release and migrate forward;
+4. run readiness against the new release and schema;
+5. on failure, stop both units, restore the matching snapshot, switch the
+   `current` release link back, and only then restart.
+
+The migration runner intentionally has no destructive down-migration path.
+Unknown newer migration versions make older code fail closed. A future release
+manager must therefore read the release/schema compatibility declaration before
+offering or automatically performing rollback; it must never start an
+incompatible older release against a newer live database.
+
 ## Health Signals
 
 Healthy `/api/health`:

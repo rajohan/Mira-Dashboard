@@ -3,6 +3,7 @@ import { type Database } from "bun:sqlite";
 import { database, getMiraDatabasePath } from "../database.ts";
 import { validateDatabaseMigrationHistory } from "../databaseMigrationRunner.ts";
 import { createVerifiedSqliteBackup, pruneSqliteBackups } from "../sqliteBackup.ts";
+import { pruneReadNotifications } from "./notificationMaintenance.ts";
 import {
     getScheduledJob,
     registerScheduledJobAction,
@@ -14,6 +15,8 @@ export const SQLITE_MAINTENANCE_JOB_ID = "database.maintenance";
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const SQLITE_MAINTENANCE_TIMEOUT_MS = 15 * 60 * 1000;
+const CHAT_RUNTIME_SNAPSHOT_RETENTION_DAYS = 30;
+const MAX_CHAT_RUNTIME_SNAPSHOTS = 200;
 
 function retentionCutoff(now: Date, days: number): string {
     return new Date(now.getTime() - days * MILLISECONDS_PER_DAY).toISOString();
@@ -23,6 +26,8 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
     const changes = {
         agentTaskHistory: 0,
         authSessions: 0,
+        chatRuntimeSnapshotEvents: 0,
+        chatRuntimeSnapshots: 0,
         deploymentJobs: 0,
         dockerUpdateEvents: 0,
         jobExecutions: 0,
@@ -163,7 +168,7 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
                    )`
             )
             .run(retentionCutoff(now, 90)).changes;
-        changes.notifications = databaseConnection
+        changes.notifications += databaseConnection
             .prepare(
                 `DELETE FROM notifications
                  WHERE json_extract(metadata_json, '$.reportId') IN (
@@ -179,6 +184,7 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
                  )`
             )
             .run(retentionCutoff(now, 365)).changes;
+        changes.notifications += pruneReadNotifications(databaseConnection, now);
         changes.reports = databaseConnection
             .prepare(
                 `DELETE FROM reports
@@ -206,6 +212,75 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
         changes.jobWorkers = databaseConnection
             .prepare("DELETE FROM job_workers WHERE heartbeat_at < ?")
             .run(retentionCutoff(now, 1)).changes;
+        changes.chatRuntimeSnapshotEvents += databaseConnection
+            .prepare(
+                `DELETE FROM chat_runtime_snapshot_events AS events
+                 WHERE NOT EXISTS (
+                     SELECT 1
+                     FROM chat_runtime_snapshots AS snapshots
+                     WHERE snapshots.gateway_scope = events.gateway_scope
+                       AND snapshots.session_key = events.session_key
+                 )`
+            )
+            .run().changes;
+        const snapshotRetentionCutoff = retentionCutoff(
+            now,
+            CHAT_RUNTIME_SNAPSHOT_RETENTION_DAYS
+        );
+        changes.chatRuntimeSnapshotEvents += databaseConnection
+            .prepare(
+                `WITH ranked AS (
+                     SELECT gateway_scope,
+                            session_key,
+                            updated_at,
+                            ROW_NUMBER() OVER (
+                                ORDER BY updated_at DESC,
+                                         gateway_scope DESC,
+                                         session_key DESC
+                            ) AS retention_rank
+                     FROM chat_runtime_snapshots
+                 ),
+                 doomed AS (
+                     SELECT gateway_scope, session_key
+                     FROM ranked
+                     WHERE updated_at < ? OR retention_rank > ?
+                 )
+                 DELETE FROM chat_runtime_snapshot_events AS events
+                 WHERE EXISTS (
+                     SELECT 1
+                     FROM doomed
+                     WHERE doomed.gateway_scope = events.gateway_scope
+                       AND doomed.session_key = events.session_key
+                 )`
+            )
+            .run(snapshotRetentionCutoff, MAX_CHAT_RUNTIME_SNAPSHOTS).changes;
+        changes.chatRuntimeSnapshots = databaseConnection
+            .prepare(
+                `WITH ranked AS (
+                     SELECT gateway_scope,
+                            session_key,
+                            updated_at,
+                            ROW_NUMBER() OVER (
+                                ORDER BY updated_at DESC,
+                                         gateway_scope DESC,
+                                         session_key DESC
+                            ) AS retention_rank
+                     FROM chat_runtime_snapshots
+                 ),
+                 doomed AS (
+                     SELECT gateway_scope, session_key
+                     FROM ranked
+                     WHERE updated_at < ? OR retention_rank > ?
+                 )
+                 DELETE FROM chat_runtime_snapshots AS snapshots
+                 WHERE EXISTS (
+                     SELECT 1
+                     FROM doomed
+                     WHERE doomed.gateway_scope = snapshots.gateway_scope
+                       AND doomed.session_key = snapshots.session_key
+                 )`
+            )
+            .run(snapshotRetentionCutoff, MAX_CHAT_RUNTIME_SNAPSHOTS).changes;
         databaseConnection.run("COMMIT");
     } catch (error) {
         try {

@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 
 import {
     applyDatabaseMigrations,
+    migrateDisposableDatabaseCopy,
     validateDatabaseMigrationHistory,
 } from "../src/databaseMigrationRunner.ts";
 import { initialSchemaMigration } from "../src/databaseMigrations/0001InitialSchema.ts";
@@ -83,10 +84,10 @@ describe("Dashboard SQLite lifecycle", () => {
             const first = applyDatabaseMigrations(database, databasePath);
             const second = applyDatabaseMigrations(database, databasePath);
 
-            expect(first.applied).toEqual([1, 2, 3]);
+            expect(first.applied).toEqual([1, 2, 3, 4]);
             expect(first.backup).toBeUndefined();
             expect(second).toEqual({ applied: [] });
-            expect(validateDatabaseMigrationHistory(database)).toBe(3);
+            expect(validateDatabaseMigrationHistory(database)).toBe(4);
             expect(
                 database
                     .query("SELECT name FROM pragma_table_info('auth_sessions')")
@@ -102,6 +103,8 @@ describe("Dashboard SQLite lifecycle", () => {
                                'idx_agent_task_history_retention',
                                'idx_deployment_jobs_retention',
                                'idx_docker_update_events_retention',
+                               'idx_chat_runtime_snapshots_retention',
+                               'idx_notifications_read_retention',
                                'idx_notifications_report_id',
                                'idx_reports_retention',
                                'idx_task_updates_task_created'
@@ -111,8 +114,10 @@ describe("Dashboard SQLite lifecycle", () => {
                     .all()
             ).toEqual([
                 { name: "idx_agent_task_history_retention" },
+                { name: "idx_chat_runtime_snapshots_retention" },
                 { name: "idx_deployment_jobs_retention" },
                 { name: "idx_docker_update_events_retention" },
+                { name: "idx_notifications_read_retention" },
                 { name: "idx_notifications_report_id" },
                 { name: "idx_reports_retention" },
                 { name: "idx_task_updates_task_created" },
@@ -149,6 +154,23 @@ describe("Dashboard SQLite lifecycle", () => {
                           ORDER BY created_at DESC, id DESC
                           LIMIT -1 OFFSET 5000`,
                 },
+                {
+                    index: "idx_chat_runtime_snapshots_retention",
+                    sql: `SELECT gateway_scope, session_key
+                          FROM chat_runtime_snapshots
+                          ORDER BY updated_at DESC,
+                                   gateway_scope DESC,
+                                   session_key DESC
+                          LIMIT -1 OFFSET 200`,
+                },
+                {
+                    index: "idx_notifications_read_retention",
+                    sql: `SELECT id
+                          FROM notifications
+                          WHERE is_read = 1
+                          ORDER BY occurred_at DESC, id DESC
+                          LIMIT -1 OFFSET 300`,
+                },
             ];
             for (const { index, sql } of retentionQueryPlans) {
                 const plan = database.query(`EXPLAIN QUERY PLAN ${sql}`).all() as Array<{
@@ -170,6 +192,41 @@ describe("Dashboard SQLite lifecycle", () => {
                 "USING COVERING INDEX idx_notifications_report_id"
             );
             expect(existsSync(sqliteBackupDirectory(databasePath))).toBe(false);
+        } finally {
+            database.close();
+        }
+    });
+
+    it("upgrades an existing version 3 database with only migration 4", () => {
+        const root = temporaryRoot("mira-db-migrations-v3-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        try {
+            applyDatabaseMigrations(database, databasePath);
+            database.run("DROP INDEX idx_notifications_read_retention");
+            database.run("DROP INDEX idx_chat_runtime_snapshots_retention");
+            database.prepare("DELETE FROM schema_migrations WHERE version = 4").run();
+
+            expect(validateDatabaseMigrationHistory(database)).toBe(3);
+            expect(migrateDisposableDatabaseCopy(database)).toEqual({ applied: [4] });
+            expect(validateDatabaseMigrationHistory(database)).toBe(4);
+            expect(
+                database
+                    .query(
+                        `SELECT name
+                         FROM sqlite_schema
+                         WHERE type = 'index'
+                           AND name IN (
+                               'idx_chat_runtime_snapshots_retention',
+                               'idx_notifications_read_retention'
+                           )
+                         ORDER BY name`
+                    )
+                    .all()
+            ).toEqual([
+                { name: "idx_chat_runtime_snapshots_retention" },
+                { name: "idx_notifications_read_retention" },
+            ]);
         } finally {
             database.close();
         }
@@ -217,7 +274,7 @@ describe("Dashboard SQLite lifecycle", () => {
         try {
             expect(
                 database.query("SELECT COUNT(*) AS count FROM schema_migrations").get()
-            ).toEqual({ count: 3 });
+            ).toEqual({ count: 4 });
         } finally {
             database.close();
         }
@@ -243,7 +300,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 );
 
             const result = applyDatabaseMigrations(database, databasePath);
-            expect(result.applied).toEqual([1, 2, 3]);
+            expect(result.applied).toEqual([1, 2, 3, 4]);
             expect(result.backup).toMatchObject({
                 kind: "pre-migration",
                 restoreVerified: true,
@@ -297,14 +354,14 @@ describe("Dashboard SQLite lifecycle", () => {
                 .prepare(
                     `INSERT INTO schema_migrations (
                         version, name, checksum, applied_at
-                     ) VALUES (4, 'unknown', 'unknown', ?)`
+                     ) VALUES (5, 'unknown', 'unknown', ?)`
                 )
                 .run("2026-07-23T00:00:00.000Z");
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
-                "unknown SQLite migration version 4"
+                "unknown SQLite migration version 5"
             );
 
-            database.prepare("DELETE FROM schema_migrations WHERE version = 4").run();
+            database.prepare("DELETE FROM schema_migrations WHERE version = 5").run();
             database.prepare("DELETE FROM schema_migrations WHERE version = 2").run();
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
                 "not contiguous"
@@ -386,7 +443,7 @@ describe("Dashboard SQLite lifecycle", () => {
         };
         expect(preflightResult).toMatchObject({
             backup: { kind: "pre-deploy", restoreVerified: true },
-            migrationTest: { applied: [1, 2, 3], currentVersion: 3 },
+            migrationTest: { applied: [1, 2, 3, 4], currentVersion: 4 },
         });
         expect(getSqliteBackupInventory(databasePath).count).toBe(1);
         const unchangedBackup = new Database(preflightResult.backup.path, {
@@ -781,6 +838,160 @@ describe("Dashboard SQLite lifecycle", () => {
                     )
                     .get(cappedTaskId, cappedTaskId)
             ).toEqual({ events: 5000, updates: 5000 });
+        } finally {
+            database.close();
+        }
+    });
+
+    it("bounds read notifications while preserving every unread notification", () => {
+        const root = temporaryRoot("mira-db-notification-retention-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        const oldTimestamp = "2026-06-01T00:00:00.000Z";
+        const currentTimestamp = "2026-07-23T00:00:00.000Z";
+        const now = new Date("2026-07-23T12:00:00.000Z");
+        try {
+            applyDatabaseMigrations(database, databasePath);
+            database
+                .prepare(
+                    `INSERT INTO notifications (
+                         title, description, type, source, dedupe_key,
+                         metadata_json, is_read, created_at, updated_at, occurred_at
+                     ) VALUES
+                       ('Expired read', '', 'info', 'retention',
+                        'expired-read', '{}', 1, ?, ?, ?),
+                       ('Expired unread', '', 'info', 'retention',
+                        'expired-unread', '{}', 0, ?, ?, ?)`
+                )
+                .run(
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp
+                );
+            database
+                .prepare(
+                    `WITH RECURSIVE sequence(value) AS (
+                         SELECT 1
+                         UNION ALL
+                         SELECT value + 1 FROM sequence WHERE value < 302
+                     )
+                     INSERT INTO notifications (
+                         title, description, type, source, dedupe_key,
+                         metadata_json, is_read, created_at, updated_at, occurred_at
+                     )
+                     SELECT 'Current read ' || value,
+                            '',
+                            'info',
+                            'retention',
+                            'current-read-' || value,
+                            '{}',
+                            1,
+                            ?,
+                            ?,
+                            ?
+                     FROM sequence`
+                )
+                .run(currentTimestamp, currentTimestamp, currentTimestamp);
+
+            const changes = pruneDatabaseHistory(database, now);
+
+            expect(changes.notifications).toBe(3);
+            expect(
+                database
+                    .query(
+                        `SELECT is_read, COUNT(*) AS count
+                         FROM notifications
+                         GROUP BY is_read
+                         ORDER BY is_read`
+                    )
+                    .all()
+            ).toEqual([
+                { count: 1, is_read: 0 },
+                { count: 300, is_read: 1 },
+            ]);
+            expect(
+                database
+                    .query(
+                        "SELECT title FROM notifications WHERE dedupe_key = 'expired-unread'"
+                    )
+                    .get()
+            ).toEqual({ title: "Expired unread" });
+        } finally {
+            database.close();
+        }
+    });
+
+    it("removes orphaned, expired, and beyond-cap chat runtime snapshots", () => {
+        const root = temporaryRoot("mira-db-chat-snapshot-retention-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        const now = new Date("2026-07-23T12:00:00.000Z");
+        try {
+            applyDatabaseMigrations(database, databasePath);
+            database
+                .prepare(
+                    `INSERT INTO chat_runtime_snapshots (
+                         gateway_scope, session_key, snapshot_json, updated_at
+                     ) VALUES ('scope', 'expired', '{}', ?)`
+                )
+                .run("2026-05-01T00:00:00.000Z");
+            database
+                .prepare(
+                    `INSERT INTO chat_runtime_snapshot_events (
+                         gateway_scope, session_key, runtime_sequence, envelope_json
+                     ) VALUES
+                       ('scope', 'expired', 1, '{}'),
+                       ('scope', 'orphan', 1, '{}')`
+                )
+                .run();
+            const insertSnapshot = database.prepare(
+                `INSERT INTO chat_runtime_snapshots (
+                     gateway_scope, session_key, snapshot_json, updated_at
+                 ) VALUES (?, ?, '{}', ?)`
+            );
+            const insertEvent = database.prepare(
+                `INSERT INTO chat_runtime_snapshot_events (
+                     gateway_scope, session_key, runtime_sequence, envelope_json
+                 ) VALUES (?, ?, 1, '{}')`
+            );
+            const baseTimestamp = Date.parse("2026-07-01T00:00:00.000Z");
+            for (let index = 0; index < 201; index += 1) {
+                const sessionKey = `session-${String(index).padStart(3, "0")}`;
+                insertSnapshot.run(
+                    "scope",
+                    sessionKey,
+                    new Date(baseTimestamp + index * 1000).toISOString()
+                );
+                insertEvent.run("scope", sessionKey);
+            }
+
+            const changes = pruneDatabaseHistory(database, now);
+
+            expect(changes.chatRuntimeSnapshotEvents).toBe(3);
+            expect(changes.chatRuntimeSnapshots).toBe(2);
+            expect(
+                database
+                    .query("SELECT COUNT(*) AS count FROM chat_runtime_snapshots")
+                    .get()
+            ).toEqual({ count: 200 });
+            expect(
+                database
+                    .query("SELECT COUNT(*) AS count FROM chat_runtime_snapshot_events")
+                    .get()
+            ).toEqual({ count: 200 });
+            expect(
+                database
+                    .query(
+                        `SELECT session_key
+                         FROM chat_runtime_snapshots
+                         WHERE session_key IN ('expired', 'session-000', 'session-200')
+                         ORDER BY session_key`
+                    )
+                    .all()
+            ).toEqual([{ session_key: "session-200" }]);
         } finally {
             database.close();
         }
