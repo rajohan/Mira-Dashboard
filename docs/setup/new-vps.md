@@ -163,5 +163,7 @@ Healthy response shape:
 ```
 
 If `gatewayConnected` is false, check the Gateway token, OpenClaw Gateway
-service, and `/api/auth/bootstrap` state before debugging the frontend. If
-`workerOnline` is false, inspect `mira-dashboard-worker.service`.
+service, and `/api/auth/bootstrap` state before debugging the frontend.
+If `workerOnline` is false, inspect both Dashboard and
+`mira-dashboard-worker.service`; the worker heartbeat may be stale or queue
+telemetry may be unavailable.

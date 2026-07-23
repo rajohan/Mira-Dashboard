@@ -51,13 +51,22 @@ function backendCommit(): string {
     return BACKEND_COMMIT;
 }
 
+function workerOnline(): boolean {
+    try {
+        return getJobExecutionSummary().workerOnline;
+    } catch (error) {
+        console.warn("[Health] Failed to read job worker telemetry:", error);
+        return false;
+    }
+}
+
 function health() {
     return json({
         status: "isOk",
         gatewayConnected: gateway.isConnected(),
         sessionCount: gateway.getSessions().length,
         backendCommit: backendCommit() || "unknown",
-        workerOnline: getJobExecutionSummary().workerOnline,
+        workerOnline: workerOnline(),
     });
 }
 

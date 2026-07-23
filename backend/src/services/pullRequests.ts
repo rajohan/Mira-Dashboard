@@ -13,6 +13,7 @@ import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
     enqueueJobExecution,
     type JobExecution,
+    protectRunningJobExecutionFromCancellation,
     registerExpiredJobExecutionHandler,
     registerQueuedJobCancellationHandler,
 } from "./jobExecutionQueue.ts";
@@ -24,6 +25,7 @@ import {
     registerScheduledJobAction,
     type ScheduledJob,
     ScheduledJobActionError,
+    type ScheduledJobActionContext,
 } from "./scheduledJobs.ts";
 
 function dateToISOString(date: Date): string {
@@ -1864,8 +1866,10 @@ function executionPullRequestNumber(payload: Record<string, unknown>): number {
 
 async function executePullRequestMerge(
     job: ScheduledJob,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    context: ScheduledJobActionContext
 ) {
+    protectRunningJobExecutionFromCancellation(context.executionId);
     const number = executionPullRequestNumber(job.actionPayload);
     const willDeploy = job.actionPayload.willDeploy === true;
     const deploymentLockId = job.actionPayload.deploymentLockId;

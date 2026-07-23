@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Server } from "bun";
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, jest } from "bun:test";
 
 import {
     isAllowedDashboardOrigin,
@@ -30,9 +30,11 @@ import {
     stringFallback,
 } from "../src/lib/values.ts";
 import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
+import { routes as appRoutes } from "../src/routes.ts";
 import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
 import { isValidAgentId } from "../src/services/agents.ts";
 import { mapBackupJob } from "../src/services/backups.ts";
+import * as jobExecutionQueueModule from "../src/services/jobExecutionQueue.ts";
 import { getResolvedRoots, validatePrNumber } from "../src/services/pullRequests.ts";
 
 function serverWithAddress(address: string): Server<unknown> {
@@ -46,16 +48,19 @@ function canonicalPath(value: string): string {
 }
 
 async function callTestRoute(
-    routes: Record<
-        string,
-        (request: Request, server: Server<unknown>) => Response | Promise<Response>
-    >,
+    routes: Record<string, unknown>,
     path: string,
     server: Server<unknown>
 ): Promise<Response> {
-    const handler = routes[path];
-    if (!handler) {
-        throw new Error(`Missing test route: ${path}`);
+    const entry = routes[path];
+    const handler =
+        typeof entry === "function"
+            ? entry
+            : typeof entry === "object" && entry !== null && "GET" in entry
+              ? entry.GET
+              : undefined;
+    if (typeof handler !== "function") {
+        throw new TypeError(`Missing test route: ${path}`);
     }
     return handler(new Request(`http://localhost${path}`), server);
 }
@@ -619,6 +624,35 @@ describe("backend service utilities", () => {
         expect(serverWithAddress("127.0.0.1").requestIP(new Request("http://x"))).toEqual(
             { address: "127.0.0.1", family: "IPv4", port: 12_345 }
         );
+    });
+
+    it("keeps health available when worker telemetry cannot be read", async () => {
+        const summarySpy = jest
+            .spyOn(jobExecutionQueueModule, "getJobExecutionSummary")
+            .mockImplementation(() => {
+                throw new Error("queue telemetry unavailable");
+            });
+        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const response = await callTestRoute(
+                appRoutes,
+                "/api/health",
+                serverWithAddress("127.0.0.1")
+            );
+
+            expect(response.status).toBe(200);
+            await expect(response.json()).resolves.toMatchObject({
+                status: "isOk",
+                workerOnline: false,
+            });
+            expect(warnSpy).toHaveBeenCalledWith(
+                "[Health] Failed to read job worker telemetry:",
+                expect.objectContaining({ message: "queue telemetry unavailable" })
+            );
+        } finally {
+            summarySpy.mockRestore();
+            warnSpy.mockRestore();
+        }
     });
 
     it("applies request policy auth, rate limit, and handler error behavior", async () => {

@@ -559,6 +559,29 @@ export function heartbeatJobExecution(
     };
 }
 
+/**
+ * Atomically closes the UI cancellation window before an irreversible action.
+ * Queued executions remain cancellable until the worker starts the action.
+ */
+export function protectRunningJobExecutionFromCancellation(id: string): JobExecution {
+    const update = database
+        .prepare(
+            `UPDATE job_executions
+             SET cancellable = 0
+             WHERE id = ? AND status = 'running' AND cancel_requested_at IS NULL`
+        )
+        .run(id);
+    if (update.changes === 0) {
+        const execution = getJobExecution(id);
+        if (!execution) throw statusError("Job execution not found", 404);
+        if (execution.cancelRequestedAt) {
+            throw statusError("Job cancellation was already requested", 409);
+        }
+        throw statusError("Job execution is not running", 409);
+    }
+    return getJobExecution(id) as JobExecution;
+}
+
 /** Replaces the bounded progress snapshot for an execution with an active lease. */
 export function updateJobExecutionOutput(
     id: string,

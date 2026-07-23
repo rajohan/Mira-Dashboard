@@ -14,6 +14,7 @@ import {
     getJobExecution,
     getJobExecutionSummary,
     insertJobExecution,
+    protectRunningJobExecutionFromCancellation,
     recoverExpiredJobExecutions,
     registerJobWorker,
     unregisterJobWorker,
@@ -138,16 +139,21 @@ describe("persistent job execution queue", () => {
 
     it("wraps worker children in class-specific systemd scopes", () => {
         const command = withJobResourceClass("host-heavy", () =>
-            scopedJobProcessCommand("docker", ["ps"], {
-                MIRA_DASHBOARD_ENABLE_JOB_SCOPES: "1",
-                MIRA_DASHBOARD_JOB_SCOPE_OWNER: "mira-dashboard-worker.service",
-            })
+            scopedJobProcessCommand(
+                "docker",
+                ["exec", "worker", "sh", "-c", 'printf "%s" "$JOB_COMMAND"'],
+                {
+                    MIRA_DASHBOARD_ENABLE_JOB_SCOPES: "1",
+                    MIRA_DASHBOARD_JOB_SCOPE_OWNER: "mira-dashboard-worker.service",
+                }
+            )
         );
 
         expect(command.executable).toBe("systemd-run");
         expect(command.arguments).toEqual(
             expect.arrayContaining([
                 "--scope",
+                "--expand-environment=no",
                 "--nice=15",
                 "CPUWeight=15",
                 "IOWeight=15",
@@ -157,9 +163,46 @@ describe("persistent job execution queue", () => {
                 "RuntimeMaxSec=7h",
                 "BindsTo=mira-dashboard-worker.service",
                 "docker",
-                "ps",
+                "exec",
+                "worker",
+                "sh",
+                "-c",
+                'printf "%s" "$JOB_COMMAND"',
             ])
         );
+    });
+
+    it("allows queued cancellation but protects a running mutation", () => {
+        const queued = enqueueJobExecution({
+            actionKey: `test.protected-${Bun.randomUUIDv7()}`,
+            displayName: "Protected mutation",
+            resourceClass: "exclusive",
+            timeoutMs: 60_000,
+        });
+        testExecutionIds.add(queued.id);
+        const workerId = `test-worker-${Bun.randomUUIDv7()}`;
+        const running = claimNextJobExecution(workerId, 1);
+        expect(running?.id).toBe(queued.id);
+
+        expect(protectRunningJobExecutionFromCancellation(queued.id)).toMatchObject({
+            cancellable: false,
+            status: "running",
+        });
+        expect(() => cancelJobExecution(queued.id)).toThrow(
+            "This job execution cannot be cancelled here"
+        );
+        finishJobExecution(queued.id, workerId, "success", undefined, {});
+
+        const cancellableWhileQueued = enqueueJobExecution({
+            actionKey: `test.queued-cancellation-${Bun.randomUUIDv7()}`,
+            displayName: "Queued cancellation",
+            resourceClass: "exclusive",
+            timeoutMs: 60_000,
+        });
+        testExecutionIds.add(cancellableWhileQueued.id);
+        expect(cancelJobExecution(cancellableWhileQueued.id)).toMatchObject({
+            status: "cancelled",
+        });
     });
 
     it("prioritizes interactive work and enforces global capacity", () => {

@@ -126,6 +126,7 @@ export function scopedJobProcessCommand(
         arguments: [
             "--user",
             "--scope",
+            "--expand-environment=no",
             "--quiet",
             "--collect",
             `--nice=${policy.nice}`,

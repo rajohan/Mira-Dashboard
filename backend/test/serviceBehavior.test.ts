@@ -1610,9 +1610,11 @@ fi
         process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
 
         try {
-            const { approvePullRequest } =
+            const { registerPullRequestExecutionActions, runPullRequestApproval } =
                 await import("../src/services/pullRequests.ts");
-            const result = await approvePullRequest(11, false);
+            registerPullRequestExecutionActions();
+            await startTestScheduledExecutor();
+            const result = await runPullRequestApproval(11, false);
 
             expect(result).toMatchObject({
                 cleanup: {
@@ -1622,13 +1624,31 @@ fi
                 },
                 isOk: true,
                 message: "PR #11 merged",
-                syncError: undefined,
             });
             await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
             await expect(Bun.file(gitLog).text()).resolves.toContain("worktree remove");
             expect(existsSync(localWorktree)).toBe(false);
+            expect(
+                database
+                    .prepare(
+                        `SELECT cancellable, status
+                         FROM job_executions
+                         WHERE action_key = 'github.merge'
+                           AND json_extract(payload_json, '$.number') = 11
+                         ORDER BY queued_at DESC, id DESC
+                         LIMIT 1`
+                    )
+                    .get()
+            ).toEqual({ cancellable: 0, status: "success" });
         } finally {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database
+                .prepare(
+                    `DELETE FROM job_executions
+                     WHERE action_key = 'github.merge'
+                       AND json_extract(payload_json, '$.number') = 11`
+                )
+                .run();
             database
                 .prepare("DELETE FROM deployment_jobs WHERE id LIKE 'approve-%'")
                 .run();
@@ -3275,8 +3295,18 @@ fi
         try {
             registerBackupScheduledJobs();
             await startTestScheduledExecutor();
-            await expect(startManualBackup("walg")).rejects.toMatchObject({
-                statusCode: 409,
+            await expect(runScheduledJob("backup.walg")).resolves.toMatchObject({
+                output: {
+                    backup: {
+                        code: 130,
+                        status: "needs_attention",
+                        stderr: expect.stringContaining(
+                            "backup process is still running"
+                        ),
+                        type: "walg",
+                    },
+                },
+                status: "failed",
             });
             expect(mapBackupJob(getCurrentBackupJob("walg"))).toMatchObject({
                 code: 130,
@@ -3287,11 +3317,12 @@ fi
             await expect(startManualBackup("walg")).rejects.toThrow(
                 "WALG backup needs attention"
             );
-
-            await expect(runScheduledJob("backup.walg")).resolves.toMatchObject({
-                status: "failed",
+            expect(getPersistedBackupJob("walg")).toMatchObject({
+                code: 130,
+                status: "needs_attention",
+                stderr: expect.stringContaining("backup process is still running"),
+                type: "walg",
             });
-            expect(getPersistedBackupJob("walg")).toBeDefined();
 
             const clearedJob = await clearPersistedBackupAttention("walg");
             expect(clearedJob).toMatchObject({

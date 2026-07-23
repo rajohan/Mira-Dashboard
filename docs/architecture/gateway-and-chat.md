@@ -57,6 +57,10 @@ server may need manual inspection.
 | `backendCommit`    | Git commit served by the backend when available.                   |
 | `workerOnline`     | Whether the persistent job worker has a fresh heartbeat.           |
 
+If queue telemetry cannot be read, health remains available and reports
+`workerOnline:false`. Treat that degraded value as either an offline worker or
+unavailable queue telemetry, and inspect both backend and worker logs.
+
 If `gatewayConnected:false`, check:
 
 - `mira-dashboard.service` logs;

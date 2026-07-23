@@ -772,19 +772,36 @@ async function startScheduledBackup(
         );
     }
     const currentJob = getCurrentBackupJob(type);
-    if (currentJob?.status === "running" || currentJob?.status === "needs_attention") {
+    if (currentJob?.status === "needs_attention") {
         throw Object.assign(
-            new Error(
-                currentJob.status === "needs_attention"
-                    ? `${type.toUpperCase()} backup needs attention`
-                    : `${type.toUpperCase()} backup is already running`
-            ),
-            {
-                statusCode: 409,
-            }
+            new ScheduledJobActionError(`${type.toUpperCase()} backup needs attention`, {
+                backup: mapBackupJob(currentJob),
+            }),
+            { statusCode: 409 }
         );
     }
-    const job = await startManualBackup(type, signal);
+    if (currentJob?.status === "running") {
+        throw Object.assign(
+            new Error(`${type.toUpperCase()} backup is already running`),
+            { statusCode: 409 }
+        );
+    }
+    let job: BackupJob;
+    try {
+        job = await startManualBackup(type, signal);
+    } catch (error) {
+        const attentionJob = getCurrentBackupJob(type);
+        if (attentionJob?.status === "needs_attention") {
+            throw Object.assign(
+                new ScheduledJobActionError(
+                    errorMessage(error, `${type.toUpperCase()} backup needs attention`),
+                    { backup: mapBackupJob(attentionJob) }
+                ),
+                { statusCode: 409 }
+            );
+        }
+        throw error;
+    }
     const publish = () => context.updateOutput({ backup: mapBackupJob(job) });
     publish();
     const progress = setInterval(publish, 1000);
