@@ -637,7 +637,13 @@ describe("Docker updater tag patterns", () => {
             )
             .get() as { id: number };
 
-        const steps = await runDockerUpdaterService(service.id);
+        const protectFromCancellation = jest.fn();
+        const steps = await runDockerUpdaterService(
+            service.id,
+            undefined,
+            protectFromCancellation
+        );
+        expect(protectFromCancellation).toHaveBeenCalledTimes(1);
         expect(steps).toContainEqual(
             expect.objectContaining({
                 isOk: true,

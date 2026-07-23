@@ -51,7 +51,7 @@ function backendCommit(): string {
     return BACKEND_COMMIT;
 }
 
-function workerOnline(): boolean {
+function isWorkerOnline(): boolean {
     try {
         return getJobExecutionSummary().workerOnline;
     } catch (error) {
@@ -66,7 +66,7 @@ function health() {
         gatewayConnected: gateway.isConnected(),
         sessionCount: gateway.getSessions().length,
         backendCommit: backendCommit() || "unknown",
-        workerOnline: workerOnline(),
+        workerOnline: isWorkerOnline(),
     });
 }
 

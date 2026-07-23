@@ -1465,6 +1465,18 @@ fi
             updatePullRequestBranch,
         } = await import("../src/services/pullRequests.ts");
         registerPullRequestExecutionActions();
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    `DELETE FROM job_executions
+                     WHERE action_key IN (
+                         'github.review-approval',
+                         'github.update-branch',
+                         'github.reject'
+                     )`
+                )
+                .run();
+        });
         await startTestScheduledExecutor();
         const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
 
@@ -1532,6 +1544,34 @@ fi
             isOk: true,
             message: "PR #5 closed",
         });
+        const queuedMutations = database
+            .prepare(
+                `SELECT action_key AS actionKey, cancellable, status
+                 FROM job_executions
+                 WHERE action_key IN (
+                     'github.review-approval',
+                     'github.update-branch',
+                     'github.reject'
+                 )
+                 ORDER BY action_key, id`
+            )
+            .all() as Array<{
+            actionKey: string;
+            cancellable: number;
+            status: string;
+        }>;
+        expect(queuedMutations.map((execution) => execution.actionKey)).toEqual([
+            "github.reject",
+            "github.reject",
+            "github.review-approval",
+            "github.update-branch",
+        ]);
+        expect(
+            queuedMutations.every(
+                (execution) =>
+                    execution.cancellable === 0 && execution.status === "success"
+            )
+        ).toBe(true);
 
         const malformedApproveRoute = await pullRequestRoutes[
             "/api/pull-requests/:number/approve"
@@ -3409,6 +3449,55 @@ fi
                 type: backup.type,
             });
             expect(getPersistedBackupJob("walg")).toBeUndefined();
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("reports recovered backup failures instead of stale running snapshots", async () => {
+        const { getPersistedBackupJob, registerBackupScheduledJobs } =
+            await import("../src/services/backups.ts");
+        const {
+            claimNextJobExecution,
+            recoverExpiredJobExecutions,
+            updateJobExecutionOutput,
+        } = await import("../src/services/jobExecutionQueue.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            const run = enqueueScheduledJob("backup.walg", "manual");
+            const executionId = run.executionId;
+            if (!executionId) throw new Error("Backup execution id was missing");
+            const workerId = `backup-recovery-${Bun.randomUUIDv7()}`;
+            const startedAt = new Date(Date.now() + 1000).toISOString();
+            const claimed = claimNextJobExecution(workerId, 1, startedAt, 1000);
+            expect(claimed?.id).toBe(executionId);
+            const backup = {
+                code: undefined,
+                endedAt: undefined,
+                id: Bun.randomUUIDv7(),
+                startedAt: Date.parse(startedAt),
+                status: "running",
+                stderr: "",
+                stdout: "backup started",
+                type: "walg",
+            };
+            updateJobExecutionOutput(executionId, workerId, { backup });
+            const recoveredAt = new Date(Date.parse(startedAt) + 2000).toISOString();
+
+            expect(recoverExpiredJobExecutions(recoveredAt)).toBe(1);
+            expect(getPersistedBackupJob("walg")).toMatchObject({
+                id: backup.id,
+                endedAt: Date.parse(recoveredAt),
+                status: "failed",
+                stderr: "Job failed after its worker lease expired",
+                stdout: backup.stdout,
+                type: "walg",
+            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")

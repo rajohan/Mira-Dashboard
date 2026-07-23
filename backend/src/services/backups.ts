@@ -792,11 +792,14 @@ async function startScheduledBackup(
     } catch (error) {
         const attentionJob = getCurrentBackupJob(type);
         if (attentionJob?.status === "needs_attention") {
+            const message = errorMessage(
+                error,
+                `${type.toUpperCase()} backup needs attention`
+            );
             throw Object.assign(
-                new ScheduledJobActionError(
-                    errorMessage(error, `${type.toUpperCase()} backup needs attention`),
-                    { backup: mapBackupJob(attentionJob) }
-                ),
+                new ScheduledJobActionError(message, {
+                    backup: mapBackupJob(attentionJob),
+                }),
                 { statusCode: 409 }
             );
         }
@@ -848,7 +851,21 @@ function backupViewFromExecution(
     if (!execution) return;
     const backup = execution.output.backup;
     if (backup && typeof backup === "object" && !Array.isArray(backup)) {
-        return backup as ReturnType<typeof mapBackupJob>;
+        const backupView = backup as NonNullable<ReturnType<typeof mapBackupJob>>;
+        if (
+            backupView.status === "running" &&
+            (execution.status === "failed" || execution.status === "cancelled")
+        ) {
+            return {
+                ...backupView,
+                endedAt: execution.finishedAt
+                    ? Date.parse(execution.finishedAt)
+                    : backupView.endedAt,
+                status: execution.status,
+                stderr: execution.message ?? backupView.stderr,
+            };
+        }
+        return backupView;
     }
     return {
         code: undefined,

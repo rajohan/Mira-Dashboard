@@ -2542,9 +2542,16 @@ async function syncDockerUpdaterChangesBestEffort(
 
 export async function runDockerUpdaterService(
     serviceId?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    protectFromCancellation?: () => void
 ): Promise<DockerUpdaterStepResult[]> {
     signal?.throwIfAborted();
+    let isApplyProtected = false;
+    const protectApply = () => {
+        if (isApplyProtected) return;
+        protectFromCancellation?.();
+        isApplyProtected = true;
+    };
     const requestedService =
         serviceId === undefined
             ? undefined
@@ -2684,6 +2691,7 @@ export async function runDockerUpdaterService(
                 },
             ];
         }
+        protectApply();
         const apply = await applyServiceUpdate(refreshedService, "manual", signal);
         if (apply.isOk) {
             await pruneDanglingImagesBestEffort(signal);
@@ -2711,6 +2719,7 @@ export async function runDockerUpdaterService(
         ) {
             continue;
         }
+        protectApply();
         applyResults.push(await applyServiceUpdate(service, "auto", signal));
     }
     if (applyResults.some((step) => step.isOk)) {
@@ -2745,7 +2754,7 @@ export function registerDockerUpdaterScheduledJobs(): void {
     } as const;
     registerScheduledJobAction(
         "docker.updater",
-        async (executionJob, signal) => {
+        async (executionJob, signal, context) => {
             const rawServiceId = executionJob.actionPayload.serviceId;
             const serviceId =
                 rawServiceId === undefined
@@ -2760,7 +2769,11 @@ export function registerDockerUpdaterScheduledJobs(): void {
                     statusCode: 400,
                 });
             }
-            const steps = await runDockerUpdaterService(serviceId, signal);
+            const steps = await runDockerUpdaterService(
+                serviceId,
+                signal,
+                context.protectFromCancellation
+            );
             const failed = steps.filter(
                 (step) =>
                     !step.isOk &&

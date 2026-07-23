@@ -13,7 +13,6 @@ import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
     enqueueJobExecution,
     type JobExecution,
-    protectRunningJobExecutionFromCancellation,
     registerExpiredJobExecutionHandler,
     registerQueuedJobCancellationHandler,
 } from "./jobExecutionQueue.ts";
@@ -24,8 +23,8 @@ import {
 import {
     registerScheduledJobAction,
     type ScheduledJob,
-    ScheduledJobActionError,
     type ScheduledJobActionContext,
+    ScheduledJobActionError,
 } from "./scheduledJobs.ts";
 
 function dateToISOString(date: Date): string {
@@ -1869,7 +1868,7 @@ async function executePullRequestMerge(
     signal: AbortSignal | undefined,
     context: ScheduledJobActionContext
 ) {
-    protectRunningJobExecutionFromCancellation(context.executionId);
+    context.protectFromCancellation();
     const number = executionPullRequestNumber(job.actionPayload);
     const willDeploy = job.actionPayload.willDeploy === true;
     const deploymentLockId = job.actionPayload.deploymentLockId;
@@ -1918,31 +1917,31 @@ export function registerPullRequestExecutionActions(): void {
     });
     registerScheduledJobAction("github.merge", executePullRequestMerge);
     registerScheduledJobAction("github.merge-deploy", executePullRequestMerge);
-    registerScheduledJobAction("github.review-approval", async (job, signal) => ({
-        result: await approvePullRequestReview(
-            executionPullRequestNumber(job.actionPayload),
-            signal
-        ),
-    }));
-    registerScheduledJobAction("github.update-branch", async (job, signal) => ({
-        result: await updatePullRequestBranch(
-            executionPullRequestNumber(job.actionPayload),
-            signal
-        ),
-    }));
-    registerScheduledJobAction("github.reject", async (job, signal) => {
+    registerScheduledJobAction("github.review-approval", async (job, signal, context) => {
+        const number = executionPullRequestNumber(job.actionPayload);
+        context.protectFromCancellation();
+        return {
+            result: await approvePullRequestReview(number, signal),
+        };
+    });
+    registerScheduledJobAction("github.update-branch", async (job, signal, context) => {
+        const number = executionPullRequestNumber(job.actionPayload);
+        context.protectFromCancellation();
+        return {
+            result: await updatePullRequestBranch(number, signal),
+        };
+    });
+    registerScheduledJobAction("github.reject", async (job, signal, context) => {
         const comment = job.actionPayload.comment;
         if (typeof comment !== "string" || comment.trim() === "") {
             throw Object.assign(new Error("Pull request rejection comment is missing"), {
                 statusCode: 400,
             });
         }
+        const number = executionPullRequestNumber(job.actionPayload);
+        context.protectFromCancellation();
         return {
-            result: await rejectPullRequest(
-                executionPullRequestNumber(job.actionPayload),
-                comment,
-                signal
-            ),
+            result: await rejectPullRequest(number, comment, signal),
         };
     });
 }

@@ -14,6 +14,7 @@ import {
     heartbeatJobExecution,
     insertJobExecution,
     type JobExecution,
+    protectRunningJobExecutionFromCancellation,
     recoverExpiredJobExecutions,
     registerJobWorker,
     unregisterJobWorker,
@@ -63,6 +64,7 @@ export type ScheduledJobRunStatus =
 export type ScheduledJobTriggerType = "manual" | "schedule" | "startup";
 export interface ScheduledJobActionContext {
     executionId: string;
+    protectFromCancellation: () => void;
     updateOutput: (output: Record<string, unknown>) => void;
 }
 export type ScheduledJobActionHandler = (
@@ -1057,6 +1059,9 @@ async function executeClaimedJobExecution(
                     job,
                     {
                         executionId: execution.id,
+                        protectFromCancellation: () => {
+                            protectRunningJobExecutionFromCancellation(execution.id);
+                        },
                         updateOutput: (nextOutput) => {
                             updateJobExecutionOutput(execution.id, workerId, nextOutput);
                         },
