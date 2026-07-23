@@ -33,7 +33,7 @@ export function TaskColumn({ id, tasks, isOver, onTaskClick }: TaskColumnPropert
                 ref={setNodeRef}
                 data-column={id}
                 className={
-                    "flex min-h-28 flex-col gap-2 overflow-y-auto overscroll-contain rounded-lg border-2 border-dashed p-2 transition-colors lg:min-h-0 lg:flex-1 " +
+                    "flex max-h-100 min-h-28 flex-col gap-2 overflow-y-auto rounded-lg border-2 border-dashed p-2 transition-colors lg:max-h-none lg:min-h-0 lg:flex-1 lg:overscroll-y-contain " +
                     (isOver
                         ? "border-accent-500/50 bg-accent-500/5"
                         : "border-primary-700/50 bg-primary-800/30")

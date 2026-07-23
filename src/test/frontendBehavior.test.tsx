@@ -5185,7 +5185,7 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(await screen.findByText("Write useful tests")).toBeInTheDocument();
     });
 
-    it("keeps task cards inside independently scrollable columns", async () => {
+    it("keeps task cards inside scrollable columns at every breakpoint", async () => {
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
             value: createApi([
@@ -5204,10 +5204,13 @@ describe("Mira Dashboard frontend behavior", () => {
         const taskColumn = container.querySelector('[data-column="in-progress"]');
 
         expect(taskColumn).toHaveClass(
+            "max-h-100",
             "overflow-y-auto",
-            "overscroll-contain",
-            "lg:min-h-0"
+            "lg:max-h-none",
+            "lg:min-h-0",
+            "lg:overscroll-y-contain"
         );
+        expect(taskColumn).not.toHaveClass("overscroll-contain");
         expect(taskColumn?.parentElement).toHaveClass("lg:min-h-0");
         expect(taskColumn?.parentElement?.parentElement).toHaveClass(
             "min-h-0",
