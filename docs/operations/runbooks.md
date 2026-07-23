@@ -54,9 +54,13 @@ Use only when Raymond wants to re-run bootstrap.
 ```bash
 cd /home/ubuntu/projects/mira-dashboard/backend
 mkdir -p data/backups
-cp data/mira-dashboard.db "data/backups/mira-dashboard-before-auth-reset-$(date +%Y%m%d-%H%M%S).db"
-sqlite3 data/mira-dashboard.db "DELETE FROM auth_sessions; DELETE FROM users;"
-sqlite3 data/mira-dashboard.db "PRAGMA integrity_check;"
+db_path=data/mira-dashboard.db
+backup_path="data/backups/mira-dashboard-before-auth-reset-$(date +%Y%m%d-%H%M%S).db"
+sqlite3 -cmd ".timeout 5000" "$db_path" ".backup '$backup_path'"
+chmod 0600 "$backup_path"
+test "$(sqlite3 "$backup_path" "PRAGMA quick_check;")" = "ok"
+sqlite3 "$db_path" "DELETE FROM auth_sessions; DELETE FROM users;"
+sqlite3 "$db_path" "PRAGMA integrity_check;"
 curl http://127.0.0.1:3100/api/auth/bootstrap
 ```
 

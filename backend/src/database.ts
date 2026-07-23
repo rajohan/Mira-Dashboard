@@ -451,7 +451,19 @@ function initializeDatabase(databasePath: string): DatabaseSync {
     const initializedDatabase = new Database(databasePath);
     initializedDatabase.run("PRAGMA foreign_keys = ON");
     initializedDatabase.run("PRAGMA busy_timeout = 5000");
-    initializedDatabase.run("PRAGMA journal_mode = WAL");
+    const journalModeRow = initializedDatabase
+        .query("PRAGMA journal_mode = WAL")
+        .get() as { journal_mode?: unknown } | null;
+    const journalMode =
+        typeof journalModeRow?.journal_mode === "string"
+            ? journalModeRow.journal_mode
+            : undefined;
+    if (journalMode?.toLowerCase() !== "wal") {
+        initializedDatabase.close();
+        throw new Error(
+            `SQLite WAL journal mode is required for ${databasePath}; got ${journalMode ?? "unknown"}`
+        );
+    }
     runSchemaSql(initializedDatabase, SCHEMA_SQL);
 
     return initializedDatabase;
