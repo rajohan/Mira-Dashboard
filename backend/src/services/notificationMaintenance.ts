@@ -16,7 +16,14 @@ export function pruneReadNotifications(
     ).toISOString();
 
     const expired = databaseConnection
-        .prepare("DELETE FROM notifications WHERE is_read = 1 AND occurred_at < ?")
+        .prepare(
+            `DELETE FROM notifications
+             WHERE is_read = 1
+               AND COALESCE(
+                       datetime(occurred_at),
+                       datetime(created_at)
+                   ) < datetime(?)`
+        )
         .run(cutoff).changes;
 
     const beyondLimit = databaseConnection
@@ -27,7 +34,11 @@ export function pruneReadNotifications(
                    SELECT id
                    FROM notifications
                    WHERE is_read = 1
-                   ORDER BY occurred_at DESC, id DESC
+                   ORDER BY COALESCE(
+                                datetime(occurred_at),
+                                datetime(created_at)
+                            ) DESC,
+                            id DESC
                    LIMIT -1 OFFSET ?
                )`
         )

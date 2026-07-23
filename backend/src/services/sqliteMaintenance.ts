@@ -235,8 +235,7 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
                             updated_at,
                             ROW_NUMBER() OVER (
                                 ORDER BY updated_at DESC,
-                                         gateway_scope DESC,
-                                         session_key DESC
+                                         rowid DESC
                             ) AS retention_rank
                      FROM chat_runtime_snapshots
                  ),
@@ -262,8 +261,7 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
                             updated_at,
                             ROW_NUMBER() OVER (
                                 ORDER BY updated_at DESC,
-                                         gateway_scope DESC,
-                                         session_key DESC
+                                         rowid DESC
                             ) AS retention_rank
                      FROM chat_runtime_snapshots
                  ),

@@ -126,6 +126,7 @@ describe("Dashboard SQLite lifecycle", () => {
             const retentionQueryPlans = [
                 {
                     index: "idx_deployment_jobs_retention",
+                    usage: "USING COVERING INDEX",
                     sql: `SELECT id
                           FROM deployment_jobs
                           WHERE status NOT IN ('building', 'restart-scheduled')
@@ -134,6 +135,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 },
                 {
                     index: "idx_agent_task_history_retention",
+                    usage: "USING COVERING INDEX",
                     sql: `SELECT id
                           FROM agent_task_history
                           WHERE status != 'active' AND completed_at IS NOT NULL
@@ -142,6 +144,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 },
                 {
                     index: "idx_reports_retention",
+                    usage: "USING COVERING INDEX",
                     sql: `SELECT id
                           FROM reports
                           ORDER BY occurred_at DESC, id DESC
@@ -149,6 +152,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 },
                 {
                     index: "idx_docker_update_events_retention",
+                    usage: "USING COVERING INDEX",
                     sql: `SELECT id
                           FROM docker_update_events
                           ORDER BY created_at DESC, id DESC
@@ -156,28 +160,33 @@ describe("Dashboard SQLite lifecycle", () => {
                 },
                 {
                     index: "idx_chat_runtime_snapshots_retention",
+                    usage: "USING INDEX",
                     sql: `SELECT gateway_scope, session_key
                           FROM chat_runtime_snapshots
                           ORDER BY updated_at DESC,
-                                   gateway_scope DESC,
-                                   session_key DESC
+                                   rowid DESC
                           LIMIT -1 OFFSET 200`,
                 },
                 {
                     index: "idx_notifications_read_retention",
+                    usage: "USING COVERING INDEX",
                     sql: `SELECT id
                           FROM notifications
                           WHERE is_read = 1
-                          ORDER BY occurred_at DESC, id DESC
+                          ORDER BY COALESCE(
+                                       datetime(occurred_at),
+                                       datetime(created_at)
+                                   ) DESC,
+                                   id DESC
                           LIMIT -1 OFFSET 300`,
                 },
             ];
-            for (const { index, sql } of retentionQueryPlans) {
+            for (const { index, sql, usage } of retentionQueryPlans) {
                 const plan = database.query(`EXPLAIN QUERY PLAN ${sql}`).all() as Array<{
                     detail: string;
                 }>;
                 expect(plan.map((row) => row.detail).join("\n")).toContain(
-                    `USING COVERING INDEX ${index}`
+                    `${usage} ${index}`
                 );
             }
             const notificationPlan = database
@@ -205,6 +214,7 @@ describe("Dashboard SQLite lifecycle", () => {
             applyDatabaseMigrations(database, databasePath);
             database.run("DROP INDEX idx_notifications_read_retention");
             database.run("DROP INDEX idx_chat_runtime_snapshots_retention");
+            database.run("CREATE INDEX idx_notifications_read ON notifications(is_read)");
             database.prepare("DELETE FROM schema_migrations WHERE version = 4").run();
 
             expect(validateDatabaseMigrationHistory(database)).toBe(3);
@@ -848,7 +858,10 @@ describe("Dashboard SQLite lifecycle", () => {
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
         const oldTimestamp = "2026-06-01T00:00:00.000Z";
-        const currentTimestamp = "2026-07-23T00:00:00.000Z";
+        const baselineTimestamp = "2026-07-23T00:00:00.000Z";
+        const offsetNewerTimestamp = "2026-07-23T00:30:00.000-05:00";
+        const utcOlderTimestamp = "2026-07-23T01:00:00.000Z";
+        const veryNewTimestamp = "2026-07-23T06:00:00.000Z";
         const now = new Date("2026-07-23T12:00:00.000Z");
         try {
             applyDatabaseMigrations(database, databasePath);
@@ -861,7 +874,13 @@ describe("Dashboard SQLite lifecycle", () => {
                        ('Expired read', '', 'info', 'retention',
                         'expired-read', '{}', 1, ?, ?, ?),
                        ('Expired unread', '', 'info', 'retention',
-                        'expired-unread', '{}', 0, ?, ?, ?)`
+                        'expired-unread', '{}', 0, ?, ?, ?),
+                       ('Baseline read', '', 'info', 'retention',
+                        'baseline-read', '{}', 1, ?, ?, ?),
+                       ('Offset newer read', '', 'info', 'retention',
+                        'offset-newer-read', '{}', 1, ?, ?, ?),
+                       ('UTC older read', '', 'info', 'retention',
+                        'utc-older-read', '{}', 1, ?, ?, ?)`
                 )
                 .run(
                     oldTimestamp,
@@ -869,14 +888,23 @@ describe("Dashboard SQLite lifecycle", () => {
                     oldTimestamp,
                     oldTimestamp,
                     oldTimestamp,
-                    oldTimestamp
+                    oldTimestamp,
+                    baselineTimestamp,
+                    baselineTimestamp,
+                    baselineTimestamp,
+                    offsetNewerTimestamp,
+                    offsetNewerTimestamp,
+                    offsetNewerTimestamp,
+                    utcOlderTimestamp,
+                    utcOlderTimestamp,
+                    utcOlderTimestamp
                 );
             database
                 .prepare(
                     `WITH RECURSIVE sequence(value) AS (
                          SELECT 1
                          UNION ALL
-                         SELECT value + 1 FROM sequence WHERE value < 302
+                         SELECT value + 1 FROM sequence WHERE value < 299
                      )
                      INSERT INTO notifications (
                          title, description, type, source, dedupe_key,
@@ -894,7 +922,7 @@ describe("Dashboard SQLite lifecycle", () => {
                             ?
                      FROM sequence`
                 )
-                .run(currentTimestamp, currentTimestamp, currentTimestamp);
+                .run(veryNewTimestamp, veryNewTimestamp, veryNewTimestamp);
 
             const changes = pruneDatabaseHistory(database, now);
 
@@ -919,6 +947,20 @@ describe("Dashboard SQLite lifecycle", () => {
                     )
                     .get()
             ).toEqual({ title: "Expired unread" });
+            expect(
+                database
+                    .query(
+                        `SELECT dedupe_key
+                         FROM notifications
+                         WHERE dedupe_key IN (
+                             'baseline-read',
+                             'offset-newer-read',
+                             'utc-older-read'
+                         )
+                         ORDER BY dedupe_key`
+                    )
+                    .all()
+            ).toEqual([{ dedupe_key: "offset-newer-read" }]);
         } finally {
             database.close();
         }
@@ -957,16 +999,19 @@ describe("Dashboard SQLite lifecycle", () => {
                      gateway_scope, session_key, runtime_sequence, envelope_json
                  ) VALUES (?, ?, 1, '{}')`
             );
-            const baseTimestamp = Date.parse("2026-07-01T00:00:00.000Z");
+            const currentTimestamp = "2026-07-01T00:00:00.000Z";
             for (let index = 0; index < 201; index += 1) {
                 const sessionKey = `session-${String(index).padStart(3, "0")}`;
-                insertSnapshot.run(
-                    "scope",
-                    sessionKey,
-                    new Date(baseTimestamp + index * 1000).toISOString()
-                );
+                insertSnapshot.run("scope", sessionKey, currentTimestamp);
                 insertEvent.run("scope", sessionKey);
             }
+            database
+                .prepare(
+                    `DELETE FROM chat_runtime_snapshots
+                     WHERE gateway_scope = 'scope' AND session_key = 'session-000'`
+                )
+                .run();
+            insertSnapshot.run("scope", "session-000", currentTimestamp);
 
             const changes = pruneDatabaseHistory(database, now);
 
@@ -987,11 +1032,16 @@ describe("Dashboard SQLite lifecycle", () => {
                     .query(
                         `SELECT session_key
                          FROM chat_runtime_snapshots
-                         WHERE session_key IN ('expired', 'session-000', 'session-200')
+                         WHERE session_key IN (
+                             'expired',
+                             'session-000',
+                             'session-001',
+                             'session-200'
+                         )
                          ORDER BY session_key`
                     )
                     .all()
-            ).toEqual([{ session_key: "session-200" }]);
+            ).toEqual([{ session_key: "session-000" }, { session_key: "session-200" }]);
         } finally {
             database.close();
         }
