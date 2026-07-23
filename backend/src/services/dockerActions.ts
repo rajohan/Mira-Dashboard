@@ -277,7 +277,7 @@ async function executeDockerCommand(
 }
 
 export function registerDockerExecutionActions(): void {
-    registerScheduledJobAction("docker.stack.action", async (job, signal) => {
+    registerScheduledJobAction("docker.stack.action", async (job, signal, context) => {
         const action = job.actionPayload.action;
         if (action !== "restart" && action !== "start" && action !== "stop") {
             throw Object.assign(new Error("Invalid stack action"), { statusCode: 400 });
@@ -287,47 +287,56 @@ export function registerDockerExecutionActions(): void {
         if (service !== undefined) {
             arguments_.push(requiredIdentifier(service, "service name"));
         }
+        context.protectFromCancellation();
         const result = await runDockerComposeCommand(arguments_, signal);
         return {
             ...result,
             output: [result.stdout, result.stderr].filter(Boolean).join("\n").trim(),
         };
     });
-    registerScheduledJobAction("docker.container.action", async (job, signal) => {
-        const action = job.actionPayload.action;
-        if (action !== "restart" && action !== "start" && action !== "stop") {
-            throw Object.assign(new Error("Invalid container action"), {
-                statusCode: 400,
-            });
+    registerScheduledJobAction(
+        "docker.container.action",
+        async (job, signal, context) => {
+            const action = job.actionPayload.action;
+            if (action !== "restart" && action !== "start" && action !== "stop") {
+                throw Object.assign(new Error("Invalid container action"), {
+                    statusCode: 400,
+                });
+            }
+            const containerId = requiredIdentifier(
+                job.actionPayload.containerId,
+                "containerId"
+            );
+            context.protectFromCancellation();
+            return { output: await runDockerCommand([action, containerId], signal) };
         }
-        const containerId = requiredIdentifier(
-            job.actionPayload.containerId,
-            "containerId"
-        );
-        return { output: await runDockerCommand([action, containerId], signal) };
+    );
+    registerScheduledJobAction("docker.image.delete", async (job, signal, context) => {
+        const imageId = requiredImageIdentifier(job.actionPayload.imageId);
+        context.protectFromCancellation();
+        return {
+            output: await runDockerCommand(["image", "rm", imageId], signal),
+        };
     });
-    registerScheduledJobAction("docker.image.delete", async (job, signal) => ({
-        output: await runDockerCommand(
-            ["image", "rm", requiredImageIdentifier(job.actionPayload.imageId)],
-            signal
-        ),
-    }));
-    registerScheduledJobAction("docker.prune.images", async (_job, signal) => ({
-        output: await runDockerCommand(["image", "prune", "-a", "-f"], signal),
-    }));
-    registerScheduledJobAction("docker.prune.volumes", async (_job, signal) => ({
-        output: await runDockerCommand(["volume", "prune", "-f"], signal),
-    }));
-    registerScheduledJobAction("docker.volume.delete", async (job, signal) => ({
-        output: await runDockerCommand(
-            [
-                "volume",
-                "rm",
-                requiredIdentifier(job.actionPayload.volumeName, "volumeName"),
-            ],
-            signal
-        ),
-    }));
+    registerScheduledJobAction("docker.prune.images", async (_job, signal, context) => {
+        context.protectFromCancellation();
+        return {
+            output: await runDockerCommand(["image", "prune", "-a", "-f"], signal),
+        };
+    });
+    registerScheduledJobAction("docker.prune.volumes", async (_job, signal, context) => {
+        context.protectFromCancellation();
+        return {
+            output: await runDockerCommand(["volume", "prune", "-f"], signal),
+        };
+    });
+    registerScheduledJobAction("docker.volume.delete", async (job, signal, context) => {
+        const volumeName = requiredIdentifier(job.actionPayload.volumeName, "volumeName");
+        context.protectFromCancellation();
+        return {
+            output: await runDockerCommand(["volume", "rm", volumeName], signal),
+        };
+    });
     registerScheduledJobAction(
         "docker.exec",
         (job, signal, context) =>

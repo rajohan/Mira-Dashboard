@@ -3401,6 +3401,25 @@ describe("backend route and service behavior", () => {
             await import("../src/services/dockerActions.ts");
         registerDockerExecutionActions();
         await startTestScheduledExecutor();
+        const executionBaseline = database
+            .prepare("SELECT COALESCE(MAX(rowid), 0) AS rowId FROM job_executions")
+            .get() as { rowId: number };
+        cleanupCallbacks.push(() => {
+            database
+                .prepare(
+                    `DELETE FROM job_executions
+                     WHERE rowid > ?
+                       AND action_key IN (
+                           'docker.stack.action',
+                           'docker.container.action',
+                           'docker.image.delete',
+                           'docker.prune.images',
+                           'docker.prune.volumes',
+                           'docker.volume.delete'
+                       )`
+                )
+                .run(executionBaseline.rowId);
+        });
 
         const containers = await dockerRoutes["/api/docker/containers"].GET();
         await expect(containers.json()).resolves.toMatchObject({
@@ -3603,6 +3622,41 @@ describe("backend route and service behavior", () => {
         await expect(stackServiceAction.json()).resolves.toEqual({
             output: "compose:restart web",
         });
+        const mutationExecutions = database
+            .prepare(
+                `SELECT action_key AS actionKey, cancellable, status
+                 FROM job_executions
+                 WHERE rowid > ?
+                   AND action_key IN (
+                       'docker.stack.action',
+                       'docker.container.action',
+                       'docker.image.delete',
+                       'docker.prune.images',
+                       'docker.prune.volumes',
+                       'docker.volume.delete'
+                   )
+                 ORDER BY rowid`
+            )
+            .all(executionBaseline.rowId) as Array<{
+            actionKey: string;
+            cancellable: number;
+            status: string;
+        }>;
+        expect(mutationExecutions.map((execution) => execution.actionKey)).toEqual([
+            "docker.container.action",
+            "docker.image.delete",
+            "docker.volume.delete",
+            "docker.prune.images",
+            "docker.prune.volumes",
+            "docker.stack.action",
+            "docker.stack.action",
+        ]);
+        expect(
+            mutationExecutions.every(
+                (execution) =>
+                    execution.cancellable === 0 && execution.status === "success"
+            )
+        ).toBe(true);
 
         const invalidStackAction = await dockerRoutes["/api/docker/stack/action"].POST(
             jsonRequest("/api/docker/stack/action", { action: "reload" })

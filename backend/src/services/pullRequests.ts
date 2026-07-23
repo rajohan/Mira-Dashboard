@@ -1894,7 +1894,7 @@ async function executePullRequestMerge(
 /** Registers every mutating GitHub/deploy action exclusively in the worker. */
 export function registerPullRequestExecutionActions(): void {
     registerPullRequestJobLifecycleHandlers();
-    registerScheduledJobAction("dashboard.deploy", async (job, signal) => {
+    registerScheduledJobAction("dashboard.deploy", async (job, signal, context) => {
         const deploymentId = job.actionPayload.deploymentId;
         if (typeof deploymentId !== "string" || deploymentId.trim() === "") {
             throw Object.assign(new Error("Deployment id is missing"), {
@@ -1907,12 +1907,14 @@ export function registerPullRequestExecutionActions(): void {
                 statusCode: 404,
             });
         }
+        context.protectFromCancellation();
         const isSuccess = await runDeploymentJob(deployment, signal);
         if (!isSuccess) {
             throw new ScheduledJobActionError("Dashboard deploy failed", {
                 deploymentId,
             });
         }
+        context.pauseWorkerClaims();
         return { deploymentId };
     });
     registerScheduledJobAction("github.merge", executePullRequestMerge);

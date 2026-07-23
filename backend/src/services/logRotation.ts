@@ -1968,8 +1968,9 @@ function persistLogRotationScheduledFailure(
 
 /** Registers the scheduled real log rotation job. */
 export function registerLogRotationScheduledJobs(): void {
-    registerScheduledJobAction(LOG_ROTATION_JOB_ID, async (job, signal) => {
+    registerScheduledJobAction(LOG_ROTATION_JOB_ID, async (job, signal, context) => {
         const isDryRun = job.actionPayload.isDryRun === true;
+        if (!isDryRun) context.protectFromCancellation();
         const logRotation = await runElevatedLogRotationService({
             isDryRun,
             signal,

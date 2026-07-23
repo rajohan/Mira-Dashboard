@@ -1239,9 +1239,29 @@ printf 'scheduled\n'
 
         const { registerPullRequestExecutionActions, startDeployLatest } =
             await import("../src/services/pullRequests.ts");
+        const { enqueueJobExecution, getJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const { registerScheduledJobAction } =
+            await import("../src/services/scheduledJobs.ts");
         registerPullRequestExecutionActions();
+        registerScheduledJobAction("test.after-deploy", async () => ({}));
         await startTestScheduledExecutor();
         const job = startDeployLatest();
+        const deploymentExecution = database
+            .prepare(
+                `SELECT id
+                 FROM job_executions
+                 WHERE action_key = 'dashboard.deploy'
+                   AND json_extract(payload_json, '$.deploymentId') = ?`
+            )
+            .get(job.id) as { id: string };
+        const followUpExecution = enqueueJobExecution({
+            actionKey: "test.after-deploy",
+            displayName: "Must wait for restarted worker",
+            priority: 0,
+            resourceClass: "light",
+            timeoutMs: 1000,
+        });
 
         try {
             await waitFor(() => {
@@ -1259,6 +1279,11 @@ printf 'scheduled\n'
                     | undefined;
                 return row?.status === "restart-scheduled" && existsSync(systemdLog);
             }, 5000);
+            await waitFor(
+                () => getJobExecution(deploymentExecution.id)?.status === "success",
+                5000
+            );
+            await Bun.sleep(25);
 
             const row = database
                 .prepare(
@@ -1296,7 +1321,17 @@ printf 'scheduled\n'
             expect(existsSync(path.join(fakeRoot, "backend", "node_modules"))).toBe(
                 false
             );
+            expect(getJobExecution(deploymentExecution.id)).toMatchObject({
+                cancellable: false,
+                status: "success",
+            });
+            expect(getJobExecution(followUpExecution.id)).toMatchObject({
+                status: "queued",
+            });
         } finally {
+            database
+                .prepare("DELETE FROM job_executions WHERE id = ?")
+                .run(followUpExecution.id);
             database.prepare("DELETE FROM deployment_lock WHERE job_id = ?").run(job.id);
             database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(job.id);
             database
@@ -4404,6 +4439,7 @@ fi
             const run = await runScheduledJob("ops.log-rotation");
 
             expect(run.status).toBe("success");
+            expect(run.cancellable).toBe(false);
             expect(run.message).toBeUndefined();
             expect(run.output).toMatchObject({
                 logRotation: {

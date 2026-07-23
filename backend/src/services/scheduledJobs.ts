@@ -47,6 +47,7 @@ const scheduledJobRuntimeState: {
     executor: NodeJS.Timeout | undefined;
     workerHeartbeat: NodeJS.Timeout | undefined;
     isSchedulerTickRunning: boolean;
+    isExecutorClaimingPaused: boolean;
     isExecutorTickRunning: boolean;
     workerId: string;
 } = {
@@ -54,6 +55,7 @@ const scheduledJobRuntimeState: {
     executor: undefined,
     workerHeartbeat: undefined,
     isSchedulerTickRunning: false,
+    isExecutorClaimingPaused: false,
     isExecutorTickRunning: false,
     workerId: `dashboard-worker:${process.pid}:${Bun.randomUUIDv7()}`,
 };
@@ -64,6 +66,7 @@ export type ScheduledJobRunStatus =
 export type ScheduledJobTriggerType = "manual" | "schedule" | "startup";
 export interface ScheduledJobActionContext {
     executionId: string;
+    pauseWorkerClaims: () => void;
     protectFromCancellation: () => void;
     updateOutput: (output: Record<string, unknown>) => void;
 }
@@ -1059,6 +1062,9 @@ async function executeClaimedJobExecution(
                     job,
                     {
                         executionId: execution.id,
+                        pauseWorkerClaims: () => {
+                            scheduledJobRuntimeState.isExecutorClaimingPaused = true;
+                        },
                         protectFromCancellation: () => {
                             protectRunningJobExecutionFromCancellation(execution.id);
                         },
@@ -1231,6 +1237,7 @@ async function observeClaimedExecution(
 function executorTick(): void {
     if (
         !scheduledJobRuntimeState.executor ||
+        scheduledJobRuntimeState.isExecutorClaimingPaused ||
         scheduledJobRuntimeState.isExecutorTickRunning ||
         activeExecutionRuns.size >= executorCapacity
     ) {
@@ -1281,6 +1288,7 @@ export function startScheduledJobScheduler(): void {
 
 export function startScheduledJobExecutor(): void {
     if (scheduledJobRuntimeState.executor) return;
+    scheduledJobRuntimeState.isExecutorClaimingPaused = false;
     const timestamp = nowIso();
     const recoveredLegacyRuns = recoverOrphanedScheduledJobRuns(timestamp);
     if (recoveredLegacyRuns > 0) {
@@ -1349,4 +1357,5 @@ export async function stopScheduledJobExecutor(): Promise<void> {
     activeExecutionControllers.clear();
     activeExecutionRuns.clear();
     unregisterJobWorker(scheduledJobRuntimeState.workerId);
+    scheduledJobRuntimeState.isExecutorClaimingPaused = false;
 }
