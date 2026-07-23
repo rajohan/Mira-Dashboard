@@ -5185,6 +5185,39 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(await screen.findByText("Write useful tests")).toBeInTheDocument();
     });
 
+    it("keeps task cards inside scrollable columns at every breakpoint", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: createApi([
+                task({
+                    number: 1,
+                    title: "Stay inside the task column",
+                    labels: [{ name: "in-progress" }],
+                }),
+            ]),
+            writable: true,
+        });
+
+        const { container } = renderWithQueryClient(createElement(Tasks));
+
+        await screen.findByText("Stay inside the task column");
+        const taskColumn = container.querySelector('[data-column="in-progress"]');
+
+        expect(taskColumn).toHaveClass(
+            "max-h-100",
+            "overflow-y-auto",
+            "lg:max-h-none",
+            "lg:min-h-0",
+            "lg:overscroll-y-contain"
+        );
+        expect(taskColumn).not.toHaveClass("overscroll-contain");
+        expect(taskColumn?.parentElement).toHaveClass("lg:min-h-0");
+        expect(taskColumn?.parentElement?.parentElement).toHaveClass(
+            "min-h-0",
+            "lg:overflow-y-hidden"
+        );
+    });
+
     it("keeps progress update delete confirmation disabled while deletion is pending", async () => {
         const tasks = [
             task({
