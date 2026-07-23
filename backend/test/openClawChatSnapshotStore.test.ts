@@ -56,6 +56,63 @@ describe("OpenClaw chat snapshot store", () => {
         );
     });
 
+    it("retries transient WAL lock contention without closing the connection", () => {
+        const statements: string[] = [];
+        let attempts = 0;
+        let closeCalls = 0;
+        const busyError = Object.assign(new Error("database is locked"), {
+            code: "SQLITE_BUSY",
+        });
+        const retryingDatabase = {
+            close: () => {
+                closeCalls += 1;
+            },
+            query: (statement: string) => {
+                statements.push(statement);
+                return {
+                    get: () => {
+                        attempts += 1;
+                        if (attempts === 1) {
+                            throw busyError;
+                        }
+                        return {
+                            journal_mode:
+                                statement === "PRAGMA journal_mode" ? "delete" : "wal",
+                        };
+                    },
+                };
+            },
+        } as unknown as Database;
+
+        enableRequiredWalJournalMode(retryingDatabase, "retry.db");
+
+        expect(statements).toEqual([
+            "PRAGMA journal_mode",
+            "PRAGMA journal_mode",
+            "PRAGMA journal_mode = WAL",
+        ]);
+        expect(closeCalls).toBe(0);
+    });
+
+    it("does not request a journal-mode write when WAL is already active", () => {
+        const statements: string[] = [];
+        let closeCalls = 0;
+        const existingWalDatabase = {
+            close: () => {
+                closeCalls += 1;
+            },
+            query: (statement: string) => {
+                statements.push(statement);
+                return { get: () => ({ journal_mode: "wal" }) };
+            },
+        } as unknown as Database;
+
+        enableRequiredWalJournalMode(existingWalDatabase, "existing.db");
+
+        expect(statements).toEqual(["PRAGMA journal_mode"]);
+        expect(closeCalls).toBe(0);
+    });
+
     it("uses WAL and waits for a competing writer before updating a snapshot", async () => {
         const databasePath = process.env.MIRA_DASHBOARD_DB_PATH;
         if (!databasePath) throw new Error("Test database path is required");

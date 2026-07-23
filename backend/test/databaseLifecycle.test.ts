@@ -334,7 +334,7 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("runs a deploy preflight backup without applying pending migrations", async () => {
+    it("tests pending migrations on a deploy copy without mutating live data", async () => {
         const root = temporaryRoot("mira-db-preflight-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
@@ -367,10 +367,31 @@ describe("Dashboard SQLite lifecycle", () => {
 
         expect(exitCode).toBe(0);
         expect(stderr).toBe("");
-        expect(JSON.parse(stdout)).toMatchObject({
+        const preflightResult = JSON.parse(stdout) as {
+            backup: { kind: string; path: string; restoreVerified: boolean };
+            migrationTest: { applied: number[]; currentVersion: number };
+        };
+        expect(preflightResult).toMatchObject({
             backup: { kind: "pre-deploy", restoreVerified: true },
+            migrationTest: { applied: [1, 2, 3], currentVersion: 3 },
         });
         expect(getSqliteBackupInventory(databasePath).count).toBe(1);
+        const unchangedBackup = new Database(preflightResult.backup.path, {
+            readonly: true,
+        });
+        try {
+            expect(
+                unchangedBackup
+                    .query(
+                        `SELECT 1
+                         FROM sqlite_schema
+                         WHERE type = 'table' AND name = 'schema_migrations'`
+                    )
+                    .get()
+            ).toBeNull();
+        } finally {
+            unchangedBackup.close();
+        }
         const unchangedLegacyDatabase = new Database(databasePath, { readonly: true });
         try {
             expect(
@@ -426,6 +447,99 @@ describe("Dashboard SQLite lifecycle", () => {
         const now = new Date("2026-07-23T12:00:00.000Z");
         try {
             applyDatabaseMigrations(database, databasePath);
+            database
+                .prepare(
+                    `INSERT INTO tasks (
+                        title, body, status, priority, labels_json,
+                        automation_json, created_at, updated_at
+                     ) VALUES
+                       ('Done retention task', '', 'done', 'medium', '[]', '{}', ?, ?),
+                       ('Active retention task', '', 'in-progress', 'medium', '[]', '{}', ?, ?),
+                       ('Capped retention task', '', 'in-progress', 'medium', '[]', '{}', ?, ?)`
+                )
+                .run(
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    currentTimestamp,
+                    currentTimestamp,
+                    currentTimestamp
+                );
+            const taskIds = database
+                .query("SELECT id, title FROM tasks ORDER BY id")
+                .all() as Array<{ id: number; title: string }>;
+            const doneTaskId = taskIds.find(
+                (task) => task.title === "Done retention task"
+            )?.id;
+            const activeTaskId = taskIds.find(
+                (task) => task.title === "Active retention task"
+            )?.id;
+            const cappedTaskId = taskIds.find(
+                (task) => task.title === "Capped retention task"
+            )?.id;
+            if (!doneTaskId || !activeTaskId || !cappedTaskId) {
+                throw new Error("Retention task fixtures were not created");
+            }
+            database
+                .prepare(
+                    `INSERT INTO task_events (
+                        task_id, event_type, payload_json, created_at
+                     ) VALUES
+                       (?, 'done-old', '{}', ?),
+                       (?, 'done-current', '{}', ?),
+                       (?, 'active-old', '{}', ?)`
+                )
+                .run(
+                    doneTaskId,
+                    oldTimestamp,
+                    doneTaskId,
+                    currentTimestamp,
+                    activeTaskId,
+                    oldTimestamp
+                );
+            database
+                .prepare(
+                    `INSERT INTO task_updates (
+                        task_id, author, message_md, created_at
+                     ) VALUES
+                       (?, 'mira-2026', 'done-old', ?),
+                       (?, 'mira-2026', 'done-current', ?),
+                       (?, 'mira-2026', 'active-old', ?)`
+                )
+                .run(
+                    doneTaskId,
+                    oldTimestamp,
+                    doneTaskId,
+                    currentTimestamp,
+                    activeTaskId,
+                    oldTimestamp
+                );
+            database
+                .prepare(
+                    `WITH RECURSIVE sequence(value) AS (
+                         SELECT 1
+                         UNION ALL
+                         SELECT value + 1 FROM sequence WHERE value < 5001
+                     )
+                     INSERT INTO task_events (
+                         task_id, event_type, payload_json, created_at
+                     )
+                     SELECT ?, 'capped', '{}', ? FROM sequence`
+                )
+                .run(cappedTaskId, currentTimestamp);
+            database
+                .prepare(
+                    `WITH RECURSIVE sequence(value) AS (
+                         SELECT 1
+                         UNION ALL
+                         SELECT value + 1 FROM sequence WHERE value < 5001
+                     )
+                     INSERT INTO task_updates (
+                         task_id, author, message_md, created_at
+                     )
+                     SELECT ?, 'mira-2026', 'capped', ? FROM sequence`
+                )
+                .run(cappedTaskId, currentTimestamp);
             database
                 .prepare(
                     `INSERT INTO users (
@@ -535,6 +649,43 @@ describe("Dashboard SQLite lifecycle", () => {
                     currentTimestamp,
                     currentTimestamp
                 );
+            const reportIds = database
+                .query("SELECT id, title FROM reports ORDER BY id")
+                .all() as Array<{ id: number; title: string }>;
+            const oldReportId = reportIds.find((report) => report.title === "Old")?.id;
+            const currentReportId = reportIds.find(
+                (report) => report.title === "Current"
+            )?.id;
+            if (!oldReportId || !currentReportId) {
+                throw new Error("Retention report fixtures were not created");
+            }
+            database
+                .prepare(
+                    `INSERT INTO notifications (
+                        title, description, type, source, dedupe_key,
+                        metadata_json, is_read, created_at, updated_at, occurred_at
+                     ) VALUES
+                       ('Old report notification', '', 'info', 'reports',
+                        'retention-report-old', ?, 0, ?, ?, ?),
+                       ('Current report notification', '', 'info', 'reports',
+                        'retention-report-current', ?, 0, ?, ?, ?),
+                       ('Unrelated notification', '', 'info', 'reports',
+                        'retention-report-unrelated', '{"reportId":999999}',
+                        0, ?, ?, ?)`
+                )
+                .run(
+                    JSON.stringify({ reportId: oldReportId }),
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    JSON.stringify({ reportId: currentReportId }),
+                    currentTimestamp,
+                    currentTimestamp,
+                    currentTimestamp,
+                    currentTimestamp,
+                    currentTimestamp,
+                    currentTimestamp
+                );
             database
                 .prepare(
                     `INSERT INTO docker_update_events (
@@ -546,11 +697,11 @@ describe("Dashboard SQLite lifecycle", () => {
                 .prepare(
                     `INSERT INTO job_workers (
                         id, capacity, started_at, heartbeat_at
-                     ) VALUES
+                    ) VALUES
                        ('old-worker', 1, ?, ?),
                        ('current-worker', 1, ?, ?)`
                 )
-                .run(oldTimestamp, oldTimestamp, currentTimestamp, currentTimestamp);
+                .run(oldTimestamp, oldTimestamp, now.toISOString(), now.toISOString());
 
             const changes = pruneDatabaseHistory(database, now);
             expect(changes).toMatchObject({
@@ -562,6 +713,9 @@ describe("Dashboard SQLite lifecycle", () => {
                 jobWorkers: 1,
                 reports: 1,
                 scheduledJobRuns: 1,
+                tasks: 1,
+                taskEvents: 3,
+                taskUpdates: 3,
             });
             expect(
                 database.query("SELECT id FROM auth_sessions ORDER BY id").all()
@@ -572,6 +726,47 @@ describe("Dashboard SQLite lifecycle", () => {
             expect(database.query("SELECT task FROM agent_task_history").all()).toEqual([
                 { task: "Current" },
             ]);
+            expect(
+                database.query("SELECT title FROM notifications ORDER BY title").all()
+            ).toEqual([
+                { title: "Current report notification" },
+                { title: "Unrelated notification" },
+            ]);
+            expect(
+                database.query("SELECT title FROM tasks ORDER BY title").all()
+            ).toEqual([
+                { title: "Active retention task" },
+                { title: "Capped retention task" },
+            ]);
+            expect(
+                database
+                    .prepare(
+                        `SELECT event_type
+                         FROM task_events
+                         WHERE task_id IN (?, ?)
+                         ORDER BY event_type`
+                    )
+                    .all(doneTaskId, activeTaskId)
+            ).toEqual([{ event_type: "active-old" }]);
+            expect(
+                database
+                    .prepare(
+                        `SELECT message_md
+                         FROM task_updates
+                         WHERE task_id IN (?, ?)
+                         ORDER BY message_md`
+                    )
+                    .all(doneTaskId, activeTaskId)
+            ).toEqual([{ message_md: "active-old" }]);
+            expect(
+                database
+                    .prepare(
+                        `SELECT
+                             (SELECT COUNT(*) FROM task_events WHERE task_id = ?) AS events,
+                             (SELECT COUNT(*) FROM task_updates WHERE task_id = ?) AS updates`
+                    )
+                    .get(cappedTaskId, cappedTaskId)
+            ).toEqual({ events: 5000, updates: 5000 });
         } finally {
             database.close();
         }

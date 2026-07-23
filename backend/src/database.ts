@@ -13,6 +13,8 @@ import {
 type DatabaseSync = Database;
 
 const SQLITE_NULL = JSON.parse("null") as SQLQueryBindings;
+const SQLITE_BUSY_TIMEOUT_MS = 5000;
+const SQLITE_JOURNAL_MODE_RETRY_DELAY_MS = 25;
 
 /** Converts optional values to SQLite NULL-compatible bindings. */
 export function sqlNullable(value: SQLQueryBindings | undefined): SQLQueryBindings {
@@ -115,32 +117,60 @@ export function assertMiraDatabasePathSafeForEnvironment(databasePath: string): 
     assertTestDatabasePath(databasePath, configuredDatabasePath);
 }
 
+function sqliteJournalMode(
+    databaseConnection: DatabaseSync,
+    statement: "PRAGMA journal_mode" | "PRAGMA journal_mode = WAL"
+): string | undefined {
+    const row = databaseConnection.query(statement).get() as {
+        journal_mode?: unknown;
+    } | null;
+    return typeof row?.journal_mode === "string" ? row.journal_mode : undefined;
+}
+
+function isSqliteLockContention(error: unknown): boolean {
+    if (typeof error !== "object" || error === null) {
+        return false;
+    }
+    const code = Reflect.get(error, "code");
+    return (
+        typeof code === "string" &&
+        (code.startsWith("SQLITE_BUSY") || code.startsWith("SQLITE_LOCKED"))
+    );
+}
+
 export function enableRequiredWalJournalMode(
     databaseConnection: DatabaseSync,
     databasePath: string
 ): void {
-    let journalModeRow: { journal_mode?: unknown } | null;
-    try {
-        journalModeRow = databaseConnection.query("PRAGMA journal_mode = WAL").get() as {
-            journal_mode?: unknown;
-        } | null;
-    } catch (error) {
+    const retryDeadline = Date.now() + SQLITE_BUSY_TIMEOUT_MS;
+    while (true) {
         try {
-            databaseConnection.close();
-        } catch {
-            // Preserve the original SQLite error.
+            const currentJournalMode = sqliteJournalMode(
+                databaseConnection,
+                "PRAGMA journal_mode"
+            );
+            const journalMode =
+                currentJournalMode?.toLowerCase() === "wal"
+                    ? currentJournalMode
+                    : sqliteJournalMode(databaseConnection, "PRAGMA journal_mode = WAL");
+            if (journalMode?.toLowerCase() !== "wal") {
+                throw new Error(
+                    `SQLite WAL journal mode is required for ${databasePath}; got ${journalMode ?? "unknown"}`
+                );
+            }
+            return;
+        } catch (error) {
+            if (isSqliteLockContention(error) && Date.now() < retryDeadline) {
+                Bun.sleepSync(SQLITE_JOURNAL_MODE_RETRY_DELAY_MS);
+                continue;
+            }
+            try {
+                databaseConnection.close();
+            } catch {
+                // Preserve the original SQLite error.
+            }
+            throw error;
         }
-        throw error;
-    }
-    const journalMode =
-        typeof journalModeRow?.journal_mode === "string"
-            ? journalModeRow.journal_mode
-            : undefined;
-    if (journalMode?.toLowerCase() !== "wal") {
-        databaseConnection.close();
-        throw new Error(
-            `SQLite WAL journal mode is required for ${databasePath}; got ${journalMode ?? "unknown"}`
-        );
     }
 }
 

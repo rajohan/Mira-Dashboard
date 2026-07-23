@@ -47,15 +47,18 @@ checksum, and application timestamp.
 Startup behavior is fail-closed:
 
 1. validate every recorded version/name/checksum against the registry;
-2. create and restore-verify a `pre-migration` backup when adopting or changing
-   an existing application schema;
-3. acquire `BEGIN IMMEDIATE`, then revalidate after the write lock;
+2. acquire `BEGIN IMMEDIATE`, then revalidate after the write lock;
+3. while that lock excludes other writers, create and restore-verify a
+   `pre-migration` backup through a separate read-only connection when adopting
+   or changing an existing application schema;
 4. apply all pending migrations in one transaction;
 5. stop startup on unknown versions, gaps, checksum drift, or SQL failure.
 
 The second validation makes simultaneous web/worker startup safe: one process
 applies migrations while the other waits and then observes the completed
-history. Never edit a released migration. Add the next numbered file instead.
+history. The same writer lock spans the backup and migration, so the rollback
+snapshot cannot miss commits that are included in the migrated database. Never
+edit a released migration. Add the next numbered file instead.
 
 ## Tables
 
@@ -101,8 +104,10 @@ This builds the frontend and backend before invoking the backend
 `db:preflight`. Preflight requires the live database to be in WAL mode,
 validates its recorded migration prefix, creates a `pre-deploy` snapshot with
 `VACUUM INTO`, copies the snapshot to an isolated temporary restore directory,
-opens that copy read-only, and requires `PRAGMA quick_check = ok` plus valid
-migration history. Ordinary builds remain side-effect free.
+requires `PRAGMA quick_check = ok` plus valid migration history, then applies
+every pending migration to that disposable copy and validates it again. The
+retained `pre-deploy` snapshot and live database remain unchanged. Ordinary
+builds remain side-effect free.
 
 The enabled `database.maintenance` worker job runs daily at `02:40`. It creates
 and restore-verifies a `scheduled` backup before pruning bounded history, runs

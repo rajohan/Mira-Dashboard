@@ -212,11 +212,12 @@ History retention keeps:
 | Data                                        | Retention                            |
 | ------------------------------------------- | ------------------------------------ |
 | completed scheduled runs and job executions | 90 days and at most 20,000 rows each |
+| done tasks with events and progress updates  | deleted after 365 idle days; retained tasks keep at most 5,000 rows per history table |
 | non-active deployment jobs                  | 90 days and at most 500 rows         |
 | completed agent task history                | 90 days and at most 10,000 rows      |
-| reports                                     | 365 days and at most 5,000 rows      |
+| reports and their linked notifications      | 365 days and at most 5,000 reports   |
 | Docker update events                        | 180 days and at most 5,000 rows      |
-| stale worker heartbeats                     | 7 days                               |
+| stale worker heartbeats                     | 24 hours                             |
 | expired auth sessions                       | removed after expiry                 |
 
 Active, queued, and running execution/deployment rows are preserved. SQLite

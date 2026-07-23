@@ -2,9 +2,13 @@ import { Database } from "bun:sqlite";
 
 import {
     assertMiraDatabasePathSafeForEnvironment,
+    enableRequiredWalJournalMode,
     getMiraDatabasePath,
 } from "./database.ts";
-import { validateDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
+import {
+    migrateDisposableDatabaseCopy,
+    validateDatabaseMigrationHistory,
+} from "./databaseMigrationRunner.ts";
 import { secureSqliteFilePermissions } from "./databaseStorage.ts";
 import { createVerifiedSqliteBackup, pruneSqliteBackups } from "./sqliteBackup.ts";
 
@@ -34,15 +38,38 @@ export async function runDatabasePreflight() {
             );
         }
         validateDatabaseMigrationHistory(sourceDatabase);
+        let testedMigrationVersions: number[] = [];
+        let testedSchemaVersion = 0;
         const backup = createVerifiedSqliteBackup(
             sourceDatabase,
             databasePath,
             "pre-deploy",
-            { validateRestore: validateDatabaseMigrationHistory }
+            {
+                exerciseRestore: (restoredDatabase) => {
+                    restoredDatabase.run("PRAGMA foreign_keys = ON");
+                    restoredDatabase.run("PRAGMA busy_timeout = 5000");
+                    enableRequiredWalJournalMode(
+                        restoredDatabase,
+                        "disposable restore copy"
+                    );
+                    testedMigrationVersions =
+                        migrateDisposableDatabaseCopy(restoredDatabase).applied;
+                    testedSchemaVersion =
+                        validateDatabaseMigrationHistory(restoredDatabase);
+                },
+                validateRestore: validateDatabaseMigrationHistory,
+            }
         );
         const retention = pruneSqliteBackups(databasePath);
         secureSqliteFilePermissions(databasePath);
-        return { backup, retention };
+        return {
+            backup,
+            migrationTest: {
+                applied: testedMigrationVersions,
+                currentVersion: testedSchemaVersion,
+            },
+            retention,
+        };
     } finally {
         sourceDatabase.close();
     }

@@ -29,6 +29,9 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
         jobWorkers: 0,
         reports: 0,
         scheduledJobRuns: 0,
+        tasks: 0,
+        taskEvents: 0,
+        taskUpdates: 0,
     };
 
     databaseConnection.run("BEGIN IMMEDIATE");
@@ -36,6 +39,60 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
         changes.authSessions = databaseConnection
             .prepare("DELETE FROM auth_sessions WHERE expires_at <= ?")
             .run(now.toISOString()).changes;
+        const taskHistoryCutoff = retentionCutoff(now, 365);
+        changes.taskEvents = databaseConnection
+            .prepare(
+                `DELETE FROM task_events
+                 WHERE NOT EXISTS (
+                           SELECT 1 FROM tasks WHERE tasks.id = task_events.task_id
+                       )
+                    OR task_id IN (
+                        SELECT id
+                        FROM tasks
+                        WHERE status = 'done' AND updated_at < ?
+                    )
+                    OR id IN (
+                        SELECT id
+                        FROM (
+                            SELECT id,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY task_id
+                                       ORDER BY created_at DESC, id DESC
+                                   ) AS retention_rank
+                            FROM task_events
+                        )
+                        WHERE retention_rank > 5000
+                    )`
+            )
+            .run(taskHistoryCutoff).changes;
+        changes.taskUpdates = databaseConnection
+            .prepare(
+                `DELETE FROM task_updates
+                 WHERE NOT EXISTS (
+                           SELECT 1 FROM tasks WHERE tasks.id = task_updates.task_id
+                       )
+                    OR task_id IN (
+                        SELECT id
+                        FROM tasks
+                        WHERE status = 'done' AND updated_at < ?
+                    )
+                    OR id IN (
+                        SELECT id
+                        FROM (
+                            SELECT id,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY task_id
+                                       ORDER BY created_at DESC, id DESC
+                                   ) AS retention_rank
+                            FROM task_updates
+                        )
+                        WHERE retention_rank > 5000
+                    )`
+            )
+            .run(taskHistoryCutoff).changes;
+        changes.tasks = databaseConnection
+            .prepare("DELETE FROM tasks WHERE status = 'done' AND updated_at < ?")
+            .run(taskHistoryCutoff).changes;
         changes.jobExecutions = databaseConnection
             .prepare(
                 `DELETE FROM job_executions
@@ -105,6 +162,22 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
                    )`
             )
             .run(retentionCutoff(now, 90)).changes;
+        databaseConnection
+            .prepare(
+                `DELETE FROM notifications
+                 WHERE json_extract(metadata_json, '$.reportId') IN (
+                     SELECT id
+                     FROM reports
+                     WHERE occurred_at < ?
+                        OR id IN (
+                            SELECT id
+                            FROM reports
+                            ORDER BY occurred_at DESC, id DESC
+                            LIMIT -1 OFFSET 5000
+                        )
+                 )`
+            )
+            .run(retentionCutoff(now, 365));
         changes.reports = databaseConnection
             .prepare(
                 `DELETE FROM reports
@@ -131,7 +204,7 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
             .run(retentionCutoff(now, 180)).changes;
         changes.jobWorkers = databaseConnection
             .prepare("DELETE FROM job_workers WHERE heartbeat_at < ?")
-            .run(retentionCutoff(now, 7)).changes;
+            .run(retentionCutoff(now, 1)).changes;
         databaseConnection.run("COMMIT");
     } catch (error) {
         try {

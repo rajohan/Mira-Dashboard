@@ -1,4 +1,4 @@
-import { type Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 
 import {
     type DatabaseMigration,
@@ -123,30 +123,52 @@ function runMigrationSql(database: Database, sql: string): void {
     database.run(sql);
 }
 
-export function applyDatabaseMigrations(
+function createPreMigrationBackupWhileLocked(
     database: Database,
     databasePath: string
+): SqliteBackupResult | undefined {
+    if (!database.inTransaction) {
+        throw new Error("SQLite pre-migration backup requires the migration lock");
+    }
+    if (!hasAppSchema(database)) {
+        return undefined;
+    }
+
+    const hasExistingMigrationTable = hasMigrationTable(database);
+    const backupSource = new Database(databasePath, { readonly: true });
+    try {
+        backupSource.run("PRAGMA busy_timeout = 5000");
+        return createVerifiedSqliteBackup(backupSource, databasePath, "pre-migration", {
+            validateRestore: hasExistingMigrationTable
+                ? validateDatabaseMigrationHistory
+                : undefined,
+        });
+    } finally {
+        backupSource.close();
+    }
+}
+
+function applyPendingDatabaseMigrations(
+    database: Database,
+    createBackup?: () => SqliteBackupResult | undefined
 ): DatabaseMigrationResult {
     const appliedCountBeforeLock = validateDatabaseMigrationHistory(database);
     if (appliedCountBeforeLock === databaseMigrations.length) {
         return { applied: [] };
     }
 
-    let backup: SqliteBackupResult | undefined;
-    if (hasAppSchema(database)) {
-        const hasExistingMigrationTable = hasMigrationTable(database);
-        backup = createVerifiedSqliteBackup(database, databasePath, "pre-migration", {
-            validateRestore: hasExistingMigrationTable
-                ? validateDatabaseMigrationHistory
-                : undefined,
-        });
-    }
-
     const applied: number[] = [];
+    let backup: SqliteBackupResult | undefined;
     database.run("BEGIN IMMEDIATE");
     try {
-        database.run(MIGRATION_TABLE_SQL);
         const appliedCount = validateDatabaseMigrationHistory(database);
+        if (appliedCount === databaseMigrations.length) {
+            database.run("COMMIT");
+            return { applied };
+        }
+
+        backup = createBackup?.();
+        database.run(MIGRATION_TABLE_SQL);
         for (const migration of databaseMigrations.slice(appliedCount)) {
             runMigrationSql(database, migration.sql);
             database
@@ -172,8 +194,28 @@ export function applyDatabaseMigrations(
         throw error;
     }
 
-    if (backup) {
+    return { applied, backup };
+}
+
+export function applyDatabaseMigrations(
+    database: Database,
+    databasePath: string
+): DatabaseMigrationResult {
+    const result = applyPendingDatabaseMigrations(database, () =>
+        createPreMigrationBackupWhileLocked(database, databasePath)
+    );
+    if (result.backup) {
         pruneSqliteBackups(databasePath);
     }
-    return { applied, backup };
+    return result;
+}
+
+/**
+ * Applies pending migrations only to an isolated restore copy that will be
+ * discarded by the caller.
+ */
+export function migrateDisposableDatabaseCopy(
+    database: Database
+): DatabaseMigrationResult {
+    return applyPendingDatabaseMigrations(database);
 }

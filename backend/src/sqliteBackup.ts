@@ -82,7 +82,8 @@ function quickCheck(database: Database): void {
 function verifyRestoredCopy(
     backupPath: string,
     backupDirectory: string,
-    validate?: RestoreValidator
+    validate?: RestoreValidator,
+    exercise?: RestoreValidator
 ): void {
     const restoreDirectory = fs.mkdtempSync(
         path.join(backupDirectory, ".restore-check-"),
@@ -93,11 +94,19 @@ function verifyRestoredCopy(
     try {
         fs.copyFileSync(backupPath, restoredPath, fs.constants.COPYFILE_EXCL);
         fs.chmodSync(restoredPath, 0o600);
-        const restoredDatabase = new Database(restoredPath, { readonly: true });
+        const restoredDatabase = exercise
+            ? new Database(restoredPath)
+            : new Database(restoredPath, { readonly: true });
         try {
-            restoredDatabase.run("PRAGMA query_only = ON");
+            if (!exercise) {
+                restoredDatabase.run("PRAGMA query_only = ON");
+            }
             quickCheck(restoredDatabase);
             validate?.(restoredDatabase);
+            if (exercise) {
+                exercise(restoredDatabase);
+                quickCheck(restoredDatabase);
+            }
         } finally {
             restoredDatabase.close();
         }
@@ -112,6 +121,7 @@ export function createVerifiedSqliteBackup(
     kind: SqliteBackupKind,
     options: {
         createdAt?: Date;
+        exerciseRestore?: RestoreValidator;
         validateRestore?: RestoreValidator;
     } = {}
 ): SqliteBackupResult {
@@ -123,7 +133,12 @@ export function createVerifiedSqliteBackup(
     try {
         sourceDatabase.prepare("VACUUM INTO ?").run(targetPath);
         fs.chmodSync(targetPath, 0o600);
-        verifyRestoredCopy(targetPath, backupDirectory, options.validateRestore);
+        verifyRestoredCopy(
+            targetPath,
+            backupDirectory,
+            options.validateRestore,
+            options.exerciseRestore
+        );
         return {
             bytes: fs.statSync(targetPath).size,
             createdAt: createdAt.toISOString(),

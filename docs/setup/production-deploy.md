@@ -159,14 +159,17 @@ SQLite schema changes are numbered, immutable migrations recorded in
 1. requires the live database to be in WAL mode;
 2. rejects unknown migration versions, gaps, names, or checksum drift;
 3. creates a WAL-consistent `pre-deploy` backup with `VACUUM INTO`;
-4. copies that snapshot to an isolated restore location and requires
-   `PRAGMA quick_check = ok` plus valid migration history;
+4. copies that snapshot to an isolated restore location, requires
+   `PRAGMA quick_check = ok` plus valid migration history, and applies every
+   pending migration to the disposable copy;
 5. applies bounded backup retention.
 
 On restart, web and worker independently validate history. `BEGIN IMMEDIATE`
 serializes pending migrations and the second process revalidates after waiting
-for the first. An existing schema receives a separate restore-verified
-`pre-migration` backup before any migration SQL runs.
+for the first. The process holding that writer lock creates a separate
+restore-verified `pre-migration` backup through a read-only connection before
+running migration SQL, so no other writer can commit between the rollback
+snapshot and the migration.
 
 The first deployment that introduces this lifecycle cannot make the
 already-running old worker call the new preflight command. Its new startup path
