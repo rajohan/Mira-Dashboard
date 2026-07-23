@@ -102,6 +102,7 @@ describe("Dashboard SQLite lifecycle", () => {
                                'idx_agent_task_history_retention',
                                'idx_deployment_jobs_retention',
                                'idx_docker_update_events_retention',
+                               'idx_notifications_report_id',
                                'idx_reports_retention',
                                'idx_task_updates_task_created'
                            )
@@ -112,6 +113,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 { name: "idx_agent_task_history_retention" },
                 { name: "idx_deployment_jobs_retention" },
                 { name: "idx_docker_update_events_retention" },
+                { name: "idx_notifications_report_id" },
                 { name: "idx_reports_retention" },
                 { name: "idx_task_updates_task_created" },
             ]);
@@ -156,6 +158,17 @@ describe("Dashboard SQLite lifecycle", () => {
                     `USING COVERING INDEX ${index}`
                 );
             }
+            const notificationPlan = database
+                .query(
+                    `EXPLAIN QUERY PLAN
+                     SELECT id
+                     FROM notifications
+                     WHERE json_extract(metadata_json, '$.reportId') = 1`
+                )
+                .all() as Array<{ detail: string }>;
+            expect(notificationPlan.map((row) => row.detail).join("\n")).toContain(
+                "USING COVERING INDEX idx_notifications_report_id"
+            );
             expect(existsSync(sqliteBackupDirectory(databasePath))).toBe(false);
         } finally {
             database.close();
@@ -711,6 +724,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 dockerUpdateEvents: 1,
                 jobExecutions: 1,
                 jobWorkers: 1,
+                notifications: 1,
                 reports: 1,
                 scheduledJobRuns: 1,
                 tasks: 1,

@@ -27,6 +27,7 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
         dockerUpdateEvents: 0,
         jobExecutions: 0,
         jobWorkers: 0,
+        notifications: 0,
         reports: 0,
         scheduledJobRuns: 0,
         tasks: 0,
@@ -162,7 +163,7 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
                    )`
             )
             .run(retentionCutoff(now, 90)).changes;
-        databaseConnection
+        changes.notifications = databaseConnection
             .prepare(
                 `DELETE FROM notifications
                  WHERE json_extract(metadata_json, '$.reportId') IN (
@@ -177,7 +178,7 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
                         )
                  )`
             )
-            .run(retentionCutoff(now, 365));
+            .run(retentionCutoff(now, 365)).changes;
         changes.reports = databaseConnection
             .prepare(
                 `DELETE FROM reports

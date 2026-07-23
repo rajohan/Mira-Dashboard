@@ -29,6 +29,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_task_history_retention
 CREATE INDEX IF NOT EXISTS idx_reports_retention
     ON reports(occurred_at DESC, id DESC);
 
+CREATE INDEX IF NOT EXISTS idx_notifications_report_id
+    ON notifications(json_extract(metadata_json, '$.reportId'));
+
 CREATE INDEX IF NOT EXISTS idx_docker_update_events_retention
     ON docker_update_events(created_at DESC, id DESC);
 `,
