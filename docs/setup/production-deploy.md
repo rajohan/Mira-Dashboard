@@ -18,8 +18,16 @@ This is a single-host service:
 
 - frontend assets are built into `dist/`;
 - backend TypeScript is built into `backend/dist/`;
-- `mira-dashboard.service` runs `bun dist/serverStart.js` through Doppler;
+- `mira-dashboard.service` runs the HTTP/WebSocket process from
+  `bun dist/serverStart.js` through Doppler;
+- `mira-dashboard-worker.service` runs the persistent scheduler/executor from
+  `bun dist/workerStart.js` through Doppler;
 - SQLite state lives under `backend/data/` unless `MIRA_DASHBOARD_DB_PATH` is set.
+
+Both tracked units preserve the production environment contract by launching
+through Doppler project/config `rajohan/prd`. Auth and origin settings such as
+`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH` and `MIRA_DASHBOARD_ALLOWED_ORIGINS`
+remain owned by Doppler; do not duplicate their values in unit files.
 
 There is no container image for the Dashboard service today.
 
@@ -42,20 +50,47 @@ bun install --frozen-lockfile
 bun run build
 ```
 
-## Restart
+## Install Or Refresh Units
 
-Always tell Raymond before restarting OpenClaw Gateway. Dashboard restart is
-safe after a merged/deployed Dashboard change:
+After building, install the tracked resource-limited units:
+
+```bash
+cd /home/ubuntu/projects/mira-dashboard
+install -m 0644 systemd/mira-dashboard.service \
+  /home/ubuntu/.config/systemd/user/mira-dashboard.service
+install -m 0644 systemd/mira-dashboard-worker.service \
+  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
+systemctl --user daemon-reload
+```
+
+For the first split-process rollout, restart the web unit with its explicit
+`web` role before starting the worker. This avoids overlapping the legacy
+combined scheduler with the dedicated worker:
 
 ```bash
 systemctl --user restart mira-dashboard.service
+systemctl --user enable --now mira-dashboard-worker.service
+```
+
+## Restart
+
+Always tell Raymond before restarting OpenClaw Gateway. Dashboard restart is
+safe after a merged/deployed Dashboard change. A web-only restart does not
+interrupt queued/running actions. Before restarting the worker, verify the Jobs
+queue is idle or explicitly accept that its active action will be cancelled:
+
+```bash
+systemctl --user restart mira-dashboard.service
+systemctl --user restart mira-dashboard-worker.service
 systemctl --user status mira-dashboard.service --no-pager
+systemctl --user status mira-dashboard-worker.service --no-pager
 ```
 
 Logs:
 
 ```bash
 journalctl --user -u mira-dashboard.service -n 120 --no-pager
+journalctl --user -u mira-dashboard-worker.service -n 120 --no-pager
 ```
 
 ## Smoke Test
@@ -63,11 +98,13 @@ journalctl --user -u mira-dashboard.service -n 120 --no-pager
 ```bash
 curl http://127.0.0.1:3100/api/health
 curl http://127.0.0.1:3100/api/auth/bootstrap
+curl http://127.0.0.1:3100/api/job-executions
 ```
 
 For an authenticated browser session, also verify:
 
 - header/WebSocket status is connected;
+- Jobs shows the execution queue and the worker becomes idle after startup seeds;
 - Dashboard page cards load;
 - Reports page loads recent reports;
 - Notifications bell loads without global chat/tool errors.
@@ -85,8 +122,14 @@ bun run build
 cd backend
 bun run build
 systemctl --user restart mira-dashboard.service
+systemctl --user restart mira-dashboard-worker.service
 curl http://127.0.0.1:3100/api/health
 ```
+
+If the known-good target predates `workerStart.js`, stop and disable
+`mira-dashboard-worker.service` before starting that version and restore the
+legacy combined web unit. Do not repeatedly restart a worker unit whose target
+entrypoint does not exist.
 
 Do not use `git reset --hard` casually in normal work. It is a rollback
 procedure for production incidents after an explicit decision.
@@ -125,4 +168,6 @@ Important failures:
 - HTTP `503 Frontend Not Built`: build root frontend with `bun run build`.
 - `Unauthorized` on API routes: auth/session or cookie issue.
 - `database is locked`: another process is holding SQLite; retry after
-  background jobs settle, then inspect service logs.
+  background jobs settle, then inspect both service logs. Dashboard uses a
+  five-second SQLite busy timeout; WAL remains a separate storage-lifecycle
+  decision that must be paired with a tested backup/checkpoint plan.

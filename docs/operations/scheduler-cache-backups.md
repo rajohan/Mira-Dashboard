@@ -1,19 +1,23 @@
 # Scheduler, Cache, And Backups
 
-Dashboard starts background jobs from `backend/src/serverStart.ts` unless
-`MIRA_DASHBOARD_DISABLE_SCHEDULER=1` is set. Other values, such as `0`,
-`false`, or `true`, do not disable schedulers. The backend development script
-disables schedulers by default.
+Dashboard runs background jobs from `backend/src/workerStart.ts`. Production
+sets `MIRA_DASHBOARD_EXECUTION_ROLE=web` on the web unit and
+`MIRA_DASHBOARD_EXECUTION_ROLE=worker` on the worker unit. The backward-
+compatible default is `combined`; `MIRA_DASHBOARD_DISABLE_SCHEDULER=1` still
+disables the in-process worker during local development.
 
 ## Scheduled Jobs
 
 Dashboard-local scheduled jobs are stored in SQLite:
 
-| Table                | Purpose                                  |
-| -------------------- | ---------------------------------------- |
-| `scheduled_jobs`     | Job definitions.                         |
-| `scheduled_job_runs` | Run history, status, output, and errors. |
-| `openclaw_cron_job_metadata` | Dashboard-owned metadata for external OpenClaw cron jobs. |
+| Table                              | Purpose                                                   |
+| ---------------------------------- | --------------------------------------------------------- |
+| `scheduled_jobs`                   | Job definitions.                                          |
+| `scheduled_job_runs`               | Run history, status, output, and errors.                  |
+| `scheduled_job_execution_policies` | Resource class and timeout per job.                       |
+| `job_executions`                   | Persistent queue, lease, heartbeat, and cancellation.     |
+| `job_workers`                      | Worker capacity and liveness heartbeat.                   |
+| `openclaw_cron_job_metadata`       | Dashboard-owned metadata for external OpenClaw cron jobs. |
 
 Supported schedule shapes:
 
@@ -26,6 +30,22 @@ Operational defaults:
 - scheduler tick: 30 seconds;
 - minimum interval schedule: 60 seconds;
 - default run timeout: 5 minutes.
+- global worker concurrency: 1;
+- worker lease: 2 minutes, refreshed every second while an action runs;
+- startup cache seeds: persistent, single-concurrency queue with five-second stagger
+  plus bounded jitter.
+
+Queue statuses are `queued`, `running`, `success`, `failed`, and `cancelled`.
+An expired running lease is marked failed instead of automatically replayed;
+this avoids repeating backup, update, or other non-idempotent side effects after
+a worker crash.
+
+`GET /api/job-executions` exposes queue depth, oldest wait, resource classes,
+and worker liveness. `GET /api/job-executions/:id` includes the bounded
+persisted output snapshot used for stdout/stderr and incremental progress.
+HTTP waiters are observers only: disconnecting a request or restarting the web
+service never writes a cancellation request. Cancellation is explicit through
+`POST /api/job-executions/:id/cancel`.
 
 Use the Jobs page to inspect definitions and run history before editing the
 database manually.
@@ -48,7 +68,7 @@ There is deliberately no runtime migration or fallback for these fields.
 
 ## Built-In Startup Jobs
 
-When enabled, startup registers jobs for:
+When enabled, worker startup registers jobs for:
 
 - backup refresh/status;
 - cache refresh;
@@ -57,7 +77,23 @@ When enabled, startup registers jobs for:
 - log rotation;
 - quota notifications;
 - OpenClaw update notifications;
-- scheduled job runner.
+- persistent scheduled job executor.
+
+The same executor owns manual cache refresh, backups, log rotation, OpenClaw
+Gateway restart, tracked shell/exec, Docker mutations and container exec,
+Docker updater, GitHub pull-request mutations, and Dashboard deploy/build.
+These adapters are registered only in the worker process; the web process only
+validates, enqueues, and reads persisted state.
+
+Resource classes are `interactive`, `light`, `network`, `host-heavy`, and
+`exclusive`. The queue prioritizes interactive/light data ahead of maintenance
+work, while the initial global concurrency of one prevents classes from
+overlapping. Child commands launched by worker actions use transient systemd
+scopes with class-specific `Nice`, `CPUWeight`, `IOWeight`, `MemoryHigh`,
+`MemoryMax`, `TasksMax`, and maximum runtime limits. Each action scope is bound
+to `mira-dashboard-worker.service`; restarting only
+`mira-dashboard.service` leaves it running, while stopping/restarting the worker
+cooperatively aborts the active execution and terminates its scoped child cgroup.
 
 Do not assume a job is running just because the code exists. Check the Jobs page
 or `scheduled_jobs` table for enabled state and recent run history.
@@ -100,9 +136,9 @@ latest scheduled job run before debugging the frontend.
 
 Dashboard exposes two intentionally different aggregate cache endpoints:
 
-| Endpoint               | Consumer               | Payload contract                                                       |
-| ---------------------- | ---------------------- | ---------------------------------------------------------------------- |
-| `/api/cache/status`    | Dashboard UI polling   | Cache envelopes only; `data` is `null`.                                |
+| Endpoint               | Consumer               | Payload contract                                                                           |
+| ---------------------- | ---------------------- | ------------------------------------------------------------------------------------------ |
+| `/api/cache/status`    | Dashboard UI polling   | Cache envelopes only; `data` is `null`.                                                    |
 | `/api/cache/heartbeat` | OpenClaw ops heartbeat | `schemaVersion: 3` plus compact cache, task, OpenClaw cron, and Dashboard-job projections. |
 
 Both responses retain every cache envelope so consumers can assess freshness,
@@ -161,8 +197,9 @@ host backups. Relevant scripts in production include:
 /usr/local/bin/backup-push.sh
 ```
 
-Long-running backup jobs can run for hours. Do not restart Dashboard just
-because a backup action is active; first inspect the active job and host logs.
+Long-running backup jobs can run for hours. Restarting the web service does not
+interrupt them. Do not restart the worker while a backup is active unless the
+intent is to abort it; first inspect the execution row and host logs.
 
 ## Operational Checks
 

@@ -20,6 +20,16 @@ describe("server start scheduler policy", () => {
                 MIRA_DASHBOARD_DISABLE_SCHEDULER: "1",
             })
         ).toBe(false);
+        expect(
+            shouldStartScheduledJobs({
+                MIRA_DASHBOARD_EXECUTION_ROLE: "web",
+            })
+        ).toBe(false);
+        expect(
+            shouldStartScheduledJobs({
+                MIRA_DASHBOARD_EXECUTION_ROLE: "combined",
+            })
+        ).toBe(true);
     });
 
     it("resolves backend startup entrypoint and gateway token decisions without starting services", async () => {
@@ -57,6 +67,17 @@ describe("server start scheduler policy", () => {
         expect(shouldStartOnImport("1", false)).toBe(true);
         expect(shouldStartOnImport(undefined, true)).toBe(true);
         expect(shouldStartOnImport("0", false)).toBe(false);
+    });
+
+    it("resolves the dedicated worker entrypoint without starting it on import", async () => {
+        const { isDirectWorkerEntrypoint } = await import("../src/workerStart.ts");
+
+        expect(
+            isDirectWorkerEntrypoint("/tmp/workerStart.ts", "file:///tmp/workerStart.ts")
+        ).toBe(true);
+        expect(
+            isDirectWorkerEntrypoint("/tmp/serverStart.ts", "file:///tmp/workerStart.ts")
+        ).toBe(false);
     });
 
     it("starts listening-time services with a configured gateway token", async () => {

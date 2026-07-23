@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { database } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 import {
     type BunProcess,
@@ -8,6 +9,17 @@ import {
     pipeProcessOutput,
     spawnProcess,
 } from "../lib/processes.ts";
+import {
+    cancelJobExecution,
+    enqueueJobExecution,
+    getJobExecution,
+    type JobExecution,
+} from "./jobExecutionQueue.ts";
+import {
+    successfulJobExecutionOutput,
+    waitForJobExecution,
+} from "./queuedJobExecution.ts";
+import { registerScheduledJobAction, ScheduledJobActionError } from "./scheduledJobs.ts";
 
 const OPS_SHELL_COMMANDS = new Set([
     "__mira_dashboard_shell_smoke_test__",
@@ -49,22 +61,12 @@ export interface ExecJobResponse {
 }
 
 class ExecValidationError extends Error {
+    readonly statusCode = 400;
+
     constructor(message: string) {
         super(message);
         this.name = "ExecValidationError";
     }
-}
-
-interface ExecJob {
-    closePending?: boolean;
-    code: number | undefined;
-    endedAt: number | undefined;
-    id: string;
-    process?: BunProcess;
-    startedAt: number;
-    status: "running" | "signaled" | "done";
-    stderr: string;
-    stdout: string;
 }
 
 const MAX_COMMAND_LENGTH = 4096;
@@ -75,7 +77,8 @@ const MAX_JOBS = 100;
 const EXEC_ONCE_TIMEOUT_MS = 60_000;
 const ALLOWED_DIRECT_EXECUTABLES = new Set<string>(["bash"]);
 const BASH_LOGIN_COMMAND_ARGUMENTS = 2;
-const jobs = new Map<string, ExecJob>();
+const TRACKED_EXEC_TIMEOUT_MS = 7 * 60 * 60 * 1000;
+const STREAM_UPDATE_INTERVAL_MS = 250;
 
 function trimOutput(text: string): string {
     return text.length <= MAX_OUTPUT_CHARS ? text : text.slice(-MAX_OUTPUT_CHARS);
@@ -165,7 +168,7 @@ function validateExecRequest(payload: unknown, mode: ExecRequestMode): ExecReque
     if (cwd !== undefined && typeof cwd !== "string") {
         throw new ExecValidationError("cwd must be a string");
     }
-    return { args, command, cwd, shell };
+    return { args, command, cwd: resolveCwd(cwd), shell };
 }
 
 function resolveCwd(cwd: string | undefined): string {
@@ -222,12 +225,17 @@ export function execErrorResponse(error: unknown): { error: string; status: numb
 
 function runExecCommand(
     request: ExecRequest,
-    jobId: string,
-    onUpdate?: (update: Pick<ExecJob, "stderr" | "stdout">) => void,
-    timeoutMs?: number
+    onUpdate?: (update: Pick<ExecResponse, "stderr" | "stdout">) => void,
+    timeoutMs?: number,
+    signal?: AbortSignal
 ): Promise<ExecResponse> {
     const { args, command, cwd, shell } = request;
-    const cwdOption = { cwd: resolveCwd(cwd), detached: true, env: process.env };
+    const cwdOption = {
+        cwd: resolveCwd(cwd),
+        detached: true,
+        env: process.env,
+        signal,
+    };
     let childFactory: () => BunProcess;
     if (shell) {
         childFactory = () =>
@@ -244,27 +252,24 @@ function runExecCommand(
 
     return new Promise((resolve, reject) => {
         const child = childFactory();
-        const job = jobs.get(jobId);
-        if (job) job.process = child;
+        let stdout = "";
+        let stderr = "";
         const recordKillError = (signal: NodeJS.Signals, error: unknown) => {
             const message = errorMessage(error, `Failed to send ${signal}`);
             console.error("[Exec] Process group kill failed:", message);
-            const current = jobs.get(jobId);
-            if (current) {
-                current.stderr = trimOutput(`${current.stderr}\n${message}`.trim());
-            }
+            stderr = trimOutput(`${stderr}\n${message}`.trim());
+            onUpdate?.({ stderr, stdout });
         };
         let timeout: Timer | undefined;
         let forceKillTimeout: Timer | undefined;
         let didTimeout = false;
-        if (timeoutMs !== undefined) {
-            timeout = setTimeout(() => {
-                didTimeout = true;
-                try {
-                    killProcessGroup(child, "SIGTERM");
-                } catch (error) {
-                    recordKillError("SIGTERM", error);
-                }
+        const terminate = () => {
+            try {
+                killProcessGroup(child, "SIGTERM");
+            } catch (error) {
+                recordKillError("SIGTERM", error);
+            }
+            if (!forceKillTimeout) {
                 forceKillTimeout = setTimeout(() => {
                     try {
                         killProcessGroup(child, "SIGKILL");
@@ -273,12 +278,17 @@ function runExecCommand(
                     }
                 }, 3000);
                 forceKillTimeout.unref();
+            }
+        };
+        const abortFromSignal = () => terminate();
+        signal?.addEventListener("abort", abortFromSignal, { once: true });
+        if (timeoutMs !== undefined) {
+            timeout = setTimeout(() => {
+                didTimeout = true;
+                terminate();
             }, timeoutMs);
             timeout.unref();
         }
-
-        let stdout = "";
-        let stderr = "";
         const outputUpdate = () => onUpdate?.({ stderr, stdout });
         const stdoutDone = pipeProcessOutput(
             child.stdout as ReadableStream<Uint8Array> | undefined,
@@ -300,6 +310,7 @@ function runExecCommand(
             return code;
         })()
             .then((code) => {
+                signal?.removeEventListener("abort", abortFromSignal);
                 if (timeout) clearTimeout(timeout);
                 if (forceKillTimeout) clearTimeout(forceKillTimeout);
                 resolve({
@@ -309,6 +320,7 @@ function runExecCommand(
                 });
             })
             .catch((error: unknown) => {
+                signal?.removeEventListener("abort", abortFromSignal);
                 if (timeout) clearTimeout(timeout);
                 if (forceKillTimeout) clearTimeout(forceKillTimeout);
                 reject(error);
@@ -316,179 +328,198 @@ function runExecCommand(
     });
 }
 
-function cleanupJobs(): void {
-    if (jobs.size < MAX_JOBS) return;
-    const entries = jobs
-        .values()
-        .toArray()
-        .toSorted((a, b) => a.startedAt - b.startedAt);
-    let overflow = entries.length - (MAX_JOBS - 1);
-    for (const job of entries) {
-        if (overflow <= 0) break;
-        if (
-            job.closePending ||
-            ((job.status === "running" || job.status === "signaled") && job.process)
-        ) {
-            continue;
-        }
-        jobs.delete(job.id);
-        overflow -= 1;
+function outputString(output: Record<string, unknown>, key: string): string {
+    return typeof output[key] === "string" ? output[key] : "";
+}
+
+function outputNumber(output: Record<string, unknown>, key: string): number | undefined {
+    return typeof output[key] === "number" && Number.isFinite(output[key])
+        ? output[key]
+        : undefined;
+}
+
+function execResponseFromExecution(execution: JobExecution): ExecResponse {
+    const output = execution.output;
+    if (typeof output.stdout !== "string" || typeof output.stderr !== "string") {
+        successfulJobExecutionOutput(execution);
     }
-    if (overflow > 0) {
-        console.warn("[Exec] Job cleanup skipped active jobs while enforcing cap");
+    return {
+        code: outputNumber(output, "code"),
+        stderr: outputString(output, "stderr").slice(-10_000),
+        stdout: outputString(output, "stdout").slice(-10_000),
+    };
+}
+
+async function executeCommandInWorker(
+    payload: Record<string, unknown>,
+    mode: ExecRequestMode,
+    signal: AbortSignal | undefined,
+    updateOutput: (output: Record<string, unknown>) => void
+): Promise<Record<string, unknown>> {
+    const request = validateExecRequest(payload.request, mode);
+    const startedAt = Date.now();
+    let lastPublishedAt = 0;
+    let latestOutput = { stderr: "", stdout: "" };
+    const publish = (
+        update: Pick<ExecResponse, "stderr" | "stdout">,
+        isForced = false
+    ) => {
+        const timestamp = Date.now();
+        if (!isForced && timestamp - lastPublishedAt < STREAM_UPDATE_INTERVAL_MS) return;
+        lastPublishedAt = timestamp;
+        updateOutput({
+            endedAt: undefined,
+            startedAt,
+            status: "running",
+            stderr: update.stderr,
+            stdout: update.stdout,
+        });
+    };
+    publish(latestOutput, true);
+    let result: ExecResponse;
+    try {
+        result = await runExecCommand(
+            request,
+            (update) => {
+                latestOutput = update;
+                publish(update);
+            },
+            mode === "once" ? EXEC_ONCE_TIMEOUT_MS : undefined,
+            signal
+        );
+    } catch (error) {
+        const output = {
+            code: 1,
+            endedAt: Date.now(),
+            startedAt,
+            status: "done",
+            stderr: trimOutput(
+                `${latestOutput.stderr}\n${errorMessage(error, "Tracked command failed")}`.trim()
+            ),
+            stdout: latestOutput.stdout,
+        };
+        throw new ScheduledJobActionError("Tracked command failed", output);
     }
+    const output = {
+        code: result.code,
+        endedAt: Date.now(),
+        startedAt,
+        status: "done",
+        stderr: result.stderr,
+        stdout: result.stdout,
+    };
+    publish(result, true);
+    if (result.code !== 0) {
+        throw new ScheduledJobActionError("Tracked command exited non-zero", output);
+    }
+    return output;
 }
 
-function updateExecJobOutput(
-    jobId: string,
-    update: Pick<ExecJob, "stderr" | "stdout">
-): void {
-    const current = jobs.get(jobId);
-    if (!current) return;
-    current.stdout = update.stdout;
-    current.stderr = update.stderr;
-}
-
-function completeExecJob(jobId: string, result: ExecResponse): void {
-    const current = jobs.get(jobId);
-    if (!current) return;
-    current.status = "done";
-    if (!current.closePending) current.code = result.code;
-    current.stdout = result.stdout;
-    current.stderr = result.stderr;
-    current.endedAt = Date.now();
-    current.closePending = false;
-    current.process = undefined;
-    cleanupJobs();
-}
-
-function markExecJobForcedKilled(job: ExecJob): void {
-    job.closePending = true;
-    job.status = "done";
-    job.code = 137;
-    job.endedAt = Date.now();
-    cleanupJobs();
-}
-
-function failExecJob(jobId: string, error: unknown): void {
-    const current = jobs.get(jobId);
-    if (!current) return;
-    current.status = "done";
-    current.code = 1;
-    const message = error instanceof Error ? error.message : String(error);
-    current.stderr = trimOutput(`${current.stderr}\n${message}`.trim());
-    current.endedAt = Date.now();
-    current.closePending = false;
-    current.process = undefined;
-    cleanupJobs();
+export function registerExecExecutionActions(): void {
+    registerScheduledJobAction(
+        "exec.once",
+        (job, signal, context) =>
+            executeCommandInWorker(
+                job.actionPayload,
+                "once",
+                signal,
+                context.updateOutput
+            ),
+        { timeoutMs: EXEC_ONCE_TIMEOUT_MS }
+    );
+    registerScheduledJobAction(
+        "exec.tracked",
+        (job, signal, context) =>
+            executeCommandInWorker(
+                job.actionPayload,
+                "start",
+                signal,
+                context.updateOutput
+            ),
+        { timeoutMs: TRACKED_EXEC_TIMEOUT_MS }
+    );
 }
 
 export async function runExecOnce(payload: unknown): Promise<ExecResponse> {
     const request = validateExecRequest(payload, "once");
-    const result = await runExecCommand(
-        request,
-        Bun.randomUUIDv7(),
-        undefined,
-        EXEC_ONCE_TIMEOUT_MS
+    const execution = enqueueJobExecution({
+        actionKey: "exec.once",
+        displayName: "Tracked ops command",
+        payload: { request },
+        resourceClass: "exclusive",
+        timeoutMs: EXEC_ONCE_TIMEOUT_MS,
+    });
+    return execResponseFromExecution(
+        await waitForJobExecution(execution.id, {
+            timeoutMs: EXEC_ONCE_TIMEOUT_MS + 30 * 60 * 1000,
+        })
     );
-    return {
-        code: result.code,
-        stderr: result.stderr.slice(-10_000),
-        stdout: result.stdout.slice(-10_000),
-    };
+}
+
+function activeTrackedExecCount(): number {
+    const row = database
+        .prepare(
+            `SELECT COUNT(*) AS count
+             FROM job_executions
+             WHERE action_key = 'exec.tracked'
+               AND status IN ('queued', 'running')`
+        )
+        .get() as { count: number };
+    return row.count;
 }
 
 export function startExecJob(payload: unknown): ExecStartResponse {
-    const request = validateExecRequest(payload, "start");
-    cleanupJobs();
-    if (jobs.size >= MAX_JOBS) {
+    if (activeTrackedExecCount() >= MAX_JOBS) {
         throw Object.assign(new Error("Too many exec jobs"), { statusCode: 429 });
     }
-
-    const jobId = Bun.randomUUIDv7();
-    jobs.set(jobId, {
-        closePending: false,
-        code: undefined,
-        endedAt: undefined,
-        id: jobId,
-        startedAt: Date.now(),
-        status: "running",
-        stderr: "",
-        stdout: "",
+    const request = validateExecRequest(payload, "start");
+    const execution = enqueueJobExecution({
+        actionKey: "exec.tracked",
+        displayName: "Tracked shell job",
+        payload: { request },
+        resourceClass: "exclusive",
+        timeoutMs: TRACKED_EXEC_TIMEOUT_MS,
     });
+    return { jobId: execution.id };
+}
 
-    let runPromise: Promise<ExecResponse>;
-    try {
-        runPromise = runExecCommand(request, jobId, (update) =>
-            updateExecJobOutput(jobId, update)
-        );
-    } catch (error) {
-        jobs.delete(jobId);
-        throw error;
+function trackedExecExecution(jobId: string): JobExecution {
+    const execution = getJobExecution(jobId);
+    if (!execution || execution.actionKey !== "exec.tracked") {
+        throw Object.assign(new Error("Exec job not found"), { statusCode: 404 });
     }
-
-    void (async () => {
-        try {
-            completeExecJob(jobId, await runPromise);
-        } catch (error) {
-            failExecJob(jobId, error);
-        }
-    })();
-
-    return { jobId };
+    return execution;
 }
 
 export function stopExecJob(jobId: string): { isSuccess: boolean; message: string } {
-    const job = jobs.get(jobId);
-    if (!job) {
-        throw Object.assign(new Error("Exec job not found"), { statusCode: 404 });
-    }
-    if (job.status !== "running") {
+    const execution = trackedExecExecution(jobId);
+    if (execution.status !== "queued" && execution.status !== "running") {
         throw Object.assign(new Error("Job is not running"), { statusCode: 400 });
     }
-
-    if (!job.process) {
-        throw Object.assign(new Error("Process not available"), { statusCode: 400 });
-    }
-
-    try {
-        killProcessGroup(job.process, "SIGTERM");
-    } catch (error) {
-        throw Object.assign(
-            new Error(errorMessage(error, "Failed to stop exec job process")),
-            { statusCode: 409 }
-        );
-    }
-    job.status = "signaled";
-
-    const forceKillTimer = setTimeout(() => {
-        if (!job.process || job.status !== "signaled") return;
-        try {
-            killProcessGroup(job.process, "SIGKILL");
-            markExecJobForcedKilled(job);
-        } catch (error) {
-            const message = errorMessage(error, "Failed to force kill exec job");
-            console.error("[Exec] Force kill failed:", message);
-            job.stderr = trimOutput(`${job.stderr}\n${message}`.trim());
-        }
-    }, 3000);
-    forceKillTimer.unref();
-
+    cancelJobExecution(jobId);
     return { isSuccess: true, message: "Stop signal sent" };
 }
 
 export function getExecJob(jobId: string): ExecJobResponse {
-    const job = jobs.get(jobId);
-    if (!job) {
-        throw Object.assign(new Error("Exec job not found"), { statusCode: 404 });
-    }
+    const execution = trackedExecExecution(jobId);
+    const output = execution.output;
+    const isTerminal = ["success", "failed", "cancelled"].includes(execution.status);
     return {
-        code: job.code,
-        endedAt: job.endedAt,
-        jobId: job.id,
-        startedAt: job.startedAt,
-        status: job.status,
-        stderr: job.stderr,
-        stdout: job.stdout,
+        code: outputNumber(output, "code"),
+        endedAt: isTerminal
+            ? (outputNumber(output, "endedAt") ??
+              (execution.finishedAt ? Date.parse(execution.finishedAt) : undefined))
+            : undefined,
+        jobId: execution.id,
+        startedAt:
+            outputNumber(output, "startedAt") ??
+            Date.parse(execution.startedAt ?? execution.queuedAt),
+        status: isTerminal
+            ? "done"
+            : execution.cancelRequestedAt
+              ? "signaled"
+              : "running",
+        stderr: outputString(output, "stderr"),
+        stdout: outputString(output, "stdout"),
     };
 }

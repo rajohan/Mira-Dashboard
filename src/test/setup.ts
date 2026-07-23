@@ -1,10 +1,12 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import * as matchers from "@testing-library/jest-dom/matchers";
 import { afterEach, expect, jest } from "bun:test";
 
-expect.extend(matchers);
-
 GlobalRegistrator.register();
+
+// jest-dom v7 eagerly imports Testing Library's document-bound helpers.
+// Register Happy DOM before loading the matchers so `screen` binds to this document.
+const matcherModule = await import("@testing-library/jest-dom/matchers");
+expect.extend(matcherModule as Omit<typeof matcherModule, "default">);
 
 Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
     configurable: true,

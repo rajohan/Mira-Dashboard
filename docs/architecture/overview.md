@@ -11,16 +11,18 @@ Browser
   |
   | HTTP + /ws
   v
-Bun backend on :3100
+Mira Dashboard web on :3100
   |-- static frontend from dist/
   |-- /api/* route table
   |-- authenticated Dashboard WebSocket
-  |-- SQLite via bun:sqlite
-  |-- background scheduled jobs
-  |
-  | OpenClaw Gateway WebSocket
-  v
-OpenClaw Gateway on :18789
+  |-- OpenClaw Gateway WebSocket --> OpenClaw Gateway on :18789
+  `-- SQLite via bun:sqlite <------------------.
+                                               |
+Mira Dashboard worker                         |
+  |-- scheduler                               |
+  |-- bounded action executor                 |
+  |-- resource-scoped child processes         |
+  `-- persistent execution queue (SQLite) ----'
 ```
 
 ## Frontend
@@ -73,7 +75,8 @@ Key files:
 | `backend/src/http.ts`          | JSON helpers, cookies, origin/proxy/IP helpers.                   |
 | `backend/src/gateway.ts`       | OpenClaw Gateway client lifecycle and Dashboard WebSocket fanout. |
 | `backend/src/database.ts`      | SQLite path, schema, PRAGMAs, database proxy.                     |
-| `backend/src/serverStart.ts`   | Production startup and background scheduler registration.         |
+| `backend/src/serverStart.ts`   | HTTP/WebSocket production startup (or combined fallback role).    |
+| `backend/src/workerStart.ts`   | Dedicated scheduler/executor production startup.                  |
 
 ## Authentication
 
@@ -115,8 +118,14 @@ token recovery, browser WebSocket behavior, and chat event handling.
 
 ## Background Jobs
 
-When `MIRA_DASHBOARD_DISABLE_SCHEDULER` is not set for development/testing,
-startup registers jobs for:
+The dedicated worker registers scheduled jobs and every long-running or
+mutating execution-plane adapter. The web process validates requests, enqueues
+work in SQLite, and observes persisted result/progress snapshots when an API
+must retain a synchronous response shape. Restarting the web process therefore
+does not terminate worker-owned deploy, exec, Docker, backup, cache refresh,
+log rotation, GitHub, or OpenClaw restart actions.
+
+Worker startup registers scheduled jobs for:
 
 - backups;
 - cache refresh;
@@ -126,8 +135,10 @@ startup registers jobs for:
 - OpenClaw update notifications;
 - scheduled job runner.
 
-Local development disables scheduler by default through the backend `dev`
-script.
+Production uses `MIRA_DASHBOARD_EXECUTION_ROLE=web` and `worker` in separate
+systemd services. The default `combined` role exists for compatibility and
+tests; local backend development disables it through
+`MIRA_DASHBOARD_DISABLE_SCHEDULER=1`.
 
 See [Scheduler, cache, and backups](../operations/scheduler-cache-backups.md)
 for job tables, cache entries, backup scripts, and inspection commands.

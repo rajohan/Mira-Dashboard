@@ -88,14 +88,28 @@ describe("Bun-native dashboard backend", () => {
         );
         const serverScript = path.join(state.temporaryRoot, "native-server.ts");
         const serverModulePath = path.resolve(import.meta.dirname, "../src/server.ts");
+        const dockerActionsModulePath = path.resolve(
+            import.meta.dirname,
+            "../src/services/dockerActions.ts"
+        );
+        const scheduledJobsModulePath = path.resolve(
+            import.meta.dirname,
+            "../src/services/scheduledJobs.ts"
+        );
         const serverModuleUrl = pathToFileURL(serverModulePath).href;
+        const dockerActionsModuleUrl = pathToFileURL(dockerActionsModulePath).href;
+        const scheduledJobsModuleUrl = pathToFileURL(scheduledJobsModulePath).href;
         await fs.writeFile(
             serverScript,
             [
                 `import { createServer } from ${JSON.stringify(serverModuleUrl)};`,
+                `import { registerDockerExecutionActions } from ${JSON.stringify(dockerActionsModuleUrl)};`,
+                `import { startScheduledJobExecutor, stopScheduledJobExecutor } from ${JSON.stringify(scheduledJobsModuleUrl)};`,
+                "registerDockerExecutionActions();",
+                "startScheduledJobExecutor();",
                 "const server = createServer(0);",
                 "console.log(JSON.stringify({ port: server.port }));",
-                "process.on('SIGTERM', () => { server.stop(true).then(() => process.exit(0)); });",
+                "process.on('SIGTERM', () => { Promise.all([server.stop(true), stopScheduledJobExecutor()]).then(() => process.exit(0)); });",
             ].join("\n")
         );
 

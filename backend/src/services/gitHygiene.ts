@@ -415,6 +415,7 @@ export function registerGitHygieneScheduledJobs(): void {
         timeOfDay: "05:20",
         actionKey: "git.openclaw.workspace-sync",
         actionPayload: {},
+        resourceClass: "host-heavy",
     } as const;
     registerScheduledJobAction(
         "git.openclaw.workspace-sync",

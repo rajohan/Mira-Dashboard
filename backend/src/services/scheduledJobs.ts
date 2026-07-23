@@ -1,6 +1,25 @@
 import { database, sqlNullable } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
+import {
+    isJobResourceClass,
+    type JobResourceClass,
+    withJobResourceClass,
+} from "../lib/jobResources.ts";
 import { type JobDisableIntent, parseJobDisableIntent } from "./jobDisableIntent.ts";
+import {
+    claimNextJobExecution,
+    didHeartbeatJobWorker,
+    finishJobExecution,
+    getJobExecution,
+    heartbeatJobExecution,
+    insertJobExecution,
+    type JobExecution,
+    recoverExpiredJobExecutions,
+    registerJobWorker,
+    unregisterJobWorker,
+    updateJobExecutionOutput,
+} from "./jobExecutionQueue.ts";
+import { waitForJobExecution } from "./queuedJobExecution.ts";
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -10,26 +29,45 @@ const schedulerTickMs = 30_000;
 const defaultScheduledJobRunTimeoutMs = 5 * 60 * 1000;
 const minimumIntervalSeconds = 60;
 const latestRunsJobIdChunkSize = 900;
-const runningJobs = new Set<string>();
-const scheduledJobRuns = new Set<Promise<void>>();
+const executorTickMs = 1000;
+const executorHeartbeatMs = 1000;
+const executorCapacity = 1;
 const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
-const abortHandlerSettled = new WeakMap<ScheduledJobAbortError, Promise<unknown>>();
+const interruptedHandlerSettled = new WeakMap<
+    ScheduledJobInterruptionError,
+    Promise<unknown>
+>();
+const activeExecutionControllers = new Map<string, AbortController>();
+const activeExecutionRuns = new Map<string, Promise<void>>();
 
 const scheduledJobRuntimeState: {
     scheduler: NodeJS.Timeout | undefined;
+    executor: NodeJS.Timeout | undefined;
+    workerHeartbeat: NodeJS.Timeout | undefined;
     isSchedulerTickRunning: boolean;
+    isExecutorTickRunning: boolean;
+    workerId: string;
 } = {
     scheduler: undefined,
+    executor: undefined,
+    workerHeartbeat: undefined,
     isSchedulerTickRunning: false,
+    isExecutorTickRunning: false,
+    workerId: `dashboard-worker:${process.pid}:${Bun.randomUUIDv7()}`,
 };
-const scheduledJobRunTimeoutMs = defaultScheduledJobRunTimeoutMs;
 
 export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
-export type ScheduledJobRunStatus = "running" | "success" | "failed";
-export type ScheduledJobTriggerType = "manual" | "schedule";
+export type ScheduledJobRunStatus =
+    "queued" | "running" | "success" | "failed" | "cancelled";
+export type ScheduledJobTriggerType = "manual" | "schedule" | "startup";
+export interface ScheduledJobActionContext {
+    executionId: string;
+    updateOutput: (output: Record<string, unknown>) => void;
+}
 export type ScheduledJobActionHandler = (
     job: ScheduledJob,
-    signal?: AbortSignal
+    signal: AbortSignal | undefined,
+    context: ScheduledJobActionContext
 ) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
 
 export interface ScheduledJobActionOptions {
@@ -52,14 +90,14 @@ export class ScheduledJobActionError extends Error {
     }
 }
 
-class ScheduledJobAbortError extends Error {
-    constructor(handlerSettled: Promise<unknown>) {
-        super("Scheduled job aborted");
-        abortHandlerSettled.set(this, handlerSettled);
+class ScheduledJobInterruptionError extends Error {
+    constructor(message: string, handlerSettled: Promise<unknown>) {
+        super(message);
+        interruptedHandlerSettled.set(this, handlerSettled);
     }
 
     getHandlerSettled(): Promise<unknown> {
-        return abortHandlerSettled.get(this)!;
+        return interruptedHandlerSettled.get(this)!;
     }
 }
 
@@ -79,6 +117,9 @@ export interface ScheduledJob {
     createdAt: string;
     updatedAt: string;
     lastRun: ScheduledJobRun | undefined;
+    resourceClass: JobResourceClass;
+    timeoutMs: number;
+    isQueued: boolean;
     isRunning: boolean;
 }
 
@@ -91,6 +132,11 @@ export interface ScheduledJobRun {
     finishedAt: string | undefined;
     message: string | undefined;
     output: Record<string, unknown>;
+    executionId: string | undefined;
+    queuedAt: string;
+    resourceClass: JobResourceClass;
+    cancelRequestedAt: string | undefined;
+    cancellable: boolean;
 }
 
 export interface ScheduledJobDefinition {
@@ -104,6 +150,8 @@ export interface ScheduledJobDefinition {
     cronExpression?: string | undefined;
     actionKey: string;
     actionPayload?: Record<string, unknown>;
+    resourceClass?: JobResourceClass;
+    timeoutMs?: number;
 }
 
 export interface ScheduledJobPatch {
@@ -131,6 +179,8 @@ interface ScheduledJobRow {
     next_run_at: string | null | undefined;
     created_at: string;
     updated_at: string;
+    resource_class?: string | null;
+    timeout_ms?: number | null;
 }
 
 interface ScheduledJobRunRow {
@@ -142,6 +192,11 @@ interface ScheduledJobRunRow {
     finished_at: string | null | undefined;
     message: string | null | undefined;
     output_json: string;
+    execution_id?: string | null;
+    execution_queued_at?: string | null;
+    execution_resource_class?: string | null;
+    execution_cancel_requested_at?: string | null;
+    execution_cancellable?: number | null;
 }
 
 export class ScheduledJobValidationError extends Error {
@@ -423,6 +478,9 @@ function mapRun(row: ScheduledJobRunRow | undefined): ScheduledJobRun | undefine
     if (!row) {
         return undefined;
     }
+    const resourceClass = isJobResourceClass(row.execution_resource_class)
+        ? row.execution_resource_class
+        : "light";
     return {
         id: row.id,
         jobId: row.job_id,
@@ -432,6 +490,11 @@ function mapRun(row: ScheduledJobRunRow | undefined): ScheduledJobRun | undefine
         finishedAt: fromSqlNullable(row.finished_at),
         message: fromSqlNullable(row.message),
         output: parseJsonObject(row.output_json),
+        executionId: fromSqlNullable(row.execution_id),
+        queuedAt: fromSqlNullable(row.execution_queued_at) ?? row.started_at,
+        resourceClass,
+        cancelRequestedAt: fromSqlNullable(row.execution_cancel_requested_at),
+        cancellable: row.execution_cancellable !== 0,
     };
 }
 
@@ -463,11 +526,18 @@ function latestRunsByJobId(jobIds: string[]): Map<string, ScheduledJobRun> {
                  FROM (
                      SELECT
                          run.*,
+                         execution.id AS execution_id,
+                         execution.queued_at AS execution_queued_at,
+                         execution.resource_class AS execution_resource_class,
+                         execution.cancel_requested_at AS execution_cancel_requested_at,
+                         execution.cancellable AS execution_cancellable,
                          ROW_NUMBER() OVER (
                              PARTITION BY run.job_id
                              ORDER BY run.started_at DESC, run.id DESC
                          ) AS row_number
                      FROM scheduled_job_runs run
+                     LEFT JOIN job_executions execution
+                       ON execution.scheduled_run_id = run.id
                      WHERE run.job_id IN (${placeholders})
                  )
                  WHERE row_number = 1
@@ -501,7 +571,15 @@ function mapJob(
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         lastRun: latestRuns.get(row.id) ?? undefined,
-        isRunning: runningJobs.has(row.id),
+        resourceClass: isJobResourceClass(row.resource_class)
+            ? row.resource_class
+            : "light",
+        timeoutMs:
+            typeof row.timeout_ms === "number" && row.timeout_ms > 0
+                ? row.timeout_ms
+                : defaultScheduledJobRunTimeoutMs,
+        isQueued: latestRuns.get(row.id)?.status === "queued",
+        isRunning: latestRuns.get(row.id)?.status === "running",
     };
 }
 
@@ -566,6 +644,12 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
               new Date(timestamp)
           )
         : existing.nextRunAt;
+    const resourceClass = definition.resourceClass ?? "light";
+    const timeoutMs =
+        definition.timeoutMs ??
+        actionHandlers.get(definition.actionKey)?.timeoutMs ??
+        defaultScheduledJobRunTimeoutMs;
+    assertValidActionTimeoutMs(timeoutMs);
     database
         .prepare(
             `INSERT INTO scheduled_jobs (
@@ -600,20 +684,42 @@ export function upsertScheduledJob(definition: ScheduledJobDefinition): Schedule
             existing?.createdAt ?? timestamp,
             timestamp
         );
+    database
+        .prepare(
+            `INSERT INTO scheduled_job_execution_policies (
+                job_id, resource_class, timeout_ms, updated_at
+             ) VALUES (?, ?, ?, ?)
+             ON CONFLICT(job_id) DO UPDATE SET
+                 resource_class = excluded.resource_class,
+                 timeout_ms = excluded.timeout_ms,
+                 updated_at = excluded.updated_at`
+        )
+        .run(definition.id, resourceClass, timeoutMs, timestamp);
     return getScheduledJob(definition.id) as ScheduledJob;
 }
 
 export function listScheduledJobs(): ScheduledJob[] {
     const rows = database
-        .prepare("SELECT * FROM scheduled_jobs ORDER BY name COLLATE NOCASE, id")
+        .prepare(
+            `SELECT job.*, policy.resource_class, policy.timeout_ms
+             FROM scheduled_jobs job
+             LEFT JOIN scheduled_job_execution_policies policy ON policy.job_id = job.id
+             ORDER BY job.name COLLATE NOCASE, job.id`
+        )
         .all() as unknown as ScheduledJobRow[];
     const latestRuns = latestRunsByJobId(rows.map((row) => row.id));
     return rows.map((row) => mapJob(row, latestRuns));
 }
 
 export function getScheduledJob(id: string): ScheduledJob | undefined {
-    const row = database.prepare("SELECT * FROM scheduled_jobs WHERE id = ?").get(id) as
-        ScheduledJobRow | undefined;
+    const row = database
+        .prepare(
+            `SELECT job.*, policy.resource_class, policy.timeout_ms
+             FROM scheduled_jobs job
+             LEFT JOIN scheduled_job_execution_policies policy ON policy.job_id = job.id
+             WHERE job.id = ?`
+        )
+        .get(id) as ScheduledJobRow | undefined;
     return row ? mapJob(row) : undefined;
 }
 
@@ -624,10 +730,17 @@ export function listScheduledJobRuns(id: string, limit = 20): ScheduledJobRun[] 
     return (
         database
             .prepare(
-                `SELECT *
-                 FROM scheduled_job_runs
-                 WHERE job_id = ?
-                 ORDER BY started_at DESC, id DESC
+                `SELECT run.*,
+                        execution.id AS execution_id,
+                        execution.queued_at AS execution_queued_at,
+                        execution.resource_class AS execution_resource_class,
+                        execution.cancel_requested_at AS execution_cancel_requested_at,
+                        execution.cancellable AS execution_cancellable
+                 FROM scheduled_job_runs run
+                 LEFT JOIN job_executions execution
+                   ON execution.scheduled_run_id = run.id
+                 WHERE run.job_id = ?
+                 ORDER BY run.started_at DESC, run.id DESC
                  LIMIT ?`
             )
             .all(id, normalizedLimit) as unknown as ScheduledJobRunRow[]
@@ -724,167 +837,109 @@ export function updateScheduledJob(
     return getScheduledJob(id);
 }
 
-function createRun(jobId: string, triggerType: ScheduledJobTriggerType): ScheduledJobRun {
-    const startedAt = nowIso();
+interface EnqueueScheduledJobOptions {
+    availableAt?: string;
+}
+
+function scheduledRunById(id: number): ScheduledJobRun | undefined {
+    const row = database
+        .prepare(
+            `SELECT run.*,
+                    execution.id AS execution_id,
+                    execution.queued_at AS execution_queued_at,
+                    execution.resource_class AS execution_resource_class,
+                    execution.cancel_requested_at AS execution_cancel_requested_at,
+                    execution.cancellable AS execution_cancellable
+             FROM scheduled_job_runs run
+             LEFT JOIN job_executions execution ON execution.scheduled_run_id = run.id
+             WHERE run.id = ?`
+        )
+        .get(id) as ScheduledJobRunRow | undefined;
+    return mapRun(row);
+}
+
+function insertScheduledRun(
+    jobId: string,
+    triggerType: ScheduledJobTriggerType,
+    status: "queued" | "running",
+    timestamp: string
+): number {
     const result = database
         .prepare(
             `INSERT INTO scheduled_job_runs (
                 job_id, status, trigger_type, started_at, output_json
-            ) VALUES (?, 'running', ?, ?, '{}')`
+            ) VALUES (?, ?, ?, ?, '{}')`
         )
-        .run(jobId, triggerType, startedAt);
-    return {
-        id: Number(result.lastInsertRowid),
-        jobId,
-        status: "running",
-        triggerType,
-        startedAt,
-        finishedAt: undefined,
-        message: undefined,
-        output: {},
-    };
+        .run(jobId, status, triggerType, timestamp);
+    return Number(result.lastInsertRowid);
 }
 
-function finishRun(
-    run: ScheduledJobRun,
-    status: Exclude<ScheduledJobRunStatus, "running">,
-    message: string | undefined,
-    output: Record<string, unknown>
+function isActiveExecutionConflict(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+        message.includes("UNIQUE constraint failed: job_executions.scheduled_job_id") ||
+        message.includes("idx_job_executions_active_scheduled_job")
+    );
+}
+
+function jobStatusError(message: string, statusCode: number): Error {
+    return Object.assign(new Error(message), { statusCode });
+}
+
+export function enqueueScheduledJob(
+    id: string,
+    triggerType: ScheduledJobTriggerType = "manual",
+    options: EnqueueScheduledJobOptions = {}
 ): ScheduledJobRun {
-    const finishedAt = nowIso();
-    database
-        .prepare(
-            `UPDATE scheduled_job_runs
-         SET status = ?, finished_at = ?, message = ?, output_json = ?
-         WHERE id = ?`
-        )
-        .run(status, finishedAt, sqlNullable(message), JSON.stringify(output), run.id);
-    return { ...run, status, finishedAt, message, output };
-}
-
-function claimScheduledRun(job: ScheduledJob): ScheduledJobRun | undefined {
-    const currentJob = getScheduledJob(job.id);
-    const dueAt = nowIso();
-    if (!currentJob?.enabled || !currentJob.nextRunAt || currentJob.nextRunAt > dueAt) {
-        return undefined;
+    const job = getScheduledJob(id);
+    if (!job) throw jobStatusError("Scheduled job not found", 404);
+    if (triggerType === "startup" && !job.enabled) {
+        throw jobStatusError("Scheduled job is disabled", 409);
     }
-    const nextRunAt = calculateNextRunAt(currentJob);
-    const startedAt = nowIso();
+
+    const queuedAt = nowIso();
+    database.run("BEGIN IMMEDIATE");
     try {
-        database.run("BEGIN IMMEDIATE");
-        const updateResult = database
-            .prepare(
-                `UPDATE scheduled_jobs
-                 SET next_run_at = ?, updated_at = ?
-                 WHERE id = ? AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?`
-            )
-            .run(sqlNullable(nextRunAt), startedAt, currentJob.id, dueAt);
-        if (updateResult.changes === 0) {
-            database.run("ROLLBACK");
-            return undefined;
+        if (triggerType === "schedule") {
+            const nextRunAt = calculateNextRunAt(job, new Date(queuedAt));
+            const update = database
+                .prepare(
+                    `UPDATE scheduled_jobs
+                     SET next_run_at = ?, updated_at = ?
+                     WHERE id = ? AND enabled = 1
+                       AND next_run_at IS NOT NULL AND next_run_at <= ?`
+                )
+                .run(sqlNullable(nextRunAt), queuedAt, job.id, queuedAt);
+            if (update.changes === 0) {
+                throw jobStatusError("Scheduled job is no longer due", 409);
+            }
         }
-        const insertResult = database
-            .prepare(
-                `INSERT INTO scheduled_job_runs (
-                    job_id, status, trigger_type, started_at, output_json
-                ) VALUES (?, 'running', 'schedule', ?, '{}')`
-            )
-            .run(currentJob.id, startedAt);
+
+        const runId = insertScheduledRun(job.id, triggerType, "queued", queuedAt);
+        insertJobExecution({
+            actionKey: job.actionKey,
+            availableAt: options.availableAt,
+            displayName: job.name,
+            payload: job.actionPayload,
+            queuedAt,
+            resourceClass: job.resourceClass,
+            scheduledJobId: job.id,
+            scheduledRunId: runId,
+            timeoutMs: job.timeoutMs,
+            triggerType,
+        });
         database.run("COMMIT");
-        return {
-            id: Number(insertResult.lastInsertRowid),
-            jobId: currentJob.id,
-            status: "running",
-            triggerType: "schedule",
-            startedAt,
-            finishedAt: undefined,
-            message: undefined,
-            output: {},
-        };
+        return scheduledRunById(runId) as ScheduledJobRun;
     } catch (error) {
         try {
             database.run("ROLLBACK");
         } catch {
-            // Ignore rollback failures after SQLite has already unwound the transaction.
+            // Preserve the enqueue error.
+        }
+        if (isActiveExecutionConflict(error)) {
+            throw jobStatusError("Scheduled job is already queued or running", 409);
         }
         throw error;
-    }
-}
-
-function markAbandonedRunningRuns(): void {
-    try {
-        database
-            .prepare(
-                `UPDATE scheduled_job_runs
-             SET status = 'failed',
-                 finished_at = COALESCE(finished_at, ?),
-                 message = COALESCE(message, ?)
-             WHERE status = 'running'`
-            )
-            .run(nowIso(), "Scheduled job abandoned after backend restart");
-    } catch (error) {
-        console.warn("[ScheduledJobs] Failed to mark abandoned scheduled runs:", error);
-    }
-}
-
-function persistedRunFallback(
-    run: ScheduledJobRun,
-    status: Exclude<ScheduledJobRunStatus, "running">,
-    message: string | undefined,
-    output: Record<string, unknown>
-): ScheduledJobRun {
-    return { ...run, status, finishedAt: nowIso(), message, output };
-}
-
-function finishRunOrReport(
-    run: ScheduledJobRun,
-    status: Exclude<ScheduledJobRunStatus, "running">,
-    message: string | undefined,
-    output: Record<string, unknown>
-): ScheduledJobRun {
-    try {
-        return finishRun(run, status, message, output);
-    } catch (error) {
-        console.warn(
-            `[ScheduledJobs] Failed to persist ${status} scheduled job run:`,
-            error
-        );
-        return persistedRunFallback(
-            run,
-            status,
-            errorMessage(error, `Scheduled job ${status} persistence failed`),
-            output
-        );
-    }
-}
-
-export function createManualScheduledJobRun(jobId: string): ScheduledJobRun {
-    if (runningJobs.has(jobId)) {
-        const error = new Error("Scheduled job is already running") as Error & {
-            statusCode?: number;
-        };
-        error.statusCode = 409;
-        throw error;
-    }
-    runningJobs.add(jobId);
-    try {
-        return createRun(jobId, "manual");
-    } catch (error) {
-        runningJobs.delete(jobId);
-        throw error;
-    }
-}
-
-export function finishScheduledJobRun(
-    run: ScheduledJobRun,
-    status: Exclude<ScheduledJobRunStatus, "running">,
-    message: string | undefined,
-    output: Record<string, unknown>
-): ScheduledJobRun {
-    try {
-        return finishRunOrReport(run, status, message, output);
-    } finally {
-        runningJobs.delete(run.jobId);
     }
 }
 
@@ -894,61 +949,126 @@ export async function runScheduledJob(
     signal?: AbortSignal
 ): Promise<ScheduledJobRun> {
     const job = getScheduledJob(id);
-    if (!job) {
-        const error = new Error("Scheduled job not found") as Error & {
-            statusCode?: number;
-        };
-        error.statusCode = 404;
-        throw error;
-    }
-    if (runningJobs.has(id)) {
-        const error = new Error("Scheduled job is already running") as Error & {
-            statusCode?: number;
-        };
-        error.statusCode = 409;
-        throw error;
-    }
+    if (!job) throw jobStatusError("Scheduled job not found", 404);
     const action = actionHandlers.get(job.actionKey);
     if (!action && triggerType === "manual") {
         throw new ScheduledJobValidationError(
             `No scheduled job action registered for ${job.actionKey}`
         );
     }
-    const timeoutMs = action?.timeoutMs ?? scheduledJobRunTimeoutMs;
+    const run = enqueueScheduledJob(id, triggerType);
+    if (!run.executionId) throw jobStatusError("Scheduled job was not queued", 500);
+    await waitForJobExecution(run.executionId, { signal });
+    return scheduledRunById(run.id) as ScheduledJobRun;
+}
 
-    const run =
-        triggerType === "schedule" ? claimScheduledRun(job) : createRun(id, triggerType);
-    if (!run) {
-        const error = new Error("Scheduled job is no longer due") as Error & {
-            statusCode?: number;
-        };
-        error.statusCode = 409;
-        throw error;
-    }
-    runningJobs.add(id);
+async function executeClaimedJobExecution(
+    execution: JobExecution,
+    workerId: string,
+    signal?: AbortSignal
+): Promise<JobExecution | ScheduledJobRun> {
+    const currentJob = execution.scheduledJobId
+        ? getScheduledJob(execution.scheduledJobId)
+        : undefined;
+    const job: ScheduledJob = currentJob
+        ? {
+              ...currentJob,
+              actionKey: execution.actionKey,
+              actionPayload: execution.payload,
+              resourceClass: execution.resourceClass,
+              timeoutMs: execution.timeoutMs,
+          }
+        : {
+              actionKey: execution.actionKey,
+              actionPayload: execution.payload,
+              createdAt: execution.queuedAt,
+              cronExpression: undefined,
+              description: "",
+              disableIntent: undefined,
+              enabled: true,
+              id: execution.id,
+              intervalSeconds: 60,
+              isQueued: false,
+              isRunning: true,
+              lastRun: undefined,
+              name: execution.displayName,
+              nextRunAt: undefined,
+              resourceClass: execution.resourceClass,
+              scheduleType: "interval",
+              timeOfDay: undefined,
+              timeoutMs: execution.timeoutMs,
+              updatedAt: execution.startedAt ?? execution.queuedAt,
+          };
+    const action = actionHandlers.get(execution.actionKey);
+    const controller = new AbortController();
+    const abortFromSignal = () => controller.abort();
+    signal?.addEventListener("abort", abortFromSignal, { once: true });
+    if (signal?.aborted) controller.abort();
+    const heartbeat = setInterval(() => {
+        try {
+            const lease = heartbeatJobExecution(execution.id, workerId);
+            if (!lease.hasLease || lease.cancelRequested) controller.abort();
+        } catch (error) {
+            console.warn("[ScheduledJobs] Execution heartbeat failed:", error);
+        }
+    }, executorHeartbeatMs);
+    heartbeat.unref();
+
+    let status: "success" | "failed" = "success";
+    let message: string | undefined;
+    let output: Record<string, unknown>;
     try {
-        let output: Record<string, unknown>;
         try {
             if (!action) {
                 throw new ScheduledJobValidationError(
-                    `No scheduled job action registered for ${job.actionKey}`
+                    `No scheduled job action registered for ${execution.actionKey}`
                 );
             }
-            output = await runActionWithTimeout(timeoutMs, action, job, signal);
+            output = await withJobResourceClass(execution.resourceClass, () =>
+                runActionWithTimeout(
+                    execution.timeoutMs,
+                    action,
+                    job,
+                    {
+                        executionId: execution.id,
+                        updateOutput: (nextOutput) => {
+                            updateJobExecutionOutput(execution.id, workerId, nextOutput);
+                        },
+                    },
+                    controller.signal
+                )
+            );
         } catch (error) {
-            if (error instanceof ScheduledJobAbortError) {
+            if (error instanceof ScheduledJobInterruptionError) {
                 await error.getHandlerSettled();
             }
-            return finishRunOrReport(
-                run,
-                "failed",
-                errorMessage(error, "Scheduled job failed"),
-                error instanceof ScheduledJobActionError ? error.output : {}
+            status = "failed";
+            message = errorMessage(error, "Scheduled job failed");
+            const progressOutput = getJobExecution(execution.id)?.output ?? {};
+            const statusCode = Number(
+                (error as { statusCode?: unknown } | undefined)?.statusCode
             );
+            output = {
+                ...progressOutput,
+                ...(error instanceof ScheduledJobActionError && error.output),
+                ...(Number.isSafeInteger(statusCode) &&
+                    statusCode >= 400 &&
+                    statusCode < 600 && { statusCode }),
+            };
         }
-        return finishRunOrReport(run, "success", undefined, output);
+        const finishedExecution = finishJobExecution(
+            execution.id,
+            workerId,
+            status,
+            message,
+            output
+        );
+        return execution.scheduledRunId === undefined
+            ? finishedExecution
+            : (scheduledRunById(execution.scheduledRunId) as ScheduledJobRun);
     } finally {
-        runningJobs.delete(id);
+        clearInterval(heartbeat);
+        signal?.removeEventListener("abort", abortFromSignal);
     }
 }
 
@@ -956,6 +1076,7 @@ async function runActionWithTimeout(
     timeoutMs: number,
     action: ScheduledJobActionRegistration,
     job: ScheduledJob,
+    context: ScheduledJobActionContext,
     signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
     if (signal?.aborted) {
@@ -964,51 +1085,33 @@ async function runActionWithTimeout(
     const controller = new AbortController();
     const abortPromise = Promise.withResolvers<never>();
     let handlerSettled: Promise<unknown> = Promise.resolve();
-    const abortFromSignal = () => {
+    const interrupt = (message: string) => {
+        abortPromise.reject(new ScheduledJobInterruptionError(message, handlerSettled));
         controller.abort();
-        abortPromise.reject(new ScheduledJobAbortError(handlerSettled));
     };
+    const abortFromSignal = () => interrupt("Scheduled job aborted");
     signal?.addEventListener("abort", abortFromSignal, { once: true });
-    let isTimedOut = false;
     let timeout: NodeJS.Timeout | undefined;
     try {
-        const timeoutPromise = new Promise<never>((_resolve, reject) => {
-            timeout = setTimeout(() => {
-                isTimedOut = true;
-                controller.abort();
-                console.warn("[ScheduledJobs] Scheduled job exceeded timeout", {
-                    timeoutMs,
-                });
-                reject(new Error("Scheduled job timed out"));
-            }, timeoutMs);
-        });
+        timeout = setTimeout(() => {
+            console.warn("[ScheduledJobs] Scheduled job exceeded timeout", {
+                timeoutMs,
+            });
+            interrupt("Scheduled job timed out");
+        }, timeoutMs);
         timeout?.unref();
-        const handlerPromise = Promise.resolve(action.handler(job, controller.signal));
+        const handlerPromise = Promise.resolve(
+            action.handler(job, controller.signal, context)
+        );
         handlerSettled = suppressHandlerPromiseRejection(handlerPromise);
-        void suppressHandlerPromiseRejection(handlerPromise);
-        const output =
-            (await Promise.race([
-                handlerPromise,
-                timeoutPromise,
-                abortPromise.promise,
-            ])) ?? {};
+        const output = (await Promise.race([handlerPromise, abortPromise.promise])) ?? {};
         return output;
-    } catch (error) {
-        if (isTimedOut) {
-            throw new Error("Scheduled job timed out", { cause: error });
-        }
-        throw error;
     } finally {
         if (timeout) {
             clearTimeout(timeout);
         }
         signal?.removeEventListener("abort", abortFromSignal);
     }
-}
-
-function trackScheduledRun(run: Promise<void>): void {
-    scheduledJobRuns.add(run);
-    void untrackScheduledRun(run);
 }
 
 async function suppressHandlerPromiseRejection(
@@ -1021,30 +1124,12 @@ async function suppressHandlerPromiseRejection(
     }
 }
 
-async function untrackScheduledRun(run: Promise<void>): Promise<void> {
-    try {
-        await run;
-    } finally {
-        scheduledJobRuns.delete(run);
-    }
-}
-
 function isStaleScheduledRunError(error: unknown): boolean {
     return (
         error instanceof Error &&
         "statusCode" in error &&
         (error as { statusCode?: unknown }).statusCode === 409
     );
-}
-
-async function observeScheduledRun(id: string): Promise<void> {
-    try {
-        await runScheduledJob(id, "schedule");
-    } catch (error) {
-        if (!isStaleScheduledRunError(error)) {
-            console.warn("[ScheduledJobs] Scheduled run failed unexpectedly:", error);
-        }
-    }
 }
 
 async function runDueJobs(): Promise<void> {
@@ -1057,26 +1142,59 @@ async function runDueJobs(): Promise<void> {
         )
         .all(dueAt) as Array<{ id: string }>;
     for (const row of rows) {
-        if (!runningJobs.has(row.id)) {
-            try {
-                const currentJob = getScheduledJob(row.id);
-                if (
-                    !currentJob?.enabled ||
-                    !currentJob.nextRunAt ||
-                    currentJob.nextRunAt > nowIso()
-                ) {
-                    continue;
-                }
-                const run = observeScheduledRun(row.id);
-                trackScheduledRun(run);
-            } catch (error) {
-                console.warn(
-                    "[ScheduledJobs] Failed to inspect due scheduled job:",
-                    error
-                );
-                // Keep later due jobs running even if a persisted row is stale.
+        try {
+            enqueueScheduledJob(row.id, "schedule");
+        } catch (error) {
+            if (!isStaleScheduledRunError(error)) {
+                console.warn("[ScheduledJobs] Failed to queue due scheduled job:", error);
             }
+            // Keep later due jobs queueing even if a persisted row is stale.
         }
+    }
+}
+
+async function observeClaimedExecution(
+    execution: JobExecution,
+    controller: AbortController
+): Promise<void> {
+    try {
+        await executeClaimedJobExecution(
+            execution,
+            scheduledJobRuntimeState.workerId,
+            controller.signal
+        );
+    } catch (error) {
+        console.warn("[ScheduledJobs] Queued execution failed unexpectedly:", error);
+    } finally {
+        activeExecutionControllers.delete(execution.id);
+        activeExecutionRuns.delete(execution.id);
+        queueMicrotask(executorTick);
+    }
+}
+
+function executorTick(): void {
+    if (
+        !scheduledJobRuntimeState.executor ||
+        scheduledJobRuntimeState.isExecutorTickRunning ||
+        activeExecutionRuns.size >= executorCapacity
+    ) {
+        return;
+    }
+    scheduledJobRuntimeState.isExecutorTickRunning = true;
+    try {
+        const execution = claimNextJobExecution(
+            scheduledJobRuntimeState.workerId,
+            executorCapacity
+        );
+        if (!execution) return;
+        const controller = new AbortController();
+        activeExecutionControllers.set(execution.id, controller);
+        const run = observeClaimedExecution(execution, controller);
+        activeExecutionRuns.set(execution.id, run);
+    } catch (error) {
+        console.warn("[ScheduledJobs] Executor tick failed:", error);
+    } finally {
+        scheduledJobRuntimeState.isExecutorTickRunning = false;
     }
 }
 
@@ -1100,10 +1218,31 @@ export function startScheduledJobScheduler(): void {
     if (scheduledJobRuntimeState.scheduler) {
         return;
     }
-    markAbandonedRunningRuns();
     scheduledJobRuntimeState.scheduler = setInterval(scheduleTick, schedulerTickMs);
     scheduledJobRuntimeState.scheduler.unref();
     scheduleTick();
+}
+
+export function startScheduledJobExecutor(): void {
+    if (scheduledJobRuntimeState.executor) return;
+    const recovered = recoverExpiredJobExecutions();
+    if (recovered > 0) {
+        console.warn("[ScheduledJobs] Recovered expired job execution leases", {
+            recovered,
+        });
+    }
+    registerJobWorker(scheduledJobRuntimeState.workerId, executorCapacity);
+    scheduledJobRuntimeState.workerHeartbeat = setInterval(() => {
+        try {
+            didHeartbeatJobWorker(scheduledJobRuntimeState.workerId);
+        } catch (error) {
+            console.warn("[ScheduledJobs] Worker heartbeat failed:", error);
+        }
+    }, executorHeartbeatMs);
+    scheduledJobRuntimeState.workerHeartbeat.unref();
+    scheduledJobRuntimeState.executor = setInterval(executorTick, executorTickMs);
+    scheduledJobRuntimeState.executor.unref();
+    executorTick();
 }
 
 export function stopScheduledJobScheduler(): void {
@@ -1112,4 +1251,22 @@ export function stopScheduledJobScheduler(): void {
     }
     clearInterval(scheduledJobRuntimeState.scheduler);
     scheduledJobRuntimeState.scheduler = undefined;
+}
+
+export async function stopScheduledJobExecutor(): Promise<void> {
+    if (scheduledJobRuntimeState.executor) {
+        clearInterval(scheduledJobRuntimeState.executor);
+        scheduledJobRuntimeState.executor = undefined;
+    }
+    if (scheduledJobRuntimeState.workerHeartbeat) {
+        clearInterval(scheduledJobRuntimeState.workerHeartbeat);
+        scheduledJobRuntimeState.workerHeartbeat = undefined;
+    }
+    for (const controller of activeExecutionControllers.values()) {
+        controller.abort();
+    }
+    await Promise.allSettled(activeExecutionRuns.values());
+    activeExecutionControllers.clear();
+    activeExecutionRuns.clear();
+    unregisterJobWorker(scheduledJobRuntimeState.workerId);
 }

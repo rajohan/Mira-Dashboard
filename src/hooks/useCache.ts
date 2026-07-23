@@ -108,14 +108,18 @@ export function useRefreshCacheEntry() {
                 .map((key) => key.trim())
                 .filter(Boolean);
 
-            const results = await Promise.all(
-                keys.map((key) =>
-                    apiPostRequired<{
+            const results: Array<{
+                isOk: boolean;
+                entry: CacheEnvelope<unknown>;
+            }> = [];
+            for (const key of keys) {
+                results.push(
+                    await apiPostRequired<{
                         isOk: boolean;
                         entry: CacheEnvelope<unknown>;
                     }>(`/cache/${encodeURIComponent(key)}/refresh`)
-                )
-            );
+                );
+            }
 
             return { keys, results };
         },

@@ -78,6 +78,7 @@ import { PreviewToggle } from "../components/features/files/PreviewToggle";
 import { CodePreview } from "../components/features/files/viewers/CodePreview";
 import { JsonPreview } from "../components/features/files/viewers/JsonPreview";
 import { MarkdownPreview } from "../components/features/files/viewers/MarkdownPreview";
+import { JobExecutionQueueCard } from "../components/features/jobs/JobExecutionQueueCard";
 import { LogLine } from "../components/features/logs/LogLine";
 import { MyCommentCard } from "../components/features/moltbook/MyCommentCard";
 import { MyPostCard } from "../components/features/moltbook/MyPostCard";
@@ -3173,6 +3174,94 @@ describe("shared component helpers", () => {
             "2"
         );
         expect(screen.getByText("Disabled").nextElementSibling).toHaveTextContent("2");
+
+        queryClient.clear();
+    });
+
+    it("shows queue pressure and cancels an active job execution", async () => {
+        let executionStatus: "cancelled" | "queued" = "queued";
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                const execution = {
+                    actionKey: "backup.run",
+                    attempt: 0,
+                    availableAt: "2026-07-22T10:00:00.000Z",
+                    cancelRequestedAt: undefined,
+                    cancellable: true,
+                    displayName: "Host backup",
+                    finishedAt:
+                        executionStatus === "cancelled"
+                            ? "2026-07-22T10:01:00.000Z"
+                            : undefined,
+                    id: "execution-1",
+                    queuedAt: "2026-07-22T10:00:00.000Z",
+                    resourceClass: "host-heavy",
+                    scheduledJobId: "backup.kopia",
+                    scheduledRunId: 42,
+                    startedAt: undefined,
+                    status: executionStatus,
+                    triggerType: "manual",
+                };
+
+                if (url === "/api/job-executions" && method === "GET") {
+                    return Response.json({
+                        executions: [execution],
+                        summary: {
+                            activeResourceClasses: [],
+                            oldestQueuedAt:
+                                executionStatus === "queued"
+                                    ? execution.queuedAt
+                                    : undefined,
+                            queued: executionStatus === "queued" ? 1 : 0,
+                            running: 0,
+                            workerCapacity: 1,
+                            workerCount: 1,
+                            workerOnline: true,
+                        },
+                    });
+                }
+
+                if (
+                    url === "/api/job-executions/execution-1/cancel" &&
+                    method === "POST"
+                ) {
+                    executionStatus = "cancelled";
+                    return Response.json({
+                        execution: { ...execution, status: "cancelled" },
+                        isOk: true,
+                    });
+                }
+
+                throw new Error(`Unexpected queue API call: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const queryClient = createQueryClient();
+        render(
+            <QueryClientProvider client={queryClient}>
+                <JobExecutionQueueCard />
+            </QueryClientProvider>
+        );
+
+        expect(await screen.findByText("Host backup")).toBeInTheDocument();
+        expect(screen.getByText("host heavy")).toBeInTheDocument();
+        expect(screen.getByText("Worker idle")).toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole("button", { name: "Cancel Host backup" }));
+
+        await waitFor(() => {
+            expect(executionStatus).toBe("cancelled");
+            expect(
+                screen.queryByRole("button", { name: "Cancel Host backup" })
+            ).not.toBeInTheDocument();
+        });
 
         queryClient.clear();
     });

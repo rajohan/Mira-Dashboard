@@ -8,7 +8,11 @@ import {
 } from "../lib/cacheStore.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { stringFallback } from "../lib/values.ts";
-import { refreshCacheProducer } from "../services/cacheRefresh.ts";
+import { cacheRefreshResourceClass } from "../services/cacheRefresh.ts";
+import {
+    enqueueAndWaitForJobExecution,
+    successfulJobExecutionOutput,
+} from "../services/queuedJobExecution.ts";
 import { listScheduledJobs } from "../services/scheduledJobs.ts";
 import { getHeartbeatAutomationSnapshot } from "../services/taskAutomation.ts";
 
@@ -187,6 +191,7 @@ function compactDashboardJobs() {
         disableIntent: job.disableIntent,
         enabled: job.enabled,
         id: job.id,
+        isQueued: job.isQueued,
         isRunning: job.isRunning,
         lastRun: job.lastRun
             ? {
@@ -199,6 +204,7 @@ function compactDashboardJobs() {
             : undefined,
         name: job.name,
         nextRunAt: job.nextRunAt,
+        resourceClass: job.resourceClass,
     }));
 }
 
@@ -225,8 +231,7 @@ function mapCacheRowForResponse(
     };
 }
 
-async function refreshCacheKey(key: string) {
-    const result = await refreshCacheProducer(key);
+async function refreshedCacheEntry(key: string, result: Record<string, unknown>) {
     const refreshed = Array.isArray(result?.refreshed) ? result.refreshed : [];
     if (refreshed.length === 0) {
         throw Object.assign(new Error(`No cache keys refreshed for: ${key}`), {
@@ -306,7 +311,22 @@ export const cacheRoutes = {
             const key = stringFallback(request.params.key).trim();
             if (!key) return json({ error: "Missing cache key" }, { status: 400 });
             try {
-                return json({ entry: await refreshCacheKey(key), isOk: true });
+                const resourceClass = cacheRefreshResourceClass(key);
+                const execution = await enqueueAndWaitForJobExecution(
+                    {
+                        actionKey: "cache.refresh",
+                        displayName: `Refresh cache: ${key}`,
+                        payload: { key },
+                        resourceClass,
+                        timeoutMs: 5 * 60 * 1000,
+                    },
+                    { signal: request.signal }
+                );
+                const entry = await refreshedCacheEntry(
+                    key,
+                    successfulJobExecutionOutput(execution)
+                );
+                return json({ entry, isOk: true });
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Cache refresh failed") },

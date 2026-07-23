@@ -1,9 +1,12 @@
+import { scopedJobProcessCommand } from "./jobResources.ts";
+
 export interface RunProcessOptions {
     cwd?: string;
     detached?: boolean;
     env?: Record<string, string | undefined>;
     killSignal?: NodeJS.Signals;
     maxBuffer?: number;
+    signal?: AbortSignal;
     timeoutMs?: number;
 }
 
@@ -52,8 +55,12 @@ export function spawnProcess(
     arguments_: readonly string[],
     options: RunProcessOptions = {}
 ): BunProcess {
+    if (options.signal?.aborted) {
+        throw new DOMException("Process aborted before start", "AbortError");
+    }
+    const command = scopedJobProcessCommand(executable, arguments_);
     return Bun.spawn({
-        cmd: [executable, ...arguments_],
+        cmd: [command.executable, ...command.arguments],
         cwd: options.cwd,
         detached: options.detached ?? true,
         env: options.env,
@@ -86,14 +93,13 @@ export async function runProcess(
     let forceKillTimeout: Timer | undefined;
     let didTimeout = false;
     const timeoutMs = options.timeoutMs;
-    if (timeoutMs !== undefined) {
-        timeout = setTimeout(() => {
-            didTimeout = true;
-            try {
-                killProcessGroup(process, options.killSignal ?? "SIGTERM");
-            } catch {
-                // The process may already have exited between scheduling and timeout.
-            }
+    const terminateProcess = () => {
+        try {
+            killProcessGroup(process, options.killSignal ?? "SIGTERM");
+        } catch {
+            // The process may already have exited between scheduling and termination.
+        }
+        if (!forceKillTimeout) {
             forceKillTimeout = setTimeout(() => {
                 try {
                     killProcessGroup(process, "SIGKILL");
@@ -102,11 +108,20 @@ export async function runProcess(
                 }
             }, DEFAULT_FORCE_KILL_GRACE_MS);
             forceKillTimeout.unref();
+        }
+    };
+    const abortFromSignal = () => terminateProcess();
+    options.signal?.addEventListener("abort", abortFromSignal, { once: true });
+    if (timeoutMs !== undefined) {
+        timeout = setTimeout(() => {
+            didTimeout = true;
+            terminateProcess();
         }, timeoutMs);
         timeout.unref();
     }
 
     function clearExitTimers(): void {
+        options.signal?.removeEventListener("abort", abortFromSignal);
         if (timeout) {
             clearTimeout(timeout);
             timeout = undefined;

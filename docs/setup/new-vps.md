@@ -77,40 +77,29 @@ minimum production setup normally needs:
 - optional provider keys for Moltbook, ElevenLabs, OpenRouter, and Synthetic
   health checks depending on enabled Dashboard features.
 
-## Create The Systemd User Service
+## Create The Systemd User Services
 
-Service path:
+Install the tracked web and worker units:
 
-```text
-/home/ubuntu/.config/systemd/user/mira-dashboard.service
+```bash
+install -m 0644 systemd/mira-dashboard.service \
+  /home/ubuntu/.config/systemd/user/mira-dashboard.service
+install -m 0644 systemd/mira-dashboard-worker.service \
+  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
 ```
 
-Current production shape:
+The web role owns HTTP, WebSocket, and the Gateway bridge. The worker role owns
+scheduled-job registration, queue claims, cache startup seeds, and action
+execution. Both units have explicit CPU, IO, memory, and task guardrails. Heavy
+worker children are additionally placed in transient resource-class scopes.
 
-```ini
-[Unit]
-Description=Mira Dashboard
-After=network-online.target openclaw-gateway.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/home/ubuntu/projects/mira-dashboard/backend
-Environment=NODE_ENV=production
-ExecStart=/usr/local/bin/doppler run --config prd --project rajohan -- /home/ubuntu/.bun/bin/bun dist/serverStart.js
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-```
-
-Enable and start:
+Enable and start both:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now mira-dashboard.service
+systemctl --user enable --now mira-dashboard.service mira-dashboard-worker.service
 systemctl --user status mira-dashboard.service --no-pager
+systemctl --user status mira-dashboard-worker.service --no-pager
 ```
 
 ## Bootstrap The First User
@@ -147,6 +136,7 @@ Expected after setup:
 curl http://127.0.0.1:3100/api/health
 systemctl --user status mira-dashboard.service --no-pager
 journalctl --user -u mira-dashboard.service -n 100 --no-pager
+journalctl --user -u mira-dashboard-worker.service -n 100 --no-pager
 ```
 
 Healthy response shape:

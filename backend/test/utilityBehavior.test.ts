@@ -637,6 +637,11 @@ describe("backend service utilities", () => {
                 "/generic-error": () => {
                     throw new Error("boom");
                 },
+                "/status-error": () => {
+                    throw Object.assign(new Error("Job capacity is full"), {
+                        statusCode: 409,
+                    });
+                },
             };
             const routes = withRequestPolicy(routeEntries);
             const server = serverWithAddress("203.0.113.10");
@@ -655,6 +660,12 @@ describe("backend service utilities", () => {
             expect(syntaxResponse.status).toBe(400);
             await expect(syntaxResponse.json()).resolves.toEqual({
                 error: "Invalid JSON",
+            });
+
+            const statusResponse = await callTestRoute(routes, "/status-error", server);
+            expect(statusResponse.status).toBe(409);
+            await expect(statusResponse.json()).resolves.toEqual({
+                error: "Job capacity is full",
             });
 
             const authRequest = new Request("http://localhost/api/auth/login");

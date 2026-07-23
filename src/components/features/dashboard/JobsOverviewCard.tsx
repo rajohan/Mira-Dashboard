@@ -24,7 +24,8 @@ function jobTimestamp(job: ScheduledJob, key: "nextRunAt" | "lastRun") {
 function lastRunVariant(job: ScheduledJob | undefined) {
     const status = job?.lastRun?.status;
     if (status === "failed") return "error" as const;
-    if (status === "running") return "info" as const;
+    if (status === "queued" || status === "running") return "info" as const;
+    if (status === "cancelled") return "warning" as const;
     if (status === "success") return "success" as const;
     return "default" as const;
 }
@@ -53,7 +54,7 @@ export function JobsOverviewCard() {
     const cronEnabledCount = cronJobs.filter((job) => job.enabled !== false).length;
     const disabledCount = jobs.filter((job) => !job.enabled).length;
     const cronDisabledCount = cronJobs.filter((job) => job.enabled === false).length;
-    const runningCount = jobs.filter((job) => job.isRunning).length;
+    const activeCount = jobs.filter((job) => job.isQueued || job.isRunning).length;
     const latestRunJob =
         [...jobs]
             .filter((job) => jobTimestamp(job, "lastRun") !== undefined)
@@ -153,13 +154,13 @@ export function JobsOverviewCard() {
                         </span>
                     </div>
                     <div className="flex items-center justify-between">
-                        <span>Running</span>
+                        <span>Queued/running</span>
                         <span
                             className={
-                                runningCount > 0 ? "text-blue-300" : "text-primary-300"
+                                activeCount > 0 ? "text-blue-300" : "text-primary-300"
                             }
                         >
-                            {runningCount}
+                            {activeCount}
                         </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">

@@ -11,6 +11,7 @@ import {
 import os from "node:os";
 
 import { database } from "../database.ts";
+import type { JobResourceClass } from "../lib/jobResources.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
@@ -26,6 +27,7 @@ import { getDatabaseOverview } from "./databaseOverview.ts";
 import { evaluateOpenClawNotifications } from "./openclawNotifications.ts";
 import { evaluateQuotaNotifications } from "./quotaNotifications.ts";
 import {
+    enqueueScheduledJob,
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
@@ -1884,6 +1886,31 @@ function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQ
 
 const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();
 
+class SerialOperationQueue {
+    private tail: Promise<void> = Promise.resolve();
+
+    private async observe(result: Promise<unknown>): Promise<void> {
+        try {
+            await result;
+        } catch {
+            // A failed operation must not block later queue entries.
+        }
+    }
+
+    run<T>(operation: () => Promise<T>): Promise<T> {
+        const previous = this.tail;
+        const result = (async () => {
+            await previous;
+            return operation();
+        })();
+        this.tail = this.observe(result);
+        return result;
+    }
+}
+
+const cacheRefreshQueue = new SerialOperationQueue();
+const localCacheSeedQueue = new SerialOperationQueue();
+
 function cacheRefreshScopeKey(key: string): string {
     if (key === "moltbook") {
         return "moltbook";
@@ -1909,6 +1936,24 @@ function isSupportedCacheProducerKey(key: string): boolean {
         key === DATABASE_SUMMARY_KEY ||
         key === LOG_ROTATION_STATE_KEY
     );
+}
+
+export function cacheRefreshResourceClass(key: string): JobResourceClass {
+    if (!isSupportedCacheProducerKey(key)) {
+        throw Object.assign(
+            new Error(`No backend refresh producer configured for cache key: ${key}`),
+            { statusCode: 400 }
+        );
+    }
+    if (
+        key === "weather.spydeberg" ||
+        key === "quotas.summary" ||
+        key === "moltbook" ||
+        MOLTBOOK_CACHE_KEYS.has(key)
+    ) {
+        return "network";
+    }
+    return "host-heavy";
 }
 
 async function refreshCacheWithFailureRecord(
@@ -2015,6 +2060,16 @@ function abortError(): Error {
     return error;
 }
 
+function runBoundedCacheRefresh<T>(
+    operation: () => Promise<T>,
+    signal?: AbortSignal
+): Promise<T> {
+    return cacheRefreshQueue.run(async () => {
+        if (signal?.aborted) throw abortError();
+        return await operation();
+    });
+}
+
 async function waitForRefreshWithSignal<T>(
     refresh: Promise<T>,
     signal: AbortSignal | undefined
@@ -2025,22 +2080,20 @@ async function waitForRefreshWithSignal<T>(
     if (signal.aborted) {
         throw abortError();
     }
-    return await Promise.race([
-        refresh,
-        new Promise<never>((_resolve, reject) => {
-            const onAbort = () => reject(abortError());
-            signal.addEventListener("abort", onAbort, { once: true });
-            void (async () => {
-                try {
-                    await refresh;
-                } catch {
-                    // The refresh result is observed by the race winner.
-                } finally {
-                    signal.removeEventListener("abort", onAbort);
-                }
-            })();
-        }),
-    ]);
+    let isAborted = false;
+    const onAbort = () => {
+        isAborted = true;
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+        // Keep the permit occupied until the producer really settles. Returning
+        // on abort would let a second heavy producer overlap the first one.
+        const result = await refresh;
+        if (isAborted) throw abortError();
+        return result;
+    } finally {
+        signal.removeEventListener("abort", onAbort);
+    }
 }
 
 async function waitForExistingRefresh(
@@ -2097,8 +2150,8 @@ export async function refreshCacheProducer(
         .map(([, refresh]) => refresh);
     const refresh =
         childRefreshes.length > 0
-            ? refreshAfterChildRefreshes(childRefreshes, key)
-            : refreshCacheProducerUnlocked(key);
+            ? refreshAfterChildRefreshes(childRefreshes, key, signal)
+            : runBoundedCacheRefresh(() => refreshCacheProducerUnlocked(key), signal);
     inFlightCacheRefreshes.set(scopeKey, refresh);
     void (async () => {
         try {
@@ -2116,10 +2169,11 @@ export async function refreshCacheProducer(
 
 async function refreshAfterChildRefreshes(
     childRefreshes: Array<Promise<{ refreshed: string[] }>>,
-    key: string
+    key: string,
+    signal?: AbortSignal
 ): Promise<{ refreshed: string[] }> {
     await Promise.allSettled(childRefreshes);
-    return await refreshCacheProducerUnlocked(key);
+    return await runBoundedCacheRefresh(() => refreshCacheProducerUnlocked(key), signal);
 }
 
 const cacheRefreshScheduledJobs = [
@@ -2131,6 +2185,7 @@ const cacheRefreshScheduledJobs = [
         intervalSeconds: 60 * 60,
         actionKey: "cache.refresh",
         actionPayload: { key: "weather.spydeberg" },
+        resourceClass: "network",
     },
     {
         id: "cache.quotas",
@@ -2140,6 +2195,7 @@ const cacheRefreshScheduledJobs = [
         intervalSeconds: 30 * 60,
         actionKey: "cache.refresh",
         actionPayload: { key: "quotas.summary" },
+        resourceClass: "network",
     },
     {
         id: "cache.system",
@@ -2150,6 +2206,7 @@ const cacheRefreshScheduledJobs = [
         timeOfDay: "02:50",
         actionKey: "cache.refresh",
         actionPayload: { key: "system.host" },
+        resourceClass: "host-heavy",
     },
     {
         id: "cache.git",
@@ -2159,6 +2216,7 @@ const cacheRefreshScheduledJobs = [
         intervalSeconds: 60 * 60,
         actionKey: "cache.refresh",
         actionPayload: { key: "git.workspace" },
+        resourceClass: "host-heavy",
     },
     {
         id: "cache.moltbook",
@@ -2168,6 +2226,7 @@ const cacheRefreshScheduledJobs = [
         intervalSeconds: 30 * 60,
         actionKey: "cache.refresh",
         actionPayload: { key: "moltbook" },
+        resourceClass: "network",
     },
     {
         id: "cache.backup.kopia",
@@ -2177,6 +2236,7 @@ const cacheRefreshScheduledJobs = [
         intervalSeconds: 60 * 60,
         actionKey: "cache.refresh",
         actionPayload: { key: "backup.kopia.status" },
+        resourceClass: "host-heavy",
     },
     {
         id: "cache.backup.walg",
@@ -2186,6 +2246,7 @@ const cacheRefreshScheduledJobs = [
         intervalSeconds: 60 * 60,
         actionKey: "cache.refresh",
         actionPayload: { key: "backup.walg.status" },
+        resourceClass: "host-heavy",
     },
     {
         id: "cache.docker.summary",
@@ -2195,6 +2256,7 @@ const cacheRefreshScheduledJobs = [
         intervalSeconds: 30 * 60,
         actionKey: "cache.refresh",
         actionPayload: { key: DOCKER_SUMMARY_KEY },
+        resourceClass: "host-heavy",
     },
     {
         id: "cache.database.summary",
@@ -2204,6 +2266,7 @@ const cacheRefreshScheduledJobs = [
         intervalSeconds: 60 * 60,
         actionKey: "cache.refresh",
         actionPayload: { key: DATABASE_SUMMARY_KEY },
+        resourceClass: "host-heavy",
     },
 ] as const;
 
@@ -2241,15 +2304,21 @@ function isCacheEntryFresh(key: string): boolean {
 
 const localCacheSeedPromises = new Map<string, Promise<void>>();
 
+type CacheSeedStrategy = "local" | "none" | "queue";
+
+interface CacheRefreshScheduledJobOptions {
+    seedStrategy?: CacheSeedStrategy;
+}
+
 export function waitForLocalCacheSeed(key: string): Promise<void> {
     return localCacheSeedPromises.get(key) ?? Promise.resolve();
 }
 
 export function seedMissingLocalCacheEntry(key: string): void {
-    if (isCacheEntryFresh(key)) {
+    if (isCacheEntryFresh(key) || localCacheSeedPromises.has(key)) {
         return;
     }
-    const seedPromise = (async () => {
+    const seedPromise = localCacheSeedQueue.run(async () => {
         try {
             await refreshCacheProducer(key);
         } catch (error) {
@@ -2259,7 +2328,7 @@ export function seedMissingLocalCacheEntry(key: string): void {
             );
             throw error;
         }
-    })();
+    });
     localCacheSeedPromises.set(key, seedPromise);
     void (async () => {
         try {
@@ -2274,13 +2343,43 @@ export function seedMissingLocalCacheEntry(key: string): void {
     })();
 }
 
-export function registerCacheRefreshScheduledJobs(): void {
+function queueMissingCacheSeeds(seedJobs: Array<{ id: string; key: string }>): void {
+    const startedAt = Date.now();
+    for (const [index, seedJob] of seedJobs.entries()) {
+        if (isCacheEntryFresh(seedJob.key)) continue;
+        const scheduledJob = getScheduledJob(seedJob.id);
+        if (scheduledJob?.nextRunAt && Date.parse(scheduledJob.nextRunAt) <= startedAt) {
+            continue;
+        }
+        const staggerMs = index * 5000 + Math.floor(Math.random() * 2500);
+        try {
+            enqueueScheduledJob(seedJob.id, "startup", {
+                availableAt: new Date(startedAt + staggerMs).toISOString(),
+            });
+        } catch (error) {
+            const statusCode =
+                error instanceof Error && "statusCode" in error
+                    ? (error as { statusCode?: unknown }).statusCode
+                    : undefined;
+            if (statusCode !== 409) {
+                console.warn(
+                    `[CacheRefresh] Failed to queue startup cache seed ${seedJob.key}:`,
+                    error
+                );
+            }
+        }
+    }
+}
+
+export function registerCacheRefreshScheduledJobs(
+    options: CacheRefreshScheduledJobOptions = {}
+): void {
     registerScheduledJobAction("cache.refresh", async (job, signal) => {
         const key = getScheduledCacheKey(job);
         const result = await refreshCacheProducer(key, signal);
         return { key, ...result };
     });
-    const seedKeys: string[] = [];
+    const seedJobs: Array<{ id: string; key: string }> = [];
     database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction(
@@ -2307,7 +2406,7 @@ export function registerCacheRefreshScheduledJobs(): void {
                         : undefined),
             });
             if (existing?.enabled ?? true) {
-                seedKeys.push(job.actionPayload.key);
+                seedJobs.push({ id: job.id, key: job.actionPayload.key });
             }
         }
         database.run("COMMIT");
@@ -2319,7 +2418,11 @@ export function registerCacheRefreshScheduledJobs(): void {
         }
         throw error;
     }
-    for (const key of seedKeys) {
-        seedMissingLocalCacheEntry(key);
+    if (options.seedStrategy === "queue") {
+        queueMissingCacheSeeds(seedJobs);
+    } else if (options.seedStrategy === "local") {
+        for (const seedJob of seedJobs) {
+            seedMissingLocalCacheEntry(seedJob.key);
+        }
     }
 }

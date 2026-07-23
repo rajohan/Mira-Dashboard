@@ -12,6 +12,7 @@ import {
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
+    ScheduledJobActionError,
     upsertScheduledJob,
 } from "./scheduledJobs.ts";
 
@@ -2684,11 +2685,26 @@ export function registerDockerUpdaterScheduledJobs(): void {
         timeOfDay: "04:10",
         actionKey: "docker.updater",
         actionPayload: {},
+        resourceClass: "exclusive",
     } as const;
     registerScheduledJobAction(
         "docker.updater",
-        async () => {
-            const steps = await runDockerUpdaterService();
+        async (executionJob) => {
+            const rawServiceId = executionJob.actionPayload.serviceId;
+            const serviceId =
+                rawServiceId === undefined
+                    ? undefined
+                    : typeof rawServiceId === "number" &&
+                        Number.isSafeInteger(rawServiceId) &&
+                        rawServiceId > 0
+                      ? rawServiceId
+                      : NaN;
+            if (Number.isNaN(serviceId)) {
+                throw Object.assign(new Error("Invalid Docker updater service id"), {
+                    statusCode: 400,
+                });
+            }
+            const steps = await runDockerUpdaterService(serviceId);
             const failed = steps.filter(
                 (step) =>
                     !step.isOk &&
@@ -2696,11 +2712,12 @@ export function registerDockerUpdaterScheduledJobs(): void {
                     step.step !== "git-sync:docker"
             );
             if (failed.length > 0) {
-                throw new Error(
-                    failed.map((step) => `${step.step}: ${step.stderr}`).join("\n")
+                throw new ScheduledJobActionError(
+                    failed.map((step) => `${step.step}: ${step.stderr}`).join("\n"),
+                    { serviceId, steps }
                 );
             }
-            return { steps };
+            return { serviceId, steps };
         },
         { timeoutMs: 30 * 60 * 1000 }
     );

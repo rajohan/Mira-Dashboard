@@ -13,6 +13,7 @@ import { databaseRoutes } from "./routes/databaseRoutes.ts";
 import { dockerRoutes } from "./routes/dockerRoutes.ts";
 import { execRoutes } from "./routes/execRoutes.ts";
 import { fileRoutes } from "./routes/fileRoutes.ts";
+import { jobExecutionRoutes } from "./routes/jobExecutionRoutes.ts";
 import { jobRoutes } from "./routes/jobRoutes.ts";
 import { logRoutes } from "./routes/logRoutes.ts";
 import { mediaRoutes } from "./routes/mediaRoutes.ts";
@@ -83,6 +84,7 @@ const routeTable = {
     ...execRoutes,
     ...fileRoutes,
     ...jobRoutes,
+    ...jobExecutionRoutes,
     ...logRoutes,
     ...mediaRoutes,
     ...metricsRoutes,

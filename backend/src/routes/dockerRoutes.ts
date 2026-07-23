@@ -1,13 +1,7 @@
 import { database } from "../database.ts";
 import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
-import {
-    type BunProcess,
-    killProcessGroup,
-    pipeProcessOutput,
-    runProcess,
-    spawnProcess,
-} from "../lib/processes.ts";
+import { runProcess } from "../lib/processes.ts";
 import {
     arrayFallback,
     nonEmptyEnvironmentFallback,
@@ -18,16 +12,20 @@ import {
 import {
     type DockerUpdaterStepResult,
     isNonblockingRegistrationFailure,
-    registerDockerUpdaterScheduledJobs,
-    runDockerUpdaterService,
 } from "../services/dockerUpdater.ts";
 import {
-    createManualScheduledJobRun,
-    finishScheduledJobRun,
-} from "../services/scheduledJobs.ts";
+    cancelJobExecution,
+    enqueueJobExecution,
+    getJobExecution,
+    type JobExecution,
+} from "../services/jobExecutionQueue.ts";
+import {
+    successfulJobExecutionOutput,
+    waitForJobExecution,
+} from "../services/queuedJobExecution.ts";
+import { enqueueScheduledJob } from "../services/scheduledJobs.ts";
 
 const dockerBin = nonEmptyEnvironmentFallback("MIRA_DOCKER_BIN", "docker");
-const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
 const MIN_LOG_TAIL = 50;
 const MAX_LOG_TAIL = 5000;
@@ -114,19 +112,6 @@ interface DockerVolumeRow {
     Size: string;
 }
 
-interface DockerExecJob {
-    code: number | undefined;
-    containerId: string;
-    containerPid?: number;
-    endedAt: number | undefined;
-    id: string;
-    process?: BunProcess;
-    startedAt: number;
-    status: "running" | "done";
-    stderr: string;
-    stdout: string;
-}
-
 interface DockerUpdaterServiceRow {
     app_slug: string;
     compose_image_ref: string;
@@ -145,8 +130,6 @@ interface DockerUpdaterServiceRow {
     policy: string;
     service_name: string;
 }
-
-const dockerExecJobs = new Map<string, DockerExecJob>();
 
 const dockerUpdaterProjection = `
     CAST(id AS TEXT) AS id,
@@ -171,13 +154,6 @@ function getDockerRoot(): string {
     return nonEmptyEnvironmentFallback("MIRA_DOCKER_ROOT", "/opt/docker");
 }
 
-function getDockerComposeWrapper(): string {
-    return nonEmptyEnvironmentFallback(
-        "MIRA_DOCKER_COMPOSE_WRAPPER",
-        `${getDockerRoot()}/bin/docker-compose-doppler`
-    );
-}
-
 function parameters(request: Request): Record<string, string | undefined> {
     return (request as Request & { params?: Record<string, string> }).params ?? {};
 }
@@ -187,10 +163,6 @@ function queryNumber(request: Request, key: string, fallback: number): number {
     if (rawValue === null || rawValue === "") return fallback;
     const parsed = Number(rawValue);
     return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function trimOutput(text: string): string {
-    return text.length <= MAX_OUTPUT_CHARS ? text : text.slice(-MAX_OUTPUT_CHARS);
 }
 
 function dockerIdentifier(value: unknown): string | undefined {
@@ -298,11 +270,12 @@ function parseDockerSizeToBytes(sizeRaw: string | undefined): number {
     );
 }
 
-async function runDocker(arguments_: string[]): Promise<string> {
+async function runDocker(arguments_: string[], signal?: AbortSignal): Promise<string> {
     const { code, stderr, stdout } = await runProcess(dockerBin, arguments_, {
         cwd: getDockerRoot(),
         env: process.env,
         maxBuffer: 10 * 1024 * 1024,
+        signal,
         timeoutMs: DOCKER_REQUEST_TIMEOUT_MS,
     });
     if (code !== 0) {
@@ -313,25 +286,6 @@ async function runDocker(arguments_: string[]): Promise<string> {
         );
     }
     return String(stdout);
-}
-
-async function runCompose(
-    arguments_: string[]
-): Promise<{ stderr: string; stdout: string }> {
-    const result = await runProcess(getDockerComposeWrapper(), arguments_, {
-        cwd: getDockerRoot(),
-        env: process.env,
-        maxBuffer: 20 * 1024 * 1024,
-        timeoutMs: DOCKER_REQUEST_TIMEOUT_MS,
-    });
-    if (result.code !== 0) {
-        throw new Error(
-            `docker compose ${arguments_.join(" ")} failed with exit code ${
-                result.code
-            }: ${result.stderr.trim() || result.stdout.trim()}`
-        );
-    }
-    return result;
 }
 
 async function getContainerInspectMap(containerIds: string[]) {
@@ -610,6 +564,15 @@ function blockingDockerUpdaterFailures(steps: DockerUpdaterStepResult[]) {
     );
 }
 
+function dockerUpdaterSteps(execution: JobExecution): DockerUpdaterStepResult[] {
+    const steps = execution.output.steps;
+    if (!Array.isArray(steps)) {
+        successfulJobExecutionOutput(execution);
+        throw new Error("Docker updater result was missing");
+    }
+    return steps as DockerUpdaterStepResult[];
+}
+
 export async function getDockerUpdaterEvents(limit: number) {
     const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
     const rows = database
@@ -683,6 +646,42 @@ function statusCodeFromError(error: unknown): number {
         : 500;
 }
 
+async function runQueuedDockerAction(options: {
+    actionKey: string;
+    displayName: string;
+    payload?: Record<string, unknown>;
+    resourceClass?: "host-heavy" | "interactive" | "exclusive";
+    timeoutMs: number;
+}): Promise<Record<string, unknown>> {
+    const execution = enqueueJobExecution({
+        actionKey: options.actionKey,
+        displayName: options.displayName,
+        payload: options.payload,
+        resourceClass: options.resourceClass ?? "host-heavy",
+        timeoutMs: options.timeoutMs,
+    });
+    return successfulJobExecutionOutput(
+        await waitForJobExecution(execution.id, {
+            timeoutMs: options.timeoutMs + 30 * 60 * 1000,
+        })
+    );
+}
+
+function outputString(output: Record<string, unknown>, key: string): string {
+    return typeof output[key] === "string" ? output[key] : "";
+}
+
+function outputNumber(output: Record<string, unknown>, key: string): number | undefined {
+    return typeof output[key] === "number" && Number.isFinite(output[key])
+        ? output[key]
+        : undefined;
+}
+
+function dockerExecExecution(jobId: string): JobExecution | undefined {
+    const execution = getJobExecution(jobId);
+    return execution?.actionKey === "docker.exec" ? execution : undefined;
+}
+
 async function runStackAction(request: Request): Promise<Response> {
     const body = await readDockerJson<{ action?: unknown; service?: unknown }>(request);
     if (body instanceof Response) return body;
@@ -699,128 +698,15 @@ async function runStackAction(request: Request): Promise<Response> {
     ) {
         return json({ error: "Invalid service name" }, { status: 400 });
     }
-    const arguments_: string[] = [body.action];
-    if (body.service !== undefined) arguments_.push(body.service);
-    const result = await runCompose(arguments_);
-    return json({
-        output: [result.stdout, result.stderr].filter(Boolean).join("\n").trim(),
+    const result = await runQueuedDockerAction({
+        actionKey: "docker.stack.action",
+        displayName: `Docker stack ${body.action}`,
+        payload: { action: body.action, service: body.service },
+        timeoutMs: 2 * 60 * 1000,
     });
-}
-
-function cleanupDockerExecJobs(): void {
-    if (dockerExecJobs.size <= MAX_JOBS) return;
-    const doneJobs = dockerExecJobs
-        .values()
-        .filter((job) => job.status === "done")
-        .toArray()
-        .toSorted((a, b) => a.startedAt - b.startedAt);
-    const jobsToDelete = doneJobs.slice(0, dockerExecJobs.size - MAX_JOBS);
-    for (const job of jobsToDelete) {
-        dockerExecJobs.delete(job.id);
-    }
-}
-
-function activeDockerExecJobCount(): number {
-    return dockerExecJobs
-        .values()
-        .filter((job) => job.status !== "done")
-        .toArray().length;
-}
-
-function settleDockerExecJob(containerId: string, command: string, jobId: string): void {
-    const pidMarker = `__MIRA_DOCKER_EXEC_PID_${jobId}:`;
-    let child: BunProcess;
-    try {
-        child = spawnProcess(
-            dockerBin,
-            [
-                "exec",
-                "-e",
-                `MIRA_DASHBOARD_EXEC_COMMAND=${command}`,
-                containerId,
-                "sh",
-                "-lc",
-                String.raw`if command -v setsid >/dev/null 2>&1; then exec setsid sh -lc 'printf '\''${pidMarker}%s\n'\'' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"'; fi; printf '${pidMarker}%s\n' "$$"; exec sh -lc "$MIRA_DASHBOARD_EXEC_COMMAND"`,
-            ],
-            {
-                cwd: getDockerRoot(),
-                env: process.env,
-            }
-        );
-    } catch (error) {
-        const job = dockerExecJobs.get(jobId);
-        if (job) {
-            job.status = "done";
-            job.code = 1;
-            job.stderr = errorMessage(error, "Docker exec failed");
-            job.endedAt = Date.now();
-            cleanupDockerExecJobs();
-        }
-        return;
-    }
-    const job = dockerExecJobs.get(jobId);
-    if (job) job.process = child;
-
-    let stdoutPrefix = "";
-    const stdoutDone = pipeProcessOutput(
-        child.stdout as ReadableStream<Uint8Array> | undefined,
-        (data) => {
-            const current = dockerExecJobs.get(jobId);
-            if (!current) return;
-            const output = stdoutPrefix + String(data);
-            const newlineIndex = output.indexOf("\n");
-            if (newlineIndex === -1 && current.containerPid === undefined) {
-                stdoutPrefix = output;
-                return;
-            }
-            let userOutput = output;
-            if (current.containerPid === undefined) {
-                const firstLine = output.slice(0, newlineIndex).trim();
-                if (firstLine.startsWith(pidMarker)) {
-                    const pid = Number(firstLine.slice(pidMarker.length));
-                    if (Number.isSafeInteger(pid) && pid > 0) {
-                        current.containerPid = pid;
-                    }
-                    userOutput = output.slice(newlineIndex + 1);
-                }
-                stdoutPrefix = "";
-            }
-            current.stdout = trimOutput(current.stdout + userOutput);
-        }
-    );
-    const stderrDone = pipeProcessOutput(
-        child.stderr as ReadableStream<Uint8Array> | undefined,
-        (data) => {
-            const current = dockerExecJobs.get(jobId);
-            if (current) current.stderr = trimOutput(current.stderr + String(data));
-        }
-    );
-    void (async () => {
-        const code = await child.exited;
-        await Promise.all([stdoutDone, stderrDone]);
-        return code;
-    })()
-        .then((code) => {
-            const current = dockerExecJobs.get(jobId);
-            if (!current) return;
-            current.status = "done";
-            current.code = code;
-            current.endedAt = Date.now();
-            current.process = undefined;
-            cleanupDockerExecJobs();
-        })
-        .catch((error: unknown) => {
-            const current = dockerExecJobs.get(jobId);
-            if (!current) return;
-            current.status = "done";
-            current.code = 1;
-            current.stderr = trimOutput(
-                `${current.stderr}\n${errorMessage(error, "Docker exec failed")}`.trim()
-            );
-            current.endedAt = Date.now();
-            current.process = undefined;
-            cleanupDockerExecJobs();
-        });
+    return json({
+        output: outputString(result, "output"),
+    });
 }
 
 export const dockerRoutes = {
@@ -867,10 +753,16 @@ export const dockerRoutes = {
             ) {
                 return json({ error: "Invalid container action" }, { status: 400 });
             }
+            const action = body.action;
             const details = await getContainerDetails(containerId);
             if (!details) return json({ error: "Container not found" }, { status: 404 });
-            await runDocker([body.action, details.id]);
-            return json({ output: `${body.action} sent to ${details.name}` });
+            await runQueuedDockerAction({
+                actionKey: "docker.container.action",
+                displayName: `Docker container ${action}`,
+                payload: { action, containerId: details.id },
+                timeoutMs: 2 * 60 * 1000,
+            });
+            return json({ output: `${action} sent to ${details.name}` });
         },
     },
     "/api/docker/containers/:containerId/logs": {
@@ -906,69 +798,51 @@ export const dockerRoutes = {
     },
     "/api/docker/exec/:jobId": {
         GET: (request: Request) => {
-            const job = dockerExecJobs.get(stringFallback(parameters(request).jobId));
-            if (!job)
+            const jobId = stringFallback(parameters(request).jobId);
+            const execution = dockerExecExecution(jobId);
+            if (!execution)
                 return json({ error: "Docker exec job not found" }, { status: 404 });
+            const output = execution.output;
+            const isTerminal = ["success", "failed", "cancelled"].includes(
+                execution.status
+            );
             return json({
-                code: job.code,
-                containerId: job.containerId,
-                endedAt: job.endedAt,
-                jobId: job.id,
-                startedAt: job.startedAt,
-                status: job.status,
-                stderr: job.stderr,
-                stdout: job.stdout,
+                code: outputNumber(output, "code"),
+                containerId:
+                    outputString(output, "containerId") ||
+                    stringFallback(execution.payload.containerId),
+                endedAt: isTerminal
+                    ? (outputNumber(output, "endedAt") ??
+                      (execution.finishedAt
+                          ? Date.parse(execution.finishedAt)
+                          : undefined))
+                    : undefined,
+                jobId: execution.id,
+                startedAt:
+                    outputNumber(output, "startedAt") ??
+                    Date.parse(execution.startedAt ?? execution.queuedAt),
+                status: isTerminal ? "done" : "running",
+                stderr: outputString(output, "stderr"),
+                stdout: outputString(output, "stdout"),
             });
         },
     },
     "/api/docker/exec/:jobId/stop": {
-        POST: async (request: Request) => {
-            const job = dockerExecJobs.get(stringFallback(parameters(request).jobId));
-            if (!job)
+        POST: (request: Request) => {
+            const jobId = stringFallback(parameters(request).jobId);
+            const execution = dockerExecExecution(jobId);
+            if (!execution)
                 return json({ error: "Docker exec job not found" }, { status: 404 });
-            if (job.status !== "running") {
+            if (execution.status !== "queued" && execution.status !== "running") {
                 return json({ error: "Job is not running" }, { status: 400 });
             }
-            if (!job.process) {
-                return json({ error: "Process not available" }, { status: 400 });
-            }
-            let containerStopError: string | undefined;
-            if (job.containerPid) {
-                try {
-                    await runDocker([
-                        "exec",
-                        job.containerId,
-                        "kill",
-                        "-TERM",
-                        `-${job.containerPid}`,
-                    ]);
-                } catch (groupError) {
-                    try {
-                        await runDocker([
-                            "exec",
-                            job.containerId,
-                            "kill",
-                            "-TERM",
-                            String(job.containerPid),
-                        ]);
-                    } catch (processError) {
-                        containerStopError = `${errorMessage(groupError, "Failed to stop in-container process group")}; ${errorMessage(processError, "Failed to stop in-container process")}`;
-                        job.stderr = trimOutput(
-                            `${job.stderr}\n${containerStopError}`.trim()
-                        );
-                    }
-                }
-            }
             try {
-                killProcessGroup(job.process, "SIGTERM");
+                cancelJobExecution(execution.id);
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Failed to stop Docker exec job") },
-                    { status: 500 }
+                    { status: statusCodeFromError(error) }
                 );
-            }
-            if (containerStopError) {
-                return json({ error: containerStopError }, { status: 500 });
             }
             return json({ isSuccess: true });
         },
@@ -993,26 +867,35 @@ export const dockerRoutes = {
             if (!containerId) {
                 return json({ error: "Container not found" }, { status: 404 });
             }
-            cleanupDockerExecJobs();
-            if (activeDockerExecJobCount() >= MAX_JOBS) {
+            const activeJobs = database
+                .prepare(
+                    `SELECT COUNT(*) AS count FROM job_executions
+                     WHERE action_key = 'docker.exec'
+                       AND status IN ('queued', 'running')`
+                )
+                .get() as { count: number };
+            if (activeJobs.count >= MAX_JOBS) {
                 return json(
                     { error: "Too many active Docker exec jobs" },
                     { status: 429 }
                 );
             }
-            const jobId = Bun.randomUUIDv7();
-            dockerExecJobs.set(jobId, {
-                code: undefined,
-                containerId,
-                endedAt: undefined,
-                id: jobId,
-                startedAt: Date.now(),
-                status: "running",
-                stderr: "",
-                stdout: "",
-            });
-            settleDockerExecJob(containerId, body.command, jobId);
-            return json({ jobId });
+            let execution: JobExecution;
+            try {
+                execution = enqueueJobExecution({
+                    actionKey: "docker.exec",
+                    displayName: "Docker container exec",
+                    payload: { command: body.command, containerId },
+                    resourceClass: "interactive",
+                    timeoutMs: 7 * 60 * 60 * 1000,
+                });
+            } catch (error) {
+                return json(
+                    { error: errorMessage(error, "Docker exec failed to start") },
+                    { status: statusCodeFromError(error) }
+                );
+            }
+            return json({ jobId: execution.id });
         },
     },
     "/api/docker/images": {
@@ -1022,7 +905,12 @@ export const dockerRoutes = {
         DELETE: async (request: Request) => {
             const imageId = dockerImageIdentifier(parameters(request).imageId);
             if (!imageId) return invalidDockerIdentifier("imageId");
-            await runDocker(["image", "rm", imageId]);
+            await runQueuedDockerAction({
+                actionKey: "docker.image.delete",
+                displayName: "Delete Docker image",
+                payload: { imageId },
+                timeoutMs: 2 * 60 * 1000,
+            });
             return json({ isSuccess: true });
         },
     },
@@ -1033,13 +921,29 @@ export const dockerRoutes = {
             if (body?.target === "images") {
                 return json({
                     isSuccess: true,
-                    output: await runDocker(["image", "prune", "-a", "-f"]),
+                    output: outputString(
+                        await runQueuedDockerAction({
+                            actionKey: "docker.prune.images",
+                            displayName: "Prune Docker images",
+                            payload: { target: "images" },
+                            timeoutMs: 10 * 60 * 1000,
+                        }),
+                        "output"
+                    ),
                 });
             }
             if (body?.target === "volumes") {
                 return json({
                     isSuccess: true,
-                    output: await runDocker(["volume", "prune", "-f"]),
+                    output: outputString(
+                        await runQueuedDockerAction({
+                            actionKey: "docker.prune.volumes",
+                            displayName: "Prune Docker volumes",
+                            payload: { target: "volumes" },
+                            timeoutMs: 10 * 60 * 1000,
+                        }),
+                        "output"
+                    ),
                 });
             }
             return json({ error: "Invalid prune target" }, { status: 400 });
@@ -1056,37 +960,18 @@ export const dockerRoutes = {
     },
     "/api/docker/updater/run": {
         POST: async () => {
-            let scheduledRun;
             try {
-                registerDockerUpdaterScheduledJobs();
-                scheduledRun = createManualScheduledJobRun("docker.updater");
-            } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Docker updater failed") },
-                    { status: statusCodeFromError(error) }
+                const scheduledRun = enqueueScheduledJob("docker.updater", "manual");
+                const execution = await waitForJobExecution(
+                    scheduledRun.executionId as string,
+                    { timeoutMs: 60 * 60 * 1000 }
                 );
-            }
-            try {
-                const steps = await runDockerUpdaterService();
-                finishScheduledJobRun(
-                    scheduledRun,
-                    blockingDockerUpdaterFailures(steps).length === 0
-                        ? "success"
-                        : "failed",
-                    undefined,
-                    { steps }
-                );
+                const steps = dockerUpdaterSteps(execution);
                 return json({
                     isSuccess: blockingDockerUpdaterFailures(steps).length === 0,
                     steps,
                 });
             } catch (error) {
-                finishScheduledJobRun(
-                    scheduledRun,
-                    "failed",
-                    errorMessage(error, "Docker updater failed"),
-                    { steps: [] }
-                );
                 return json(
                     { error: errorMessage(error, "Docker updater failed") },
                     { status: statusCodeFromError(error) }
@@ -1116,34 +1001,21 @@ export const dockerRoutes = {
             if (!service.enabled) {
                 return json({ error: "Updater service is disabled" }, { status: 400 });
             }
-            let scheduledRun;
-            try {
-                registerDockerUpdaterScheduledJobs();
-                scheduledRun = createManualScheduledJobRun("docker.updater");
-            } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Docker updater failed") },
-                    { status: statusCodeFromError(error) }
-                );
-            }
             let steps: DockerUpdaterStepResult[];
             try {
-                steps = await runDockerUpdaterService(serviceId);
-                finishScheduledJobRun(
-                    scheduledRun,
-                    blockingDockerUpdaterFailures(steps).length === 0
-                        ? "success"
-                        : "failed",
-                    undefined,
-                    { serviceId, steps }
+                const execution = enqueueJobExecution({
+                    actionKey: "docker.updater",
+                    displayName: `Update Docker service ${serviceId}`,
+                    payload: { serviceId },
+                    resourceClass: "exclusive",
+                    timeoutMs: 30 * 60 * 1000,
+                });
+                steps = dockerUpdaterSteps(
+                    await waitForJobExecution(execution.id, {
+                        timeoutMs: 60 * 60 * 1000,
+                    })
                 );
             } catch (error) {
-                finishScheduledJobRun(
-                    scheduledRun,
-                    "failed",
-                    errorMessage(error, "Docker updater failed"),
-                    { serviceId }
-                );
                 return json(
                     { error: errorMessage(error, "Docker updater failed") },
                     { status: statusCodeFromError(error) }
@@ -1203,7 +1075,12 @@ export const dockerRoutes = {
         DELETE: async (request: Request) => {
             const volumeName = dockerIdentifier(parameters(request).volumeName);
             if (!volumeName) return invalidDockerIdentifier("volumeName");
-            await runDocker(["volume", "rm", volumeName]);
+            await runQueuedDockerAction({
+                actionKey: "docker.volume.delete",
+                displayName: "Delete Docker volume",
+                payload: { volumeName },
+                timeoutMs: 2 * 60 * 1000,
+            });
             return json({ isSuccess: true });
         },
     },

@@ -77,6 +77,7 @@ type ExecFileRunner = (
         encoding?: BufferEncoding;
         env: NodeJS.ProcessEnv;
         maxBuffer: number;
+        signal?: AbortSignal;
         timeout?: number;
     }
 ) => Promise<{ stderr: string; stdout: string }>;
@@ -89,6 +90,7 @@ const elevatedLogRotationExecFileRunner: ExecFileRunner = async (
     const result = await runProcess(file, arguments_, {
         env: options.env,
         maxBuffer: options.maxBuffer,
+        signal: options.signal,
         timeoutMs: options.timeout,
     });
     if (result.code !== 0) {
@@ -1775,6 +1777,7 @@ export async function runLogRotationService(
 
 export async function runElevatedLogRotationService(options: {
     isDryRun: boolean;
+    signal?: AbortSignal;
 }): Promise<ElevatedLogRotationResult> {
     const modulePath = Bun.fileURLToPath(import.meta.url);
     const arguments_ = buildElevatedLogRotationCliArguments(modulePath, options);
@@ -1785,6 +1788,7 @@ export async function runElevatedLogRotationService(options: {
             encoding: "utf8",
             env: elevatedLogRotationEnvironment(),
             maxBuffer: ELEVATED_LOG_ROTATION_MAX_BUFFER,
+            signal: options.signal,
             timeout: ELEVATED_LOG_ROTATION_TIMEOUT_MS,
         });
         stderr = output.stderr;
@@ -1964,11 +1968,15 @@ function persistLogRotationScheduledFailure(
 
 /** Registers the scheduled real log rotation job. */
 export function registerLogRotationScheduledJobs(): void {
-    registerScheduledJobAction(LOG_ROTATION_JOB_ID, async () => {
-        const logRotation = await runElevatedLogRotationService({ isDryRun: false });
+    registerScheduledJobAction(LOG_ROTATION_JOB_ID, async (job, signal) => {
+        const isDryRun = job.actionPayload.isDryRun === true;
+        const logRotation = await runElevatedLogRotationService({
+            isDryRun,
+            signal,
+        });
         if (logRotation.result?.isOk !== true) {
             const message = logRotationFailureMessage(logRotation);
-            persistLogRotationScheduledFailure(logRotation, message);
+            if (!isDryRun) persistLogRotationScheduledFailure(logRotation, message);
             throw new ScheduledJobActionError(message, {
                 logRotation: capScheduledLogRotationFailure(logRotation),
             });
@@ -1991,6 +1999,7 @@ export function registerLogRotationScheduledJobs(): void {
             cronExpression: existing?.cronExpression ?? undefined,
             actionKey: LOG_ROTATION_JOB_ID,
             actionPayload: { key: STATE_CACHE_KEY },
+            resourceClass: "host-heavy",
         });
         database.run("COMMIT");
     } catch (error) {

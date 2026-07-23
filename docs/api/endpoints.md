@@ -102,18 +102,21 @@ Create body:
 
 ## Jobs And Cron
 
-| Method  | Path                        | Purpose                                |
-| ------- | --------------------------- | -------------------------------------- |
-| `GET`   | `/api/jobs`                 | Lists Dashboard scheduled jobs.        |
-| `GET`   | `/api/jobs/:id`             | Reads a scheduled job.                 |
-| `PATCH` | `/api/jobs/:id`             | Updates scheduled job settings and intentional-disable metadata. |
-| `POST`  | `/api/jobs/:id/run`         | Runs a scheduled job now.              |
-| `GET`   | `/api/jobs/:id/runs`        | Lists job run history.                 |
-| `GET`   | `/api/cron/jobs`            | Lists OpenClaw cron jobs and open linked tasks. |
-| `POST`  | `/api/cron/jobs/:id/run`    | Runs an OpenClaw cron job.             |
-| `POST`  | `/api/cron/jobs/:id/toggle` | Enables/disables an OpenClaw cron job and updates its Dashboard-owned disable intent. |
-| `POST`  | `/api/cron/jobs/:id/update` | Updates an OpenClaw cron job patch.    |
-| `POST`  | `/api/cron/jobs/:id/delete` | Deletes an OpenClaw cron job.          |
+| Method  | Path                             | Purpose                                                                               |
+| ------- | -------------------------------- | ------------------------------------------------------------------------------------- |
+| `GET`   | `/api/jobs`                      | Lists Dashboard scheduled jobs.                                                       |
+| `GET`   | `/api/jobs/:id`                  | Reads a scheduled job.                                                                |
+| `PATCH` | `/api/jobs/:id`                  | Updates scheduled job settings and intentional-disable metadata.                      |
+| `POST`  | `/api/jobs/:id/run`              | Queues a scheduled job and returns `202`.                                             |
+| `GET`   | `/api/job-executions`            | Lists recent executions plus queue/worker summary.                                    |
+| `GET`   | `/api/job-executions/:id`        | Reads one execution, including its persisted progress/result output snapshot.         |
+| `POST`  | `/api/job-executions/:id/cancel` | Cancels queued work or requests cooperative cancellation of a running execution.      |
+| `GET`   | `/api/jobs/:id/runs`             | Lists job run history.                                                                |
+| `GET`   | `/api/cron/jobs`                 | Lists OpenClaw cron jobs and open linked tasks.                                       |
+| `POST`  | `/api/cron/jobs/:id/run`         | Runs an OpenClaw cron job.                                                            |
+| `POST`  | `/api/cron/jobs/:id/toggle`      | Enables/disables an OpenClaw cron job and updates its Dashboard-owned disable intent. |
+| `POST`  | `/api/cron/jobs/:id/update`      | Updates an OpenClaw cron job patch.                                                   |
+| `POST`  | `/api/cron/jobs/:id/delete`      | Deletes an OpenClaw cron job.                                                         |
 
 When a Dashboard job or OpenClaw cron job is intentionally disabled, its update
 body may include `disableIntent: { mode, comment, until? }`. `mode` is `until`
@@ -123,16 +126,24 @@ the annotation in `scheduled_jobs.disable_intent_json`; OpenClaw cron jobs use
 the Dashboard-owned `openclaw_cron_job_metadata` table rather than modifying the
 OpenClaw payload or linked tasks.
 
+Dashboard-owned execution-plane routes enqueue work in `job_executions`; the
+dedicated worker owns the action and every child process. Scheduled jobs return
+the queued execution immediately. Routes that retain an older synchronous API
+shape wait by observing the persisted row, but an HTTP disconnect or web
+restart does not cancel the action. Poll the execution detail endpoint for its
+bounded progress/output snapshot, and use the explicit cancel endpoint when a
+queued or running action should stop.
+
 ## OpenClaw Config
 
-| Method | Path                | Purpose                                   |
-| ------ | ------------------- | ----------------------------------------- |
-| `GET`  | `/api/config`       | Reads OpenClaw config snapshot plus hash. |
-| `PUT`  | `/api/config`       | Writes OpenClaw config with hash check.   |
-| `GET`  | `/api/skills`       | Lists OpenClaw skills.                    |
-| `POST` | `/api/skills/:name` | Toggles a skill.                          |
-| `POST` | `/api/backup`       | Creates config backup.                    |
-| `POST` | `/api/restart`      | Restarts OpenClaw Gateway.                |
+| Method | Path                | Purpose                                                                |
+| ------ | ------------------- | ---------------------------------------------------------------------- |
+| `GET`  | `/api/config`       | Reads OpenClaw config snapshot plus hash.                              |
+| `PUT`  | `/api/config`       | Writes OpenClaw config with hash check.                                |
+| `GET`  | `/api/skills`       | Lists OpenClaw skills.                                                 |
+| `POST` | `/api/skills/:name` | Toggles a skill.                                                       |
+| `POST` | `/api/backup`       | Creates config backup.                                                 |
+| `POST` | `/api/restart`      | Queues an OpenClaw Gateway restart and waits for its persisted result. |
 
 ## Files, Config Files, Logs, Media
 
@@ -162,58 +173,58 @@ upstream download metadata.
 
 ## Docker
 
-| Method   | Path                                             | Purpose                          |
-| -------- | ------------------------------------------------ | -------------------------------- |
-| `GET`    | `/api/docker/containers`                         | Lists containers.                |
-| `GET`    | `/api/docker/containers/:containerId`            | Reads container details.         |
-| `POST`   | `/api/docker/containers/:containerId/action`     | Starts/stops/restarts container. |
-| `GET`    | `/api/docker/containers/:containerId/logs`       | Reads container logs.            |
-| `POST`   | `/api/docker/exec/start`                         | Starts a container exec job.     |
-| `GET`    | `/api/docker/exec/:jobId`                        | Reads exec job output/state.     |
-| `POST`   | `/api/docker/exec/:jobId/stop`                   | Stops exec job.                  |
-| `GET`    | `/api/docker/images`                             | Lists images.                    |
-| `DELETE` | `/api/docker/images/:imageId`                    | Deletes an image.                |
-| `GET`    | `/api/docker/volumes`                            | Lists volumes.                   |
-| `DELETE` | `/api/docker/volumes/:volumeName`                | Deletes a volume.                |
-| `POST`   | `/api/docker/prune`                              | Runs Docker prune target.        |
-| `POST`   | `/api/docker/stack/action`                       | Runs a compose stack action.     |
-| `GET`    | `/api/docker/updater/services`                   | Lists managed update services.   |
-| `GET`    | `/api/docker/updater/events`                     | Lists update events.             |
-| `POST`   | `/api/docker/updater/run`                        | Runs updater scan.               |
-| `POST`   | `/api/docker/updater/services/:serviceId/update` | Updates one managed service.     |
+| Method   | Path                                             | Purpose                                   |
+| -------- | ------------------------------------------------ | ----------------------------------------- |
+| `GET`    | `/api/docker/containers`                         | Lists containers.                         |
+| `GET`    | `/api/docker/containers/:containerId`            | Reads container details.                  |
+| `POST`   | `/api/docker/containers/:containerId/action`     | Queues a container start/stop/restart.    |
+| `GET`    | `/api/docker/containers/:containerId/logs`       | Reads container logs.                     |
+| `POST`   | `/api/docker/exec/start`                         | Queues a worker-owned container exec job. |
+| `GET`    | `/api/docker/exec/:jobId`                        | Reads persisted exec output/state.        |
+| `POST`   | `/api/docker/exec/:jobId/stop`                   | Requests exec cancellation.               |
+| `GET`    | `/api/docker/images`                             | Lists images.                             |
+| `DELETE` | `/api/docker/images/:imageId`                    | Queues image deletion.                    |
+| `GET`    | `/api/docker/volumes`                            | Lists volumes.                            |
+| `DELETE` | `/api/docker/volumes/:volumeName`                | Queues volume deletion.                   |
+| `POST`   | `/api/docker/prune`                              | Queues a Docker prune target.             |
+| `POST`   | `/api/docker/stack/action`                       | Queues a Compose stack action.            |
+| `GET`    | `/api/docker/updater/services`                   | Lists managed update services.            |
+| `GET`    | `/api/docker/updater/events`                     | Lists update events.                      |
+| `POST`   | `/api/docker/updater/run`                        | Queues an updater scan.                   |
+| `POST`   | `/api/docker/updater/services/:serviceId/update` | Queues one managed service update.        |
 
 ## Pull Requests And Deployments
 
-| Method | Path                                         | Purpose                              |
-| ------ | -------------------------------------------- | ------------------------------------ |
-| `GET`  | `/api/pull-requests`                         | Lists Dashboard PRs.                 |
-| `POST` | `/api/pull-requests/:number/approve`         | Approves/merges, optionally deploys. |
-| `POST` | `/api/pull-requests/:number/reject`          | Rejects/closes.                      |
-| `POST` | `/api/pull-requests/:number/review-approval` | Approves review.                     |
-| `POST` | `/api/pull-requests/:number/update-branch`   | Updates branch.                      |
-| `POST` | `/api/pull-requests/deploy`                  | Starts deploy latest job.            |
-| `GET`  | `/api/pull-requests/deployments`             | Lists deploy jobs.                   |
-| `GET`  | `/api/pull-requests/production-checkout`     | Reads production checkout status.    |
+| Method | Path                                         | Purpose                                      |
+| ------ | -------------------------------------------- | -------------------------------------------- |
+| `GET`  | `/api/pull-requests`                         | Lists Dashboard PRs.                         |
+| `POST` | `/api/pull-requests/:number/approve`         | Queues merge, optionally followed by deploy. |
+| `POST` | `/api/pull-requests/:number/reject`          | Queues reject/close.                         |
+| `POST` | `/api/pull-requests/:number/review-approval` | Queues review approval.                      |
+| `POST` | `/api/pull-requests/:number/update-branch`   | Queues branch update.                        |
+| `POST` | `/api/pull-requests/deploy`                  | Queues deploy latest.                        |
+| `GET`  | `/api/pull-requests/deployments`             | Lists deploy jobs.                           |
+| `GET`  | `/api/pull-requests/production-checkout`     | Reads production checkout status.            |
 
 ## Backups, Cache, Metrics, Ops
 
-| Method | Path                                       | Purpose                                                                |
-| ------ | ------------------------------------------ | ---------------------------------------------------------------------- |
-| `GET`  | `/api/backups/kopia`                       | Reads Kopia backup state.                                              |
-| `POST` | `/api/backups/kopia/run`                   | Starts Kopia backup.                                                   |
-| `POST` | `/api/backups/kopia/clear-needs-attention` | Clears Kopia attention state.                                          |
-| `GET`  | `/api/backups/walg`                        | Reads WAL-G backup state.                                              |
-| `POST` | `/api/backups/walg/run`                    | Starts WAL-G backup.                                                   |
-| `POST` | `/api/backups/walg/clear-needs-attention`  | Clears WAL-G attention state.                                          |
+| Method | Path                                       | Purpose                                                                                          |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `GET`  | `/api/backups/kopia`                       | Reads Kopia backup state.                                                                        |
+| `POST` | `/api/backups/kopia/run`                   | Queues Kopia backup.                                                                             |
+| `POST` | `/api/backups/kopia/clear-needs-attention` | Queues clearing Kopia attention state.                                                           |
+| `GET`  | `/api/backups/walg`                        | Reads WAL-G backup state.                                                                        |
+| `POST` | `/api/backups/walg/run`                    | Queues WAL-G backup.                                                                             |
+| `POST` | `/api/backups/walg/clear-needs-attention`  | Queues clearing WAL-G attention state.                                                           |
 | `GET`  | `/api/cache/heartbeat`                     | Reads schema v3 cache envelopes plus compact task, OpenClaw cron, and Dashboard-job projections. |
-| `GET`  | `/api/cache/status`                        | Reads cache envelopes without payload data for lightweight UI polling. |
-| `GET`  | `/api/cache/:key`                          | Reads one cache entry.                                                 |
-| `POST` | `/api/cache/:key/refresh`                  | Refreshes one cache entry.                                             |
-| `GET`  | `/api/metrics`                             | Reads host metrics.                                                    |
-| `GET`  | `/api/database/overview`                   | Reads Postgres/PgBouncer overview.                                     |
-| `GET`  | `/api/ops/log-rotation/status`             | Reads log rotation status.                                             |
-| `POST` | `/api/ops/log-rotation/dry-run`            | Runs log rotation dry-run.                                             |
-| `POST` | `/api/ops/log-rotation/run`                | Runs log rotation.                                                     |
+| `GET`  | `/api/cache/status`                        | Reads cache envelopes without payload data for lightweight UI polling.                           |
+| `GET`  | `/api/cache/:key`                          | Reads one cache entry.                                                                           |
+| `POST` | `/api/cache/:key/refresh`                  | Queues and observes one cache refresh.                                                           |
+| `GET`  | `/api/metrics`                             | Reads host metrics.                                                                              |
+| `GET`  | `/api/database/overview`                   | Reads Postgres/PgBouncer overview.                                                               |
+| `GET`  | `/api/ops/log-rotation/status`             | Reads log rotation status.                                                                       |
+| `POST` | `/api/ops/log-rotation/dry-run`            | Queues and observes log rotation dry-run.                                                        |
+| `POST` | `/api/ops/log-rotation/run`                | Queues and observes log rotation.                                                                |
 
 `/api/database/overview` includes Comet/Bitmagnet torrent counts and a
 conservative Postgres maintenance assessment. Bloat is marked for review at an
@@ -240,14 +251,14 @@ their consumer contracts.
 
 ## Exec And Terminal
 
-| Method | Path                     | Purpose                               |
-| ------ | ------------------------ | ------------------------------------- |
-| `POST` | `/api/exec`              | Runs one command.                     |
-| `POST` | `/api/exec/start`        | Starts long-running exec job.         |
-| `GET`  | `/api/exec/:jobId`       | Reads exec job output/state.          |
-| `POST` | `/api/exec/:jobId/stop`  | Stops exec job.                       |
-| `POST` | `/api/terminal/complete` | Returns shell/path completions.       |
-| `POST` | `/api/terminal/cd`       | Resolves validated directory changes. |
+| Method | Path                     | Purpose                                               |
+| ------ | ------------------------ | ----------------------------------------------------- |
+| `POST` | `/api/exec`              | Queues one command and observes its persisted result. |
+| `POST` | `/api/exec/start`        | Queues a worker-owned long-running exec job.          |
+| `GET`  | `/api/exec/:jobId`       | Reads persisted exec output/state.                    |
+| `POST` | `/api/exec/:jobId/stop`  | Requests exec cancellation.                           |
+| `POST` | `/api/terminal/complete` | Returns shell/path completions.                       |
+| `POST` | `/api/terminal/cd`       | Resolves validated directory changes.                 |
 
 The Terminal page executes commands through `/api/exec/start` and polls the
 result by job ID. The backend validates the argv contract. The Terminal UI

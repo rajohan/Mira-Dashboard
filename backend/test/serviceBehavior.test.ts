@@ -20,7 +20,7 @@ import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import { database, sqlNullable } from "../src/database.ts";
 import * as processModule from "../src/lib/processes.ts";
 
-const cleanupCallbacks: Array<() => void> = [];
+const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
 function rememberEnvironment(key: string): void {
     const originalValue = process.env[key];
@@ -351,15 +351,29 @@ function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<vo
     });
 }
 
-afterEach(() => {
+async function startTestScheduledExecutor(): Promise<void> {
+    const { startScheduledJobExecutor, stopScheduledJobExecutor } =
+        await import("../src/services/scheduledJobs.ts");
+    startScheduledJobExecutor();
+    cleanupCallbacks.push(stopScheduledJobExecutor);
+}
+
+afterEach(async () => {
     const errors: unknown[] = [];
     while (cleanupCallbacks.length > 0) {
         try {
-            cleanupCallbacks.pop()?.();
+            await cleanupCallbacks.pop()?.();
         } catch (error) {
             errors.push(error);
         }
     }
+    database
+        .prepare(
+            `DELETE FROM job_executions
+             WHERE scheduled_job_id LIKE 'backup.%'
+                OR action_key = 'backup.clear-attention'`
+        )
+        .run();
     if (errors.length > 0) {
         throw new AggregateError(errors, "Test cleanup failed");
     }
@@ -843,6 +857,10 @@ describe("backend service behavior", () => {
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
 
+        const { registerCacheRefreshScheduledJobs } =
+            await import("../src/services/cacheRefresh.ts");
+        registerCacheRefreshScheduledJobs({ seedStrategy: "none" });
+        await startTestScheduledExecutor();
         const { cacheRoutes } = await import("../src/routes/cacheRoutes.ts");
         const response = await cacheRoutes["/api/cache/:key/refresh"].POST(
             Object.assign(
@@ -1036,7 +1054,10 @@ printf 'scheduled\n'
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
 
-        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        const { registerPullRequestExecutionActions, startDeployLatest } =
+            await import("../src/services/pullRequests.ts");
+        registerPullRequestExecutionActions();
+        await startTestScheduledExecutor();
         const job = startDeployLatest();
 
         try {
@@ -1054,7 +1075,7 @@ printf 'scheduled\n'
                       }
                     | undefined;
                 return row?.status === "restart-scheduled" && existsSync(systemdLog);
-            });
+            }, 5000);
 
             const row = database
                 .prepare(
@@ -1091,6 +1112,11 @@ printf 'scheduled\n'
         } finally {
             database.prepare("DELETE FROM deployment_lock WHERE job_id = ?").run(job.id);
             database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(job.id);
+            database
+                .prepare(
+                    "DELETE FROM job_executions WHERE action_key = 'dashboard.deploy' AND payload_json LIKE ?"
+                )
+                .run(`%${job.id}%`);
         }
     });
 
@@ -1245,8 +1271,14 @@ fi
         process.env.RAJOHAN_GITHUB_TOKEN = "review-token";
         process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
 
-        const { approvePullRequestReview, rejectPullRequest, updatePullRequestBranch } =
-            await import("../src/services/pullRequests.ts");
+        const {
+            approvePullRequestReview,
+            registerPullRequestExecutionActions,
+            rejectPullRequest,
+            updatePullRequestBranch,
+        } = await import("../src/services/pullRequests.ts");
+        registerPullRequestExecutionActions();
+        await startTestScheduledExecutor();
         const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
 
         await expect(approvePullRequestReview(3)).resolves.toMatchObject({
@@ -2196,10 +2228,28 @@ fi
         await waitFor(() => weatherResponses === 1);
         const secondRefresh = refreshCacheProducer("weather.spydeberg");
         const abortController = new AbortController();
+        const abortedRefresh = refreshCacheProducer(
+            "weather.spydeberg",
+            abortController.signal
+        );
         abortController.abort();
-        await expect(
-            refreshCacheProducer("weather.spydeberg", abortController.signal)
-        ).rejects.toThrow("Cache refresh aborted");
+        const abortedRefreshState = (async () => {
+            try {
+                await abortedRefresh;
+                return "resolved" as const;
+            } catch (error) {
+                return error instanceof Error ? error.message : "rejected without error";
+            }
+        })();
+        expect(
+            await Promise.race([
+                abortedRefreshState,
+                (async () => {
+                    await Bun.sleep(10);
+                    return "pending" as const;
+                })(),
+            ])
+        ).toBe("pending");
         releaseWeather?.();
 
         await expect(firstRefresh).resolves.toEqual({
@@ -2208,6 +2258,7 @@ fi
         await expect(secondRefresh).resolves.toEqual({
             refreshed: ["weather.spydeberg"],
         });
+        await expect(abortedRefreshState).resolves.toBe("Cache refresh aborted");
         expect(weatherResponses).toBe(1);
     });
 
@@ -2516,6 +2567,7 @@ fi
 
         try {
             registerBackupScheduledJobs();
+            await startTestScheduledExecutor();
             expect(getScheduledJob("backup.walg")).toMatchObject({
                 actionKey: "backup.run",
                 enabled: true,
@@ -2548,21 +2600,6 @@ fi
             });
             expect(getCurrentBackupJob("walg")).toMatchObject({ status: "done" });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { status?: string } | undefined;
-                return row?.status === "success";
-            });
-            expect(
-                database
-                    .prepare(
-                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get()
-            ).toEqual({ status: "success" });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -2585,17 +2622,6 @@ fi
                 statusCode: 503,
             });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { message?: string; status?: string } | undefined;
-                return (
-                    row?.status === "failed" &&
-                    row.message?.includes("pgrep failed") === true
-                );
-            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -2695,7 +2721,7 @@ fi
         }
     });
 
-    it("runs a manual backup without scheduled metadata and trims oversized output", async () => {
+    it("trims oversized output in the worker backup primitive", async () => {
         const { getCurrentBackupJob, startManualBackup } =
             await import("../src/services/backups.ts");
         const largeOutput = `${"x".repeat(100_200)}tail-marker\n`;
@@ -2739,7 +2765,6 @@ fi
             });
             expect(completed.stdout.length).toBeLessThanOrEqual(100_000);
             expect(completed.stdout).toEndWith("tail-marker\n");
-            expect(completed.manualScheduledRun).toBeUndefined();
             expect(
                 database
                     .prepare(
@@ -2804,17 +2829,6 @@ fi
             expect(completed.stdout).toContain("stdout before failure");
             expect(completed.stderr).toContain("stderr before failure");
             expect(completed.stderr).toContain("child process promise failed");
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { message: string; status: string } | undefined;
-                return (
-                    row?.status === "failed" &&
-                    row.message.includes("child process promise failed")
-                );
-            });
             expect(getCurrentBackupJob("walg")).toMatchObject({ status: "done" });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
         } finally {
@@ -2827,20 +2841,26 @@ fi
         }
     });
 
-    it("marks aborted scheduled backups failed before preflight starts", async () => {
+    it("cancels queued backups before worker preflight starts", async () => {
         const { getCurrentBackupJob, registerBackupScheduledJobs } =
             await import("../src/services/backups.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
-        const controller = new AbortController();
-        controller.abort();
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
 
         try {
             registerBackupScheduledJobs();
-            const run = await runScheduledJob("backup.walg", "manual", controller.signal);
-            expect(run).toMatchObject({
+            const run = enqueueScheduledJob("backup.walg", "manual");
+            cancelJobExecution(run.executionId as string);
+            expect(
+                database
+                    .prepare(
+                        "SELECT job_id AS jobId, status FROM scheduled_job_runs WHERE id = ?"
+                    )
+                    .get(run.id)
+            ).toMatchObject({
                 jobId: "backup.walg",
-                message: "Scheduled job aborted",
-                status: "failed",
+                status: "cancelled",
             });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
         } finally {
@@ -2888,6 +2908,7 @@ fi
 
         try {
             registerBackupScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("backup.walg");
 
             expect(run).toMatchObject({
@@ -2938,6 +2959,7 @@ fi
 
         try {
             registerBackupScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("backup.kopia");
 
             expect(run).toMatchObject({
@@ -2966,7 +2988,11 @@ fi
     it("terminates running WAL-G backups when a scheduled run is aborted", async () => {
         const { getCurrentBackupJob, registerBackupScheduledJobs } =
             await import("../src/services/backups.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const { waitForJobExecution } =
+            await import("../src/services/queuedJobExecution.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
         const exit = Promise.withResolvers<number>();
         const runProcessCalls: string[] = [];
         const runProcessSpy = jest
@@ -3002,22 +3028,20 @@ fi
                     stdout: readableUtf8Stream(""),
                 }) as unknown as processModule.BunProcess
         );
-        const controller = new AbortController();
-
         try {
             registerBackupScheduledJobs();
-            const runPromise = runScheduledJob(
-                "backup.walg",
-                "manual",
-                controller.signal
-            );
-            await waitFor(() => spawnSpy.mock.calls.length === 1);
-            controller.abort();
+            await startTestScheduledExecutor();
+            const run = enqueueScheduledJob("backup.walg", "manual");
+            await waitFor(() => spawnSpy.mock.calls.length === 1, 3000);
+            cancelJobExecution(run.executionId as string);
+            await waitFor(() => killSignals.includes("SIGTERM"), 3000);
             exit.resolve(143);
 
-            const run = await runPromise;
-            expect(run.status).toBe("failed");
-            expect(run.message).toBe("Scheduled job aborted");
+            const execution = await waitForJobExecution(run.executionId as string, {
+                timeoutMs: 3000,
+            });
+            expect(execution.status).toBe("cancelled");
+            expect(execution.message).toBe("Job cancelled");
             expect(killSignals).toContain("SIGTERM");
             expect(runProcessCalls).toEqual(
                 expect.arrayContaining([
@@ -3074,14 +3098,6 @@ fi
                 type: "walg",
             });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.walg' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { status?: string } | undefined;
-                return row?.status === "failed";
-            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -3110,17 +3126,6 @@ fi
                 statusCode: 503,
             });
             expect(getCurrentBackupJob("kopia")).toBeUndefined();
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status, message FROM scheduled_job_runs WHERE job_id = 'backup.kopia' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { message?: string; status?: string } | undefined;
-                return (
-                    row?.status === "failed" &&
-                    row.message?.includes("pgrep unavailable") === true
-                );
-            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -3168,14 +3173,6 @@ fi
             expect(readFileSync(pgrepLog, "utf8")).toContain(
                 "-f /opt/docker/apps/kopia/backup.sh"
             );
-            await waitFor(() => {
-                const row = database
-                    .prepare(
-                        "SELECT status FROM scheduled_job_runs WHERE job_id = 'backup.kopia' ORDER BY id DESC LIMIT 1"
-                    )
-                    .get() as { status?: string } | undefined;
-                return row?.status === "failed";
-            });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -3773,6 +3770,7 @@ fi
 
         try {
             registerLogRotationScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("ops.log-rotation");
 
             expect(run.status).toBe("failed");
@@ -3830,6 +3828,7 @@ fi
 
         try {
             registerLogRotationScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("ops.log-rotation");
 
             expect(run.status).toBe("failed");
@@ -3895,6 +3894,7 @@ fi
 
         try {
             registerLogRotationScheduledJobs();
+            await startTestScheduledExecutor();
             const run = await runScheduledJob("ops.log-rotation");
 
             expect(run.status).toBe("success");
@@ -4507,7 +4507,7 @@ fi
     });
 
     it("starts, stops, and reports exec jobs through the service lifecycle", async () => {
-        const { getExecJob, startExecJob, stopExecJob } =
+        const { getExecJob, registerExecExecutionActions, startExecJob, stopExecJob } =
             await import("../src/services/execJobs.ts");
         const exit = Promise.withResolvers<number>();
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
@@ -4523,6 +4523,8 @@ fi
                 }) as unknown as processModule.BunProcess
         );
         try {
+            registerExecExecutionActions();
+            await startTestScheduledExecutor();
             const { jobId } = startExecJob({
                 command: "__mira_dashboard_shell_smoke_test__",
                 shell: true,
@@ -4531,14 +4533,12 @@ fi
                 jobId,
                 status: "running",
             });
+            await waitFor(() => spawnSpy.mock.calls.length === 1, 3000);
             expect(stopExecJob(jobId)).toEqual({
                 isSuccess: true,
                 message: "Stop signal sent",
             });
-            expect(getExecJob(jobId)).toMatchObject({
-                jobId,
-                status: "signaled",
-            });
+            await waitFor(() => getExecJob(jobId).status === "done", 3000);
             expect(() => stopExecJob(jobId)).toThrow("Job is not running");
         } finally {
             exit.resolve(0);
@@ -4547,8 +4547,8 @@ fi
         }
     });
 
-    it("rejects new exec jobs while the active job cap is full", async () => {
-        const { execErrorResponse, startExecJob } =
+    it("serializes concurrent exec jobs through global execution capacity", async () => {
+        const { registerExecExecutionActions, startExecJob } =
             await import("../src/services/execJobs.ts");
         const exits: Array<ReturnType<typeof Promise.withResolvers<number>>> = [];
         const spawnSpy = jest
@@ -4564,37 +4564,33 @@ fi
                     stdout: readableUtf8Stream(""),
                 } as unknown as processModule.BunProcess;
             });
-        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-
         try {
-            let capError: unknown;
-            for (let index = 0; !capError && index < 120; index += 1) {
-                try {
-                    startExecJob({
-                        command: "__mira_dashboard_shell_smoke_test__",
-                        shell: true,
-                    });
-                } catch (error) {
-                    capError = error;
-                }
-            }
-            expect(execErrorResponse(capError)).toEqual({
-                error: "Too many exec jobs",
-                status: 429,
+            registerExecExecutionActions();
+            await startTestScheduledExecutor();
+            const first = startExecJob({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
             });
-            expect(warnSpy).toHaveBeenCalled();
+            const second = startExecJob({
+                command: "__mira_dashboard_shell_smoke_test__",
+                shell: true,
+            });
+            expect(first.jobId).not.toBe(second.jobId);
+            await waitFor(() => exits.length === 1, 3000);
+            exits[0]?.resolve(0);
+            await waitFor(() => exits.length === 2, 3000);
+            exits[1]?.resolve(0);
         } finally {
             for (const exit of exits) {
                 exit.resolve(0);
             }
             await Bun.sleep(0);
             spawnSpy.mockRestore();
-            warnSpy.mockRestore();
         }
     });
 
     it("records exec process failures and trims oversized output", async () => {
-        const { getExecJob, runExecOnce, startExecJob } =
+        const { getExecJob, registerExecExecutionActions, runExecOnce, startExecJob } =
             await import("../src/services/execJobs.ts");
         const longOutput = `${"x".repeat(101_000)}tail`;
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
@@ -4609,6 +4605,8 @@ fi
         );
 
         try {
+            registerExecExecutionActions();
+            await startTestScheduledExecutor();
             const once = await runExecOnce({
                 command: "__mira_dashboard_shell_smoke_test__",
                 shell: true,
@@ -4890,6 +4888,10 @@ fi
             hash: "hash-1",
         });
 
+        const { registerOpenClawExecutionActions } =
+            await import("../src/services/openclawActions.ts");
+        registerOpenClawExecutionActions();
+        await startTestScheduledExecutor();
         const restartResponse = await openclawConfigRoutes["/api/restart"].POST();
         expect(restartResponse.status).toBe(200);
         await expect(restartResponse.json()).resolves.toEqual({ isOk: true });
@@ -5260,6 +5262,10 @@ fi
                 throw new Error("docker exec spawn failed");
             });
         try {
+            const { registerDockerExecutionActions } =
+                await import("../src/services/dockerActions.ts");
+            registerDockerExecutionActions();
+            await startTestScheduledExecutor();
             const execStart = await dockerRoutes["/api/docker/exec/start"].POST(
                 new Request("https://dashboard.test/api/docker/exec/start", {
                     body: JSON.stringify({
@@ -5270,6 +5276,12 @@ fi
                 })
             );
             const execStartBody = (await execStart.json()) as { jobId: string };
+            await waitFor(() => {
+                const row = database
+                    .prepare("SELECT status FROM job_executions WHERE id = ?")
+                    .get(execStartBody.jobId) as { status?: string } | undefined;
+                return row?.status === "failed";
+            }, 3000);
             const failedExec = dockerRoutes["/api/docker/exec/:jobId"].GET(
                 Object.assign(
                     new Request(
@@ -5435,8 +5447,9 @@ fi
                 ].join("\n")
             );
             process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
-            const { registerDockerUpdaterServices } =
+            const { registerDockerUpdaterScheduledJobs, registerDockerUpdaterServices } =
                 await import("../src/services/dockerUpdater.ts");
+            registerDockerUpdaterScheduledJobs();
             await expect(registerDockerUpdaterServices()).resolves.toMatchObject({
                 isOk: true,
             });
@@ -5479,7 +5492,7 @@ fi
         const scheduledDisabledId = `test-job-scheduled-disabled-${Bun.randomUUIDv7()}`;
         const {
             calculateNextRunAt,
-            finishScheduledJobRun,
+            enqueueScheduledJob,
             getScheduledJob,
             isScheduledJobValidationError,
             listScheduledJobs,
@@ -5487,12 +5500,16 @@ fi
             registerScheduledJobAction,
             removeScheduledJobsNotInAction,
             runScheduledJob,
-            createManualScheduledJobRun,
+            startScheduledJobExecutor,
+            stopScheduledJobExecutor,
             updateScheduledJob,
             upsertScheduledJob,
         } = await import("../src/services/scheduledJobs.ts");
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
 
         try {
+            startScheduledJobExecutor();
             expect(
                 calculateNextRunAt(
                     {
@@ -5638,11 +5655,11 @@ fi
                 nextRunAt: undefined,
             });
 
-            const manualRun = createManualScheduledJobRun(keepId);
-            expect(() => createManualScheduledJobRun(keepId)).toThrow(
-                "Scheduled job is already running"
+            const manualRun = enqueueScheduledJob(keepId);
+            expect(() => enqueueScheduledJob(keepId)).toThrow(
+                "Scheduled job is already queued or running"
             );
-            finishScheduledJobRun(manualRun, "success", undefined, { manual: true });
+            cancelJobExecution(manualRun.executionId as string);
 
             const result = await runScheduledJob(keepId);
             expect(result).toMatchObject({
@@ -5742,11 +5759,16 @@ fi
 
             const timeoutActionKey = `test-timeout-action-${Bun.randomUUIDv7()}`;
             const timeoutJobId = `test-job-timeout-${Bun.randomUUIDv7()}`;
+            let isTimeoutHandlerSettled = false;
             registerScheduledJobAction(
                 timeoutActionKey,
                 async () => {
-                    await Bun.sleep(50);
-                    return { late: true };
+                    try {
+                        await Bun.sleep(50);
+                        return { late: true };
+                    } finally {
+                        isTimeoutHandlerSettled = true;
+                    }
                 },
                 { timeoutMs: 1 }
             );
@@ -5765,6 +5787,7 @@ fi
                     output: {},
                     status: "failed",
                 });
+                expect(isTimeoutHandlerSettled).toBe(true);
             } finally {
                 warnSpy.mockRestore();
             }
@@ -5783,13 +5806,9 @@ fi
             controller.abort();
             await expect(
                 runScheduledJob(abortJobId, "manual", controller.signal)
-            ).resolves.toMatchObject({
-                jobId: abortJobId,
-                message: "Scheduled job aborted",
-                output: {},
-                status: "failed",
-            });
+            ).rejects.toHaveProperty("name", "AbortError");
         } finally {
+            await stopScheduledJobExecutor();
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'test-job-%'")
                 .run();

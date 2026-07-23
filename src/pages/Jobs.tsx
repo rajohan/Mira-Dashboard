@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { CronJobDetails, CronJobList } from "../components/features/cron";
 import { JobDisableIntentStatus } from "../components/features/jobs/JobDisableIntentStatus";
+import { JobExecutionQueueCard } from "../components/features/jobs/JobExecutionQueueCard";
 import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -143,7 +144,9 @@ function getInitialCronJobId(): string {
 
 function scheduledJobStatusVariant(job: ScheduledJob) {
     if (!job.enabled) return "warning" as const;
+    if (job.isQueued || job.lastRun?.status === "queued") return "info" as const;
     if (job.isRunning || job.lastRun?.status === "running") return "info" as const;
+    if (job.lastRun?.status === "cancelled") return "warning" as const;
     if (job.lastRun?.status === "failed") return "error" as const;
     if (job.lastRun?.status === "success") return "success" as const;
     return "default" as const;
@@ -151,6 +154,7 @@ function scheduledJobStatusVariant(job: ScheduledJob) {
 
 function scheduledJobStatusLabel(job: ScheduledJob): string {
     if (!job.enabled) return "Disabled";
+    if (job.isQueued || job.lastRun?.status === "queued") return "Queued";
     if (job.isRunning || job.lastRun?.status === "running") return "Running";
     return job.lastRun?.status || "Never run";
 }
@@ -340,7 +344,7 @@ function ScheduledJobDetails({
                     <Button
                         size="sm"
                         variant="primary"
-                        disabled={runPending || job.isRunning}
+                        disabled={runPending || job.isQueued || job.isRunning}
                         onClick={onRunNow}
                         className="w-full sm:w-auto"
                     >
@@ -350,7 +354,13 @@ function ScheduledJobDetails({
                                 runPending ? "animate-pulse" : "",
                             ].join(" ")}
                         />
-                        {runPending || job.isRunning ? "Running..." : "Run now"}
+                        {runPending
+                            ? "Queueing..."
+                            : job.isQueued
+                              ? "Queued"
+                              : job.isRunning
+                                ? "Running..."
+                                : "Run now"}
                     </Button>
                 </div>
             </div>
@@ -450,7 +460,13 @@ function ScheduledJobDetails({
                 ) : undefined}
             </div>
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <Card className="min-w-0 bg-primary-900/40 p-3">
+                    <div className="text-xs text-primary-400">Resource class</div>
+                    <div className="mt-1 text-sm text-primary-100 capitalize">
+                        {(job.resourceClass ?? "light").replace("-", " ")}
+                    </div>
+                </Card>
                 <Card className="min-w-0 bg-primary-900/40 p-3">
                     <div className="text-xs text-primary-400">Action</div>
                     <div className="mt-1 text-sm break-all text-primary-100">
@@ -496,7 +512,10 @@ function ScheduledJobDetails({
                                             {run.triggerType} run #{run.id}
                                         </div>
                                         <div className="mt-1 text-xs text-primary-400">
-                                            Started {formatDate(run.startedAt)}
+                                            Queued {formatDate(run.queuedAt)}
+                                            {run.status === "queued"
+                                                ? ""
+                                                : ` · started ${formatDate(run.startedAt)}`}
                                             {run.finishedAt
                                                 ? ` · finished ${formatDate(run.finishedAt)}`
                                                 : ""}
@@ -514,7 +533,9 @@ function ScheduledJobDetails({
                                                 ? "success"
                                                 : run.status === "failed"
                                                   ? "error"
-                                                  : "info"
+                                                  : run.status === "cancelled"
+                                                    ? "warning"
+                                                    : "info"
                                         }
                                     >
                                         {run.status}
@@ -941,45 +962,52 @@ export function Jobs() {
                     </p>
                 </Card>
             ) : view === "scheduled" ? (
-                <div className="grid grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[380px_1fr]">
-                    <ScheduledJobList
-                        jobs={sortedScheduledJobs}
-                        selectedId={selectedScheduledJobId}
-                        currentJobId={currentScheduledJobId}
-                        onSelect={setSelectedScheduledJobId}
-                    />
-                    <ScheduledJobDetails
-                        job={currentScheduledJob as ScheduledJob}
-                        scheduleTypeDraft={scheduleTypeDraft}
-                        intervalDraft={intervalDraft}
-                        timeDraft={timeDraft}
-                        cronDraft={cronExpressionDraft}
-                        editError={scheduledEditError}
-                        runPending={runScheduledJob.isPending}
-                        updatePending={updateScheduledJob.isPending}
-                        onScheduleTypeChange={setScheduleTypeDraft}
-                        onIntervalChange={setIntervalDraft}
-                        onTimeChange={setTimeDraft}
-                        onCronChange={setCronExpressionDraft}
-                        onToggle={(isEnabled) => {
-                            handleScheduledToggle(
-                                currentScheduledJob as ScheduledJob,
-                                isEnabled
-                            );
-                        }}
-                        onConfigureDisable={() =>
-                            openDisableModal({
-                                kind: "scheduled",
-                                job: currentScheduledJob as ScheduledJob,
-                            })
-                        }
-                        onRunNow={() => {
-                            void handleScheduledRun(currentScheduledJob as ScheduledJob);
-                        }}
-                        onSave={() => {
-                            void handleScheduledSave(currentScheduledJob as ScheduledJob);
-                        }}
-                    />
+                <div className="space-y-3 sm:space-y-4">
+                    <JobExecutionQueueCard />
+                    <div className="grid grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[380px_1fr]">
+                        <ScheduledJobList
+                            jobs={sortedScheduledJobs}
+                            selectedId={selectedScheduledJobId}
+                            currentJobId={currentScheduledJobId}
+                            onSelect={setSelectedScheduledJobId}
+                        />
+                        <ScheduledJobDetails
+                            job={currentScheduledJob as ScheduledJob}
+                            scheduleTypeDraft={scheduleTypeDraft}
+                            intervalDraft={intervalDraft}
+                            timeDraft={timeDraft}
+                            cronDraft={cronExpressionDraft}
+                            editError={scheduledEditError}
+                            runPending={runScheduledJob.isPending}
+                            updatePending={updateScheduledJob.isPending}
+                            onScheduleTypeChange={setScheduleTypeDraft}
+                            onIntervalChange={setIntervalDraft}
+                            onTimeChange={setTimeDraft}
+                            onCronChange={setCronExpressionDraft}
+                            onToggle={(isEnabled) => {
+                                handleScheduledToggle(
+                                    currentScheduledJob as ScheduledJob,
+                                    isEnabled
+                                );
+                            }}
+                            onConfigureDisable={() =>
+                                openDisableModal({
+                                    kind: "scheduled",
+                                    job: currentScheduledJob as ScheduledJob,
+                                })
+                            }
+                            onRunNow={() => {
+                                void handleScheduledRun(
+                                    currentScheduledJob as ScheduledJob
+                                );
+                            }}
+                            onSave={() => {
+                                void handleScheduledSave(
+                                    currentScheduledJob as ScheduledJob
+                                );
+                            }}
+                        />
+                    </div>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[360px_1fr]">

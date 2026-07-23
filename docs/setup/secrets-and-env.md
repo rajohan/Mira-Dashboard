@@ -43,6 +43,21 @@ token in `app_config.gateway_token`. Environment token precedence is:
 See [Auth and trust boundaries](../security/auth-and-trust-boundaries.md) for
 route auth, loopback bypass, proxy trust, bootstrap, and token handling.
 
+## Execution Roles And Resource Scopes
+
+| Variable                           | Production value    | Purpose                                                                                    |
+| ---------------------------------- | ------------------- | ------------------------------------------------------------------------------------------ |
+| `MIRA_DASHBOARD_EXECUTION_ROLE`    | `web` / `worker`    | Keeps HTTP/WebSocket handling in the web unit and scheduler/executor work in the worker.   |
+| `MIRA_DASHBOARD_ENABLE_JOB_SCOPES` | `1` in both units   | Runs classified job children in constrained transient user scopes.                         |
+| `MIRA_DASHBOARD_JOB_SCOPE_OWNER`   | owning service unit | Binds transient scopes to their service lifecycle so restarts terminate orphaned children. |
+| `MIRA_DASHBOARD_DISABLE_SCHEDULER` | unset in production | Development/test escape hatch; `1` disables scheduler/executor startup.                    |
+
+The tracked systemd units set these orchestration values directly. Doppler
+remains the source of auth, origin, provider, and credential values. Production
+actions run in the worker, so their child scopes bind to
+`mira-dashboard-worker.service`; restarting only the web unit leaves them
+untouched.
+
 ## GitHub And PR Operations
 
 | Variable                    | Required for                             | Purpose                                                         |

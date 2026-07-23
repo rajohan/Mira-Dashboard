@@ -41,6 +41,17 @@ export {
 } from "./useCron";
 export { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
 export { useHealth } from "./useHealth";
+export type {
+    JobExecution,
+    JobExecutionStatus,
+    JobExecutionSummary,
+    JobResourceClass,
+} from "./useJobExecutions";
+export {
+    jobExecutionKeys,
+    useCancelJobExecution,
+    useJobExecutions,
+} from "./useJobExecutions";
 export { logKeys, useLogContent, useLogFiles } from "./useLogs";
 export { useMetrics } from "./useMetrics";
 export {

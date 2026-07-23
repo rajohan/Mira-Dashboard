@@ -25,7 +25,7 @@ import type {
     OpenClawGatewayClientOptions,
 } from "../src/lib/openclawGatewayClient.ts";
 
-const cleanupCallbacks: Array<() => void> = [];
+const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
 function rememberEnvironment(key: string): void {
     const originalValue = process.env[key];
@@ -184,7 +184,15 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
     return (await response.json()) as Record<string, unknown>;
 }
 
-afterEach(() => {
+async function startTestScheduledExecutor(): Promise<void> {
+    const { startScheduledJobExecutor, stopScheduledJobExecutor } =
+        await import("../src/services/scheduledJobs.ts");
+    startScheduledJobExecutor();
+    cleanupCallbacks.push(stopScheduledJobExecutor);
+}
+
+afterEach(async () => {
+    while (cleanupCallbacks.length > 0) await cleanupCallbacks.pop()?.();
     database
         .prepare(
             "DELETE FROM task_updates WHERE task_id IN (SELECT id FROM tasks WHERE title LIKE 'Coverage %')"
@@ -234,7 +242,6 @@ afterEach(() => {
         )
         .run();
     database.prepare("DELETE FROM users WHERE username LIKE 'coverage-%'").run();
-    while (cleanupCallbacks.length > 0) cleanupCallbacks.pop()?.();
 });
 
 describe("backend route and service behavior", () => {
@@ -2462,6 +2469,10 @@ describe("backend route and service behavior", () => {
                 .prepare("DELETE FROM scheduled_jobs WHERE id = 'docker.updater'")
                 .run();
         });
+        const { registerDockerUpdaterScheduledJobs } =
+            await import("../src/services/dockerUpdater.ts");
+        registerDockerUpdaterScheduledJobs();
+        await startTestScheduledExecutor();
         const updaterRun = await dockerRoutes["/api/docker/updater/run"].POST();
         expect(updaterRun.status).toBe(200);
         await expect(updaterRun.json()).resolves.toMatchObject({
@@ -3129,12 +3140,13 @@ describe("backend route and service behavior", () => {
             .spyOn(AbortSignal, "timeout")
             .mockReturnValue(gatewayHeadersTimeoutController.signal);
         cleanupCallbacks.push(
-            () =>
+            () => {
                 Object.defineProperty(globalThis, "fetch", {
                     configurable: true,
                     value: originalFetch,
                     writable: true,
-                }),
+                });
+            },
             () => gatewayTimeoutSpy.mockRestore()
         );
 
@@ -3327,11 +3339,12 @@ describe("backend route and service behavior", () => {
         writeFakeBackupDocker(path.join(fakeBin, "docker"));
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const { backupRoutes } = await import("../src/routes/backupRoutes.ts");
-        const { getCurrentBackupJob, registerBackupScheduledJobs } =
+        const { registerBackupScheduledJobs } =
             await import("../src/services/backups.ts");
 
         try {
             registerBackupScheduledJobs();
+            await startTestScheduledExecutor();
             const response = await backupRoutes["/api/backups/walg/run"].POST();
             expect(response.status).toBe(200);
             const body = (await response.json()) as {
@@ -3343,20 +3356,24 @@ describe("backend route and service behavior", () => {
                 job: { status: "running", type: "walg" },
             });
 
-            const completed = await getCurrentBackupJob("walg")?.completed;
-            expect(completed).toMatchObject({
-                code: 0,
-                status: "done",
-                stdout: expect.stringContaining("backup ok"),
-                type: "walg",
+            let statusBody: Record<string, unknown> = {};
+            const deadline = Date.now() + 3000;
+            while (Date.now() < deadline) {
+                statusBody = await responseJson(backupRoutes["/api/backups/walg"].GET());
+                if (
+                    (statusBody.job as { status?: string } | undefined)?.status === "done"
+                )
+                    break;
+                await Bun.sleep(25);
+            }
+            expect(statusBody).toMatchObject({
+                job: {
+                    code: 0,
+                    status: "done",
+                    stdout: expect.stringContaining("backup ok"),
+                    type: "walg",
+                },
             });
-
-            const status = backupRoutes["/api/backups/walg"].GET();
-            await expect(status.json()).resolves.toMatchObject({
-                job: { code: 0, status: "done", type: "walg" },
-            });
-            const clearedStatus = backupRoutes["/api/backups/walg"].GET();
-            await expect(clearedStatus.json()).resolves.toEqual({ job: undefined });
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
@@ -3380,6 +3397,10 @@ describe("backend route and service behavior", () => {
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(fakeBin, "compose");
         process.env.MIRA_DOCKER_ROOT = dockerRoot;
         const { dockerRoutes } = await import("../src/routes/dockerRoutes.ts");
+        const { registerDockerExecutionActions } =
+            await import("../src/services/dockerActions.ts");
+        registerDockerExecutionActions();
+        await startTestScheduledExecutor();
 
         const containers = await dockerRoutes["/api/docker/containers"].GET();
         await expect(containers.json()).resolves.toMatchObject({
@@ -3679,7 +3700,7 @@ describe("backend route and service behavior", () => {
         await expect(stopCompletedExec.json()).resolves.toEqual({
             error: "Job is not running",
         });
-    });
+    }, 20_000);
 
     it("normalizes ops log-rotation status cache state", async () => {
         const { opsRoutes } = await import("../src/routes/opsRoutes.ts");
@@ -3750,8 +3771,14 @@ describe("backend route and service behavior", () => {
     });
 
     it("exec service validation and error normalization branches", async () => {
-        const { execErrorResponse, getExecJob, runExecOnce, startExecJob, stopExecJob } =
-            await import("../src/services/execJobs.ts");
+        const {
+            execErrorResponse,
+            getExecJob,
+            registerExecExecutionActions,
+            runExecOnce,
+            startExecJob,
+            stopExecJob,
+        } = await import("../src/services/execJobs.ts");
 
         await expect(runExecOnce(undefined)).rejects.toThrow(
             "request body must be a JSON object"
@@ -3814,6 +3841,8 @@ describe("backend route and service behavior", () => {
             })
         ).rejects.toThrow("cwd does not exist");
 
+        registerExecExecutionActions();
+        await startTestScheduledExecutor();
         const result = await runExecOnce({
             command: "__mira_dashboard_shell_smoke_test__",
             cwd: process.cwd(),
@@ -4748,6 +4777,7 @@ esac
         }
 
         registerCacheRefreshScheduledJobs();
+        await startTestScheduledExecutor();
 
         const rows = database
             .prepare(

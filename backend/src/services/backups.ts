@@ -9,12 +9,21 @@ import {
 } from "../lib/processes.ts";
 import { refreshCacheProducer } from "./cacheRefresh.ts";
 import {
-    createManualScheduledJobRun,
-    finishScheduledJobRun,
+    enqueueJobExecution,
+    getJobExecution,
+    getLatestScheduledJobExecution,
+    type JobExecution,
+} from "./jobExecutionQueue.ts";
+import {
+    successfulJobExecutionOutput,
+    waitForJobExecution,
+} from "./queuedJobExecution.ts";
+import {
+    enqueueScheduledJob,
     getScheduledJob,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
-    type ScheduledJobRun,
+    type ScheduledJobActionContext,
     upsertScheduledJob,
 } from "./scheduledJobs.ts";
 const MAX_OUTPUT_CHARS = 100_000;
@@ -46,7 +55,6 @@ interface BackupJob {
     completed: Promise<BackupJob>;
     process?: BunProcess;
     statusRefreshed?: boolean;
-    manualScheduledRun?: ScheduledJobRun;
 }
 
 const backupJobs = new Map<string, BackupJob>();
@@ -739,7 +747,11 @@ async function startWalgBackupJob(signal?: AbortSignal) {
     );
 }
 
-async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSignal) {
+async function startScheduledBackup(
+    type: BackupJob["type"],
+    signal: AbortSignal | undefined,
+    context: ScheduledJobActionContext
+) {
     if (signal?.aborted) {
         throw new Error("Backup aborted by scheduler");
     }
@@ -756,11 +768,18 @@ async function startScheduledBackup(type: BackupJob["type"], signal?: AbortSigna
             }
         );
     }
-    const job =
-        type === "kopia"
-            ? await startKopiaBackupJob(signal)
-            : await startWalgBackupJob(signal);
-    const completedJob = await job.completed;
+    const job = await startManualBackup(type, signal);
+    const publish = () => context.updateOutput({ backup: mapBackupJob(job) });
+    publish();
+    const progress = setInterval(publish, 1000);
+    progress.unref();
+    let completedJob: BackupJob;
+    try {
+        completedJob = await job.completed;
+    } finally {
+        clearInterval(progress);
+        publish();
+    }
     if (completedJob.code !== 0) {
         const details = completedJob.stderr || completedJob.stdout;
         throw new Error(
@@ -776,66 +795,68 @@ function scheduledBackupJobId(type: BackupJob["type"]) {
     return type === "kopia" ? "backup.kopia" : "backup.walg";
 }
 
-function createBackupManualScheduledRun(type: BackupJob["type"]) {
-    const jobId = scheduledBackupJobId(type);
-    if (!getScheduledJob(jobId)) {
-        return;
-    }
-    return createManualScheduledJobRun(jobId);
-}
-
-function backupFailureMessage(job: BackupJob) {
-    if (job.status === "needs_attention") {
-        return `${job.type.toUpperCase()} backup needs attention`;
-    }
-    if (job.code === 0) {
-        return;
-    }
-    const details = job.stderr || job.stdout;
-    return `${job.type.toUpperCase()} backup failed with code ${job.code ?? 1}${
-        details ? `: ${details}` : ""
-    }`;
-}
-
-function attachManualScheduledRun(job: BackupJob): void {
-    if (job.manualScheduledRun || job.status !== "running") {
-        return;
-    }
-    let run: ScheduledJobRun;
-    try {
-        const scheduledRun = createBackupManualScheduledRun(job.type);
-        if (!scheduledRun) {
-            return;
-        }
-        run = scheduledRun;
-    } catch (error) {
-        console.warn("[Backups] Failed to record manual backup run:", error);
-        return;
-    }
-    job.manualScheduledRun = run;
-    void finishManualScheduledRunWhenComplete(job, run);
-}
-
-async function finishManualScheduledRunWhenComplete(
-    job: BackupJob,
-    run: ScheduledJobRun
-): Promise<void> {
-    try {
-        const completedJob = await job.completed;
-        const isSuccess = completedJob.status === "done" && completedJob.code === 0;
-        finishScheduledJobRun(
-            run,
-            isSuccess ? "success" : "failed",
-            isSuccess ? undefined : backupFailureMessage(completedJob),
-            { backup: mapBackupJob(completedJob) }
-        );
-    } catch (error) {
-        console.warn("[Backups] Failed to finish manual backup run:", error);
-    }
-}
-
 export function getCurrentBackupJob(type: BackupJob["type"]): BackupJob | undefined {
     return (type === "kopia" ? getCurrentKopiaJob : getCurrentWalgJob)();
+}
+
+/** Worker primitive. HTTP callers must enqueue the registered backup action. */
+export async function startManualBackup(type: BackupJob["type"], signal?: AbortSignal) {
+    const existingJob = getCurrentBackupJob(type);
+    if (existingJob?.status === "running") return existingJob;
+    return type === "kopia"
+        ? await startKopiaBackupJob(signal)
+        : await startWalgBackupJob(signal);
+}
+
+function backupViewFromExecution(
+    type: BackupJob["type"],
+    execution: JobExecution | undefined
+) {
+    if (!execution) return;
+    const backup = execution.output.backup;
+    if (backup && typeof backup === "object" && !Array.isArray(backup)) {
+        return backup as ReturnType<typeof mapBackupJob>;
+    }
+    return {
+        code: undefined,
+        endedAt: execution.finishedAt ? Date.parse(execution.finishedAt) : undefined,
+        id: execution.id,
+        startedAt: Date.parse(execution.startedAt ?? execution.queuedAt),
+        status: execution.finishedAt ? "done" : "running",
+        stderr: execution.message ?? "",
+        stdout: "",
+        type,
+    } as const;
+}
+
+export function getPersistedBackupJob(type: BackupJob["type"]) {
+    return backupViewFromExecution(
+        type,
+        getLatestScheduledJobExecution(scheduledBackupJobId(type))
+    );
+}
+
+export function queueManualBackup(type: BackupJob["type"]) {
+    const scheduledRun = enqueueScheduledJob(scheduledBackupJobId(type), "manual");
+    return backupViewFromExecution(
+        type,
+        scheduledRun.executionId ? getJobExecution(scheduledRun.executionId) : undefined
+    );
+}
+
+export async function clearPersistedBackupAttention(type: BackupJob["type"]) {
+    const execution = enqueueJobExecution({
+        actionKey: "backup.clear-attention",
+        displayName: `Clear ${type.toUpperCase()} backup attention`,
+        payload: { type },
+        resourceClass: "light",
+        timeoutMs: 5 * 60 * 1000,
+    });
+    const completed = await waitForJobExecution(execution.id, {
+        timeoutMs: 15 * 60 * 1000,
+    });
+    const output = successfulJobExecutionOutput(completed);
+    return output.backup as ReturnType<typeof mapBackupJob>;
 }
 
 async function terminateContainerProcessSafely(
@@ -854,37 +875,6 @@ async function terminateContainerProcessSafely(
     }
 }
 
-export async function startManualBackup(type: BackupJob["type"]) {
-    const existingJob = getCurrentBackupJob(type);
-    if (existingJob?.status === "running") {
-        return existingJob;
-    }
-    try {
-        const job =
-            type === "kopia" ? await startKopiaBackupJob() : await startWalgBackupJob();
-        attachManualScheduledRun(job);
-        return job;
-    } catch (error) {
-        try {
-            const failedRun = createBackupManualScheduledRun(type);
-            if (failedRun) {
-                finishScheduledJobRun(
-                    failedRun,
-                    "failed",
-                    errorMessage(error, `${type.toUpperCase()} backup failed to start`),
-                    {}
-                );
-            }
-        } catch (runError) {
-            console.warn(
-                "[Backups] Failed to record failed manual backup run:",
-                runError
-            );
-        }
-        throw error;
-    }
-}
-
 const backupScheduledJobs = [
     {
         id: "backup.walg",
@@ -895,6 +885,7 @@ const backupScheduledJobs = [
         timeOfDay: "03:20",
         actionKey: "backup.run",
         actionPayload: { type: "walg" },
+        resourceClass: "host-heavy",
     },
     {
         id: "backup.kopia",
@@ -905,13 +896,14 @@ const backupScheduledJobs = [
         timeOfDay: "03:50",
         actionKey: "backup.run",
         actionPayload: { type: "kopia" },
+        resourceClass: "host-heavy",
     },
 ] as const;
 
 export function registerBackupScheduledJobs(): void {
     registerScheduledJobAction(
         "backup.run",
-        (job, signal) => {
+        (job, signal, context) => {
             const type = getScheduledBackupType(job.actionPayload);
             if (type !== "kopia" && type !== "walg") {
                 throw Object.assign(
@@ -919,10 +911,18 @@ export function registerBackupScheduledJobs(): void {
                     { statusCode: 400 }
                 );
             }
-            return startScheduledBackup(type, signal);
+            return startScheduledBackup(type, signal, context);
         },
         { timeoutMs: SCHEDULED_BACKUP_TIMEOUT_MS }
     );
+    registerScheduledJobAction("backup.clear-attention", async (job) => {
+        const type = getScheduledBackupType(job.actionPayload);
+        if (type !== "kopia" && type !== "walg") {
+            throw Object.assign(new Error("Invalid backup type"), { statusCode: 400 });
+        }
+        const cleared = await clearNeedsAttentionBackupJob(type);
+        return { backup: mapBackupJob(cleared) };
+    });
     database.run("BEGIN");
     try {
         removeScheduledJobsNotInAction(

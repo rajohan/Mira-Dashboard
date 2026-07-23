@@ -1,6 +1,10 @@
 import { database } from "../database.ts";
 import { json } from "../http.ts";
 import { runElevatedLogRotationService } from "../services/logRotation.ts";
+import {
+    enqueueAndWaitForJobExecution,
+    successfulJobExecutionOutput,
+} from "../services/queuedJobExecution.ts";
 
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 
@@ -93,7 +97,20 @@ export async function runLogRotation(options: {
 
 async function runLogRotationResponse(isDryRun: boolean) {
     try {
-        const { result, stderr } = await runLogRotation({ isDryRun });
+        const execution = await enqueueAndWaitForJobExecution({
+            actionKey: "ops.log-rotation",
+            displayName: isDryRun ? "Log rotation dry run" : "Log rotation manual run",
+            payload: { isDryRun },
+            resourceClass: "host-heavy",
+            timeoutMs: 10 * 60 * 1000,
+        });
+        const output = execution.output;
+        const logRotation = output.logRotation;
+        if (!logRotation || typeof logRotation !== "object") {
+            successfulJobExecutionOutput(execution);
+            throw new Error("Log rotation result was missing");
+        }
+        const { result, stderr } = logRotation as unknown as LogRotationResult;
         return json({
             isSuccess: result?.isOk === true,
             result,
