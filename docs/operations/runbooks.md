@@ -123,8 +123,9 @@ is compatible with its schema. Never overwrite the live database or remove
 `-wal`/`-shm` while either Dashboard process is running.
 
 1. Confirm the execution queue is idle and record the absolute snapshot path.
-2. Resolve the configured database path and verify the snapshot before stopping
-   services:
+2. In one shell invocation, resolve the configured database path, verify the
+   snapshot, stop worker then web, preserve the current SQLite files, install
+   and validate the standalone snapshot, and only then start web and worker:
 
 ```bash
 set -euo pipefail
@@ -154,13 +155,6 @@ if [[ "$has_migration_history" = "1" ]]; then
 else
   printf '%s\n' "Legacy snapshot without schema_migrations; pair it with pre-lifecycle code."
 fi
-```
-
-3. Stop worker first, then web. Preserve every current SQLite file in a
-   same-filesystem recovery directory before installing the standalone
-   snapshot:
-
-```bash
 systemctl --user stop mira-dashboard-worker.service
 systemctl --user stop mira-dashboard.service
 db_dir="$(dirname "$db_path")"
@@ -174,19 +168,15 @@ for suffix in "" "-wal" "-shm"; do
 done
 install -m 0600 "$backup_path" "$db_path"
 test "$(sqlite3 -readonly "$db_path" "PRAGMA quick_check;")" = "ok"
-```
-
-4. Start web, then worker, and verify health, Database → Dashboard SQLite,
-   migrations, and queue state:
-
-```bash
 systemctl --user start mira-dashboard.service
 systemctl --user start mira-dashboard-worker.service
-curl http://127.0.0.1:3100/api/health
+curl --fail --show-error --silent http://127.0.0.1:3100/api/health
+printf '\nRecovery files retained at %s\n' "$recovery_dir"
 ```
 
-Keep `recovery_dir` until the restore has been validated. Removing it later is
-a separate destructive cleanup decision.
+3. Verify Database → Dashboard SQLite, migrations, and queue state. Keep the
+   printed recovery directory until the restore has been validated. Removing
+   it later is a separate destructive cleanup decision.
 
 ## PostgreSQL Maintenance Review
 

@@ -124,15 +124,24 @@ committed data may still be in `-wal`.
 
 ## Useful Inspection Commands
 
+Run production inspection through Doppler so the command resolves the same
+`MIRA_DASHBOARD_DB_PATH` value as the services:
+
 ```bash
+set -euo pipefail
 cd /home/ubuntu/projects/mira-dashboard/backend
-sqlite3 data/mira-dashboard.db ".tables"
-sqlite3 data/mira-dashboard.db "PRAGMA integrity_check;"
-sqlite3 data/mira-dashboard.db \
+db_path="$(
+  /usr/local/bin/doppler run --config prd --project rajohan -- \
+    sh -c 'realpath -m -- "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}"'
+)"
+sqlite3 -readonly "$db_path" ".tables"
+sqlite3 -readonly "$db_path" "PRAGMA integrity_check;"
+sqlite3 -readonly "$db_path" \
   "SELECT version, name, applied_at FROM schema_migrations ORDER BY version;"
-sqlite3 data/mira-dashboard.db "SELECT COUNT(*) FROM users;"
-sqlite3 data/mira-dashboard.db "SELECT COUNT(*) FROM auth_sessions;"
-sqlite3 data/mira-dashboard.db "SELECT key, length(value), updated_at FROM app_config;"
+sqlite3 -readonly "$db_path" "SELECT COUNT(*) FROM users;"
+sqlite3 -readonly "$db_path" "SELECT COUNT(*) FROM auth_sessions;"
+sqlite3 -readonly "$db_path" \
+  "SELECT key, length(value), updated_at FROM app_config;"
 ```
 
 If SQLite reports `database is locked`, wait for background jobs to settle and

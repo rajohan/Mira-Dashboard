@@ -244,10 +244,15 @@ sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
 Inspect SQLite lifecycle state:
 
 ```bash
+set -euo pipefail
 cd /home/ubuntu/projects/mira-dashboard/backend
-sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
+db_path="$(
+  /usr/local/bin/doppler run --config prd --project rajohan -- \
+    sh -c 'realpath -m -- "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}"'
+)"
+sqlite3 -readonly "$db_path" \
   "SELECT version, name, applied_at FROM schema_migrations ORDER BY version;"
-sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
+sqlite3 -readonly "$db_path" \
   "SELECT job_id, status, started_at, finished_at, message FROM scheduled_job_runs WHERE job_id = 'database.maintenance' ORDER BY id DESC LIMIT 5;"
 ```
 

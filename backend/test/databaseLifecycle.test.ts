@@ -97,10 +97,65 @@ describe("Dashboard SQLite lifecycle", () => {
                     .query(
                         `SELECT name
                          FROM sqlite_schema
-                         WHERE type = 'index' AND name = 'idx_task_updates_task_created'`
+                         WHERE type = 'index'
+                           AND name IN (
+                               'idx_agent_task_history_retention',
+                               'idx_deployment_jobs_retention',
+                               'idx_docker_update_events_retention',
+                               'idx_reports_retention',
+                               'idx_task_updates_task_created'
+                           )
+                         ORDER BY name`
                     )
-                    .get()
-            ).toEqual({ name: "idx_task_updates_task_created" });
+                    .all()
+            ).toEqual([
+                { name: "idx_agent_task_history_retention" },
+                { name: "idx_deployment_jobs_retention" },
+                { name: "idx_docker_update_events_retention" },
+                { name: "idx_reports_retention" },
+                { name: "idx_task_updates_task_created" },
+            ]);
+
+            const retentionQueryPlans = [
+                {
+                    index: "idx_deployment_jobs_retention",
+                    sql: `SELECT id
+                          FROM deployment_jobs
+                          WHERE status NOT IN ('building', 'restart-scheduled')
+                          ORDER BY started_at DESC, id DESC
+                          LIMIT -1 OFFSET 500`,
+                },
+                {
+                    index: "idx_agent_task_history_retention",
+                    sql: `SELECT id
+                          FROM agent_task_history
+                          WHERE status != 'active' AND completed_at IS NOT NULL
+                          ORDER BY completed_at DESC, id DESC
+                          LIMIT -1 OFFSET 10000`,
+                },
+                {
+                    index: "idx_reports_retention",
+                    sql: `SELECT id
+                          FROM reports
+                          ORDER BY occurred_at DESC, id DESC
+                          LIMIT -1 OFFSET 5000`,
+                },
+                {
+                    index: "idx_docker_update_events_retention",
+                    sql: `SELECT id
+                          FROM docker_update_events
+                          ORDER BY created_at DESC, id DESC
+                          LIMIT -1 OFFSET 5000`,
+                },
+            ];
+            for (const { index, sql } of retentionQueryPlans) {
+                const plan = database.query(`EXPLAIN QUERY PLAN ${sql}`).all() as Array<{
+                    detail: string;
+                }>;
+                expect(plan.map((row) => row.detail).join("\n")).toContain(
+                    `USING COVERING INDEX ${index}`
+                );
+            }
             expect(existsSync(sqliteBackupDirectory(databasePath))).toBe(false);
         } finally {
             database.close();
