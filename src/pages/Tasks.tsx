@@ -396,7 +396,7 @@ export function Tasks() {
                         </div>
                     )}
 
-                    <div className="flex flex-1 flex-col gap-4 overflow-y-auto pb-4 lg:flex-row lg:overflow-x-auto">
+                    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-4 lg:flex-row lg:overflow-x-auto lg:overflow-y-hidden">
                         {COLUMN_CONFIG.map((column) => (
                             <TaskColumn
                                 key={column.id}
