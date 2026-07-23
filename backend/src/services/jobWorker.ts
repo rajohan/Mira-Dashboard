@@ -14,10 +14,29 @@ import {
     stopScheduledJobScheduler,
 } from "./scheduledJobs.ts";
 
-const workerState: { isStarted: boolean; isStopping: boolean } = {
+const workerState: {
+    isStarted: boolean;
+    pendingStop?: Promise<void>;
+    stopGeneration: number;
+} = {
     isStarted: false,
-    isStopping: false,
+    stopGeneration: 0,
 };
+
+function trackWorkerStop(operation: () => Promise<void>): Promise<void> {
+    const generation = ++workerState.stopGeneration;
+    const pendingStop = (async () => {
+        try {
+            await operation();
+        } finally {
+            if (workerState.stopGeneration === generation) {
+                workerState.pendingStop = undefined;
+            }
+        }
+    })();
+    workerState.pendingStop = pendingStop;
+    return pendingStop;
+}
 
 function registerScheduledActions(): void {
     registerBackupScheduledJobs();
@@ -33,7 +52,7 @@ function registerScheduledActions(): void {
 
 /** Starts the persistent queue scheduler and its single-concurrency executor. */
 export function startDashboardJobWorker(): void {
-    if (workerState.isStarted || workerState.isStopping) return;
+    if (workerState.isStarted || workerState.pendingStop) return;
     workerState.isStarted = true;
     try {
         registerScheduledActions();
@@ -41,31 +60,36 @@ export function startDashboardJobWorker(): void {
         startScheduledJobScheduler();
     } catch (error) {
         stopScheduledJobScheduler();
-        workerState.isStarted = false;
-        workerState.isStopping = true;
-        void stopScheduledJobExecutor()
-            .catch((cleanupError) => {
+        void trackWorkerStop(async () => {
+            try {
+                await stopScheduledJobExecutor();
+                workerState.isStarted = false;
+            } catch (cleanupError) {
                 console.error(
                     "[JobWorker] Failed to roll back executor startup:",
                     cleanupError
                 );
-            })
-            .finally(() => {
-                workerState.isStopping = false;
-            });
+            }
+        });
         throw error;
     }
 }
 
 /** Stops claims first, then cooperatively aborts the active execution. */
 export async function stopDashboardJobWorker(): Promise<void> {
-    if (!workerState.isStarted || workerState.isStopping) return;
-    workerState.isStopping = true;
-    try {
-        stopScheduledJobScheduler();
-        await stopScheduledJobExecutor();
-        workerState.isStarted = false;
-    } finally {
-        workerState.isStopping = false;
+    for (;;) {
+        const pendingStop = workerState.pendingStop;
+        if (pendingStop) {
+            await pendingStop;
+            continue;
+        }
+        if (!workerState.isStarted) return;
+        await trackWorkerStop(async () => {
+            stopScheduledJobScheduler();
+            await stopScheduledJobExecutor();
+            // Release the startup guard only after executor cleanup succeeds.
+            workerState.isStarted = false;
+        });
+        return;
     }
 }

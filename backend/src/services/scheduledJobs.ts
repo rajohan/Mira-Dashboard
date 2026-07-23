@@ -32,6 +32,7 @@ const latestRunsJobIdChunkSize = 900;
 const executorTickMs = 1000;
 const executorHeartbeatMs = 1000;
 const executorCapacity = 1;
+const interruptedHandlerGraceMs = 30_000;
 const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
 const interruptedHandlerSettled = new WeakMap<
     ScheduledJobInterruptionError,
@@ -1040,7 +1041,15 @@ async function executeClaimedJobExecution(
             );
         } catch (error) {
             if (error instanceof ScheduledJobInterruptionError) {
-                await error.getHandlerSettled();
+                const didSettle = await waitForInterruptedHandler(
+                    error.getHandlerSettled()
+                );
+                if (!didSettle) {
+                    console.warn(
+                        "[ScheduledJobs] Interrupted action did not settle during cleanup grace",
+                        { executionId: execution.id }
+                    );
+                }
             }
             status = "failed";
             message = errorMessage(error, "Scheduled job failed");
@@ -1121,6 +1130,23 @@ async function suppressHandlerPromiseRejection(
         await handlerPromise;
     } catch {
         // The race reports handler failures unless the timeout already won.
+    }
+}
+
+async function waitForInterruptedHandler(
+    handlerSettled: Promise<unknown>
+): Promise<boolean> {
+    const didSettle = async () => {
+        await handlerSettled;
+        return true;
+    };
+    const timeout = Promise.withResolvers<boolean>();
+    const timer = setTimeout(() => timeout.resolve(false), interruptedHandlerGraceMs);
+    timer.unref();
+    try {
+        return await Promise.race([didSettle(), timeout.promise]);
+    } finally {
+        clearTimeout(timer);
     }
 }
 
@@ -1225,7 +1251,14 @@ export function startScheduledJobScheduler(): void {
 
 export function startScheduledJobExecutor(): void {
     if (scheduledJobRuntimeState.executor) return;
-    const recovered = recoverExpiredJobExecutions();
+    const timestamp = nowIso();
+    const recoveredLegacyRuns = recoverOrphanedScheduledJobRuns(timestamp);
+    if (recoveredLegacyRuns > 0) {
+        console.warn("[ScheduledJobs] Recovered orphaned scheduled job runs", {
+            recovered: recoveredLegacyRuns,
+        });
+    }
+    const recovered = recoverExpiredJobExecutions(timestamp);
     if (recovered > 0) {
         console.warn("[ScheduledJobs] Recovered expired job execution leases", {
             recovered,
@@ -1243,6 +1276,23 @@ export function startScheduledJobExecutor(): void {
     scheduledJobRuntimeState.executor = setInterval(executorTick, executorTickMs);
     scheduledJobRuntimeState.executor.unref();
     executorTick();
+}
+
+export function recoverOrphanedScheduledJobRuns(timestamp = nowIso()): number {
+    return database
+        .prepare(
+            `UPDATE scheduled_job_runs
+             SET status = 'failed', finished_at = ?,
+                 message = 'Scheduled job interrupted before worker lease recovery'
+             WHERE status = 'running'
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM job_executions
+                   WHERE scheduled_run_id = scheduled_job_runs.id
+                     AND status IN ('queued', 'running')
+               )`
+        )
+        .run(timestamp).changes;
 }
 
 export function stopScheduledJobScheduler(): void {

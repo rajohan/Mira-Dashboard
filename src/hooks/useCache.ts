@@ -112,31 +112,39 @@ export function useRefreshCacheEntry() {
                 isOk: boolean;
                 entry: CacheEnvelope<unknown>;
             }> = [];
+            const errors: unknown[] = [];
             for (const key of keys) {
-                results.push(
-                    await apiPostRequired<{
+                try {
+                    const response = await apiPostRequired<{
                         isOk: boolean;
                         entry: CacheEnvelope<unknown>;
-                    }>(`/cache/${encodeURIComponent(key)}/refresh`)
+                    }>(`/cache/${encodeURIComponent(key)}/refresh`);
+                    results.push(response);
+                    if (response.entry?.key) {
+                        queryClient.setQueryData(
+                            cacheKeys.entry(response.entry.key),
+                            response.entry
+                        );
+                    }
+                } catch (error) {
+                    errors.push(error);
+                }
+            }
+            if (errors.length === 1) throw errors[0];
+            if (errors.length > 1) {
+                throw new AggregateError(
+                    errors,
+                    `${errors.length} cache refresh requests failed`
                 );
             }
 
             return { keys, results };
         },
-        onSuccess: async (result, keysToken) => {
+        onSettled: async (_result, _error, keysToken) => {
             const keys = keysToken
                 .split(",")
                 .map((key) => key.trim())
                 .filter(Boolean);
-            for (const response of result.results) {
-                if (response.entry?.key) {
-                    queryClient.setQueryData(
-                        cacheKeys.entry(response.entry.key),
-                        response.entry
-                    );
-                }
-            }
-
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: cacheKeys.heartbeat() }),
                 queryClient.invalidateQueries({ queryKey: cacheKeys.status() }),

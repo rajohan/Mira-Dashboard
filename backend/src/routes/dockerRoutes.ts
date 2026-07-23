@@ -886,7 +886,7 @@ export const dockerRoutes = {
                     actionKey: "docker.exec",
                     displayName: "Docker container exec",
                     payload: { command: body.command, containerId },
-                    resourceClass: "interactive",
+                    resourceClass: "exclusive",
                     timeoutMs: 7 * 60 * 60 * 1000,
                 });
             } catch (error) {

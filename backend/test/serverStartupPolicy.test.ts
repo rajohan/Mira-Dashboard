@@ -80,6 +80,109 @@ describe("server start scheduler policy", () => {
         ).toBe(false);
     });
 
+    it("keeps worker startup blocked until failed executor cleanup is retried", async () => {
+        const backups = await import("../src/services/backups.ts");
+        const cacheRefresh = await import("../src/services/cacheRefresh.ts");
+        const dockerActions = await import("../src/services/dockerActions.ts");
+        const dockerUpdater = await import("../src/services/dockerUpdater.ts");
+        const execJobs = await import("../src/services/execJobs.ts");
+        const gitHygiene = await import("../src/services/gitHygiene.ts");
+        const logRotation = await import("../src/services/logRotation.ts");
+        const openclawActions = await import("../src/services/openclawActions.ts");
+        const pullRequests = await import("../src/services/pullRequests.ts");
+        const scheduledJobs = await import("../src/services/scheduledJobs.ts");
+        const worker = await import("../src/services/jobWorker.ts");
+        const registrationSpies = [
+            jest
+                .spyOn(backups, "registerBackupScheduledJobs")
+                .mockImplementation(() => {}),
+            jest
+                .spyOn(cacheRefresh, "registerCacheRefreshScheduledJobs")
+                .mockImplementation(() => {}),
+            jest
+                .spyOn(dockerActions, "registerDockerExecutionActions")
+                .mockImplementation(() => {}),
+            jest
+                .spyOn(dockerUpdater, "registerDockerUpdaterScheduledJobs")
+                .mockImplementation(() => {}),
+            jest
+                .spyOn(execJobs, "registerExecExecutionActions")
+                .mockImplementation(() => {}),
+            jest
+                .spyOn(gitHygiene, "registerGitHygieneScheduledJobs")
+                .mockImplementation(() => {}),
+            jest
+                .spyOn(logRotation, "registerLogRotationScheduledJobs")
+                .mockImplementation(() => {}),
+            jest
+                .spyOn(openclawActions, "registerOpenClawExecutionActions")
+                .mockImplementation(() => {}),
+            jest
+                .spyOn(pullRequests, "registerPullRequestExecutionActions")
+                .mockImplementation(() => {}),
+        ];
+        const startExecutorSpy = jest
+            .spyOn(scheduledJobs, "startScheduledJobExecutor")
+            .mockImplementation(() => {});
+        const startSchedulerSpy = jest
+            .spyOn(scheduledJobs, "startScheduledJobScheduler")
+            .mockImplementation(() => {});
+        startSchedulerSpy.mockImplementationOnce(() => {
+            throw new Error("scheduler startup failed");
+        });
+        const stopExecutorSpy = jest
+            .spyOn(scheduledJobs, "stopScheduledJobExecutor")
+            .mockImplementation(async () => {});
+        stopExecutorSpy.mockImplementationOnce(async () => {
+            throw new Error("executor cleanup failed");
+        });
+        const stopSchedulerSpy = jest
+            .spyOn(scheduledJobs, "stopScheduledJobScheduler")
+            .mockImplementation(() => {});
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+            expect(() => worker.startDashboardJobWorker()).toThrow(
+                "scheduler startup failed"
+            );
+            for (const registrationSpy of registrationSpies) {
+                expect(registrationSpy).toHaveBeenCalledTimes(1);
+            }
+            await Bun.sleep(0);
+            expect(errorSpy).toHaveBeenCalledWith(
+                "[JobWorker] Failed to roll back executor startup:",
+                expect.objectContaining({ message: "executor cleanup failed" })
+            );
+
+            worker.startDashboardJobWorker();
+            expect(startExecutorSpy).toHaveBeenCalledTimes(1);
+            expect(startSchedulerSpy).toHaveBeenCalledTimes(1);
+
+            await worker.stopDashboardJobWorker();
+            expect(stopExecutorSpy).toHaveBeenCalledTimes(2);
+
+            worker.startDashboardJobWorker();
+            expect(startExecutorSpy).toHaveBeenCalledTimes(2);
+            expect(startSchedulerSpy).toHaveBeenCalledTimes(2);
+            await worker.stopDashboardJobWorker();
+            expect(stopExecutorSpy).toHaveBeenCalledTimes(3);
+        } finally {
+            try {
+                await worker.stopDashboardJobWorker();
+            } catch {
+                // Test cleanup is best-effort after assertions fail.
+            }
+            for (const registrationSpy of registrationSpies) {
+                registrationSpy.mockRestore();
+            }
+            startExecutorSpy.mockRestore();
+            startSchedulerSpy.mockRestore();
+            stopExecutorSpy.mockRestore();
+            stopSchedulerSpy.mockRestore();
+            errorSpy.mockRestore();
+        }
+    });
+
     it("starts listening-time services with a configured gateway token", async () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
         const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;

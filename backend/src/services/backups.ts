@@ -147,7 +147,8 @@ function evictCompletedBackupJobs(type: BackupJob["type"]) {
 
 export async function clearNeedsAttentionBackupJob(type: BackupJob["type"]) {
     const job = getCurrentBackupJob(type);
-    if (!job) {
+    if (!job || job.status === "done") {
+        if (job) backupJobs.delete(job.id);
         throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
             statusCode: 404,
         });
@@ -822,7 +823,12 @@ function backupViewFromExecution(
         endedAt: execution.finishedAt ? Date.parse(execution.finishedAt) : undefined,
         id: execution.id,
         startedAt: Date.parse(execution.startedAt ?? execution.queuedAt),
-        status: execution.finishedAt ? "done" : "running",
+        status:
+            execution.status === "failed" || execution.status === "cancelled"
+                ? execution.status
+                : execution.finishedAt
+                  ? "done"
+                  : "running",
         stderr: execution.message ?? "",
         stdout: "",
         type,
@@ -830,9 +836,29 @@ function backupViewFromExecution(
 }
 
 export function getPersistedBackupJob(type: BackupJob["type"]) {
-    return backupViewFromExecution(
-        type,
-        getLatestScheduledJobExecution(scheduledBackupJobId(type))
+    const execution = getLatestScheduledJobExecution(scheduledBackupJobId(type));
+    if (!execution || wasBackupAttentionClearedAfter(type, execution)) return;
+    return backupViewFromExecution(type, execution);
+}
+
+function wasBackupAttentionClearedAfter(
+    type: BackupJob["type"],
+    execution: JobExecution
+): boolean {
+    return Boolean(
+        database
+            .prepare(
+                `SELECT 1
+                 FROM job_executions
+                 WHERE action_key = 'backup.clear-attention'
+                   AND status = 'success'
+                   AND json_valid(payload_json)
+                   AND json_extract(payload_json, '$.type') = ?
+                   AND json_extract(payload_json, '$.backupExecutionId') = ?
+                 ORDER BY queued_at DESC, id DESC
+                 LIMIT 1`
+            )
+            .get(type, execution.id)
     );
 }
 
@@ -845,18 +871,66 @@ export function queueManualBackup(type: BackupJob["type"]) {
 }
 
 export async function clearPersistedBackupAttention(type: BackupJob["type"]) {
-    const execution = enqueueJobExecution({
-        actionKey: "backup.clear-attention",
-        displayName: `Clear ${type.toUpperCase()} backup attention`,
-        payload: { type },
-        resourceClass: "light",
-        timeoutMs: 5 * 60 * 1000,
-    });
+    let execution: JobExecution;
+    database.run("BEGIN IMMEDIATE");
+    try {
+        const backupExecutionId = getLatestScheduledJobExecution(
+            scheduledBackupJobId(type)
+        )?.id;
+        execution = enqueueJobExecution({
+            actionKey: "backup.clear-attention",
+            displayName: `Clear ${type.toUpperCase()} backup attention`,
+            payload: { backupExecutionId, type },
+            resourceClass: "light",
+            timeoutMs: 5 * 60 * 1000,
+        });
+        database.run("COMMIT");
+    } catch (error) {
+        try {
+            database.run("ROLLBACK");
+        } catch {
+            // Preserve the queue error.
+        }
+        throw error;
+    }
     const completed = await waitForJobExecution(execution.id, {
         timeoutMs: 15 * 60 * 1000,
     });
     const output = successfulJobExecutionOutput(completed);
     return output.backup as ReturnType<typeof mapBackupJob>;
+}
+
+async function clearBackupAttention(type: BackupJob["type"]) {
+    const current = getCurrentBackupJob(type);
+    if (current) {
+        return mapBackupJob(await clearNeedsAttentionBackupJob(type));
+    }
+
+    const persisted = getPersistedBackupJob(type);
+    if (!persisted) {
+        throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
+            statusCode: 404,
+        });
+    }
+    if (persisted.status !== "needs_attention") {
+        throw Object.assign(
+            new Error(`${type.toUpperCase()} backup does not need attention`),
+            { statusCode: 409 }
+        );
+    }
+
+    const cleared = { ...persisted };
+    try {
+        await refreshCacheProducer(backupStatusCacheKey(type), undefined, {
+            force: true,
+        });
+    } catch (error) {
+        const stderr = typeof cleared.stderr === "string" ? cleared.stderr : "";
+        cleared.stderr = trimOutput(
+            `${stderr}\nStatus refresh failed: ${String(error)}`.trim()
+        );
+    }
+    return cleared;
 }
 
 async function terminateContainerProcessSafely(
@@ -920,8 +994,7 @@ export function registerBackupScheduledJobs(): void {
         if (type !== "kopia" && type !== "walg") {
             throw Object.assign(new Error("Invalid backup type"), { statusCode: 400 });
         }
-        const cleared = await clearNeedsAttentionBackupJob(type);
-        return { backup: mapBackupJob(cleared) };
+        return { backup: await clearBackupAttention(type) };
     });
     database.run("BEGIN");
     try {

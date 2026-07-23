@@ -340,6 +340,238 @@ describe("Docker updater tag patterns", () => {
         expect(runProcessSpy).not.toHaveBeenCalled();
     });
 
+    it("aborts an in-flight registry request through the worker signal", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-abort-");
+        const appRoot = path.join(appsRoot, "unit-abort-app");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            path.join(appRoot, "compose.yaml"),
+            [
+                "services:",
+                "  web:",
+                "    image: ghcr.io/unit/abort:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                String.raw`      mira.updater.tagPattern: '^\d+\.\d+\.\d+$'`,
+                "      mira.updater.tagPatternIsRegex: 'true'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const service = database
+            .prepare(
+                `SELECT id
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-abort-app' AND service_name = 'web'`
+            )
+            .get() as { id: number };
+
+        const requestStarted = Promise.withResolvers<void>();
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            _input: Request | string | URL,
+            init?: RequestInit
+        ) => {
+            const signal = init?.signal;
+            if (!signal) throw new Error("Registry request signal was missing");
+            requestStarted.resolve();
+            return await new Promise<Response>((_resolve, reject) => {
+                const rejectForAbort = () => reject(signal.reason);
+                signal.addEventListener("abort", rejectForAbort, { once: true });
+                if (signal.aborted) rejectForAbort();
+            });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+
+        const controller = new AbortController();
+        const run = runDockerUpdaterService(service.id, controller.signal);
+        await requestStarted.promise;
+        controller.abort(new DOMException("Updater cancelled", "AbortError"));
+
+        await expect(run).rejects.toMatchObject({
+            message: "Updater cancelled",
+            name: "AbortError",
+        });
+    });
+
+    it("aborts an update waiting for another service in the same Compose project", async () => {
+        rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
+        rememberEnvironment("MIRA_DOCKER_BIN");
+        rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
+        rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
+        const appsRoot = createTemporaryRoot("mira-docker-updater-lock-abort-");
+        const appRoot = path.join(appsRoot, "unit-lock-abort-app");
+        const composePath = path.join(appRoot, "compose.yaml");
+        const composeWrapper = path.join(appsRoot, "compose-wrapper");
+        mkdirSync(appRoot, { recursive: true });
+        writeFileSync(
+            composePath,
+            [
+                "services:",
+                "  first:",
+                "    image: ghcr.io/unit/lock-first:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                "      mira.updater.tagPattern: 1.0.1",
+                "      mira.updater.tagPatternIsRegex: 'false'",
+                "  second:",
+                "    image: ghcr.io/unit/lock-second:1.0.0",
+                "    labels:",
+                "      mira.updater.enabled: 'true'",
+                "      mira.updater.autoUpdate: 'false'",
+                "      mira.updater.track: tag",
+                "      mira.updater.tagPattern: 1.0.1",
+                "      mira.updater.tagPatternIsRegex: 'false'",
+                "",
+            ].join("\n")
+        );
+        process.env.MIRA_DOCKER_APPS_ROOT = appsRoot;
+        process.env.MIRA_DOCKER_BIN = "docker";
+        process.env.MIRA_DOCKER_COMPOSE_WRAPPER = composeWrapper;
+        delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
+        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
+
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+            input: Request | string | URL
+        ) => {
+            const url = String(input);
+            if (url.endsWith("/v2/unit/lock-first/manifests/1.0.1")) {
+                return Response.json(
+                    { digest: "sha256:lock-first-101" },
+                    {
+                        headers: {
+                            "docker-content-digest": "sha256:lock-first-101",
+                        },
+                    }
+                );
+            }
+            if (url.endsWith("/v2/unit/lock-second/manifests/1.0.1")) {
+                return Response.json(
+                    { digest: "sha256:lock-second-101" },
+                    {
+                        headers: {
+                            "docker-content-digest": "sha256:lock-second-101",
+                        },
+                    }
+                );
+            }
+            return new Response("not found", { status: 404 });
+        }) as typeof fetch);
+        cleanupCallbacks.push(() => fetchSpy.mockRestore());
+
+        const composeStarted = Promise.withResolvers<void>();
+        const composeRelease =
+            Promise.withResolvers<Awaited<ReturnType<typeof processModule.runProcess>>>();
+        let composeCalls = 0;
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (command) => {
+                if (command === composeWrapper) {
+                    composeCalls += 1;
+                    if (composeCalls > 1) {
+                        throw new Error("The aborted waiter reached Docker Compose");
+                    }
+                    composeStarted.resolve();
+                    return await composeRelease.promise;
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        cleanupCallbacks.push(() => runProcessSpy.mockRestore());
+
+        const registered = await registerDockerUpdaterServices();
+        expect(registered.isOk).toBe(true);
+        const services = database
+            .prepare(
+                `SELECT id, service_name
+                 FROM docker_managed_services
+                 WHERE app_slug = 'unit-lock-abort-app'
+                 ORDER BY service_name`
+            )
+            .all() as Array<{ id: number; service_name: string }>;
+        const firstService = services.find((service) => service.service_name === "first");
+        const secondService = services.find(
+            (service) => service.service_name === "second"
+        );
+        expect(firstService).toBeDefined();
+        expect(secondService).toBeDefined();
+
+        const firstRun = runDockerUpdaterService(firstService?.id);
+        try {
+            await composeStarted.promise;
+
+            const controller = new AbortController();
+            const addAbortListenerSpy = jest.spyOn(controller.signal, "addEventListener");
+            const secondRun = runDockerUpdaterService(
+                secondService?.id,
+                controller.signal
+            );
+            async function observeSecondRun() {
+                try {
+                    return {
+                        status: "resolved" as const,
+                        steps: await secondRun,
+                    };
+                } catch (error) {
+                    return { error, status: "rejected" as const };
+                }
+            }
+            async function observeTimeout() {
+                await Bun.sleep(500);
+                return { status: "timed-out" as const };
+            }
+            const secondOutcome = observeSecondRun();
+
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+                const abortListeners = addAbortListenerSpy.mock.calls.filter(
+                    ([event]) => event === "abort"
+                );
+                if (abortListeners.length >= 2) break;
+                await Bun.sleep(5);
+            }
+            expect(
+                addAbortListenerSpy.mock.calls.filter(([event]) => event === "abort")
+            ).toHaveLength(2);
+            expect(composeCalls).toBe(1);
+
+            controller.abort(new DOMException("Lock waiter cancelled", "AbortError"));
+            const outcome = await Promise.race([secondOutcome, observeTimeout()]);
+
+            expect(outcome).toMatchObject({
+                error: {
+                    message: "Lock waiter cancelled",
+                    name: "AbortError",
+                },
+                status: "rejected",
+            });
+            expect(composeCalls).toBe(1);
+
+            composeRelease.resolve({ code: 0, stderr: "", stdout: "compose ok" });
+            await expect(firstRun).resolves.toContainEqual(
+                expect.objectContaining({
+                    isOk: true,
+                    step: "manual-update:unit-lock-abort-app/first",
+                })
+            );
+        } finally {
+            composeRelease.resolve({ code: 0, stderr: "", stdout: "compose ok" });
+            try {
+                await firstRun;
+            } catch {
+                // Preserve the original assertion failure after releasing the lock.
+            }
+        }
+    });
+
     it("applies a manual update to an isolated Compose file without invoking real Docker", async () => {
         rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
         rememberEnvironment("MIRA_DOCKER_BIN");

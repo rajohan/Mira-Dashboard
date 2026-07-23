@@ -43,7 +43,9 @@ function executionLimit(request: Request): number {
 }
 
 function isValidExecutionId(id: string): boolean {
-    return /^[a-z0-9][a-z0-9-]{19,79}$/u.test(id);
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+        id
+    );
 }
 
 export const jobExecutionRoutes = {
@@ -71,10 +73,22 @@ export const jobExecutionRoutes = {
             if (!isValidExecutionId(id)) {
                 return json({ error: "Invalid job execution id" }, { status: 400 });
             }
-            const execution = getJobExecution(id);
-            return execution
-                ? json({ execution: publicExecution(execution, { includeOutput: true }) })
-                : json({ error: "Job execution not found" }, { status: 404 });
+            try {
+                const execution = getJobExecution(id);
+                return execution
+                    ? json({
+                          execution: publicExecution(execution, {
+                              includeOutput: true,
+                          }),
+                      })
+                    : json({ error: "Job execution not found" }, { status: 404 });
+            } catch (error) {
+                console.error("[jobExecutionRoutes] Queue detail lookup failed", error);
+                return json(
+                    { error: "Job execution queue lookup failed" },
+                    { status: 500 }
+                );
+            }
         },
     },
     "/api/job-executions/:id/cancel": {

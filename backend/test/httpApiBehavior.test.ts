@@ -1549,6 +1549,22 @@ describe("Mira Dashboard backend integration", () => {
             })
         );
 
+        const detail = await api<{
+            execution: { id: string; output: Record<string, unknown>; status: string };
+        }>(`/api/job-executions/${run.body.run.executionId}`);
+        expect(detail.status).toBe(200);
+        expect(detail.body.execution).toMatchObject({
+            id: run.body.run.executionId,
+            output: {},
+            status: "queued",
+        });
+
+        const invalidExecutionId = await api<{ error: string }>(
+            "/api/job-executions/not-a-uuid"
+        );
+        expect(invalidExecutionId.status).toBe(400);
+        expect(invalidExecutionId.body.error).toBe("Invalid job execution id");
+
         const cancelled = await api<{
             execution: { id: string; status: string };
             isOk: boolean;

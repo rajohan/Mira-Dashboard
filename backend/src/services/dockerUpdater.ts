@@ -652,6 +652,7 @@ interface DiscoveredComposeService {
 interface RegistryFetchOptions {
     accept?: string;
     authorization?: string;
+    signal?: AbortSignal;
 }
 
 interface RegistryCredentials {
@@ -811,7 +812,13 @@ async function fetchRegistryResponse(
 ): Promise<{ authorization?: string; response: Response; clearTimer: () => void }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
-    const clearTimer = () => clearTimeout(timeout);
+    const abortFromSignal = () => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener("abort", abortFromSignal, { once: true });
+    if (options.signal?.aborted) abortFromSignal();
+    const clearTimer = () => {
+        clearTimeout(timeout);
+        options.signal?.removeEventListener("abort", abortFromSignal);
+    };
     const headers = {
         Accept: options.accept || "application/json",
         ...(options.authorization && { Authorization: options.authorization }),
@@ -934,6 +941,7 @@ async function fetchRegistryJsonWithHeaders(
             clearTimer();
         }
     } catch (error) {
+        options.signal?.throwIfAborted();
         if (error instanceof Error && error.name === "AbortError") {
             throw new Error(`Request timeout for ${url}`, { cause: error });
         }
@@ -1142,7 +1150,7 @@ function manifestDigestForPlatform(
     return typeof digest === "string" ? digest : undefined;
 }
 
-async function lookupRegistryV2(service: ManagedServiceRow) {
+async function lookupRegistryV2(service: ManagedServiceRow, signal?: AbortSignal) {
     const registry = imageRegistry(service.image_repo);
     const registryHost = registry === "docker.io" ? "registry-1.docker.io" : registry;
     const repo =
@@ -1168,7 +1176,7 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
             }
             const { authorization, body, headers } = await fetchRegistryJsonWithHeaders(
                 tagsUrl,
-                { authorization: tagListAuthorization }
+                { authorization: tagListAuthorization, signal }
             );
             tagListAuthorization = authorization;
             tags.push(
@@ -1199,6 +1207,7 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
         `https://${registryHost}/v2/${repo}/manifests/${tag}`,
         {
             accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json",
+            signal,
         }
     );
     const manifestDigest = manifestDigestForPlatform(body, servicePlatform(service));
@@ -1211,7 +1220,8 @@ async function lookupRegistryV2(service: ManagedServiceRow) {
     };
 }
 
-async function lookupLatest(service: ManagedServiceRow) {
+async function lookupLatest(service: ManagedServiceRow, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     if (process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY === "1") {
         return {
             latestTag: service.current_tag,
@@ -1226,7 +1236,7 @@ async function lookupLatest(service: ManagedServiceRow) {
             unsupported: true,
         };
     }
-    return lookupRegistryV2(service);
+    return lookupRegistryV2(service, signal);
 }
 
 function hasUpdate(service: ManagedServiceRow): boolean {
@@ -1573,7 +1583,8 @@ function composeUpdateLockKey(service: ManagedServiceRow): string {
 
 async function withComposeUpdateLock<T>(
     service: ManagedServiceRow,
-    action: () => Promise<T>
+    action: () => Promise<T>,
+    signal?: AbortSignal
 ): Promise<T> {
     const key = composeUpdateLockKey(service);
     const wasPrevious = composeUpdateLocks.get(key)?.promise ?? Promise.resolve();
@@ -1585,8 +1596,21 @@ async function withComposeUpdateLock<T>(
     }
     const next = { promise: waitForCurrent() };
     composeUpdateLocks.set(key, next);
-    await wasPrevious;
     try {
+        if (signal) {
+            signal.throwIfAborted();
+            const aborted = Promise.withResolvers<never>();
+            const abort = () => aborted.reject(signal.reason);
+            signal.addEventListener("abort", abort, { once: true });
+            try {
+                await Promise.race([wasPrevious, aborted.promise]);
+            } finally {
+                signal.removeEventListener("abort", abort);
+            }
+            signal.throwIfAborted();
+        } else {
+            await wasPrevious;
+        }
         return await action();
     } finally {
         release();
@@ -1598,8 +1622,10 @@ async function withComposeUpdateLock<T>(
 
 async function applyComposeUpdateUnlocked(
     service: ManagedServiceRow,
-    targetImageReference: string
+    targetImageReference: string,
+    signal?: AbortSignal
 ) {
+    signal?.throwIfAborted();
     if (!service.compose_image_field) {
         throw new Error(
             `Service ${serviceLabel(service)} is missing compose image field`
@@ -1609,12 +1635,16 @@ async function applyComposeUpdateUnlocked(
     const configuredComposePath = service.compose_path;
     const composePath = fs.realpathSync(configuredComposePath);
     const commandComposePaths = getComposeCommandPaths(configuredComposePath);
-    const dirtyBefore = await dirtyDockerUpdaterPaths([
-        composePath,
-        ...commandComposePaths.map((commandComposePath) =>
-            fs.realpathSync(commandComposePath)
-        ),
-    ]);
+    const dirtyBefore = await dirtyDockerUpdaterPaths(
+        [
+            composePath,
+            ...commandComposePaths.map((commandComposePath) =>
+                fs.realpathSync(commandComposePath)
+            ),
+        ],
+        signal
+    );
+    signal?.throwIfAborted();
     const raw = fs.readFileSync(composePath, "utf8");
     const originalStats = fs.statSync(composePath);
     const document = YAML.parse(raw) as JsonRecord;
@@ -1690,6 +1720,7 @@ async function applyComposeUpdateUnlocked(
             cwd: command.cwd,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
+            signal,
             timeoutMs: 180_000,
         });
         if (code !== 0) {
@@ -1958,7 +1989,10 @@ function servicesFromCompose(composePath: string):
     }
 }
 
-export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStepResult> {
+export async function registerDockerUpdaterServices(
+    signal?: AbortSignal
+): Promise<DockerUpdaterStepResult> {
+    signal?.throwIfAborted();
     let composeFiles: string[];
     try {
         const appsRoot = getDockerAppsRoot();
@@ -2031,6 +2065,7 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
     );
     let isTxnStarted = false;
     try {
+        signal?.throwIfAborted();
         database.run("BEGIN");
         isTxnStarted = true;
         const discoveredAppSlugs = new Set(
@@ -2098,6 +2133,7 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
                 failureMessage += `; rollback failed: ${caughtMessage(rollbackError)}`;
             }
         }
+        signal?.throwIfAborted();
         return {
             isOk: false,
             step: "register-services",
@@ -2133,8 +2169,10 @@ export async function registerDockerUpdaterServices(): Promise<DockerUpdaterStep
 }
 
 export async function pollDockerUpdaterRegistries(
-    serviceId?: number
+    serviceId?: number,
+    signal?: AbortSignal
 ): Promise<DockerUpdaterStepResult> {
+    signal?.throwIfAborted();
     const timestamp = nowIso();
     const services = normalizeManagedServiceRows(
         serviceId === undefined
@@ -2156,7 +2194,8 @@ export async function pollDockerUpdaterRegistries(
     const failures: Array<{ service: string; error: string }> = [];
     for (const service of services) {
         try {
-            const latest = await lookupLatest(service);
+            signal?.throwIfAborted();
+            const latest = await lookupLatest(service, signal);
             if ("unsupported" in latest && latest.unsupported) {
                 skipped.push({
                     service: serviceLabel(service),
@@ -2208,6 +2247,7 @@ export async function pollDockerUpdaterRegistries(
                 }
             }
         } catch (error) {
+            signal?.throwIfAborted();
             failures.push({
                 service: serviceLabel(service),
                 error: caughtMessage(error),
@@ -2249,83 +2289,88 @@ export async function pollDockerUpdaterRegistries(
 
 async function applyServiceUpdate(
     service: ManagedServiceRow,
-    eventPrefix: "auto" | "manual"
+    eventPrefix: "auto" | "manual",
+    signal?: AbortSignal
 ): Promise<DockerUpdaterStepResult> {
-    return withComposeUpdateLock(service, async () => {
-        const lockedService = normalizeManagedServiceRow(
-            database
-                .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
-                .get(service.id) as ManagedServiceRow | undefined
-        );
-        if (!lockedService || lockedService.enabled !== 1) {
-            const code = lockedService ? "DISABLED" : "NOT_FOUND";
-            return {
-                step: `${eventPrefix}-update:${serviceLabel(service)}`,
-                isOk: false,
-                code,
-                stdout: "",
-                stderr: "Docker updater service not found or disabled",
-            };
-        }
-        if (!hasUpdate(lockedService)) {
-            return {
-                step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
-                isOk: false,
-                code: "CONFLICT",
-                stdout: "",
-                stderr: "No update available",
-            };
-        }
-        const target = buildTargetImageReference(lockedService);
-        let result: Awaited<ReturnType<typeof applyComposeUpdateUnlocked>>;
-        try {
-            // Compose writes tag-only refs for non-digest pins, then pulls so
-            // digest drift still refreshes mutable tags without storing @digest.
-            result = await applyComposeUpdateUnlocked(lockedService, target);
-        } catch (error) {
-            const message = caughtMessage(error);
-            database
-                .prepare(
-                    `UPDATE docker_managed_services
+    return withComposeUpdateLock(
+        service,
+        async () => {
+            signal?.throwIfAborted();
+            const lockedService = normalizeManagedServiceRow(
+                database
+                    .prepare("SELECT * FROM docker_managed_services WHERE id = ? LIMIT 1")
+                    .get(service.id) as ManagedServiceRow | undefined
+            );
+            if (!lockedService || lockedService.enabled !== 1) {
+                const code = lockedService ? "DISABLED" : "NOT_FOUND";
+                return {
+                    step: `${eventPrefix}-update:${serviceLabel(service)}`,
+                    isOk: false,
+                    code,
+                    stdout: "",
+                    stderr: "Docker updater service not found or disabled",
+                };
+            }
+            if (!hasUpdate(lockedService)) {
+                return {
+                    step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                    isOk: false,
+                    code: "CONFLICT",
+                    stdout: "",
+                    stderr: "No update available",
+                };
+            }
+            const target = buildTargetImageReference(lockedService);
+            let result: Awaited<ReturnType<typeof applyComposeUpdateUnlocked>>;
+            try {
+                // Compose writes tag-only refs for non-digest pins, then pulls so
+                // digest drift still refreshes mutable tags without storing @digest.
+                result = await applyComposeUpdateUnlocked(lockedService, target, signal);
+            } catch (error) {
+                signal?.throwIfAborted();
+                const message = caughtMessage(error);
+                database
+                    .prepare(
+                        `UPDATE docker_managed_services
                  SET last_checked_at = ?, last_status = ?
                  WHERE id = ?`
-                )
-                .run(nowIso(), `${eventPrefix}_update_failed`, lockedService.id);
-            insertEventBestEffort(
-                lockedService,
-                `${eventPrefix}_update_failed`,
-                message,
-                {
-                    targetComposeImageRef: target,
-                }
-            );
-            const [os = "linux", architecture] = servicePlatform(lockedService).split(
-                "/",
-                2
-            );
-            createNotificationBestEffort(
-                `Docker ${eventPrefix} update failed`,
-                `${serviceLabel(lockedService)}: ${message}`,
-                `docker:updater:${eventPrefix}-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
-                "error",
-                {
-                    architecture,
-                    digest: lockedService.latest_digest,
-                    os,
-                }
-            );
-            return {
-                step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
-                isOk: false,
-                stdout: "",
-                stderr: message,
-            };
-        }
+                    )
+                    .run(nowIso(), `${eventPrefix}_update_failed`, lockedService.id);
+                insertEventBestEffort(
+                    lockedService,
+                    `${eventPrefix}_update_failed`,
+                    message,
+                    {
+                        targetComposeImageRef: target,
+                    }
+                );
+                const [os = "linux", architecture] = servicePlatform(lockedService).split(
+                    "/",
+                    2
+                );
+                createNotificationBestEffort(
+                    `Docker ${eventPrefix} update failed`,
+                    `${serviceLabel(lockedService)}: ${message}`,
+                    `docker:updater:${eventPrefix}-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
+                    "error",
+                    {
+                        architecture,
+                        digest: lockedService.latest_digest,
+                        os,
+                    }
+                );
+                return {
+                    step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                    isOk: false,
+                    stdout: "",
+                    stderr: message,
+                };
+            }
 
-        try {
-            database
-                .prepare(
-                    `UPDATE docker_managed_services
+            try {
+                database
+                    .prepare(
+                        `UPDATE docker_managed_services
                  SET compose_image_ref = ?, current_tag = ?, current_digest = ?,
                      tag_match_pattern = CASE
                          WHEN tag_match_type = 'exact' THEN ?
@@ -2333,75 +2378,78 @@ async function applyServiceUpdate(
                      END,
                      last_updated_at = ?, last_checked_at = ?, last_status = 'updated'
                  WHERE id = ?`
-                )
-                .run(
-                    target,
-                    sqlNullable(lockedService.latest_tag),
-                    sqlNullable(lockedService.latest_digest),
-                    sqlNullable(lockedService.latest_tag),
-                    nowIso(),
-                    nowIso(),
-                    lockedService.id
+                    )
+                    .run(
+                        target,
+                        sqlNullable(lockedService.latest_tag),
+                        sqlNullable(lockedService.latest_digest),
+                        sqlNullable(lockedService.latest_tag),
+                        nowIso(),
+                        nowIso(),
+                        lockedService.id
+                    );
+                insertEventBestEffort(
+                    lockedService,
+                    `${eventPrefix}_update_succeeded`,
+                    "Docker service updated",
+                    { targetComposeImageRef: target }
                 );
-            insertEventBestEffort(
-                lockedService,
-                `${eventPrefix}_update_succeeded`,
-                "Docker service updated",
-                { targetComposeImageRef: target }
-            );
-            createNotificationBestEffort(
-                "Docker service updated",
-                `${serviceLabel(lockedService)} updated to ${target}`,
-                `docker:updater:updated:${lockedService.id}:${target}`
-            );
-            return {
-                step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
-                changedPaths: result.changedPaths,
-                isOk: true,
-                stdout: result.stdout,
-                stderr: result.stderr,
-            };
-        } catch (error) {
-            const message = caughtMessage(error);
-            insertEventBestEffort(
-                lockedService,
-                `${eventPrefix}_update_reconcile_failed`,
-                `Docker service updated but failed to persist updater state: ${message}`,
-                {
-                    targetComposeImageRef: target,
-                }
-            );
-            const [os = "linux", architecture] = servicePlatform(lockedService).split(
-                "/",
-                2
-            );
-            createNotificationBestEffort(
-                `Docker ${eventPrefix} update needs reconciliation`,
-                `${serviceLabel(lockedService)} updated to ${target}, but state persistence failed: ${message}`,
-                `docker:updater:${eventPrefix}-reconcile-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
-                "error",
-                {
-                    architecture,
-                    digest: lockedService.latest_digest,
-                    os,
-                }
-            );
-            return {
-                step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
-                changedPaths: result.changedPaths,
-                isOk: false,
-                stdout: result.stdout,
-                stderr: `Docker service updated but failed to persist updater state: ${message}`,
-            };
-        }
-    });
+                createNotificationBestEffort(
+                    "Docker service updated",
+                    `${serviceLabel(lockedService)} updated to ${target}`,
+                    `docker:updater:updated:${lockedService.id}:${target}`
+                );
+                return {
+                    step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                    changedPaths: result.changedPaths,
+                    isOk: true,
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                };
+            } catch (error) {
+                const message = caughtMessage(error);
+                insertEventBestEffort(
+                    lockedService,
+                    `${eventPrefix}_update_reconcile_failed`,
+                    `Docker service updated but failed to persist updater state: ${message}`,
+                    {
+                        targetComposeImageRef: target,
+                    }
+                );
+                const [os = "linux", architecture] = servicePlatform(lockedService).split(
+                    "/",
+                    2
+                );
+                createNotificationBestEffort(
+                    `Docker ${eventPrefix} update needs reconciliation`,
+                    `${serviceLabel(lockedService)} updated to ${target}, but state persistence failed: ${message}`,
+                    `docker:updater:${eventPrefix}-reconcile-failed:${lockedService.id}:${nowIso().slice(0, 10)}`,
+                    "error",
+                    {
+                        architecture,
+                        digest: lockedService.latest_digest,
+                        os,
+                    }
+                );
+                return {
+                    step: `${eventPrefix}-update:${serviceLabel(lockedService)}`,
+                    changedPaths: result.changedPaths,
+                    isOk: false,
+                    stdout: result.stdout,
+                    stderr: `Docker service updated but failed to persist updater state: ${message}`,
+                };
+            }
+        },
+        signal
+    );
 }
 
-async function pruneDanglingImagesBestEffort(): Promise<void> {
+async function pruneDanglingImagesBestEffort(signal?: AbortSignal): Promise<void> {
     try {
         const result = await runProcess(getDockerBin(), ["image", "prune", "-f"], {
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
+            signal,
             timeoutMs: 120_000,
         });
         if (result.code !== 0) {
@@ -2410,6 +2458,7 @@ async function pruneDanglingImagesBestEffort(): Promise<void> {
             );
         }
     } catch (error) {
+        signal?.throwIfAborted();
         console.error("[DockerUpdater] Failed to prune dangling images", {
             error: caughtMessage(error),
         });
@@ -2417,12 +2466,13 @@ async function pruneDanglingImagesBestEffort(): Promise<void> {
 }
 
 async function syncDockerUpdaterChangesBestEffort(
-    steps: DockerUpdaterStepResult[]
+    steps: DockerUpdaterStepResult[],
+    signal?: AbortSignal
 ): Promise<void> {
     const updateSteps = steps.filter((step) => step.step.includes("-update:"));
     if (updateSteps.length === 0) {
         try {
-            const pendingResult = await syncDockerUpdaterChanges([]);
+            const pendingResult = await syncDockerUpdaterChanges([], signal);
             if (pendingResult.pushed) {
                 steps.push({
                     step: "git-sync:docker",
@@ -2432,6 +2482,7 @@ async function syncDockerUpdaterChangesBestEffort(
                 });
             }
         } catch (error) {
+            signal?.throwIfAborted();
             steps.push({
                 step: "git-sync:docker",
                 isOk: false,
@@ -2444,7 +2495,7 @@ async function syncDockerUpdaterChangesBestEffort(
     const changedPaths = updateSteps.flatMap((step) => step.changedPaths ?? []);
     if (changedPaths.length === 0) {
         try {
-            const pendingResult = await syncDockerUpdaterChanges([]);
+            const pendingResult = await syncDockerUpdaterChanges([], signal);
             steps.push({
                 step: "git-sync:docker",
                 isOk: true,
@@ -2460,6 +2511,7 @@ async function syncDockerUpdaterChangesBestEffort(
                 stderr: "",
             });
         } catch (error) {
+            signal?.throwIfAborted();
             steps.push({
                 step: "git-sync:docker",
                 isOk: false,
@@ -2470,7 +2522,7 @@ async function syncDockerUpdaterChangesBestEffort(
         return;
     }
     try {
-        const result = await syncDockerUpdaterChanges(changedPaths);
+        const result = await syncDockerUpdaterChanges(changedPaths, signal);
         steps.push({
             step: "git-sync:docker",
             isOk: true,
@@ -2478,6 +2530,7 @@ async function syncDockerUpdaterChangesBestEffort(
             stderr: "",
         });
     } catch (error) {
+        signal?.throwIfAborted();
         steps.push({
             step: "git-sync:docker",
             isOk: false,
@@ -2488,8 +2541,10 @@ async function syncDockerUpdaterChangesBestEffort(
 }
 
 export async function runDockerUpdaterService(
-    serviceId?: number
+    serviceId?: number,
+    signal?: AbortSignal
 ): Promise<DockerUpdaterStepResult[]> {
+    signal?.throwIfAborted();
     const requestedService =
         serviceId === undefined
             ? undefined
@@ -2500,7 +2555,7 @@ export async function runDockerUpdaterService(
                       )
                       .get(serviceId) as ManagedServiceRow | undefined
               );
-    const register = await registerDockerUpdaterServices();
+    const register = await registerDockerUpdaterServices(signal);
     if (serviceId === undefined && shouldBlockGlobalUpdateForDiscoveryFailure(register)) {
         return [register];
     }
@@ -2566,7 +2621,7 @@ export async function runDockerUpdaterService(
                 },
             ];
         }
-        const poll = await pollDockerUpdaterRegistries(service.id);
+        const poll = await pollDockerUpdaterRegistries(service.id, signal);
         if (!poll?.isOk) {
             return [register, poll].filter(
                 (step): step is DockerUpdaterStepResult => step !== undefined
@@ -2629,16 +2684,16 @@ export async function runDockerUpdaterService(
                 },
             ];
         }
-        const apply = await applyServiceUpdate(refreshedService, "manual");
+        const apply = await applyServiceUpdate(refreshedService, "manual", signal);
         if (apply.isOk) {
-            await pruneDanglingImagesBestEffort();
+            await pruneDanglingImagesBestEffort(signal);
         }
         const steps = [register, poll, apply];
-        await syncDockerUpdaterChangesBestEffort(steps);
+        await syncDockerUpdaterChangesBestEffort(steps, signal);
         return steps;
     }
     const blockedAppSlugs = failedDiscoveryAppSlugs(register);
-    const poll = await pollDockerUpdaterRegistries();
+    const poll = await pollDockerUpdaterRegistries(undefined, signal);
     const autoServices = normalizeManagedServiceRows(
         database
             .prepare(
@@ -2648,6 +2703,7 @@ export async function runDockerUpdaterService(
     );
     const applyResults: DockerUpdaterStepResult[] = [];
     for (const service of autoServices) {
+        signal?.throwIfAborted();
         if (
             blockedAppSlugs.has(service.app_slug) ||
             service.last_status !== "update_available" ||
@@ -2655,13 +2711,13 @@ export async function runDockerUpdaterService(
         ) {
             continue;
         }
-        applyResults.push(await applyServiceUpdate(service, "auto"));
+        applyResults.push(await applyServiceUpdate(service, "auto", signal));
     }
     if (applyResults.some((step) => step.isOk)) {
-        await pruneDanglingImagesBestEffort();
+        await pruneDanglingImagesBestEffort(signal);
     }
     const steps = [register, poll, ...applyResults];
-    await syncDockerUpdaterChangesBestEffort(steps);
+    await syncDockerUpdaterChangesBestEffort(steps, signal);
     return steps;
 }
 
@@ -2689,7 +2745,7 @@ export function registerDockerUpdaterScheduledJobs(): void {
     } as const;
     registerScheduledJobAction(
         "docker.updater",
-        async (executionJob) => {
+        async (executionJob, signal) => {
             const rawServiceId = executionJob.actionPayload.serviceId;
             const serviceId =
                 rawServiceId === undefined
@@ -2704,7 +2760,7 @@ export function registerDockerUpdaterScheduledJobs(): void {
                     statusCode: 400,
                 });
             }
-            const steps = await runDockerUpdaterService(serviceId);
+            const steps = await runDockerUpdaterService(serviceId, signal);
             const failed = steps.filter(
                 (step) =>
                     !step.isOk &&

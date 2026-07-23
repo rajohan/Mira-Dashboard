@@ -990,6 +990,113 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("keeps queued deployment locks active beyond the legacy stale window", async () => {
+        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const first = startDeployLatest();
+        let replacementId: string | undefined;
+        try {
+            database
+                .prepare("UPDATE deployment_jobs SET updated_at = ? WHERE id = ?")
+                .run("2026-01-01T00:00:00.000Z", first.id);
+            database
+                .prepare("UPDATE deployment_lock SET updated_at = ? WHERE job_id = ?")
+                .run("2026-01-01T00:00:00.000Z", first.id);
+
+            expect(() => startDeployLatest()).toThrow(
+                `Dashboard deploy already in progress (${first.id})`
+            );
+
+            const firstExecution = database
+                .prepare(
+                    `SELECT id
+                     FROM job_executions
+                     WHERE action_key = 'dashboard.deploy'
+                       AND json_extract(payload_json, '$.deploymentId') = ?`
+                )
+                .get(first.id) as { id: string };
+            cancelJobExecution(firstExecution.id);
+
+            const replacement = startDeployLatest();
+            replacementId = replacement.id;
+            expect(replacement.id).not.toBe(first.id);
+            expect(
+                database
+                    .prepare("SELECT status FROM deployment_jobs WHERE id = ?")
+                    .get(first.id)
+            ).toEqual({ status: "failed" });
+        } finally {
+            const deploymentIds = [first.id, replacementId].filter((id): id is string =>
+                Boolean(id)
+            );
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            for (const deploymentId of deploymentIds) {
+                database
+                    .prepare(
+                        `DELETE FROM job_executions
+                         WHERE action_key = 'dashboard.deploy'
+                           AND json_extract(payload_json, '$.deploymentId') = ?`
+                    )
+                    .run(deploymentId);
+                database
+                    .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                    .run(deploymentId);
+            }
+        }
+    });
+
+    it("reserves the deployment lock while a pull request approval is queued", async () => {
+        const { runPullRequestApproval, startDeployLatest } =
+            await import("../src/services/pullRequests.ts");
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const approval = runPullRequestApproval(11, false);
+        let approvalExecutionId: string | undefined;
+        let deploymentId: string | undefined;
+        try {
+            const execution = database
+                .prepare(
+                    `SELECT id
+                     FROM job_executions
+                     WHERE action_key = 'github.merge'
+                     ORDER BY queued_at DESC, id DESC
+                     LIMIT 1`
+                )
+                .get() as { id: string };
+            approvalExecutionId = execution.id;
+            expect(() => startDeployLatest()).toThrow(
+                "Dashboard deploy already in progress"
+            );
+
+            cancelJobExecution(execution.id);
+            await expect(approval).rejects.toThrow("Job cancelled before execution");
+
+            const deployment = startDeployLatest();
+            deploymentId = deployment.id;
+            expect(deployment.status).toBe("building");
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            if (approvalExecutionId) {
+                database
+                    .prepare("DELETE FROM job_executions WHERE id = ?")
+                    .run(approvalExecutionId);
+            }
+            if (deploymentId) {
+                database
+                    .prepare(
+                        `DELETE FROM job_executions
+                         WHERE action_key = 'dashboard.deploy'
+                           AND json_extract(payload_json, '$.deploymentId') = ?`
+                    )
+                    .run(deploymentId);
+                database
+                    .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                    .run(deploymentId);
+            }
+        }
+    });
+
     it("runs deploy latest build flow against an isolated checkout", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
@@ -2560,8 +2667,12 @@ fi
         const fakeBin = createTemporaryRoot("mira-backup-docker-bin-");
         writeFakeDocker(path.join(fakeBin, "docker"));
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
-        const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
-            await import("../src/services/backups.ts");
+        const {
+            clearNeedsAttentionBackupJob,
+            getCurrentBackupJob,
+            registerBackupScheduledJobs,
+            startManualBackup,
+        } = await import("../src/services/backups.ts");
         const { getScheduledJob, runScheduledJob, upsertScheduledJob } =
             await import("../src/services/scheduledJobs.ts");
 
@@ -2598,7 +2709,9 @@ fi
                 stdout: expect.stringContaining("backup ok"),
                 type: "walg",
             });
-            expect(getCurrentBackupJob("walg")).toMatchObject({ status: "done" });
+            await expect(clearNeedsAttentionBackupJob("walg")).rejects.toMatchObject({
+                statusCode: 404,
+            });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
         } finally {
             database
@@ -3070,15 +3183,18 @@ fi
         writeRunningWalgPreflightDocker(path.join(fakeBin, "docker"));
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const {
-            clearNeedsAttentionBackupJob,
+            clearPersistedBackupAttention,
             getCurrentBackupJob,
+            getPersistedBackupJob,
             mapBackupJob,
             registerBackupScheduledJobs,
             startManualBackup,
         } = await import("../src/services/backups.ts");
+        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
 
         try {
             registerBackupScheduledJobs();
+            await startTestScheduledExecutor();
             await expect(startManualBackup("walg")).rejects.toMatchObject({
                 statusCode: 409,
             });
@@ -3092,12 +3208,80 @@ fi
                 "WALG backup needs attention"
             );
 
-            const clearedJob = await clearNeedsAttentionBackupJob("walg");
-            expect(mapBackupJob(clearedJob)).toMatchObject({
+            await expect(runScheduledJob("backup.walg")).resolves.toMatchObject({
+                status: "failed",
+            });
+            expect(getPersistedBackupJob("walg")).toBeDefined();
+
+            const clearedJob = await clearPersistedBackupAttention("walg");
+            expect(clearedJob).toMatchObject({
                 status: "needs_attention",
                 type: "walg",
             });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
+            expect(getPersistedBackupJob("walg")).toBeUndefined();
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("clears persisted backup attention without in-memory worker state", async () => {
+        rememberEnvironment("PATH");
+        const fakeBin = createTemporaryRoot("mira-backup-persisted-clear-bin-");
+        writeFakeDocker(path.join(fakeBin, "docker"));
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        const {
+            clearPersistedBackupAttention,
+            getCurrentBackupJob,
+            getPersistedBackupJob,
+            registerBackupScheduledJobs,
+        } = await import("../src/services/backups.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            const run = enqueueScheduledJob("backup.walg", "manual");
+            const executionId = run.executionId;
+            if (!executionId) throw new Error("Backup execution id was missing");
+            const completedAt = "2026-07-22T02:00:00.000Z";
+            const backup = {
+                code: 130,
+                endedAt: Date.parse(completedAt),
+                id: Bun.randomUUIDv7(),
+                startedAt: Date.parse(completedAt),
+                status: "needs_attention",
+                stderr: "Worker restarted before attention was cleared",
+                stdout: "",
+                type: "walg",
+            };
+            database
+                .prepare(
+                    `UPDATE job_executions
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(completedAt, completedAt, JSON.stringify({ backup }), executionId);
+            database
+                .prepare(
+                    `UPDATE scheduled_job_runs
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(completedAt, completedAt, JSON.stringify({ backup }), run.id);
+
+            expect(getCurrentBackupJob("walg")).toBeUndefined();
+            expect(getPersistedBackupJob("walg")).toMatchObject(backup);
+
+            await startTestScheduledExecutor();
+            await expect(clearPersistedBackupAttention("walg")).resolves.toMatchObject(
+                backup
+            );
+            expect(getPersistedBackupJob("walg")).toBeUndefined();
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")

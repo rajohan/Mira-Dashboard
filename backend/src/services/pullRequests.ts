@@ -296,6 +296,10 @@ interface DeploymentLockRow {
     updated_at: string;
 }
 
+interface DeploymentLockExecutionRow {
+    status: JobExecution["status"];
+}
+
 /** Checks whether an active deployment lock row is stale enough to replace. */
 function isDeploymentLockStale(lock: DeploymentLockRow, now = Date.now()): boolean {
     const updatedAt = Date.parse(lock.updated_at);
@@ -310,6 +314,30 @@ function readDeploymentLockRow(): DeploymentLockRow | undefined {
     return database
         .prepare("SELECT job_id, updated_at FROM deployment_lock WHERE id = 1")
         .get() as DeploymentLockRow | undefined;
+}
+
+function readDeploymentLockExecution(
+    lockOwner: string
+): DeploymentLockExecutionRow | undefined {
+    return database
+        .prepare(
+            `SELECT status
+             FROM job_executions
+             WHERE json_valid(payload_json)
+               AND (
+                   (
+                       action_key = 'dashboard.deploy'
+                       AND json_extract(payload_json, '$.deploymentId') = ?
+                   )
+                   OR (
+                       action_key IN ('github.merge', 'github.merge-deploy')
+                       AND json_extract(payload_json, '$.deploymentLockId') = ?
+                   )
+               )
+             ORDER BY queued_at DESC, id DESC
+             LIMIT 1`
+        )
+        .get(lockOwner, lockOwner) as DeploymentLockExecutionRow | undefined;
 }
 
 /** Releases the active deploy lock if it still belongs to the given job. */
@@ -329,8 +357,22 @@ function ensureNoActiveDeployment(): void {
     const activeJobId = activeLock?.job_id;
     if (activeJobId) {
         const activeJob = readDeploymentJob(activeJobId);
+        const lockExecution = readDeploymentLockExecution(activeJobId);
+        if (lockExecution?.status === "queued" || lockExecution?.status === "running") {
+            throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
+        }
+        if (lockExecution && activeJob?.status === "building") {
+            writeDeploymentJob({
+                ...activeJob,
+                note: "Deploy execution ended before build completion",
+                status: "failed",
+                updatedAt: dateToISOString(new Date()),
+            });
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            return;
+        }
         if (!activeJob) {
-            if (!isDeploymentLockStale(activeLock)) {
+            if (!lockExecution && !isDeploymentLockStale(activeLock)) {
                 throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
             }
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
@@ -361,6 +403,15 @@ function acquireDeploymentLock(jobId: string): void {
             });
         }
         throw error;
+    }
+}
+
+function refreshDeploymentLockOwner(jobId: string): void {
+    const result = database
+        .prepare("UPDATE deployment_lock SET updated_at = ? WHERE id = 1 AND job_id = ?")
+        .run(dateToISOString(new Date()), jobId);
+    if (result.changes !== 1) {
+        throw new Error("Dashboard deploy lock ownership was lost");
     }
 }
 
@@ -1494,6 +1545,7 @@ export async function prepareAndStartDeployLatest(): Promise<DeploymentJob> {
 }
 
 interface PullRequestApprovalExecutionOptions {
+    lockHeldBy?: string;
     signal?: AbortSignal;
 }
 
@@ -1503,12 +1555,8 @@ export async function approvePullRequest(
     willDeploy: boolean,
     options: PullRequestApprovalExecutionOptions = {}
 ) {
-    await ensureProductionCheckout(options.signal);
-    const pr = await getPullRequest(number, options.signal);
-    validateDashboardPrForApproval(pr);
-    const lockId = `approve-${Bun.randomUUIDv7()}`;
-    acquireDeploymentLock(lockId);
-    let isReleaseLock = true;
+    const lockId = options.lockHeldBy ?? `approve-${Bun.randomUUIDv7()}`;
+    let isReleaseLock = options.lockHeldBy !== undefined;
 
     let syncError: string | undefined;
     let deployError: string | undefined;
@@ -1516,6 +1564,16 @@ export async function approvePullRequest(
     let cleanup: WorktreeCleanupResult;
 
     try {
+        if (options.lockHeldBy) {
+            refreshDeploymentLockOwner(lockId);
+        }
+        await ensureProductionCheckout(options.signal);
+        const pr = await getPullRequest(number, options.signal);
+        validateDashboardPrForApproval(pr);
+        if (!options.lockHeldBy) {
+            acquireDeploymentLock(lockId);
+            isReleaseLock = true;
+        }
         await runCommand(
             "gh",
             [
@@ -1575,15 +1633,23 @@ function queuedPullRequestResult<T>(execution: JobExecution): T {
 
 /** Runs PR merge/deploy through the shared persistent execution plane. */
 export async function runPullRequestApproval(number: number, willDeploy: boolean) {
-    const execution = enqueueJobExecution({
-        actionKey: willDeploy ? "github.merge-deploy" : "github.merge",
-        displayName: willDeploy
-            ? `Merge and deploy PR #${number}`
-            : `Merge PR #${number}`,
-        payload: { number, willDeploy },
-        resourceClass: "exclusive",
-        timeoutMs: (willDeploy ? 45 : 10) * 60 * 1000,
-    });
+    const deploymentLockId = `approve-${Bun.randomUUIDv7()}`;
+    acquireDeploymentLock(deploymentLockId);
+    let execution: JobExecution;
+    try {
+        execution = enqueueJobExecution({
+            actionKey: willDeploy ? "github.merge-deploy" : "github.merge",
+            displayName: willDeploy
+                ? `Merge and deploy PR #${number}`
+                : `Merge PR #${number}`,
+            payload: { deploymentLockId, number, willDeploy },
+            resourceClass: "exclusive",
+            timeoutMs: (willDeploy ? 45 : 10) * 60 * 1000,
+        });
+    } catch (error) {
+        releaseDeploymentLock(deploymentLockId);
+        throw error;
+    }
     return queuedPullRequestResult<Awaited<ReturnType<typeof approvePullRequest>>>(
         await waitForJobExecution(execution.id, { timeoutMs: 60 * 60 * 1000 })
     );
@@ -1716,7 +1782,19 @@ async function executePullRequestMerge(
 ) {
     const number = executionPullRequestNumber(job.actionPayload);
     const willDeploy = job.actionPayload.willDeploy === true;
-    const result = await approvePullRequest(number, willDeploy, { signal });
+    const deploymentLockId = job.actionPayload.deploymentLockId;
+    if (
+        deploymentLockId !== undefined &&
+        (typeof deploymentLockId !== "string" || deploymentLockId.trim() === "")
+    ) {
+        throw Object.assign(new Error("Deployment lock id is invalid"), {
+            statusCode: 400,
+        });
+    }
+    const result = await approvePullRequest(number, willDeploy, {
+        lockHeldBy: deploymentLockId,
+        signal,
+    });
     const message = result.syncError || result.deployError;
     if (message) {
         throw new ScheduledJobActionError(message, { result });

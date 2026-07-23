@@ -79,9 +79,15 @@ minimum production setup normally needs:
 
 ## Create The Systemd User Services
 
+Run this section from an interactive shell as the `ubuntu` user. Use `sudo` only
+for the explicit `loginctl` command; the install and `systemctl --user` commands
+must target `ubuntu`'s user manager.
+
 Install the tracked web and worker units:
 
 ```bash
+cd /home/ubuntu/projects/mira-dashboard
+install -d -m 0755 /home/ubuntu/.config/systemd/user
 install -m 0644 systemd/mira-dashboard.service \
   /home/ubuntu/.config/systemd/user/mira-dashboard.service
 install -m 0644 systemd/mira-dashboard-worker.service \
@@ -96,11 +102,16 @@ worker children are additionally placed in transient resource-class scopes.
 Enable and start both:
 
 ```bash
+sudo loginctl enable-linger ubuntu
+loginctl show-user ubuntu -p Linger
 systemctl --user daemon-reload
 systemctl --user enable --now mira-dashboard.service mira-dashboard-worker.service
 systemctl --user status mira-dashboard.service --no-pager
 systemctl --user status mira-dashboard-worker.service --no-pager
 ```
+
+Lingering keeps the user manager and both services running after the SSH/login
+session ends and across reboots.
 
 ## Bootstrap The First User
 

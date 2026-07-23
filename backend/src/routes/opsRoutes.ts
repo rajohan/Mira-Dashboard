@@ -1,5 +1,6 @@
 import { database } from "../database.ts";
 import { json } from "../http.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { runElevatedLogRotationService } from "../services/logRotation.ts";
 import {
     enqueueAndWaitForJobExecution,
@@ -117,8 +118,17 @@ async function runLogRotationResponse(isDryRun: boolean) {
             stderr,
         });
     } catch (error) {
-        console.error("[opsRoutes] Ops route failed", error);
-        return json({ error: "Ops route failed" }, { status: 500 });
+        const status = httpStatusCode(error);
+        if (status === 500) console.error("[opsRoutes] Ops route failed", error);
+        return json(
+            {
+                error:
+                    status === 500
+                        ? "Ops route failed"
+                        : errorMessage(error, "Ops route failed"),
+            },
+            { status }
+        );
     }
 }
 

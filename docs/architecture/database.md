@@ -48,6 +48,7 @@ non-temporary paths and symlinked temp paths.
 | `scheduled_jobs`                   | Dashboard-local scheduled job definitions.                            |
 | `scheduled_job_runs`               | Scheduled job run history.                                            |
 | `scheduled_job_execution_policies` | Resource class and timeout for each Dashboard job.                    |
+| `openclaw_cron_job_metadata`       | Disable intent and Dashboard metadata for OpenClaw cron jobs.         |
 | `job_executions`                   | Persistent execution queue with leases, heartbeats, and cancellation. |
 | `job_workers`                      | Worker capacity and liveness heartbeats.                              |
 | `docker_managed_services`          | Docker updater managed service inventory.                             |

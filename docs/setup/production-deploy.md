@@ -98,8 +98,12 @@ journalctl --user -u mira-dashboard-worker.service -n 120 --no-pager
 ```bash
 curl http://127.0.0.1:3100/api/health
 curl http://127.0.0.1:3100/api/auth/bootstrap
-curl http://127.0.0.1:3100/api/job-executions
 ```
+
+The queue endpoint requires a valid Dashboard session unless the explicitly
+configured direct-loopback bypass is enabled. Production currently sources
+`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` from Doppler, but the portable smoke test
+does not depend on that host-specific bypass.
 
 For an authenticated browser session, also verify:
 
@@ -119,16 +123,26 @@ git log --oneline -n 10
 git switch main
 git reset --hard <known-good-sha>
 bun run build
-cd backend
-bun run build
-systemctl --user restart mira-dashboard.service
-systemctl --user restart mira-dashboard-worker.service
+(cd backend && bun run build)
+install -m 0644 systemd/mira-dashboard.service \
+  /home/ubuntu/.config/systemd/user/mira-dashboard.service
+if test -f backend/dist/workerStart.js; then
+  install -m 0644 systemd/mira-dashboard-worker.service \
+    /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
+  systemctl --user daemon-reload
+  systemctl --user restart mira-dashboard.service
+  systemctl --user restart mira-dashboard-worker.service
+else
+  systemctl --user disable --now mira-dashboard-worker.service
+  systemctl --user daemon-reload
+  systemctl --user restart mira-dashboard.service
+fi
 curl http://127.0.0.1:3100/api/health
 ```
 
-If the known-good target predates `workerStart.js`, stop and disable
-`mira-dashboard-worker.service` before starting that version and restore the
-legacy combined web unit. Do not repeatedly restart a worker unit whose target
+If the known-good target predates `workerStart.js`, the branch above stops the
+worker before starting that version and reinstalls the checked-out legacy
+combined web unit. Do not repeatedly restart a worker unit whose target
 entrypoint does not exist.
 
 Do not use `git reset --hard` casually in normal work. It is a rollback

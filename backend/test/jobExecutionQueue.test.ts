@@ -21,6 +21,7 @@ import {
 import { waitForJobExecution } from "../src/services/queuedJobExecution.ts";
 import {
     enqueueScheduledJob,
+    recoverOrphanedScheduledJobRuns,
     registerScheduledJobAction,
     ScheduledJobActionError,
     startScheduledJobExecutor,
@@ -206,6 +207,30 @@ describe("persistent job execution queue", () => {
         expect(recoverExpiredJobExecutions("2026-01-01T00:03:00.000Z")).toBe(1);
         expect(getJobExecution(execution.id)).toMatchObject({
             message: "Job failed after its worker lease expired",
+            status: "failed",
+        });
+    });
+
+    it("fails legacy running scheduled runs without an execution lease", () => {
+        const jobId = createScheduledTestJob("host-heavy", "Legacy running job");
+        const run = database
+            .prepare(
+                `INSERT INTO scheduled_job_runs (
+                    job_id, status, trigger_type, started_at, output_json
+                 ) VALUES (?, 'running', 'schedule', ?, '{}')`
+            )
+            .run(jobId, "2026-01-01T00:00:00.000Z");
+
+        expect(recoverOrphanedScheduledJobRuns("2026-01-01T00:03:00.000Z")).toBe(1);
+        expect(
+            database
+                .prepare(
+                    "SELECT status, finished_at AS finishedAt, message FROM scheduled_job_runs WHERE id = ?"
+                )
+                .get(Number(run.lastInsertRowid))
+        ).toEqual({
+            finishedAt: "2026-01-01T00:03:00.000Z",
+            message: "Scheduled job interrupted before worker lease recovery",
             status: "failed",
         });
     });

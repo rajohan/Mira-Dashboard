@@ -3674,6 +3674,16 @@ describe("backend route and service behavior", () => {
         );
         const { jobId } = (await execStart.json()) as { jobId: string };
         expect(jobId).toEqual(expect.any(String));
+        expect(
+            database
+                .prepare(
+                    "SELECT resource_class AS resourceClass, timeout_ms AS timeoutMs FROM job_executions WHERE id = ?"
+                )
+                .get(jobId)
+        ).toEqual({
+            resourceClass: "exclusive",
+            timeoutMs: 7 * 60 * 60 * 1000,
+        });
 
         let execStatus = dockerRoutes["/api/docker/exec/:jobId"].GET(
             requestWithParameters(`/api/docker/exec/${jobId}`, { jobId })

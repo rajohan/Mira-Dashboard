@@ -6,7 +6,6 @@ import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobW
 
 const serverStartState: {
     activeServer: ReturnType<typeof createServer> | undefined;
-    stopWorkerOnServerClose?: () => Promise<void>;
     isStarting: boolean;
 } = {
     activeServer: undefined,
@@ -14,16 +13,6 @@ const serverStartState: {
 };
 
 export { runLogRotationCli } from "./services/logRotation.ts";
-
-function installWorkerCloseCleanup(): void {
-    if (serverStartState.stopWorkerOnServerClose) {
-        return;
-    }
-    serverStartState.stopWorkerOnServerClose = async () => {
-        await stopDashboardJobWorker();
-        serverStartState.stopWorkerOnServerClose = undefined;
-    };
-}
 
 function rollbackBackgroundServiceStartup(
     function_: () => void | Promise<void>,
@@ -37,14 +26,6 @@ function rollbackBackgroundServiceStartup(
     } catch (cleanupError) {
         console.error(label, cleanupError);
     }
-}
-
-function removeWorkerCloseCleanup(): void {
-    if (!serverStartState.stopWorkerOnServerClose) {
-        return;
-    }
-
-    serverStartState.stopWorkerOnServerClose = undefined;
 }
 
 export function resolveGatewayToken(
@@ -77,12 +58,10 @@ export function handleServerListening(): void {
         if (shouldStartScheduledJobs()) {
             startDashboardJobWorker();
             isJobWorkerStarted = true;
-            installWorkerCloseCleanup();
         }
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
         if (isJobWorkerStarted) {
-            removeWorkerCloseCleanup();
             rollbackBackgroundServiceStartup(
                 () => stopDashboardJobWorker(),
                 "[Backend] Failed to stop job worker:"
@@ -128,7 +107,6 @@ export async function stopBackendServer(): Promise<void> {
     const server = serverStartState.activeServer;
     serverStartState.activeServer = undefined;
     try {
-        removeWorkerCloseCleanup();
         await stopDashboardJobWorker();
         gateway.shutdown();
     } finally {

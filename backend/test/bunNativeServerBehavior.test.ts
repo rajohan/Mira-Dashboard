@@ -109,7 +109,7 @@ describe("Bun-native dashboard backend", () => {
                 "startScheduledJobExecutor();",
                 "const server = createServer(0);",
                 "console.log(JSON.stringify({ port: server.port }));",
-                "process.on('SIGTERM', () => { Promise.all([server.stop(true), stopScheduledJobExecutor()]).then(() => process.exit(0)); });",
+                "process.on('SIGTERM', () => { Promise.all([server.stop(true), stopScheduledJobExecutor()]).then(() => process.exit(0)).catch(() => process.exit(1)); });",
             ].join("\n")
         );
 
