@@ -442,6 +442,25 @@ function runSchemaSql(databaseConnection: DatabaseSync, schemaSql: string): void
     }
 }
 
+export function enableRequiredWalJournalMode(
+    databaseConnection: DatabaseSync,
+    databasePath: string
+): void {
+    const journalModeRow = databaseConnection
+        .query("PRAGMA journal_mode = WAL")
+        .get() as { journal_mode?: unknown } | null;
+    const journalMode =
+        typeof journalModeRow?.journal_mode === "string"
+            ? journalModeRow.journal_mode
+            : undefined;
+    if (journalMode?.toLowerCase() !== "wal") {
+        databaseConnection.close();
+        throw new Error(
+            `SQLite WAL journal mode is required for ${databasePath}; got ${journalMode ?? "unknown"}`
+        );
+    }
+}
+
 function initializeDatabase(databasePath: string): DatabaseSync {
     const { configuredDatabasePath } = resolveDatabasePath();
     assertTestDatabasePath(databasePath, configuredDatabasePath);
@@ -451,19 +470,7 @@ function initializeDatabase(databasePath: string): DatabaseSync {
     const initializedDatabase = new Database(databasePath);
     initializedDatabase.run("PRAGMA foreign_keys = ON");
     initializedDatabase.run("PRAGMA busy_timeout = 5000");
-    const journalModeRow = initializedDatabase
-        .query("PRAGMA journal_mode = WAL")
-        .get() as { journal_mode?: unknown } | null;
-    const journalMode =
-        typeof journalModeRow?.journal_mode === "string"
-            ? journalModeRow.journal_mode
-            : undefined;
-    if (journalMode?.toLowerCase() !== "wal") {
-        initializedDatabase.close();
-        throw new Error(
-            `SQLite WAL journal mode is required for ${databasePath}; got ${journalMode ?? "unknown"}`
-        );
-    }
+    enableRequiredWalJournalMode(initializedDatabase, databasePath);
     runSchemaSql(initializedDatabase, SCHEMA_SQL);
 
     return initializedDatabase;

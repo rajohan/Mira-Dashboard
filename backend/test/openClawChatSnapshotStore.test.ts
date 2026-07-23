@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 
 import {
@@ -5,7 +6,7 @@ import {
     type OpenClawRuntimeSnapshot,
 } from "../src/chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "../src/chat/openClawChatSnapshotStore.ts";
-import { database } from "../src/database.ts";
+import { database, enableRequiredWalJournalMode } from "../src/database.ts";
 
 function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnapshot {
     return {
@@ -28,6 +29,14 @@ function snapshotFor(sessionKey: string, sequence: number): OpenClawRuntimeSnaps
 }
 
 describe("OpenClaw chat snapshot store", () => {
+    it("fails fast when a database cannot enable WAL", () => {
+        const memoryDatabase = new Database(":memory:");
+
+        expect(() => enableRequiredWalJournalMode(memoryDatabase, ":memory:")).toThrow(
+            "SQLite WAL journal mode is required for :memory:; got memory"
+        );
+    });
+
     it("uses WAL and waits for a competing writer before updating a snapshot", async () => {
         const databasePath = process.env.MIRA_DASHBOARD_DB_PATH;
         if (!databasePath) throw new Error("Test database path is required");
