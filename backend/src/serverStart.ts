@@ -3,7 +3,7 @@ import gateway from "./gateway.ts";
 import { createServer, resolveListenPort } from "./server.ts";
 import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
-import { registerPullRequestCancellationHandlers } from "./services/pullRequests.ts";
+import { registerPullRequestJobLifecycleHandlers } from "./services/pullRequests.ts";
 
 const serverStartState: {
     activeServer: ReturnType<typeof createServer> | undefined;
@@ -45,7 +45,7 @@ export function resolveGatewayToken(
 export function handleServerListening(): void {
     let isGatewayStarted = false;
     try {
-        registerPullRequestCancellationHandlers();
+        registerPullRequestJobLifecycleHandlers();
         const token = resolveGatewayToken();
         if (token) {
             gateway.init(token);

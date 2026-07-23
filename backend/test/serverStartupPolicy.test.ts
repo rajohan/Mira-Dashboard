@@ -88,6 +88,33 @@ describe("server start scheduler policy", () => {
         }
     });
 
+    it("cleans up dedicated worker state when startup fails", async () => {
+        const jobWorker = await import("../src/services/jobWorker.ts");
+        const workerStart = await import("../src/workerStart.ts");
+        const sigintListeners = process.listenerCount("SIGINT");
+        const sigtermListeners = process.listenerCount("SIGTERM");
+        const startSpy = jest
+            .spyOn(jobWorker, "startDashboardJobWorker")
+            .mockImplementation(() => {
+                throw new Error("worker startup failed");
+            });
+        const stopSpy = jest
+            .spyOn(jobWorker, "stopDashboardJobWorker")
+            .mockImplementation(async () => {});
+
+        try {
+            await expect(workerStart.runDashboardWorker()).rejects.toThrow(
+                "worker startup failed"
+            );
+            expect(stopSpy).toHaveBeenCalledTimes(1);
+            expect(process.listenerCount("SIGINT")).toBe(sigintListeners);
+            expect(process.listenerCount("SIGTERM")).toBe(sigtermListeners);
+        } finally {
+            startSpy.mockRestore();
+            stopSpy.mockRestore();
+        }
+    });
+
     it("keeps worker startup blocked until failed executor cleanup is retried", async () => {
         const backups = await import("../src/services/backups.ts");
         const cacheRefresh = await import("../src/services/cacheRefresh.ts");

@@ -1052,6 +1052,76 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("fails deployments and releases their locks when worker leases expire", async () => {
+        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        const { getJobExecution, recoverExpiredJobExecutions } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const deployment = startDeployLatest();
+        let replacementId: string | undefined;
+        try {
+            const execution = database
+                .prepare(
+                    `SELECT id
+                     FROM job_executions
+                     WHERE action_key = 'dashboard.deploy'
+                       AND json_extract(payload_json, '$.deploymentId') = ?`
+                )
+                .get(deployment.id) as { id: string };
+            database
+                .prepare(
+                    `UPDATE job_executions
+                     SET status = 'running', started_at = ?, heartbeat_at = ?,
+                         lease_owner = ?, lease_expires_at = ?, attempt = 1
+                     WHERE id = ?`
+                )
+                .run(
+                    "2100-01-01T00:00:00.000Z",
+                    "2100-01-01T00:00:00.000Z",
+                    "missing-deploy-worker",
+                    "2100-01-01T00:02:00.000Z",
+                    execution.id
+                );
+
+            expect(recoverExpiredJobExecutions("2100-01-01T00:03:00.000Z")).toBe(1);
+            expect(getJobExecution(execution.id)).toMatchObject({
+                message: "Job failed after its worker lease expired",
+                status: "failed",
+            });
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(deployment.id)
+            ).toEqual({
+                note: "Deploy failed after its worker lease expired",
+                status: "failed",
+            });
+            expect(
+                database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+            ).toBeNull();
+
+            const replacement = startDeployLatest();
+            replacementId = replacement.id;
+            expect(replacement.status).toBe("building");
+        } finally {
+            const deploymentIds = [deployment.id, replacementId].filter(
+                (id): id is string => Boolean(id)
+            );
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            for (const deploymentId of deploymentIds) {
+                database
+                    .prepare(
+                        `DELETE FROM job_executions
+                         WHERE action_key = 'dashboard.deploy'
+                           AND json_extract(payload_json, '$.deploymentId') = ?`
+                    )
+                    .run(deploymentId);
+                database
+                    .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                    .run(deploymentId);
+            }
+        }
+    });
+
     it("reserves the deployment lock while a pull request approval is queued", async () => {
         const { runPullRequestApproval, startDeployLatest } =
             await import("../src/services/pullRequests.ts");
@@ -3294,6 +3364,112 @@ fi
                 type: backup.type,
             });
             expect(getPersistedBackupJob("walg")).toBeUndefined();
+        } finally {
+            database
+                .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
+                .run();
+            database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
+        }
+    });
+
+    it("does not clear a newer persisted backup than the requested execution", async () => {
+        const {
+            clearPersistedBackupAttention,
+            getPersistedBackupJob,
+            registerBackupScheduledJobs,
+        } = await import("../src/services/backups.ts");
+        const { enqueueScheduledJob } = await import("../src/services/scheduledJobs.ts");
+
+        try {
+            registerBackupScheduledJobs();
+            const oldRun = enqueueScheduledJob("backup.walg", "manual");
+            const oldExecutionId = oldRun.executionId;
+            if (!oldExecutionId) throw new Error("Old backup execution id was missing");
+            const oldBackup = {
+                code: 130,
+                endedAt: Date.parse("2026-07-22T02:00:00.000Z"),
+                id: Bun.randomUUIDv7(),
+                startedAt: Date.parse("2026-07-22T02:00:00.000Z"),
+                status: "needs_attention",
+                stderr: "Old backup needs attention",
+                stdout: "",
+                type: "walg",
+            };
+            database
+                .prepare(
+                    `UPDATE job_executions
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'Old WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(
+                    "2026-07-22T02:00:00.000Z",
+                    "2026-07-22T02:00:00.000Z",
+                    JSON.stringify({ backup: oldBackup }),
+                    oldExecutionId
+                );
+            database
+                .prepare(
+                    `UPDATE scheduled_job_runs
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'Old WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(
+                    "2026-07-22T02:00:00.000Z",
+                    "2026-07-22T02:00:00.000Z",
+                    JSON.stringify({ backup: oldBackup }),
+                    oldRun.id
+                );
+
+            const clearPromise = clearPersistedBackupAttention("walg");
+            const newerRun = enqueueScheduledJob("backup.walg", "manual");
+            const newerExecutionId = newerRun.executionId;
+            if (!newerExecutionId) {
+                throw new Error("Newer backup execution id was missing");
+            }
+            const newerBackup = {
+                ...oldBackup,
+                endedAt: Date.parse("2026-07-22T03:00:00.000Z"),
+                id: Bun.randomUUIDv7(),
+                startedAt: Date.parse("2026-07-22T03:00:00.000Z"),
+                stderr: "Newer backup needs attention",
+            };
+            database
+                .prepare(
+                    `UPDATE job_executions
+                     SET status = 'failed', queued_at = ?, started_at = ?,
+                         finished_at = ?, message = 'Newer WALG backup needs attention',
+                         output_json = ?
+                     WHERE id = ?`
+                )
+                .run(
+                    "2999-01-01T03:00:00.000Z",
+                    "2999-01-01T03:00:00.000Z",
+                    "2999-01-01T03:00:00.000Z",
+                    JSON.stringify({ backup: newerBackup }),
+                    newerExecutionId
+                );
+            database
+                .prepare(
+                    `UPDATE scheduled_job_runs
+                     SET status = 'failed', started_at = ?, finished_at = ?,
+                         message = 'Newer WALG backup needs attention', output_json = ?
+                     WHERE id = ?`
+                )
+                .run(
+                    "2999-01-01T03:00:00.000Z",
+                    "2999-01-01T03:00:00.000Z",
+                    JSON.stringify({ backup: newerBackup }),
+                    newerRun.id
+                );
+
+            await startTestScheduledExecutor();
+            await expect(clearPromise).rejects.toMatchObject({
+                message: "WALG backup attention changed before clearing",
+                statusCode: 409,
+            });
+            expect(getPersistedBackupJob("walg")).toMatchObject(newerBackup);
         } finally {
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")

@@ -82,8 +82,10 @@ export interface EnqueueJobExecutionInput {
 }
 
 type QueuedJobCancellationHandler = (execution: JobExecution, timestamp: string) => void;
+type ExpiredJobExecutionHandler = (execution: JobExecution) => void;
 
 const queuedJobCancellationHandlers = new Map<string, QueuedJobCancellationHandler>();
+const expiredJobExecutionHandlers = new Map<string, ExpiredJobExecutionHandler>();
 
 /** Registers domain cleanup that participates in a queued cancellation transaction. */
 export function registerQueuedJobCancellationHandler(
@@ -91,6 +93,14 @@ export function registerQueuedJobCancellationHandler(
     handler: QueuedJobCancellationHandler
 ): void {
     queuedJobCancellationHandlers.set(actionKey, handler);
+}
+
+/** Registers domain cleanup that participates in expired-lease recovery. */
+export function registerExpiredJobExecutionHandler(
+    actionKey: string,
+    handler: ExpiredJobExecutionHandler
+): void {
+    expiredJobExecutionHandlers.set(actionKey, handler);
 }
 
 interface JobExecutionRow {
@@ -368,7 +378,7 @@ function finishExpiredExecution(row: JobExecutionRow, finishedAt: string): void 
     const message = row.cancel_requested_at
         ? "Job cancelled after its worker lease expired"
         : "Job failed after its worker lease expired";
-    database
+    const update = database
         .prepare(
             `UPDATE job_executions
              SET status = ?, finished_at = ?, lease_owner = NULL,
@@ -376,6 +386,7 @@ function finishExpiredExecution(row: JobExecutionRow, finishedAt: string): void 
              WHERE id = ? AND status = 'running'`
         )
         .run(status, finishedAt, message, row.id);
+    if (update.changes === 0) return;
     if (row.scheduled_run_id !== null && row.scheduled_run_id !== undefined) {
         database
             .prepare(
@@ -384,6 +395,18 @@ function finishExpiredExecution(row: JobExecutionRow, finishedAt: string): void 
                  WHERE id = ? AND status = 'running'`
             )
             .run(status, finishedAt, message, row.scheduled_run_id);
+    }
+    const recoveryHandler = expiredJobExecutionHandlers.get(row.action_key);
+    const execution = mapExecution({
+        ...row,
+        finished_at: finishedAt,
+        lease_expires_at: undefined,
+        lease_owner: undefined,
+        message,
+        status,
+    });
+    if (recoveryHandler && execution) {
+        recoveryHandler(execution);
     }
 }
 
@@ -533,7 +556,7 @@ export function updateJobExecutionOutput(
 export function finishJobExecution(
     id: string,
     workerId: string,
-    status: "success" | "failed",
+    status: "success" | "failed" | "cancelled",
     message: string | undefined,
     output: Record<string, unknown>,
     finishedAt = nowIso()
@@ -547,10 +570,14 @@ export function finishJobExecution(
         if (row.status !== "running" || row.lease_owner !== workerId) {
             throw statusError("Job execution lease is no longer active", 409);
         }
-        const finalStatus: JobExecutionStatus = row.cancel_requested_at
-            ? "cancelled"
-            : status;
-        const finalMessage = finalStatus === "cancelled" ? "Job cancelled" : message;
+        const wasCancellationRequested = Boolean(row.cancel_requested_at);
+        const finalStatus: JobExecutionStatus =
+            wasCancellationRequested || status === "cancelled" ? "cancelled" : status;
+        const finalMessage = wasCancellationRequested
+            ? "Job cancelled"
+            : finalStatus === "cancelled"
+              ? (message ?? "Job cancelled")
+              : message;
         database
             .prepare(
                 `UPDATE job_executions

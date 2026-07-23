@@ -13,6 +13,7 @@ import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
     enqueueJobExecution,
     type JobExecution,
+    registerExpiredJobExecutionHandler,
     registerQueuedJobCancellationHandler,
 } from "./jobExecutionQueue.ts";
 import {
@@ -355,9 +356,10 @@ function releaseDeploymentLock(jobId: string): void {
     }
 }
 
-function cleanupQueuedDeploymentCancellation(
+function cleanupTerminatedDeploymentExecution(
     execution: JobExecution,
-    timestamp: string
+    timestamp: string,
+    note: string
 ): void {
     if (execution.actionKey === "dashboard.deploy") {
         const deploymentId = execution.payload.deploymentId;
@@ -368,7 +370,7 @@ function cleanupQueuedDeploymentCancellation(
         if (deployment && ACTIVE_DEPLOYMENT_STATUSES.has(deployment.status)) {
             writeDeploymentJob({
                 ...deployment,
-                note: "Deploy cancelled before execution",
+                note,
                 status: "failed",
                 updatedAt: timestamp,
             });
@@ -387,8 +389,29 @@ function cleanupQueuedDeploymentCancellation(
     }
 }
 
-/** Restores action-specific cleanup for queued deployment cancellations. */
-export function registerPullRequestCancellationHandlers(): void {
+function cleanupQueuedDeploymentCancellation(
+    execution: JobExecution,
+    timestamp: string
+): void {
+    cleanupTerminatedDeploymentExecution(
+        execution,
+        timestamp,
+        "Deploy cancelled before execution"
+    );
+}
+
+function cleanupExpiredDeploymentExecution(execution: JobExecution): void {
+    cleanupTerminatedDeploymentExecution(
+        execution,
+        execution.finishedAt ?? dateToISOString(new Date()),
+        execution.status === "cancelled"
+            ? "Deploy cancelled after its worker lease expired"
+            : "Deploy failed after its worker lease expired"
+    );
+}
+
+/** Restores action-specific cleanup for queued cancellations and expired leases. */
+export function registerPullRequestJobLifecycleHandlers(): void {
     registerQueuedJobCancellationHandler(
         "dashboard.deploy",
         cleanupQueuedDeploymentCancellation
@@ -400,6 +423,15 @@ export function registerPullRequestCancellationHandlers(): void {
     registerQueuedJobCancellationHandler(
         "github.merge-deploy",
         cleanupQueuedDeploymentCancellation
+    );
+    registerExpiredJobExecutionHandler(
+        "dashboard.deploy",
+        cleanupExpiredDeploymentExecution
+    );
+    registerExpiredJobExecutionHandler("github.merge", cleanupExpiredDeploymentExecution);
+    registerExpiredJobExecutionHandler(
+        "github.merge-deploy",
+        cleanupExpiredDeploymentExecution
     );
 }
 
@@ -1546,7 +1578,7 @@ async function runDeploymentJob(
 
 /** Persists a deployment and puts its execution behind the worker lease. */
 export function startDeployLatest(lockHeldBy?: string): DeploymentJob {
-    registerPullRequestCancellationHandlers();
+    registerPullRequestJobLifecycleHandlers();
     const now = dateToISOString(new Date());
     const job: DeploymentJob = {
         id: Bun.randomUUIDv7(),
@@ -1686,7 +1718,7 @@ function queuedPullRequestResult<T>(execution: JobExecution): T {
 
 /** Runs PR merge/deploy through the shared persistent execution plane. */
 export async function runPullRequestApproval(number: number, willDeploy: boolean) {
-    registerPullRequestCancellationHandlers();
+    registerPullRequestJobLifecycleHandlers();
     const deploymentLockId = `approve-${Bun.randomUUIDv7()}`;
     acquireDeploymentLock(deploymentLockId);
     let execution: JobExecution;
@@ -1858,7 +1890,7 @@ async function executePullRequestMerge(
 
 /** Registers every mutating GitHub/deploy action exclusively in the worker. */
 export function registerPullRequestExecutionActions(): void {
-    registerPullRequestCancellationHandlers();
+    registerPullRequestJobLifecycleHandlers();
     registerScheduledJobAction("dashboard.deploy", async (job, signal) => {
         const deploymentId = job.actionPayload.deploymentId;
         if (typeof deploymentId !== "string" || deploymentId.trim() === "") {

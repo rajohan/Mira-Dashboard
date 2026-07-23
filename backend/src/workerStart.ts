@@ -15,13 +15,13 @@ export function createWorkerKeepAliveHandle(): NodeJS.Timeout {
 }
 
 export async function runDashboardWorker(): Promise<void> {
-    startDashboardJobWorker();
     const shutdown = Promise.withResolvers<NodeJS.Signals>();
     const stop = (signal: NodeJS.Signals) => shutdown.resolve(signal);
     const keepAlive = createWorkerKeepAliveHandle();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
+        startDashboardJobWorker();
         await shutdown.promise;
     } finally {
         process.removeListener("SIGINT", stop);

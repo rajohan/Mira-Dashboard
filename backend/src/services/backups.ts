@@ -877,6 +877,11 @@ export async function clearPersistedBackupAttention(type: BackupJob["type"]) {
         const backupExecutionId = getLatestScheduledJobExecution(
             scheduledBackupJobId(type)
         )?.id;
+        if (!backupExecutionId) {
+            throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
+                statusCode: 404,
+            });
+        }
         execution = enqueueJobExecution({
             actionKey: "backup.clear-attention",
             displayName: `Clear ${type.toUpperCase()} backup attention`,
@@ -900,7 +905,20 @@ export async function clearPersistedBackupAttention(type: BackupJob["type"]) {
     return output.backup as ReturnType<typeof mapBackupJob>;
 }
 
-async function clearBackupAttention(type: BackupJob["type"]) {
+async function clearBackupAttention(type: BackupJob["type"], backupExecutionId: string) {
+    const latestExecution = getLatestScheduledJobExecution(scheduledBackupJobId(type));
+    if (!latestExecution) {
+        throw Object.assign(new Error(`${type.toUpperCase()} backup job not found`), {
+            statusCode: 404,
+        });
+    }
+    if (latestExecution.id !== backupExecutionId) {
+        throw Object.assign(
+            new Error(`${type.toUpperCase()} backup attention changed before clearing`),
+            { statusCode: 409 }
+        );
+    }
+
     const current = getCurrentBackupJob(type);
     if (current) {
         return mapBackupJob(await clearNeedsAttentionBackupJob(type));
@@ -994,7 +1012,13 @@ export function registerBackupScheduledJobs(): void {
         if (type !== "kopia" && type !== "walg") {
             throw Object.assign(new Error("Invalid backup type"), { statusCode: 400 });
         }
-        return { backup: await clearBackupAttention(type) };
+        const backupExecutionId = job.actionPayload.backupExecutionId;
+        if (typeof backupExecutionId !== "string" || backupExecutionId.trim() === "") {
+            throw Object.assign(new Error("Backup execution id is missing"), {
+                statusCode: 400,
+            });
+        }
+        return { backup: await clearBackupAttention(type, backupExecutionId) };
     });
     database.run("BEGIN");
     try {

@@ -26,6 +26,7 @@ import {
     ScheduledJobActionError,
     startScheduledJobExecutor,
     stopScheduledJobExecutor,
+    updateScheduledJob,
     upsertScheduledJob,
 } from "../src/services/scheduledJobs.ts";
 
@@ -232,6 +233,50 @@ describe("persistent job execution queue", () => {
         expect(getJobExecution(execution.id)).toMatchObject({
             message: "Job failed after its worker lease expired",
             status: "failed",
+        });
+    });
+
+    it("cancels queued startup work when its scheduled job is disabled", async () => {
+        const actionKey = `test.disabled-startup-${Bun.randomUUIDv7()}`;
+        const jobId = `test-queue-disabled-${Bun.randomUUIDv7()}`;
+        let actionCalls = 0;
+        testJobIds.add(jobId);
+        registerScheduledJobAction(actionKey, () => {
+            actionCalls += 1;
+            return { unexpected: true };
+        });
+        upsertScheduledJob({
+            actionKey,
+            enabled: true,
+            id: jobId,
+            intervalSeconds: 3600,
+            name: "Disabled startup test job",
+            scheduleType: "interval",
+        });
+        const run = enqueueScheduledJob(jobId, "startup");
+        testExecutionIds.add(run.executionId as string);
+        expect(updateScheduledJob(jobId, { enabled: false })).toMatchObject({
+            enabled: false,
+        });
+
+        startScheduledJobExecutor();
+        const execution = await waitForJobExecution(run.executionId as string, {
+            pollIntervalMs: 10,
+            timeoutMs: 5000,
+        });
+
+        expect(execution).toMatchObject({
+            message: "Scheduled job was disabled before execution",
+            status: "cancelled",
+        });
+        expect(actionCalls).toBe(0);
+        expect(
+            database
+                .prepare("SELECT status, message FROM scheduled_job_runs WHERE id = ?")
+                .get(run.id)
+        ).toEqual({
+            message: "Scheduled job was disabled before execution",
+            status: "cancelled",
         });
     });
 

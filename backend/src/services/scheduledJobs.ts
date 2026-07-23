@@ -971,6 +971,22 @@ async function executeClaimedJobExecution(
     const currentJob = execution.scheduledJobId
         ? getScheduledJob(execution.scheduledJobId)
         : undefined;
+    if (
+        currentJob &&
+        !currentJob.enabled &&
+        (execution.triggerType === "schedule" || execution.triggerType === "startup")
+    ) {
+        const finishedExecution = finishJobExecution(
+            execution.id,
+            workerId,
+            "cancelled",
+            "Scheduled job was disabled before execution",
+            {}
+        );
+        return execution.scheduledRunId === undefined
+            ? finishedExecution
+            : (scheduledRunById(execution.scheduledRunId) as ScheduledJobRun);
+    }
     const job: ScheduledJob = currentJob
         ? {
               ...currentJob,
