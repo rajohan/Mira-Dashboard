@@ -33,8 +33,10 @@ MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1
 Even then, bypass only applies to direct loopback requests without forwarded
 client headers. A missing `Origin` header is accepted, so ordinary same-host
 `curl` or scripts can bypass the session cookie when this flag is enabled.
-If an `Origin` header is present, it must be allowed. Production smoke tests
-should normally use a real session cookie instead of relying on loopback bypass.
+If an `Origin` header is present, it must exactly match the request origin and
+both hostnames must be loopback names. Configured non-loopback origins never
+receive the loopback identity. Production smoke tests should normally use a real
+session cookie instead of relying on loopback bypass.
 
 ## Origins And Proxies
 
@@ -44,6 +46,13 @@ Browser and WebSocket access depends on allowed origins. Configure:
 MIRA_DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example
 ```
 
+Unsafe browser API methods (`POST`, `PUT`, `PATCH`, and `DELETE`) require an
+allowed `Origin` when the browser sends one. Fetch Metadata must identify the
+request as `same-origin` or `none`; explicit `same-site` and `cross-site`
+mutations are rejected before authentication or route execution. Direct API
+clients that do not emit browser provenance headers remain supported and still
+pass through the normal session or explicitly enabled loopback-auth boundary.
+
 Only set `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` when the proxy strips or overwrites
 untrusted forwarding headers. A misconfigured trusted proxy can make rate limits
 and secure-cookie decisions trust attacker-controlled headers.
@@ -52,6 +61,32 @@ Loopback proxy peers are trusted by default even when
 `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is unset. If Dashboard is behind a same-host
 reverse proxy, that proxy must still strip or overwrite client-supplied
 forwarding headers before forwarding to Dashboard.
+
+The tracked frontend development proxy overwrites forwarding identity with the
+actual client peer and rewrites only its own same-origin browser `Origin` to the
+backend target. Cross-site origins remain unchanged and are rejected by the
+backend.
+
+## Response Security And Correlation
+
+Every handled HTTP response includes a server-generated `X-Request-ID`.
+Unexpected route errors include the same identifier in the backend log so an
+operator can correlate a client failure without logging request bodies or
+credentials.
+
+Dashboard responses also set a central browser policy:
+
+- CSP defaults resources to self, blocks object/embed and framing, and keeps the
+  existing same-origin WebSocket, HTTPS image/media preview, inline style, and
+  same-origin microphone flows available;
+- `X-Content-Type-Options: nosniff`;
+- `Referrer-Policy: no-referrer`;
+- `Permissions-Policy` denies camera, geolocation, payment, and USB while
+  retaining same-origin microphone recording;
+- `X-Frame-Options: DENY` as clickjacking defense in depth.
+
+Routes that deliberately return a stricter CSP, such as sandboxed SVG previews,
+retain their route-specific policy.
 
 ## First-User Bootstrap
 

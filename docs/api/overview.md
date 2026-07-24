@@ -30,6 +30,9 @@ Errors generally use:
 { "error": "Message" }
 ```
 
+Handled responses include a server-generated `X-Request-ID`. Unexpected backend
+route errors log the same identifier for correlation.
+
 ## Authentication
 
 Authenticated routes require a valid Dashboard session cookie.
@@ -40,6 +43,11 @@ Public routes:
 - all `/api/auth/*` routes
 
 The WebSocket endpoint `/ws` is also authenticated and origin-checked.
+
+Unsafe browser mutations must come from an allowed exact `Origin` and may not
+carry `Sec-Fetch-Site: same-site` or `cross-site`. Same-origin Dashboard calls
+and direct API clients without browser provenance headers retain their existing
+contracts.
 
 ## Rate Limiting
 
@@ -63,7 +71,7 @@ Common statuses:
 | `201`  | Resource created.                                                         |
 | `400`  | Invalid request JSON, params, or body.                                    |
 | `401`  | Missing/invalid authentication or invalid Gateway token during bootstrap. |
-| `403`  | Origin/path/proxy policy rejection.                                       |
+| `403`  | Origin/Fetch Metadata/path/proxy policy rejection.                        |
 | `404`  | Resource/path not found.                                                  |
 | `409`  | Bootstrap closed or operation conflicts with current state.               |
 | `413`  | File/media payload too large.                                             |

@@ -4,6 +4,11 @@ import type { Server } from "bun";
 
 import { authUser, HttpError, isTrustedProxyAddress, json, requestIp } from "./http.ts";
 import { errorMessage, httpStatusCode } from "./lib/errors.ts";
+import {
+    isAllowedMutationSource,
+    requestIdFor,
+    withRequestSecurity,
+} from "./requestSecurity.ts";
 
 type BunHandler = (
     request: Request,
@@ -170,55 +175,66 @@ async function callHandler(
 
 function secureHandler(routePath: string, handler: BunHandler | Response): BunHandler {
     return async (request, server) => {
-        const pathname = new URL(request.url).pathname || routePath;
-        const rateRule = isAuthRoute(pathname)
-            ? authRule
-            : isApiRoute(pathname)
-              ? apiRule
-              : undefined;
-        if (rateRule) {
-            const limited = checkRateLimit(request, server, rateRule);
-            if (limited) return limited;
-        }
-
-        if (
-            isApiRoute(pathname) &&
-            !isAuthRoute(pathname) &&
-            !isPublicApiRoute(pathname) &&
-            !authUser(request, server)
-        ) {
-            return json({ error: "Unauthorized" }, { status: 401 });
-        }
-
-        try {
-            const response = await callHandler(handler, request, server);
-            if (!rateRule) return response;
-            const key = rateLimitKey(rateRule, request, server);
-            const bucket = buckets.get(key);
-            if (!bucket) return response;
-            return withRateLimitHeaders(
-                response,
-                rateRule,
-                rateRule.max - bucket.used,
-                bucket.resetAt
-            );
-        } catch (error) {
-            if (error instanceof HttpError) {
-                return json({ error: error.message }, { status: error.statusCode });
+        const response = await (async () => {
+            const pathname = new URL(request.url).pathname || routePath;
+            const rateRule = isAuthRoute(pathname)
+                ? authRule
+                : isApiRoute(pathname)
+                  ? apiRule
+                  : undefined;
+            if (rateRule) {
+                const limited = checkRateLimit(request, server, rateRule);
+                if (limited) return limited;
             }
-            if (error instanceof SyntaxError) {
-                return json({ error: "Invalid JSON" }, { status: 400 });
+
+            if (isApiRoute(pathname) && !isAllowedMutationSource(request)) {
+                return json({ error: "Forbidden request origin" }, { status: 403 });
             }
-            const mappedStatus = httpStatusCode(error);
-            if (mappedStatus !== 500) {
-                return json(
-                    { error: errorMessage(error, "Request failed") },
-                    { status: mappedStatus }
+
+            if (
+                isApiRoute(pathname) &&
+                !isAuthRoute(pathname) &&
+                !isPublicApiRoute(pathname) &&
+                !authUser(request, server)
+            ) {
+                return json({ error: "Unauthorized" }, { status: 401 });
+            }
+
+            try {
+                const handlerResponse = await callHandler(handler, request, server);
+                if (!rateRule) return handlerResponse;
+                const key = rateLimitKey(rateRule, request, server);
+                const bucket = buckets.get(key);
+                if (!bucket) return handlerResponse;
+                return withRateLimitHeaders(
+                    handlerResponse,
+                    rateRule,
+                    rateRule.max - bucket.used,
+                    bucket.resetAt
                 );
+            } catch (error) {
+                if (error instanceof HttpError) {
+                    return json({ error: error.message }, { status: error.statusCode });
+                }
+                if (error instanceof SyntaxError) {
+                    return json({ error: "Invalid JSON" }, { status: 400 });
+                }
+                const mappedStatus = httpStatusCode(error);
+                if (mappedStatus !== 500) {
+                    return json(
+                        { error: errorMessage(error, "Request failed") },
+                        { status: mappedStatus }
+                    );
+                }
+                console.error(
+                    `[BunServer] Request ${requestIdFor(request)} failed:`,
+                    error
+                );
+                return json({ error: "Internal server error" }, { status: 500 });
             }
-            console.error("[BunServer] Request failed:", error);
-            return json({ error: "Internal server error" }, { status: 500 });
-        }
+        })();
+
+        return withRequestSecurity(request, response, server);
     };
 }
 

@@ -7,6 +7,7 @@ import { describe, expect, it, jest } from "bun:test";
 
 import {
     isAllowedDashboardOrigin,
+    isAllowedLoopbackAuthOrigin,
     readJson,
     readRequestBytes,
     sessionIdFromCookie,
@@ -30,6 +31,7 @@ import {
     stringFallback,
 } from "../src/lib/values.ts";
 import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
+import { isAllowedMutationSource, withRequestSecurity } from "../src/requestSecurity.ts";
 import { routes as appRoutes } from "../src/routes.ts";
 import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
 import { isValidAgentId } from "../src/services/agents.ts";
@@ -50,7 +52,8 @@ function canonicalPath(value: string): string {
 async function callTestRoute(
     routes: Record<string, unknown>,
     path: string,
-    server: Server<unknown>
+    server: Server<unknown>,
+    init?: RequestInit
 ): Promise<Response> {
     const entry = routes[path];
     const handler =
@@ -62,7 +65,7 @@ async function callTestRoute(
     if (typeof handler !== "function") {
         throw new TypeError(`Missing test route: ${path}`);
     }
-    return handler(new Request(`http://localhost${path}`), server);
+    return handler(new Request(`http://localhost${path}`, init), server);
 }
 
 describe("backend service utilities", () => {
@@ -657,8 +660,90 @@ describe("backend service utilities", () => {
         ).toBe(true);
         expect(
             isAllowedDashboardOrigin(
+                new Request("https://mira.lan:3100/api", {
+                    headers: { origin: "https://mira.lan:3100" },
+                })
+            )
+        ).toBe(true);
+        expect(
+            isAllowedDashboardOrigin(
+                new Request("https://mira.lan:3100/api", {
+                    // eslint-disable-next-line unicorn/prefer-https -- Verifies that a cross-scheme origin is rejected.
+                    headers: { origin: "http://mira.lan:3100" },
+                })
+            )
+        ).toBe(false);
+        expect(
+            isAllowedDashboardOrigin(
                 new Request("http://localhost:3100/api", {
                     headers: { origin: "not a url" },
+                })
+            )
+        ).toBe(false);
+    });
+
+    it("allows exact same-origin mutations on non-loopback hosts", () => {
+        expect(
+            isAllowedMutationSource(
+                new Request("https://mira.lan:3100/api/tasks", {
+                    headers: {
+                        origin: "https://mira.lan:3100",
+                        "sec-fetch-site": "same-origin",
+                    },
+                    method: "POST",
+                })
+            )
+        ).toBe(true);
+        expect(
+            isAllowedMutationSource(
+                new Request("https://mira.lan:3100/api/tasks", {
+                    headers: {
+                        // eslint-disable-next-line unicorn/prefer-https -- Verifies that a cross-scheme origin is rejected.
+                        origin: "http://mira.lan:3100",
+                        "sec-fetch-site": "same-origin",
+                    },
+                    method: "POST",
+                })
+            )
+        ).toBe(false);
+    });
+
+    it("limits browser loopback auth to exact loopback origins", () => {
+        expect(
+            isAllowedLoopbackAuthOrigin(new Request("http://localhost:3100/api/tasks"))
+        ).toBe(true);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("http://127.0.0.1:3100/api/tasks", {
+                    headers: { origin: "http://127.0.0.1:3100" },
+                })
+            )
+        ).toBe(true);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("http://[::ffff:127.0.0.1]:3100/api/tasks", {
+                    headers: { origin: "http://[::ffff:127.0.0.1]:3100" },
+                })
+            )
+        ).toBe(true);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("https://evil.example:3100/api/tasks", {
+                    headers: { origin: "https://evil.example:3100" },
+                })
+            )
+        ).toBe(false);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("http://localhost:3100/api/tasks", {
+                    headers: { origin: "http://127.0.0.1:3100" },
+                })
+            )
+        ).toBe(false);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("https://localhost:3100/api/tasks", {
+                    headers: { origin: "http://localhost:3100" },
                 })
             )
         ).toBe(false);
@@ -727,6 +812,83 @@ describe("backend service utilities", () => {
             const health = await callTestRoute(routes, "/api/health", server);
             expect(health.status).toBe(200);
             expect(health.headers.get("ratelimit-policy")).toBe("600;w=60");
+            expect(health.headers.get("x-request-id")).toMatch(
+                /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/u
+            );
+            expect(health.headers.get("content-security-policy")).toContain(
+                "frame-ancestors 'none'"
+            );
+            expect(health.headers.get("content-security-policy")).toContain(
+                "connect-src 'self' ws://localhost"
+            );
+            expect(health.headers.get("permissions-policy")).toContain(
+                "microphone=(self)"
+            );
+            expect(health.headers.get("referrer-policy")).toBe("no-referrer");
+            expect(health.headers.get("x-content-type-options")).toBe("nosniff");
+            expect(health.headers.get("x-frame-options")).toBe("DENY");
+
+            const secureOrigin = withRequestSecurity(
+                // eslint-disable-next-line unicorn/prefer-https -- Simulates TLS termination at a trusted proxy.
+                new Request("http://dashboard.example/api/health", {
+                    headers: { "x-forwarded-proto": "https" },
+                }),
+                new Response(),
+                serverWithAddress("127.0.0.1")
+            );
+            expect(secureOrigin.headers.get("content-security-policy")).toContain(
+                "connect-src 'self' wss://dashboard.example"
+            );
+            const directSecureOrigin = withRequestSecurity(
+                new Request("https://dashboard.example/api/health"),
+                new Response(),
+                serverWithAddress("203.0.113.10")
+            );
+            expect(directSecureOrigin.headers.get("content-security-policy")).toContain(
+                "connect-src 'self' wss://dashboard.example"
+            );
+
+            const sameOriginMutation = await callTestRoute(
+                routes,
+                "/api/health",
+                server,
+                {
+                    headers: {
+                        origin: "http://localhost",
+                        "sec-fetch-site": "same-origin",
+                    },
+                    method: "POST",
+                }
+            );
+            expect(sameOriginMutation.status).toBe(200);
+
+            const crossOriginMutation = await callTestRoute(
+                routes,
+                "/api/health",
+                server,
+                {
+                    headers: {
+                        origin: "https://evil.example",
+                        "sec-fetch-site": "cross-site",
+                    },
+                    method: "POST",
+                }
+            );
+            expect(crossOriginMutation.status).toBe(403);
+            await expect(crossOriginMutation.json()).resolves.toEqual({
+                error: "Forbidden request origin",
+            });
+
+            const missingOriginCrossSiteMutation = await callTestRoute(
+                routes,
+                "/api/health",
+                server,
+                {
+                    headers: { "sec-fetch-site": "same-site" },
+                    method: "POST",
+                }
+            );
+            expect(missingOriginCrossSiteMutation.status).toBe(403);
 
             const privateResponse = await callTestRoute(routes, "/api/private", server);
             expect(privateResponse.status).toBe(401);

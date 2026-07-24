@@ -1,3 +1,5 @@
+import type { Server } from "bun";
+
 import dashboard from "../index.html";
 
 const host = process.env.HOST || "0.0.0.0";
@@ -7,15 +9,50 @@ const backendWebSocketTarget = apiTarget.replace(/^http/u, "ws");
 
 interface WebSocketProxyData {
     backend?: WebSocket;
+    clientAddress?: string;
     cookie?: string;
+    origin?: string;
     pendingMessages: Array<string | ArrayBuffer | Uint8Array>;
+    protocol: string;
 }
 
-async function proxyApi(request: Request): Promise<Response> {
+function forwardedBrowserOrigin(
+    request: Request,
+    targetOrigin: string
+): string | undefined {
+    const sourceUrl = new URL(request.url);
+    const origin = request.headers.get("origin");
+    return origin === sourceUrl.origin ? targetOrigin : origin || undefined;
+}
+
+function addForwardedClientHeaders(
+    headers: Headers,
+    clientAddress: string | undefined,
+    protocol: string
+): void {
+    headers.delete("x-forwarded-for");
+    headers.delete("x-real-ip");
+    if (clientAddress) {
+        headers.set("x-forwarded-for", clientAddress);
+        headers.set("x-real-ip", clientAddress);
+    }
+    headers.set("x-forwarded-proto", protocol);
+}
+
+async function proxyApi(
+    request: Request,
+    server: Server<WebSocketProxyData>
+): Promise<Response> {
     const sourceUrl = new URL(request.url);
     const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, apiTarget);
     const headers = new Headers(request.headers);
     headers.set("host", targetUrl.host);
+    const clientAddress = server.requestIP(request)?.address;
+    addForwardedClientHeaders(headers, clientAddress, sourceUrl.protocol.slice(0, -1));
+    const forwardedOrigin = forwardedBrowserOrigin(request, targetUrl.origin);
+    if (forwardedOrigin) {
+        headers.set("origin", forwardedOrigin);
+    }
 
     return fetch(targetUrl, {
         body: request.body,
@@ -26,12 +63,19 @@ async function proxyApi(request: Request): Promise<Response> {
     });
 }
 
-function upgradeWebSocket(request: Request): Response {
+function upgradeWebSocket(
+    request: Request,
+    server: Server<WebSocketProxyData>
+): Response {
+    const sourceUrl = new URL(request.url);
     if (
         server.upgrade(request, {
             data: {
+                clientAddress: server.requestIP(request)?.address,
                 cookie: request.headers.get("cookie") || undefined,
+                origin: forwardedBrowserOrigin(request, new URL(apiTarget).origin),
                 pendingMessages: [],
+                protocol: sourceUrl.protocol.slice(0, -1),
             },
         })
     ) {
@@ -46,14 +90,14 @@ const server = Bun.serve<WebSocketProxyData>({
         console: true,
         hmr: true,
     },
-    fetch(request) {
+    fetch(request, server) {
         const url = new URL(request.url);
         if (url.pathname === "/ws") {
-            return upgradeWebSocket(request);
+            return upgradeWebSocket(request, server);
         }
 
         if (url.pathname.startsWith("/api")) {
-            return proxyApi(request);
+            return proxyApi(request, server);
         }
 
         return new Response("Not found", { status: 404 });
@@ -78,12 +122,20 @@ const server = Bun.serve<WebSocketProxyData>({
             socket.data.pendingMessages.push(message);
         },
         open(socket) {
-            const headers: Record<string, string> = {};
+            const headers = new Headers();
             if (socket.data.cookie) {
-                headers.cookie = socket.data.cookie;
+                headers.set("cookie", socket.data.cookie);
             }
-            const backend = new WebSocket(`${backendWebSocketTarget}/ws`, {
+            if (socket.data.origin) {
+                headers.set("origin", socket.data.origin);
+            }
+            addForwardedClientHeaders(
                 headers,
+                socket.data.clientAddress,
+                socket.data.protocol
+            );
+            const backend = new WebSocket(`${backendWebSocketTarget}/ws`, {
+                headers: Object.fromEntries(headers),
             });
             socket.data.backend = backend;
 
