@@ -7,6 +7,7 @@ import type { Server, ServerWebSocket } from "bun";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import gateway from "./gateway.ts";
 import { authUser, isAllowedDashboardOrigin } from "./http.ts";
+import { withRequestSecurity } from "./requestSecurity.ts";
 import { routes } from "./routes.ts";
 
 interface DashboardSocketData {
@@ -89,15 +90,21 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
         idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS,
         port,
         routes,
-        fetch(request, server) {
+        async fetch(request, server) {
             const url = new URL(request.url);
             if (url.pathname === "/ws") {
                 if (!isAllowedDashboardOrigin(request)) {
-                    return new Response("Forbidden", { status: 403 });
+                    return withRequestSecurity(
+                        request,
+                        new Response("Forbidden", { status: 403 })
+                    );
                 }
                 const user = authUser(request, server);
                 if (!user) {
-                    return new Response("Unauthorized", { status: 401 });
+                    return withRequestSecurity(
+                        request,
+                        new Response("Unauthorized", { status: 401 })
+                    );
                 }
                 const isUpgraded = server.upgrade(request, {
                     data: {
@@ -109,9 +116,12 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
                 });
                 return isUpgraded
                     ? undefined
-                    : new Response("WebSocket upgrade failed", { status: 400 });
+                    : withRequestSecurity(
+                          request,
+                          new Response("WebSocket upgrade failed", { status: 400 })
+                      );
             }
-            return staticResponse(url.pathname);
+            return withRequestSecurity(request, await staticResponse(url.pathname));
         },
         websocket,
     });

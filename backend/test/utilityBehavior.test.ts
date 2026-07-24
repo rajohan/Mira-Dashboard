@@ -50,7 +50,8 @@ function canonicalPath(value: string): string {
 async function callTestRoute(
     routes: Record<string, unknown>,
     path: string,
-    server: Server<unknown>
+    server: Server<unknown>,
+    init?: RequestInit
 ): Promise<Response> {
     const entry = routes[path];
     const handler =
@@ -62,7 +63,7 @@ async function callTestRoute(
     if (typeof handler !== "function") {
         throw new TypeError(`Missing test route: ${path}`);
     }
-    return handler(new Request(`http://localhost${path}`), server);
+    return handler(new Request(`http://localhost${path}`, init), server);
 }
 
 describe("backend service utilities", () => {
@@ -727,6 +728,60 @@ describe("backend service utilities", () => {
             const health = await callTestRoute(routes, "/api/health", server);
             expect(health.status).toBe(200);
             expect(health.headers.get("ratelimit-policy")).toBe("600;w=60");
+            expect(health.headers.get("x-request-id")).toMatch(
+                /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/u
+            );
+            expect(health.headers.get("content-security-policy")).toContain(
+                "frame-ancestors 'none'"
+            );
+            expect(health.headers.get("permissions-policy")).toContain(
+                "microphone=(self)"
+            );
+            expect(health.headers.get("referrer-policy")).toBe("no-referrer");
+            expect(health.headers.get("x-content-type-options")).toBe("nosniff");
+            expect(health.headers.get("x-frame-options")).toBe("DENY");
+
+            const sameOriginMutation = await callTestRoute(
+                routes,
+                "/api/health",
+                server,
+                {
+                    headers: {
+                        origin: "http://localhost",
+                        "sec-fetch-site": "same-origin",
+                    },
+                    method: "POST",
+                }
+            );
+            expect(sameOriginMutation.status).toBe(200);
+
+            const crossOriginMutation = await callTestRoute(
+                routes,
+                "/api/health",
+                server,
+                {
+                    headers: {
+                        origin: "https://evil.example",
+                        "sec-fetch-site": "cross-site",
+                    },
+                    method: "POST",
+                }
+            );
+            expect(crossOriginMutation.status).toBe(403);
+            await expect(crossOriginMutation.json()).resolves.toEqual({
+                error: "Forbidden request origin",
+            });
+
+            const missingOriginCrossSiteMutation = await callTestRoute(
+                routes,
+                "/api/health",
+                server,
+                {
+                    headers: { "sec-fetch-site": "same-site" },
+                    method: "POST",
+                }
+            );
+            expect(missingOriginCrossSiteMutation.status).toBe(403);
 
             const privateResponse = await callTestRoute(routes, "/api/private", server);
             expect(privateResponse.status).toBe(401);

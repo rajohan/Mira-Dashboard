@@ -92,20 +92,27 @@ describe("Bun-native dashboard backend", () => {
             import.meta.dirname,
             "../src/services/dockerActions.ts"
         );
+        const execJobsModulePath = path.resolve(
+            import.meta.dirname,
+            "../src/services/execJobs.ts"
+        );
         const scheduledJobsModulePath = path.resolve(
             import.meta.dirname,
             "../src/services/scheduledJobs.ts"
         );
         const serverModuleUrl = pathToFileURL(serverModulePath).href;
         const dockerActionsModuleUrl = pathToFileURL(dockerActionsModulePath).href;
+        const execJobsModuleUrl = pathToFileURL(execJobsModulePath).href;
         const scheduledJobsModuleUrl = pathToFileURL(scheduledJobsModulePath).href;
         await fs.writeFile(
             serverScript,
             [
                 `import { createServer } from ${JSON.stringify(serverModuleUrl)};`,
                 `import { registerDockerExecutionActions } from ${JSON.stringify(dockerActionsModuleUrl)};`,
+                `import { registerExecExecutionActions } from ${JSON.stringify(execJobsModuleUrl)};`,
                 `import { startScheduledJobExecutor, stopScheduledJobExecutor } from ${JSON.stringify(scheduledJobsModuleUrl)};`,
                 "registerDockerExecutionActions();",
+                "registerExecExecutionActions();",
                 "startScheduledJobExecutor();",
                 "const server = createServer(0);",
                 "console.log(JSON.stringify({ port: server.port }));",
@@ -276,16 +283,94 @@ describe("Bun-native dashboard backend", () => {
         const appRoute = await fetch(`${state.baseUrl}/tasks`);
         expect(appRoute.status).toBe(200);
         expect(appRoute.headers.get("content-type")).toContain("text/html");
+        expect(appRoute.headers.get("content-security-policy")).toContain(
+            "connect-src 'self' ws: wss:"
+        );
+        expect(appRoute.headers.get("permissions-policy")).toContain("microphone=(self)");
+        expect(appRoute.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(appRoute.headers.get("x-frame-options")).toBe("DENY");
+        expect(appRoute.headers.get("x-request-id")).toBeTruthy();
 
         const rootChunk = await fetch(`${state.baseUrl}/index-fixture.js`);
         expect(rootChunk.status).toBe(200);
         expect(rootChunk.headers.get("cache-control")).toBe("no-store");
+        expect(rootChunk.headers.get("x-request-id")).not.toBe(
+            appRoute.headers.get("x-request-id")
+        );
 
         const missingChunk = await fetch(
             `${state.baseUrl}/assets/index-missing-after-deploy.js`
         );
         expect(missingChunk.status).toBe(404);
         expect(missingChunk.headers.get("content-type")).not.toContain("text/html");
+    });
+
+    it("preserves same-origin terminal execution and rejects cross-site mutations", async () => {
+        const browserHeaders = {
+            "Content-Type": "application/json",
+            Origin: state.baseUrl,
+            "Sec-Fetch-Site": "same-origin",
+        };
+        const changedDirectory = await fetch(`${state.baseUrl}/api/terminal/cd`, {
+            body: JSON.stringify({ cwd: "/", path: "tmp" }),
+            headers: browserHeaders,
+            method: "POST",
+        });
+        expect(changedDirectory.status).toBe(200);
+        await expect(changedDirectory.json()).resolves.toEqual({
+            isSuccess: true,
+            newCwd: "/tmp",
+        });
+
+        const started = await fetch(`${state.baseUrl}/api/exec/start`, {
+            body: JSON.stringify({
+                args: ["-lc", "printf terminal-policy-ok"],
+                command: "bash",
+                cwd: "/tmp",
+            }),
+            headers: browserHeaders,
+            method: "POST",
+        });
+        expect(started.status).toBe(200);
+        const { jobId } = (await started.json()) as { jobId: string };
+
+        let terminalResult:
+            | {
+                  code?: number;
+                  status: "done" | "running" | "signaled";
+                  stdout: string;
+              }
+            | undefined;
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+            const response = await api<{
+                code?: number;
+                status: "done" | "running" | "signaled";
+                stdout: string;
+            }>(`/api/exec/${encodeURIComponent(jobId)}`);
+            const result = response.body;
+            terminalResult = result;
+            if (result.status === "done") break;
+            await Bun.sleep(100);
+        }
+        expect(terminalResult).toMatchObject({
+            code: 0,
+            status: "done",
+            stdout: "terminal-policy-ok",
+        });
+
+        const rejected = await fetch(`${state.baseUrl}/api/terminal/cd`, {
+            body: JSON.stringify({ cwd: "/", path: "tmp" }),
+            headers: {
+                "Content-Type": "application/json",
+                Origin: "https://evil.example",
+                "Sec-Fetch-Site": "cross-site",
+            },
+            method: "POST",
+        });
+        expect(rejected.status).toBe(403);
+        await expect(rejected.json()).resolves.toEqual({
+            error: "Forbidden request origin",
+        });
     });
 
     it("creates, moves, updates, and deletes tasks through native routes", async () => {

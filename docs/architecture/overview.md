@@ -79,6 +79,7 @@ Key files:
 | `backend/src/server.ts`                  | HTTP server, static frontend serving, `/ws` upgrade.              |
 | `backend/src/routes.ts`                  | Route table assembly.                                             |
 | `backend/src/requestPolicy.ts`           | Auth requirement, rate limiting, error wrapper.                   |
+| `backend/src/requestSecurity.ts`         | Mutation provenance, request IDs, browser response headers.       |
 | `backend/src/http.ts`                    | JSON helpers, cookies, origin/proxy/IP helpers.                   |
 | `backend/src/gateway.ts`                 | OpenClaw Gateway client lifecycle and Dashboard WebSocket fanout. |
 | `backend/src/database.ts`                | SQLite path, PRAGMAs, migration startup, database proxy.          |
@@ -105,6 +106,12 @@ Rate limits:
 
 If trusted proxy headers are enabled, the proxy must strip or overwrite
 untrusted `X-Real-IP` and `X-Forwarded-For` headers before forwarding.
+
+Unsafe browser API methods additionally pass exact Origin and Fetch Metadata
+checks before authentication. API and static responses receive central CSP,
+clickjacking, MIME-sniffing, referrer, permissions, and request-correlation
+headers. Direct non-browser clients remain supported when provenance headers
+are absent; they do not bypass the existing authentication policy.
 
 ## Gateway Integration
 
