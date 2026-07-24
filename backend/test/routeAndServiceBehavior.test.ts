@@ -241,6 +241,7 @@ afterEach(async () => {
             "DELETE FROM auth_sessions WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'coverage-%')"
         )
         .run();
+    database.prepare("DELETE FROM auth_rate_limit_buckets").run();
     database.prepare("DELETE FROM users WHERE username LIKE 'coverage-%'").run();
 });
 
@@ -321,6 +322,20 @@ describe("backend route and service behavior", () => {
             server
         );
         expect(invalidLogin.status).toBe(401);
+        const { recordAuthenticationFailure, clearAuthenticationFailures } =
+            await import("../src/services/authenticationThrottle.ts");
+        recordAuthenticationFailure("login-password", username);
+        recordAuthenticationFailure("login-password", username);
+        const throttledLogin = await authRoutes["/api/auth/login"].POST(
+            jsonRequest("/api/auth/login", {
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+        expect(throttledLogin.status).toBe(429);
+        expect(throttledLogin.headers.get("retry-after")).toBeTruthy();
+        clearAuthenticationFailures("login-password", username);
 
         const invalidLoginBody = await authRoutes["/api/auth/login"].POST(
             jsonRequest("/api/auth/login", ["not", "an", "object"]),
@@ -1636,8 +1651,9 @@ describe("backend route and service behavior", () => {
             new Request("https://test.local/api/config-files/openclaw.json")
         );
         await expect(read.json()).resolves.toMatchObject({
-            content: '{"model":"codex"}\n',
+            content: '{\n  "model": "codex"\n}\n',
             isBinary: false,
+            masked: true,
             path: "config:openclaw.json",
             relativePath: "openclaw.json",
             size: 18,

@@ -9,6 +9,7 @@
         "build": "bun node_modules/@typescript/native/bin/tsc --noEmit && bun scripts/build.ts",
         "db:preflight": "bun dist/databasePreflight.js",
         "deploy:prepare": "bun run build && bun run db:preflight",
+        "auth:reset-password": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/resetDashboardPassword.js",
         "start": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/serverStart.js",
         "start:worker": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/workerStart.js",
         "dev": "MIRA_DASHBOARD_DISABLE_SCHEDULER=1 doppler run --config prd --project rajohan -- bun --watch src/serverStart.ts",
@@ -19,6 +20,10 @@
         "format:check": "prettier --check '**/*.{ts,js}'",
         "test": "bun test",
         "test:coverage": "bun ../scripts/runCoverage.ts 85 src/"
+    },
+    "dependencies": {
+        "@simplewebauthn/server": "13.3.2",
+        "otplib": "13.4.1"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",

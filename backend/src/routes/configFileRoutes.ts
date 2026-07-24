@@ -11,6 +11,10 @@ import {
     writeTextNoFollowAnchoredGuarded,
 } from "../lib/guardedOps.ts";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
+import {
+    CONFIG_REDACTION_SENTINEL,
+    redactConfigJsonText,
+} from "../services/configRedaction.ts";
 
 const MAX_FILE_SIZE = 1024 * 1024;
 const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024;
@@ -224,9 +228,23 @@ export const configFileRoutes = {
             }
             const content = buffer.toString("utf8");
             const isBinary = isBinaryContent(content);
+            const shouldMask =
+                relativePath === "openclaw.json" &&
+                new URL(request.url).searchParams.get("reveal") !== "1";
+            const responseContent =
+                shouldMask && !isBinary ? redactConfigJsonText(content) : content;
+            if (shouldMask && responseContent === undefined) {
+                return json(
+                    {
+                        error: "Config cannot be rendered safely because it is not valid JSON",
+                    },
+                    { status: 422 }
+                );
+            }
             return json({
-                content: isBinary ? "[Binary file]" : content,
+                content: isBinary ? "[Binary file]" : responseContent,
                 isBinary,
+                masked: shouldMask,
                 modified: stat.mtime.toISOString(),
                 path: `config:${relativePath}`,
                 relativePath,
@@ -267,6 +285,14 @@ export const configFileRoutes = {
                 Buffer.byteLength(body.content, "utf8") > MAX_CONFIG_WRITE_SIZE
             ) {
                 return json({ error: "Invalid content" }, { status: 400 });
+            }
+            if (body.content.includes(CONFIG_REDACTION_SENTINEL)) {
+                return json(
+                    {
+                        error: "Masked config cannot be saved; reveal and verify the file first",
+                    },
+                    { status: 400 }
+                );
             }
             const root = openclawRoot();
             if (!root) {

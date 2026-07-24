@@ -1,5 +1,6 @@
 import { type Database } from "bun:sqlite";
 
+import { sessionIdleTtlMs } from "../auth.ts";
 import { database, getMiraDatabasePath } from "../database.ts";
 import { validateDatabaseMigrationHistory } from "../databaseMigrationRunner.ts";
 import { errorMessage } from "../lib/errors.ts";
@@ -26,7 +27,11 @@ function retentionCutoff(now: Date, days: number): string {
 export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
     const changes = {
         agentTaskHistory: 0,
+        authPendingLogins: 0,
+        authRateLimitBuckets: 0,
         authSessions: 0,
+        authTotpEnrollments: 0,
+        authWebAuthnChallenges: 0,
         chatRuntimeSnapshotEvents: 0,
         chatRuntimeSnapshots: 0,
         deploymentJobs: 0,
@@ -43,9 +48,40 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
 
     databaseConnection.run("BEGIN IMMEDIATE");
     try {
+        const timestamp = now.toISOString();
+        const idleCutoff = new Date(now.getTime() - sessionIdleTtlMs()).toISOString();
+        changes.authWebAuthnChallenges = databaseConnection
+            .prepare("DELETE FROM auth_webauthn_challenges WHERE expires_at <= ?")
+            .run(timestamp).changes;
+        changes.authPendingLogins = databaseConnection
+            .prepare("DELETE FROM auth_pending_logins WHERE expires_at <= ?")
+            .run(timestamp).changes;
+        changes.authRateLimitBuckets = databaseConnection
+            .prepare(
+                `DELETE FROM auth_rate_limit_buckets
+                 WHERE updated_at <= ?
+                   AND (blocked_until IS NULL OR blocked_until <= ?)`
+            )
+            .run(
+                new Date(now.getTime() - 24 * 60 * 60_000).toISOString(),
+                timestamp
+            ).changes;
+        changes.authTotpEnrollments = databaseConnection
+            .prepare(
+                `DELETE FROM user_totp_factors
+                 WHERE confirmed_at IS NULL AND created_at <= ?`
+            )
+            .run(new Date(now.getTime() - 5 * 60_000).toISOString()).changes;
         changes.authSessions = databaseConnection
-            .prepare("DELETE FROM auth_sessions WHERE expires_at <= ?")
-            .run(now.toISOString()).changes;
+            .prepare(
+                `DELETE FROM auth_sessions
+                 WHERE expires_at <= ?
+                    OR last_seen_at IS NULL
+                    OR last_seen_at <= ?
+                    OR auth_method IS NULL
+                    OR authenticated_at IS NULL`
+            )
+            .run(timestamp, idleCutoff).changes;
         const taskHistoryCutoff = retentionCutoff(now, 365);
         changes.taskEvents = databaseConnection
             .prepare(

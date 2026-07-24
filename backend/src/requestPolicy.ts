@@ -2,6 +2,8 @@ import { isIP } from "node:net";
 
 import type { Server } from "bun";
 
+import type { AuthUser } from "./auth.ts";
+import { hasRecentMfaVerification } from "./auth.ts";
 import {
     authenticateAutomationRequest,
     type AutomationAuthentication,
@@ -9,7 +11,13 @@ import {
     type AutomationScope,
     requiredAutomationScope,
 } from "./automationAuth.ts";
-import { authUser, HttpError, isTrustedProxyAddress, json, requestIp } from "./http.ts";
+import {
+    authSession,
+    HttpError,
+    isTrustedProxyAddress,
+    json,
+    requestIp,
+} from "./http.ts";
 import { errorMessage, httpStatusCode } from "./lib/errors.ts";
 import { runWithRequestAuditContext } from "./requestAuditContext.ts";
 import {
@@ -74,6 +82,18 @@ const buckets = new Map<string, RateLimitBucket>();
 const BUCKET_CLEANUP_INTERVAL_MS = 60_000;
 const BUCKET_STALE_MS = Math.max(apiRule.windowMs, authRule.windowMs) * 2;
 const SAFE_REQUEST_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const PUBLIC_API_METHODS = new Map<string, ReadonlySet<string>>([
+    ["/api/health", new Set(["GET", "HEAD"])],
+    ["/api/auth/bootstrap", new Set(["GET", "HEAD"])],
+    ["/api/auth/login", new Set(["POST"])],
+    ["/api/auth/login/recovery", new Set(["POST"])],
+    ["/api/auth/login/totp", new Set(["POST"])],
+    ["/api/auth/login/webauthn/options", new Set(["POST"])],
+    ["/api/auth/login/webauthn/verify", new Set(["POST"])],
+    ["/api/auth/logout", new Set(["POST"])],
+    ["/api/auth/register-first-user", new Set(["POST"])],
+    ["/api/auth/session", new Set(["GET", "HEAD"])],
+]);
 const rateLimitState: { bucketCleanupTimer: Timer | undefined } = {
     bucketCleanupTimer: undefined,
 };
@@ -104,8 +124,9 @@ function isAuthRoute(pathname: string): boolean {
     return pathname === "/api/auth" || pathname.startsWith("/api/auth/");
 }
 
-function isPublicApiRoute(pathname: string): boolean {
-    return pathname === "/api/health";
+function isPublicApiRoute(request: Request): boolean {
+    const pathname = new URL(request.url).pathname;
+    return PUBLIC_API_METHODS.get(pathname)?.has(request.method.toUpperCase()) === true;
 }
 
 function rateLimitKey(
@@ -193,16 +214,14 @@ async function callHandler(
 }
 
 function requestActor(
-    user: ReturnType<typeof authUser>,
+    user: AuthUser | undefined,
     automationPrincipal?: AutomationPrincipal
 ): AuditActor {
     if (automationPrincipal) {
         return { id: automationPrincipal.id, type: "automation" };
     }
     if (!user) return { id: "anonymous", type: "anonymous" };
-    return user.id === 0
-        ? { id: user.username, type: "loopback" }
-        : { id: `${user.id}:${user.username}`, type: "user" };
+    return { id: `${user.id}:${user.username}`, type: "user" };
 }
 
 function auditOutcomeForStatus(status: number): AuditOutcome {
@@ -219,6 +238,60 @@ function isAuditedMutation(
     return (
         !SAFE_REQUEST_METHODS.has(request.method.toUpperCase()) ||
         automationScope?.endsWith(":write") === true
+    );
+}
+
+/** Identifies host-control actions that require a freshly verified second factor. */
+export function requiresRecentMfa(request: Request): boolean {
+    const url = new URL(request.url);
+    let pathname: string;
+    try {
+        pathname = decodeURIComponent(url.pathname);
+    } catch {
+        // An authenticated request with an ambiguous path must not bypass the
+        // privileged-route classifier.
+        return true;
+    }
+    const method = request.method.toUpperCase();
+    const isMutation = !SAFE_REQUEST_METHODS.has(method);
+
+    if (
+        method === "GET" &&
+        pathname === "/api/config-files/openclaw.json" &&
+        url.searchParams.get("reveal") === "1"
+    ) {
+        return true;
+    }
+    if (
+        (pathname === "/api/backup" && method === "POST") ||
+        (pathname === "/api/restart" && method === "POST")
+    ) {
+        return true;
+    }
+    if (!isMutation) return false;
+    if (
+        pathname === "/api/config" ||
+        pathname === "/api/settings" ||
+        pathname.startsWith("/api/cache/") ||
+        pathname.startsWith("/api/config-files/") ||
+        pathname.startsWith("/api/files/") ||
+        pathname.startsWith("/api/skills/")
+    ) {
+        return true;
+    }
+    return [
+        "/api/backups/",
+        "/api/cron/",
+        "/api/docker/",
+        "/api/exec",
+        "/api/job-executions/",
+        "/api/jobs",
+        "/api/ops/",
+        "/api/pull-requests/",
+        "/api/sessions/",
+        "/api/terminal/",
+    ].some(
+        (prefix) => pathname === prefix.replace(/\/$/u, "") || pathname.startsWith(prefix)
     );
 }
 
@@ -303,8 +376,7 @@ function secureHandler(
                 return json({ error: "Forbidden request origin" }, { status: 403 });
             }
 
-            const requiresAuthentication =
-                isApi && !isAuthRoute(pathname) && !isPublicApiRoute(pathname);
+            const requiresAuthentication = isApi && !isPublicApiRoute(request);
             const automationAuthentication = requiresAuthentication
                 ? authenticateAutomation(request)
                 : ({ kind: "absent" } as const);
@@ -340,16 +412,57 @@ function secureHandler(
                     { status: 403 }
                 );
             }
-            const isMutation = isAuditedMutation(isApi, request, automationScope);
-            const user =
-                !automationPrincipal && (requiresAuthentication || isMutation)
-                    ? authUser(request, server)
+            const isAuditedMutationRequest = isAuditedMutation(
+                isApi,
+                request,
+                automationScope
+            );
+            const session =
+                !automationPrincipal &&
+                (requiresAuthentication || isAuditedMutationRequest)
+                    ? authSession(request)
                     : undefined;
-            if (requiresAuthentication && !user && !automationPrincipal) {
+            if (requiresAuthentication && !session && !automationPrincipal) {
                 return json({ error: "Unauthorized" }, { status: 401 });
             }
 
+            const user = session
+                ? { id: session.id, username: session.username }
+                : undefined;
             const actor = requestActor(user, automationPrincipal);
+            const isPrivilegedRequest =
+                Boolean(session) && !automationPrincipal && requiresRecentMfa(request);
+            if (
+                isPrivilegedRequest &&
+                session &&
+                (!session.mfaEnabled || !hasRecentMfaVerification(session))
+            ) {
+                const didRecordDenial = didWriteRequestAudit(
+                    actor,
+                    "denied",
+                    request,
+                    requestIdentifier,
+                    routePath,
+                    403,
+                    automationScope,
+                    persistAuditEvent
+                );
+                if (!didRecordDenial) {
+                    return json({ error: "Audit trail unavailable" }, { status: 503 });
+                }
+                return json(
+                    {
+                        code: session.mfaEnabled
+                            ? "step_up_required"
+                            : "mfa_enrollment_required",
+                        error: session.mfaEnabled
+                            ? "Recent MFA verification is required"
+                            : "Multi-factor authentication must be enabled",
+                    },
+                    { status: 403 }
+                );
+            }
+            const isMutation = isAuditedMutationRequest || isPrivilegedRequest;
             let handlerResponse: Response;
             let didRecordAttempt = false;
             if (isMutation) {

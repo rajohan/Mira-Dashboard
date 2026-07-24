@@ -19,9 +19,11 @@ const AUTOMATION_CREDENTIALS = JSON.stringify([
 const state: {
     baseUrl: string;
     child?: ReturnType<typeof Bun.spawn>;
+    sessionToken: string;
     temporaryRoot: string;
 } = {
     baseUrl: "",
+    sessionToken: "",
     temporaryRoot: "",
 };
 
@@ -31,7 +33,11 @@ async function api<T>(
 ): Promise<{ body: T; status: number }> {
     const response = await fetch(`${state.baseUrl}${endpoint}`, {
         ...options,
-        headers: { "Content-Type": "application/json", ...options.headers },
+        headers: {
+            "Content-Type": "application/json",
+            Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
+            ...options.headers,
+        },
     });
     const text = await response.text();
     return {
@@ -99,6 +105,11 @@ describe("Bun-native dashboard backend", () => {
         );
         const serverScript = path.join(state.temporaryRoot, "native-server.ts");
         const serverModulePath = path.resolve(import.meta.dirname, "../src/server.ts");
+        const authModulePath = path.resolve(import.meta.dirname, "../src/auth.ts");
+        const databaseModulePath = path.resolve(
+            import.meta.dirname,
+            "../src/database.ts"
+        );
         const dockerActionsModulePath = path.resolve(
             import.meta.dirname,
             "../src/services/dockerActions.ts"
@@ -112,6 +123,8 @@ describe("Bun-native dashboard backend", () => {
             "../src/services/scheduledJobs.ts"
         );
         const serverModuleUrl = pathToFileURL(serverModulePath).href;
+        const authModuleUrl = pathToFileURL(authModulePath).href;
+        const databaseModuleUrl = pathToFileURL(databaseModulePath).href;
         const dockerActionsModuleUrl = pathToFileURL(dockerActionsModulePath).href;
         const execJobsModuleUrl = pathToFileURL(execJobsModulePath).href;
         const scheduledJobsModuleUrl = pathToFileURL(scheduledJobsModulePath).href;
@@ -119,14 +132,20 @@ describe("Bun-native dashboard backend", () => {
             serverScript,
             [
                 `import { createServer } from ${JSON.stringify(serverModuleUrl)};`,
+                `import { createSession, createUser } from ${JSON.stringify(authModuleUrl)};`,
+                `import { database } from ${JSON.stringify(databaseModuleUrl)};`,
                 `import { registerDockerExecutionActions } from ${JSON.stringify(dockerActionsModuleUrl)};`,
                 `import { registerExecExecutionActions } from ${JSON.stringify(execJobsModuleUrl)};`,
                 `import { startScheduledJobExecutor, stopScheduledJobExecutor } from ${JSON.stringify(scheduledJobsModuleUrl)};`,
                 "registerDockerExecutionActions();",
                 "registerExecExecutionActions();",
                 "startScheduledJobExecutor();",
+                "const user = await createUser('native-test-user', 'native-test-password');",
+                "const verifiedAt = new Date().toISOString();",
+                "database.prepare('UPDATE users SET mfa_enabled_at = ?, updated_at = ? WHERE id = ?').run(verifiedAt, verifiedAt, user.id);",
+                "const sessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: verifiedAt, userAgent: 'Native Bun test' });",
                 "const server = createServer(0);",
-                "console.log(JSON.stringify({ port: server.port }));",
+                "console.log(JSON.stringify({ port: server.port, sessionToken }));",
                 "process.on('SIGTERM', () => { Promise.all([server.stop(true), stopScheduledJobExecutor()]).then(() => process.exit(0)).catch(() => process.exit(1)); });",
             ].join("\n")
         );
@@ -141,7 +160,6 @@ describe("Bun-native dashboard backend", () => {
                     "dashboard.database"
                 ),
                 MIRA_DASHBOARD_AUTOMATION_CREDENTIALS: AUTOMATION_CREDENTIALS,
-                MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH: "1",
                 MIRA_DASHBOARD_FRONTEND_PATH: frontendRoot,
                 MIRA_DOCKER_COMPOSE_WRAPPER: composeWrapper,
                 MIRA_DOCKER_ROOT: dockerRoot,
@@ -190,8 +208,12 @@ describe("Bun-native dashboard backend", () => {
             throw new Error("Native server did not print port");
         }
         void drainReader(reader, decoder);
-        const { port } = JSON.parse(firstLine) as { port: number };
+        const { port, sessionToken } = JSON.parse(firstLine) as {
+            port: number;
+            sessionToken: string;
+        };
         state.baseUrl = `http://127.0.0.1:${port}`;
+        state.sessionToken = sessionToken;
     });
 
     afterAll(async () => {
@@ -239,7 +261,7 @@ describe("Bun-native dashboard backend", () => {
         expect(bootstrap.status).toBe(200);
         expect(bootstrap.body).toEqual({
             hasGatewayToken: false,
-            isBootstrapRequired: true,
+            isBootstrapRequired: false,
         });
     });
 
@@ -313,8 +335,12 @@ describe("Bun-native dashboard backend", () => {
         });
     });
 
-    it("accepts native dashboard WebSocket connections from loopback", async () => {
-        const ws = new WebSocket(state.baseUrl.replace("http://", "ws://") + "/ws");
+    it("accepts authenticated native dashboard WebSocket connections", async () => {
+        const ws = new WebSocket(state.baseUrl.replace("http://", "ws://") + "/ws", {
+            headers: {
+                Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
+            },
+        });
         const message = await new Promise<Record<string, unknown>>((resolve, reject) => {
             const timer = setTimeout(
                 () => reject(new Error("Timed out waiting for ws state")),
@@ -367,6 +393,7 @@ describe("Bun-native dashboard backend", () => {
     it("preserves same-origin terminal execution and rejects cross-site mutations", async () => {
         const browserHeaders = {
             "Content-Type": "application/json",
+            Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
             Origin: state.baseUrl,
             "Sec-Fetch-Site": "same-origin",
         };
@@ -433,7 +460,7 @@ describe("Bun-native dashboard backend", () => {
         expect(auditPage.body.events).toContainEqual(
             expect.objectContaining({
                 action: "job.enqueue",
-                actor: { id: "mira-local", type: "loopback" },
+                actor: { id: "1:native-test-user", type: "user" },
                 outcome: "accepted",
                 requestId: terminalRequestId,
                 target: { id: jobId, type: "job-execution" },
@@ -442,7 +469,7 @@ describe("Bun-native dashboard backend", () => {
         expect(auditPage.body.events).toContainEqual(
             expect.objectContaining({
                 action: "job.execute",
-                actor: { id: "mira-local", type: "loopback" },
+                actor: { id: "1:native-test-user", type: "user" },
                 outcome: "succeeded",
                 requestId: terminalRequestId,
                 target: { id: jobId, type: "job-execution" },
@@ -460,6 +487,7 @@ describe("Bun-native dashboard backend", () => {
             body: JSON.stringify({ cwd: "/", path: "tmp" }),
             headers: {
                 "Content-Type": "application/json",
+                Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
                 Origin: "https://evil.example",
                 "Sec-Fetch-Site": "cross-site",
             },

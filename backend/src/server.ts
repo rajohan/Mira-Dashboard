@@ -4,12 +4,15 @@ import path from "node:path";
 
 import type { Server, ServerWebSocket } from "bun";
 
+import { validateAuthenticationConfig, validateStoredSecretConfig } from "./auth.ts";
 import { validateAutomationCredentials } from "./automationAuth.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import gateway from "./gateway.ts";
 import { authUser, isAllowedDashboardOrigin } from "./http.ts";
 import { withRequestSecurity } from "./requestSecurity.ts";
 import { routes } from "./routes.ts";
+import { validateTotpStorageConfig } from "./services/multiFactorAuth.ts";
+import { validateWebAuthnConfig } from "./services/webAuthn.ts";
 
 interface DashboardSocketData {
     closeHandlers: Array<() => void>;
@@ -63,7 +66,11 @@ function dashboardSocketFromBun(
 }
 
 export function createServer(port = resolveListenPort()): Server<DashboardSocketData> {
+    validateAuthenticationConfig();
+    validateStoredSecretConfig();
     validateAutomationCredentials();
+    validateTotpStorageConfig();
+    validateWebAuthnConfig();
     const websocket = {
         close(ws: ServerWebSocket<DashboardSocketData>) {
             for (const handler of ws.data.closeHandlers) {
@@ -102,7 +109,7 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
                         server
                     );
                 }
-                const user = authUser(request, server);
+                const user = authUser(request);
                 if (!user) {
                     return withRequestSecurity(
                         request,
