@@ -993,6 +993,91 @@ describe("backend service behavior", () => {
         });
     });
 
+    it("reports database-summary refresh results from SQLite maintenance", async () => {
+        const { enqueueDatabaseSummaryRefresh } =
+            await import("../src/services/cacheRefresh.ts");
+        const { SQLITE_MAINTENANCE_JOB_ID, registerSqliteMaintenanceScheduledJob } =
+            await import("../src/services/sqliteMaintenance.ts");
+        const { getScheduledJob, runScheduledJob, updateScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
+        const originalJob = getScheduledJob(SQLITE_MAINTENANCE_JOB_ID);
+        const createdBackupPaths: string[] = [];
+        const createdRunIds: number[] = [];
+        const queuedRefresh = jest.fn(() => {});
+        const consoleWarn = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        cleanupCallbacks.push(() => {
+            consoleWarn.mockRestore();
+            for (const backupPath of createdBackupPaths) {
+                rmSync(backupPath, { force: true });
+            }
+            registerSqliteMaintenanceScheduledJob({
+                enqueueDatabaseSummaryRefresh,
+            });
+            for (const runId of createdRunIds) {
+                database
+                    .prepare("DELETE FROM job_executions WHERE scheduled_run_id = ?")
+                    .run(runId);
+                database
+                    .prepare("DELETE FROM scheduled_job_runs WHERE id = ?")
+                    .run(runId);
+            }
+            if (originalJob) {
+                updateScheduledJob(SQLITE_MAINTENANCE_JOB_ID, {
+                    cronExpression: originalJob.cronExpression,
+                    enabled: originalJob.enabled,
+                    intervalSeconds: originalJob.intervalSeconds,
+                    scheduleType: originalJob.scheduleType,
+                    timeOfDay: originalJob.timeOfDay,
+                });
+            } else {
+                database
+                    .prepare("DELETE FROM scheduled_jobs WHERE id = ?")
+                    .run(SQLITE_MAINTENANCE_JOB_ID);
+            }
+        });
+
+        registerSqliteMaintenanceScheduledJob({
+            enqueueDatabaseSummaryRefresh: queuedRefresh,
+        });
+        updateScheduledJob(SQLITE_MAINTENANCE_JOB_ID, { enabled: true });
+        await startTestScheduledExecutor();
+
+        const queuedRun = await runScheduledJob(SQLITE_MAINTENANCE_JOB_ID);
+        createdBackupPaths.push((queuedRun.output.backup as { path: string }).path);
+        createdRunIds.push(queuedRun.id);
+        expect(queuedRun).toMatchObject({
+            cancellable: false,
+            output: { cacheRefresh: { status: "queued" } },
+            status: "success",
+        });
+        expect(queuedRefresh).toHaveBeenCalledTimes(1);
+
+        registerSqliteMaintenanceScheduledJob({
+            enqueueDatabaseSummaryRefresh: () => {
+                throw new Error("refresh queue unavailable");
+            },
+        });
+        const failedRefreshRun = await runScheduledJob(SQLITE_MAINTENANCE_JOB_ID);
+        createdBackupPaths.push(
+            (failedRefreshRun.output.backup as { path: string }).path
+        );
+        createdRunIds.push(failedRefreshRun.id);
+        expect(failedRefreshRun).toMatchObject({
+            output: {
+                cacheRefresh: {
+                    message: "refresh queue unavailable",
+                    status: "failed",
+                },
+            },
+            status: "success",
+        });
+        expect(consoleWarn).toHaveBeenCalledWith(
+            "[SQLiteMaintenance] Database summary cache refresh enqueue failed:",
+            "refresh queue unavailable"
+        );
+    });
+
     it("rejects unsupported and aborted cache refresh producer requests", async () => {
         const { refreshCacheProducer, waitForLocalCacheSeed } =
             await import("../src/services/cacheRefresh.ts");

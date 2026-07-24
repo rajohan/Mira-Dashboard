@@ -173,10 +173,12 @@ export function DatabaseOverviewCard() {
                                         {sqlite.backup.count}
                                     </span>
                                 </div>
-                                {sqlite.attention[0] ? (
-                                    <div className="text-xs text-yellow-300">
-                                        {sqlite.attention[0]}
-                                    </div>
+                                {sqlite.attention.length > 0 ? (
+                                    <ul className="space-y-1 text-xs text-yellow-300">
+                                        {sqlite.attention.map((reason) => (
+                                            <li key={reason}>{reason}</li>
+                                        ))}
+                                    </ul>
                                 ) : undefined}
                             </>
                         ) : (

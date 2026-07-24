@@ -171,7 +171,7 @@ export function useDatabaseOverview() {
     const cacheEnvelope = query.data;
     const data =
         cacheEnvelope &&
-        (cacheEnvelope.status === "fresh" || cacheEnvelope.status === "error") &&
+        ["fresh", "stale", "error"].includes(cacheEnvelope.status) &&
         isDatabaseOverviewResponse(cacheEnvelope.data)
             ? cacheEnvelope.data
             : undefined;

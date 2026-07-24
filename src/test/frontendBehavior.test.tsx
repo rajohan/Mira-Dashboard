@@ -69,6 +69,7 @@ import { useOpenClawChatTransport } from "../components/features/chat/transport/
 import {
     formatBytes as formatDatabaseBytes,
     formatNumber as formatDatabaseNumber,
+    postgresMaintenanceAttention,
     truncateQuery,
 } from "../components/features/database/databaseUtilities";
 import {
@@ -3070,7 +3071,7 @@ describe("Mira Dashboard frontend behavior", () => {
         });
     });
 
-    it("fetches database overview and mutates sessions through hooks", async () => {
+    it("keeps stale database overview data while mutating sessions through hooks", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {
                 const url = String(input);
@@ -3102,7 +3103,7 @@ describe("Mira Dashboard frontend behavior", () => {
                             pgbouncerPools: [],
                             pgbouncerStats: [],
                         },
-                        status: "fresh",
+                        status: "stale",
                     });
                 }
 
@@ -4843,6 +4844,28 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(formatDatabaseBytes(1536)).toBe("1.5 KB");
         expect(truncateQuery("short", 12)).toBe("short");
         expect(truncateQuery("select " + "x".repeat(20), 12)).toBe("select xxxxx...");
+        expect(
+            postgresMaintenanceAttention({
+                status: "not_assessed",
+                hintCount: 4,
+                requiresBloatReview: false,
+                isBloatAssessmentIncomplete: true,
+                unassessedTableCount: 2,
+                unassessedPhysicalBytes: 2_147_483_648,
+                slowQueryCount: 2,
+                highDeadTupleTableCount: 2,
+                physicalTableBytes: 0,
+                estimatedReclaimableBytes: 0,
+                estimatedReclaimablePercent: 0,
+                reviewThresholdBytes: 5_368_709_120,
+                reviewMinimumBytes: 1_073_741_824,
+                reviewThresholdPercent: 25,
+            })
+        ).toEqual([
+            "2 large tables exceed the dead-tuple threshold. Review autovacuum",
+            "2 queries average at least 500 ms. Review query performance",
+            "Bloat could not be assessed for 2.0 GB across 2 tables",
+        ]);
         expect(formatDockerBytes(0)).toBe("0 B");
         expect(formatDockerBytes(1024 ** 2)).toBe("1.0 MB");
         expect(formatDockerMemory(undefined)).toBe("—");

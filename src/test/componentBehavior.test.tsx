@@ -4869,7 +4869,10 @@ describe("shared component helpers", () => {
                         pgbouncerPools: [],
                         pgbouncerStats: [],
                         sqlite: {
-                            attention: [],
+                            attention: [
+                                "SQLite can reclaim 26 MB (72.2%). Consider a planned VACUUM",
+                                "Latest verified SQLite backup is older than 48 hours",
+                            ],
                             backup: {
                                 count: 2,
                                 current: true,
@@ -4887,7 +4890,7 @@ describe("shared component helpers", () => {
                             pageSize: 4096,
                             permissions: { secure: true },
                             shmBytes: 32_768,
-                            status: "healthy",
+                            status: "review",
                             storageBytes: 48_238_096,
                             walAutoCheckpointPages: 1000,
                             walBytes: 10_456_592,
@@ -4919,6 +4922,14 @@ describe("shared component helpers", () => {
         ).toBeInTheDocument();
         expect(screen.getByText("Dashboard SQLite")).toBeInTheDocument();
         expect(screen.getByText("4/4")).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                "SQLite can reclaim 26 MB (72.2%). Consider a planned VACUUM"
+            )
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText("Latest verified SQLite backup is older than 48 hours")
+        ).toBeInTheDocument();
         const databaseCard = screen.getByRole("heading", { name: "Database" })
             .parentElement?.parentElement;
         expect(databaseCard).not.toHaveClass("xl:col-span-2");
