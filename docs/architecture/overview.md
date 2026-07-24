@@ -80,6 +80,7 @@ Key files:
 | `backend/src/server.ts`                  | HTTP server, static frontend serving, `/ws` upgrade.              |
 | `backend/src/routes.ts`                  | Route table assembly.                                             |
 | `backend/src/requestPolicy.ts`           | Auth requirement, rate limiting, error wrapper.                   |
+| `backend/src/automationAuth.ts`          | Hash-only automation credentials and route capability mapping.    |
 | `backend/src/requestSecurity.ts`         | Mutation provenance, request IDs, browser response headers.       |
 | `backend/src/requestAuditContext.ts`     | Request actor/correlation context for queued work.                |
 | `backend/src/http.ts`                    | JSON helpers, cookies, origin/proxy/IP helpers.                   |
@@ -98,9 +99,11 @@ All `/api/*` routes are authenticated except:
 - `/api/health`
 - `/api/auth/*`
 
-The browser authenticates with an HTTP-only session cookie. The first-user
-bootstrap flow validates the OpenClaw Gateway token before creating the first
-user.
+The browser authenticates with an HTTP-only session cookie. Non-browser callers
+may use a hash-only bearer identity, but only for centrally mapped capabilities.
+The first-user bootstrap flow validates the OpenClaw Gateway token before
+creating the first user. The direct-loopback bypass remains a transitional
+compatibility path while local callers migrate to scoped credentials.
 
 Rate limits:
 
@@ -114,7 +117,8 @@ Unsafe browser API methods additionally pass exact Origin and Fetch Metadata
 checks before authentication. API and static responses receive central CSP,
 clickjacking, MIME-sniffing, referrer, permissions, and request-correlation
 headers. Direct non-browser clients remain supported when provenance headers
-are absent. They do not bypass the existing authentication policy.
+are absent. They still require a scoped credential, session, or the explicitly
+enabled transitional loopback bypass.
 
 ## Gateway Integration
 

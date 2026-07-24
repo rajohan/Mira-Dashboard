@@ -33,15 +33,17 @@ token in `app_config.gateway_token`. Environment token precedence is:
 
 ## Network, Auth, And Browser Access
 
-| Variable                              | Required | Default                        | Purpose                                                                                     |
-| ------------------------------------- | -------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
-| `MIRA_DASHBOARD_ALLOWED_ORIGINS`      | Optional | same-origin/localhost behavior | Comma-separated allowed origins for browser/WebSocket checks.                               |
-| `MIRA_DASHBOARD_TRUSTED_PROXY_IPS`    | Optional | none                           | Trusted proxy IPs. Only use if the proxy strips or overwrites untrusted forwarding headers. |
-| `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH` | Optional | disabled unless set            | Enables loopback auth bypass when set to `1`.                                               |
-| `OPENCLAW_GATEWAY_URL`                | Optional | `ws://127.0.0.1:18789`         | Gateway WebSocket URL.                                                                      |
+| Variable                                | Required | Default                        | Purpose                                                                                     |
+| --------------------------------------- | -------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
+| `MIRA_DASHBOARD_ALLOWED_ORIGINS`        | Optional | same-origin/localhost behavior | Comma-separated allowed origins for browser/WebSocket checks.                               |
+| `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS` | Optional | none                           | Strict JSON list of hash-only scoped automation credentials.                                |
+| `MIRA_DASHBOARD_TRUSTED_PROXY_IPS`      | Optional | none                           | Trusted proxy IPs. Only use if the proxy strips or overwrites untrusted forwarding headers. |
+| `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH`   | Optional | disabled unless set            | Enables the transitional loopback auth bypass when set to `1`.                              |
+| `OPENCLAW_GATEWAY_URL`                  | Optional | `ws://127.0.0.1:18789`         | Gateway WebSocket URL.                                                                      |
 
 See [Auth and trust boundaries](../security/auth-and-trust-boundaries.md) for
-route auth, loopback bypass, proxy trust, bootstrap, and token handling.
+route auth, scope names, token generation, loopback migration, proxy trust,
+bootstrap, and token handling.
 
 ## Execution Roles And Resource Scopes
 

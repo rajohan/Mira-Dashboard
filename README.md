@@ -109,7 +109,7 @@ verification.
   restore checks.
 - Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
-- Auth is enforced by the backend request policy for API routes except `/api/auth/*` and `/api/health`; route modules should assume authenticated access unless explicitly public.
+- Auth is enforced by the backend request policy for API routes except `/api/auth/*` and `/api/health`. Route modules should assume authenticated access unless explicitly public. Hash-only automation credentials can reach only centrally mapped read/write scopes, never Terminal/exec or the other privileged route families.
 - If `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is configured, the trusted proxy must overwrite or strip inbound `X-Real-IP` and `X-Forwarded-For` headers from untrusted clients before forwarding to the backend. These headers are used only for proxied client identity such as rate-limit buckets; optional loopback auth bypass requires `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` and is granted only to immediate loopback peers without forwarded-client headers.
 
 ## Production checkout and PR worktrees

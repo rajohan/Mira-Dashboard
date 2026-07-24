@@ -1,6 +1,7 @@
 import type { Server } from "bun";
 
 import dashboard from "../index.html";
+import { addForwardedClientHeaders } from "../src/lib/developmentProxyHeaders.ts";
 
 const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || "5173");
@@ -23,20 +24,6 @@ function forwardedBrowserOrigin(
     const sourceUrl = new URL(request.url);
     const origin = request.headers.get("origin");
     return origin === sourceUrl.origin ? targetOrigin : origin || undefined;
-}
-
-function addForwardedClientHeaders(
-    headers: Headers,
-    clientAddress: string | undefined,
-    protocol: string
-): void {
-    headers.delete("x-forwarded-for");
-    headers.delete("x-real-ip");
-    if (clientAddress) {
-        headers.set("x-forwarded-for", clientAddress);
-        headers.set("x-real-ip", clientAddress);
-    }
-    headers.set("x-forwarded-proto", protocol);
 }
 
 async function proxyApi(

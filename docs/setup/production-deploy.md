@@ -28,8 +28,10 @@ This is a single-host service:
 
 Both tracked units preserve the production environment contract by launching
 through Doppler project/config `rajohan/prd`. Auth and origin settings such as
-`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH` and `MIRA_DASHBOARD_ALLOWED_ORIGINS`
-remain owned by Doppler; do not duplicate their values in unit files.
+`MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`,
+`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH`, and
+`MIRA_DASHBOARD_ALLOWED_ORIGINS` remain owned by Doppler. Do not duplicate their
+values in unit files.
 
 There is no container image for the Dashboard service today.
 
@@ -107,6 +109,29 @@ The queue endpoint requires a valid Dashboard session unless the explicitly
 configured direct-loopback bypass is enabled. Production currently sources
 `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` from Doppler, but the portable smoke test
 does not depend on that host-specific bypass.
+
+### Scoped Automation Rollout
+
+Scoped bearer support is backward-compatible and does not itself change
+production credentials:
+
+1. In an untracked local shell, generate a separate validator per automation
+   identity and store only its SHA-256 hash plus minimum scopes in
+   `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`. Never generate it through Dashboard
+   Terminal or another tracked exec path.
+2. Restart the web unit and confirm startup plus session-based browser flows.
+3. Add the full bearer token to each calling automation's secret store, update
+   its requests without putting the token in process arguments or transcripts,
+   and smoke-test only its required endpoints.
+4. Confirm allowed and denied calls have the expected automation actor and
+   scope in `/api/audit-events`.
+5. After every local caller has migrated, unset
+   `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH`, restart the web unit, and verify that
+   tokenless loopback calls return `401` while scoped calls still succeed.
+
+Never put the full token and its hash in the same configuration surface. Keep
+the legacy bypass enabled until the last caller has been verified so current
+task tracking, heartbeat, and report delivery do not lose functionality.
 
 For an authenticated browser session, also verify:
 

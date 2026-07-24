@@ -736,6 +736,11 @@ describe("backend service utilities", () => {
         ).toBe(false);
         expect(
             isAllowedLoopbackAuthOrigin(
+                new Request("https://evil.example:3100/api/tasks")
+            )
+        ).toBe(false);
+        expect(
+            isAllowedLoopbackAuthOrigin(
                 new Request("http://localhost:3100/api/tasks", {
                     headers: { origin: "http://127.0.0.1:3100" },
                 })
@@ -783,6 +788,37 @@ describe("backend service utilities", () => {
             summarySpy.mockRestore();
             warnSpy.mockRestore();
         }
+    });
+
+    it("fails closed cleanly when the attempted mutation audit cannot be stored", async () => {
+        const handler = jest.fn(() => new Response("must not run"));
+        const persistenceError = new Error("audit storage unavailable");
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const routes = withRequestPolicy(
+            { "/api/audit-failure": handler },
+            {
+                persistAuditEvent: () => {
+                    throw persistenceError;
+                },
+            }
+        );
+
+        const response = await callTestRoute(
+            routes,
+            "/api/audit-failure",
+            serverWithAddress("127.0.0.1"),
+            { method: "POST" }
+        );
+
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual({
+            error: "Audit trail unavailable",
+        });
+        expect(handler).not.toHaveBeenCalled();
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining("attempted persistence failed"),
+            persistenceError
+        );
     });
 
     it("applies request policy auth, rate limit, and handler error behavior", async () => {

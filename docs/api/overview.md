@@ -11,8 +11,9 @@ http://127.0.0.1:3100/api
 ```
 
 Browser/external access goes through the Dashboard UI and session cookie.
-Localhost requests still need a session cookie unless
-`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` is set and the request is a direct
+Non-browser automation can use a deliberately scoped bearer credential.
+Tokenless localhost requests still need a session cookie unless the transitional
+`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` bypass is set and the request is a direct
 loopback request without forwarded-client headers.
 
 ## Response Shape
@@ -35,7 +36,17 @@ route errors log the same identifier for correlation.
 
 ## Authentication
 
-Authenticated routes require a valid Dashboard session cookie.
+Authenticated routes require a valid Dashboard session cookie or, for the
+explicit automation-safe allowlist, a valid scoped bearer credential.
+
+Automation bearer tokens have the strict form
+`<credential-id>.<64-lowercase-hex-validator>`. Valid credentials are limited to
+their configured `agents:*`, `audit:read`, `cache:read`, `notifications:*`,
+`reports:*`, or `tasks:*` capabilities. Privileged route families such as
+terminal/exec, config/files, sessions/chat, Docker, deploy, restart, backups,
+cache refresh, and scheduled-job mutation are not automation-token accessible.
+Invalid or insufficient bearer credentials never fall back to a browser session
+or the transitional loopback bypass.
 
 Public routes:
 
@@ -71,7 +82,7 @@ Common statuses:
 | `201`  | Resource created.                                                         |
 | `400`  | Invalid request JSON, params, or body.                                    |
 | `401`  | Missing/invalid authentication or invalid Gateway token during bootstrap. |
-| `403`  | Origin/Fetch Metadata/path/proxy policy rejection.                        |
+| `403`  | Origin, scope, path, or proxy policy rejection.                           |
 | `404`  | Resource/path not found.                                                  |
 | `409`  | Bootstrap closed or operation conflicts with current state.               |
 | `413`  | File/media payload too large.                                             |
