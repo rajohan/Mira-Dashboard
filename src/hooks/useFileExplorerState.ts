@@ -167,9 +167,24 @@ export function useFileExplorerState() {
         }
 
         try {
+            const savedPath = selectedPath;
+            const savedContent = editedContent;
             await saveMutation.mutateAsync({
-                path: selectedPath,
-                content: editedContent,
+                path: savedPath,
+                content: savedContent,
+            });
+            setRevealedFileContent((current) => {
+                if (current?.sourcePath !== savedPath) {
+                    return current;
+                }
+                return {
+                    content: {
+                        ...current.content,
+                        content: savedContent,
+                        size: new TextEncoder().encode(savedContent).byteLength,
+                    },
+                    sourcePath: savedPath,
+                };
             });
             setHasChanges(false);
             void refetchContent();

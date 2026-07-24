@@ -3053,6 +3053,92 @@ describe("shared component helpers", () => {
         queryClient.clear();
     });
 
+    it("updates the revealed config baseline after a successful save", async () => {
+        let savedContent: string | undefined;
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/files" && method === "GET") {
+                    return Response.json({ files: [] });
+                }
+                if (url === "/api/config-files/openclaw.json" && method === "GET") {
+                    return Response.json({
+                        content: '{"token":"__MIRA_REDACTED__"}',
+                        isBinary: false,
+                        masked: true,
+                        modified: "",
+                        path: "config:openclaw.json",
+                        size: 31,
+                    });
+                }
+                if (
+                    url === "/api/config-files/openclaw.json?reveal=1" &&
+                    method === "GET"
+                ) {
+                    return Response.json({
+                        content: '{"token":"original-secret"}',
+                        isBinary: false,
+                        modified: "",
+                        path: "config:openclaw.json",
+                        size: 27,
+                    });
+                }
+                if (url === "/api/config-files/openclaw.json" && method === "PUT") {
+                    savedContent = (JSON.parse(String(init?.body)) as { content: string })
+                        .content;
+                    return new Response("", { status: 204 });
+                }
+
+                throw new Error(
+                    `Unexpected reveal-save baseline fetch: ${method} ${url}`
+                );
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const queryClient = createQueryClient();
+        const wrapper = ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        );
+        const { result, unmount } = renderHook(() => useFileExplorerState(), {
+            wrapper,
+        });
+
+        act(() => {
+            result.current.handleSelect("config:openclaw.json");
+        });
+        await waitFor(() => {
+            expect(result.current.fileContent?.masked).toBe(true);
+        });
+        await act(async () => {
+            await result.current.handleReveal();
+        });
+        expect(result.current.fileContent?.content).toBe('{"token":"original-secret"}');
+
+        act(() => {
+            result.current.handleContentChange('{"token":"updated-secret"}');
+        });
+        await act(async () => {
+            await result.current.handleSave();
+        });
+
+        expect(savedContent).toBe('{"token":"updated-secret"}');
+        expect(result.current.fileContent?.content).toBe('{"token":"updated-secret"}');
+        act(() => {
+            result.current.handleContentChange('{"token":"original-secret"}');
+        });
+        expect(result.current.hasChanges).toBe(true);
+
+        unmount();
+        queryClient.clear();
+    });
+
     it("keeps cached report metrics visible when a refresh fails", async () => {
         const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
             const url = String(input);

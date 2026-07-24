@@ -78,42 +78,38 @@ export function GlobalSecurityVerification() {
         setIsComplete(false);
     }
 
-    async function verifyPassword(): Promise<void> {
-        if (!password) return;
+    async function runVerification(action: () => Promise<unknown>): Promise<void> {
         setError(undefined);
         try {
-            await passwordReauth.mutateAsync(password);
-            setPassword("");
+            await action();
             setIsComplete(true);
         } catch (error_) {
             setError(errorMessage(error_));
         }
     }
 
+    async function verifyPassword(): Promise<void> {
+        if (!password) return;
+        await runVerification(async () => {
+            await passwordReauth.mutateAsync(password);
+            setPassword("");
+        });
+    }
+
     async function verifyCode(): Promise<void> {
         if (!codeMethod || !code.trim()) return;
-        setError(undefined);
-        try {
+        await runVerification(async () => {
             if (codeMethod === "totp") {
                 await totpStepUp.mutateAsync(code.trim());
             } else {
                 await recoveryStepUp.mutateAsync(code.trim());
             }
             setCode("");
-            setIsComplete(true);
-        } catch (error_) {
-            setError(errorMessage(error_));
-        }
+        });
     }
 
     async function verifySecurityKey(): Promise<void> {
-        setError(undefined);
-        try {
-            await webAuthnStepUp.mutateAsync();
-            setIsComplete(true);
-        } catch (error_) {
-            setError(errorMessage(error_));
-        }
+        await runVerification(() => webAuthnStepUp.mutateAsync());
     }
 
     const methods = data?.factors.methods ?? [];

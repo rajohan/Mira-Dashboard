@@ -10,7 +10,7 @@ import {
     isDashboardAutomationProfile,
 } from "./dashboardAutomationProfiles.ts";
 
-const DASHBOARD_ORIGIN = "http://127.0.0.1:3100";
+const DEFAULT_DASHBOARD_PORT = 3100;
 const REQUEST_TIMEOUT_MS = 30_000;
 const TOKEN_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}\.[a-f0-9]{64}$/u;
 const ALLOWED_METHODS = new Set(["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"]);
@@ -68,14 +68,25 @@ async function readCredential(profile: DashboardAutomationProfile): Promise<stri
     }
 }
 
+export function resolveDashboardOrigin(portValue = process.env.PORT): string {
+    const trimmed = portValue?.trim() ?? "";
+    const parsedPort = /^\d+$/u.test(trimmed) ? Number(trimmed) : NaN;
+    const port =
+        Number.isSafeInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65_535
+            ? parsedPort
+            : DEFAULT_DASHBOARD_PORT;
+    return new URL(`http://127.0.0.1:${port}`).origin;
+}
+
 function requestUrl(apiPath: string): URL {
     if (!apiPath.startsWith("/api/") || apiPath.includes("\0") || apiPath.includes("#")) {
         throw new TypeError(
             "api-path must start with /api/ and cannot contain a fragment"
         );
     }
-    const url = new URL(apiPath, DASHBOARD_ORIGIN);
-    if (url.origin !== DASHBOARD_ORIGIN || !url.pathname.startsWith("/api/")) {
+    const dashboardOrigin = resolveDashboardOrigin();
+    const url = new URL(apiPath, dashboardOrigin);
+    if (url.origin !== dashboardOrigin || !url.pathname.startsWith("/api/")) {
         throw new TypeError("api-path must remain within the local Dashboard API");
     }
     return url;

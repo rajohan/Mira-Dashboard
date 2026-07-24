@@ -183,7 +183,9 @@ payloads, unit files, or command arguments. The caller wrapper
 `/home/ubuntu/projects/mira-dashboard/scripts/miraDashboardApi.ts` reads the
 selected file only after checking type, ownership, exact mode, size, and token
 format. Request bodies come from standard input and the token is attached only
-as an `Authorization` header.
+as an `Authorization` header. The wrapper resolves its loopback origin from the
+same `PORT` setting as Dashboard, defaulting to `3100`; callers must inherit or
+export the service's override when a different port is configured.
 
 Do not run provisioning through Dashboard Terminal or tracked exec because
 their persisted output would retain operational details. On a new host, create

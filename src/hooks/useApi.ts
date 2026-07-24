@@ -1,9 +1,9 @@
+import { handleUnauthorizedSession } from "../lib/authBoundary";
 import {
     dispatchSecurityVerificationRequired,
     isSecurityVerificationCode,
 } from "../lib/securityVerification";
 import { hasRecentUserActivity } from "../lib/userActivity";
-import { authActions } from "../stores/authStore";
 
 const API_BASE = "/api";
 
@@ -28,12 +28,6 @@ export class UnauthorizedError extends ApiError {
     }
 }
 
-/** Responds to unauthorized events. */
-function handleUnauthorized() {
-    authActions.clearSession();
-    dispatchEvent(new CustomEvent("openclaw:unauthorized"));
-}
-
 /** Performs API fetch. */
 export async function apiFetch<T>(
     endpoint: string,
@@ -52,7 +46,7 @@ export async function apiFetch<T>(
     });
 
     if (response.status === 401) {
-        handleUnauthorized();
+        handleUnauthorizedSession();
         throw new UnauthorizedError();
     }
 

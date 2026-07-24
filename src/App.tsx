@@ -6,9 +6,9 @@ import { ErrorBoundary } from "react-error-boundary";
 import { GlobalSecurityVerification } from "./components/features/settings/GlobalSecurityVerification";
 import { AppErrorFallback } from "./components/ui/AppErrorFallback";
 import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
+import { UNAUTHORIZED_EVENT_NAME } from "./lib/authBoundary";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
-import { authActions } from "./stores/authStore";
 
 const isEnableDevtools = import.meta.env?.MODE !== "production";
 const DashboardDevtools = isEnableDevtools
@@ -20,13 +20,12 @@ export default function App() {
     useEffect(() => {
         /** Performs on unauthorized. */
         const onUnauthorized = () => {
-            authActions.clearSession();
             void router.navigate({ to: "/login" });
         };
 
-        addEventListener("openclaw:unauthorized", onUnauthorized);
+        addEventListener(UNAUTHORIZED_EVENT_NAME, onUnauthorized);
         return () => {
-            removeEventListener("openclaw:unauthorized", onUnauthorized);
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, onUnauthorized);
         };
     }, []);
 

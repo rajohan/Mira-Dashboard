@@ -1,4 +1,5 @@
 import type { SocketEnvelope } from "../../types/socket";
+import { handleUnauthorizedSession } from "../authBoundary";
 import {
     dispatchSecurityVerificationRequired,
     isSecurityVerificationCode,
@@ -124,10 +125,14 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
         });
 
-        socket.addEventListener("close", () => {
+        socket.addEventListener("close", (event) => {
             rejectPendingRequests(socket);
             if (ws !== socket) {
                 return;
+            }
+            if (event.code === 4401) {
+                shouldReconnect = false;
+                handleUnauthorizedSession();
             }
             options.onClose?.();
             if (shouldReconnect) {

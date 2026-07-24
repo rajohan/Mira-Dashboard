@@ -1,6 +1,7 @@
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { handleUnauthorizedSession } from "../lib/authBoundary";
 import { authActions } from "../stores/authStore";
 import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
 
@@ -267,7 +268,7 @@ export function useRevokeSession() {
             ),
         onSuccess: (response) => {
             if (response.loggedOut) {
-                authActions.clearSession();
+                handleUnauthorizedSession();
             } else {
                 invalidateSecurity(queryClient);
             }
@@ -292,6 +293,6 @@ export function useRevokeAllSessions() {
             apiPostRequired<{ isOk: boolean; revoked: number }>(
                 "/account/security/sessions/revoke-all"
             ),
-        onSuccess: () => authActions.clearSession(),
+        onSuccess: handleUnauthorizedSession,
     });
 }

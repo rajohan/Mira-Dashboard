@@ -183,6 +183,7 @@ import {
     useTerminalJob,
 } from "../hooks/useTerminal";
 import { useWeather } from "../hooks/useWeather";
+import { UNAUTHORIZED_EVENT_NAME } from "../lib/authBoundary";
 import { createSocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import {
@@ -543,7 +544,7 @@ function chatMessage(
     };
 }
 
-type FakeWebSocketListener = (event: { data?: string }) => void;
+type FakeWebSocketListener = (event: { code?: number; data?: string }) => void;
 
 class FakeWebSocket {
     static instances: FakeWebSocket[] = [];
@@ -562,7 +563,7 @@ class FakeWebSocket {
         FakeWebSocket.instances.push(this);
     }
 
-    private dispatch(type: string, event: { data?: string } = {}) {
+    private dispatch(type: string, event: { code?: number; data?: string } = {}) {
         const listeners = this.listeners.get(type) || [];
         for (const listener of listeners) {
             listener(event);
@@ -577,9 +578,9 @@ class FakeWebSocket {
         this.sent.push(data);
     }
 
-    close() {
+    close(code = 1000) {
         this.readyState = FakeWebSocket.CLOSED;
-        this.dispatch("close");
+        this.dispatch("close", { code });
     }
 
     open() {
@@ -1124,9 +1125,10 @@ describe("Mira Dashboard frontend behavior", () => {
             user: { id: 1, username: "raymond" },
         });
         const unauthorizedEvents: Event[] = [];
-        addEventListener("openclaw:unauthorized", (event) => {
+        const unauthorizedHandler = (event: Event) => {
             unauthorizedEvents.push(event);
-        });
+        };
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
             value: jest.fn(async () =>
@@ -1135,10 +1137,13 @@ describe("Mira Dashboard frontend behavior", () => {
             writable: true,
         });
 
-        await expect(apiFetch("/tasks")).rejects.toBeInstanceOf(UnauthorizedError);
-
-        expect(authStore.state.isAuthenticated).toBe(false);
-        expect(unauthorizedEvents).toHaveLength(1);
+        try {
+            await expect(apiFetch("/tasks")).rejects.toBeInstanceOf(UnauthorizedError);
+            expect(authStore.state.isAuthenticated).toBe(false);
+            expect(unauthorizedEvents).toHaveLength(1);
+        } finally {
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
     });
 
     it("refreshes idle-session activity only after a real browser interaction", () => {
@@ -1606,6 +1611,50 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(client.isOpen()).toBe(false);
             expect(events.filter((event) => event === "close")).toHaveLength(1);
         } finally {
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("logs out without reconnecting after a 4401 WebSocket close", () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            user: { id: 1, username: "raymond" },
+        });
+        const unauthorizedEvents: Event[] = [];
+        const unauthorizedHandler = (event: Event) => {
+            unauthorizedEvents.push(event);
+        };
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+
+        try {
+            const client = createSocketClient({
+                url: "ws://dashboard.test/socket",
+            });
+            client.connect();
+            const socket = FakeWebSocket.instances[0]!;
+            socket.open();
+            socket.close(4401);
+
+            expect(authStore.state.isAuthenticated).toBe(false);
+            expect(unauthorizedEvents).toHaveLength(1);
+            expect(timeoutSpy).not.toHaveBeenCalledWith(expect.any(Function), 2000);
+            expect(FakeWebSocket.instances).toHaveLength(1);
+        } finally {
+            timeoutSpy.mockRestore();
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
             Object.defineProperty(globalThis, "WebSocket", {
                 configurable: true,
                 value: originalWebSocket,
