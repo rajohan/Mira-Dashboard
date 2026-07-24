@@ -354,6 +354,12 @@ describe("scoped automation authentication", () => {
                 outcome: "accepted",
             },
         ]);
+        const loopbackAgentRead = await routes["/api/agents/status"].GET(
+            request("/api/agents/status"),
+            server
+        );
+        expect(loopbackAgentRead.status).toBe(200);
+        expect(auditRows(loopbackAgentRead.headers.get("x-request-id"))).toEqual([]);
 
         const readOnlyWrite = await routes["/api/tasks"].POST(
             request("/api/tasks", "POST", readerAuthorization),

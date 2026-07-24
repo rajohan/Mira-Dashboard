@@ -67,7 +67,8 @@ The route allowlist is fail-closed:
 Agent status reads (`GET`/`HEAD /api/agents/status`,
 `/api/agents/:id/status`, and `/api/agents/tasks/history`) require
 `agents:write` because their handlers reconcile stale task state in SQLite. The
-request policy audits them as mutations even though they use safe HTTP methods.
+request policy audits automation calls to them as mutations even though they use
+safe HTTP methods.
 
 Terminal/exec, config, file access, sessions/chat, Docker, deploy/review,
 restart, backup actions, cache refreshes, log rotation, scheduled-job mutation,
@@ -133,7 +134,8 @@ allowed `Origin` when the browser sends one. Fetch Metadata must identify the
 request as `same-origin` or `none`; explicit `same-site` and `cross-site`
 mutations are rejected before authentication or route execution. Direct API
 clients that do not emit browser provenance headers remain supported and still
-pass through the normal session or explicitly enabled loopback-auth boundary.
+require a scoped credential, session, or explicitly enabled transitional
+loopback-auth boundary.
 
 Only set `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` when the proxy strips or overwrites
 untrusted forwarding headers. A misconfigured trusted proxy can make rate limits

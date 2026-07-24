@@ -210,12 +210,15 @@ function auditOutcomeForStatus(status: number): AuditOutcome {
     return status >= 400 ? "failed" : "accepted";
 }
 
-function isAuditedMutation(isApi: boolean, request: Request): boolean {
+function isAuditedMutation(
+    isApi: boolean,
+    request: Request,
+    automationScope?: AutomationScope
+): boolean {
     if (!isApi) return false;
-    const method = request.method.toUpperCase();
     return (
-        !SAFE_REQUEST_METHODS.has(method) ||
-        requiredAutomationScope(request)?.endsWith(":write") === true
+        !SAFE_REQUEST_METHODS.has(request.method.toUpperCase()) ||
+        automationScope?.endsWith(":write") === true
     );
 }
 
@@ -285,7 +288,6 @@ function secureHandler(
         const response = await (async () => {
             const pathname = new URL(request.url).pathname || routePath;
             const isApi = isApiRoute(pathname);
-            const isMutation = isAuditedMutation(isApi, request);
             const requestIdentifier = requestIdFor(request);
             const rateRule = isAuthRoute(pathname)
                 ? authRule
@@ -338,6 +340,7 @@ function secureHandler(
                     { status: 403 }
                 );
             }
+            const isMutation = isAuditedMutation(isApi, request, automationScope);
             const user =
                 !automationPrincipal && (requiresAuthentication || isMutation)
                     ? authUser(request, server)
