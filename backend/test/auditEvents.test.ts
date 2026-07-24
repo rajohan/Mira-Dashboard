@@ -13,7 +13,7 @@ import {
 } from "../src/services/jobExecutionQueue.ts";
 
 describe("append-only audit events", () => {
-    it("redacts bounded metadata and rejects update or delete", () => {
+    it("redacts bounded metadata and rejects mutation or replacement", () => {
         const event = writeAuditEvent({
             actor: { id: "1:operator", type: "user" },
             action: "security.test",
@@ -51,6 +51,24 @@ describe("append-only audit events", () => {
         expect(() =>
             database.prepare("DELETE FROM audit_events WHERE id = ?").run(event.id)
         ).toThrow("audit_events is append-only");
+        expect(() =>
+            database
+                .prepare(
+                    `INSERT OR REPLACE INTO audit_events (
+                        id, actor_type, actor_id, action, target_type, target_id,
+                        outcome, metadata_json, occurred_at
+                     ) VALUES (
+                        ?, 'system', 'replacement', 'security.replace',
+                        'test-target', 'replacement', 'failed', '{}', ?
+                     )`
+                )
+                .run(event.id, new Date().toISOString())
+        ).toThrow("audit_events is append-only");
+        expect(
+            database
+                .prepare("SELECT actor_id, outcome FROM audit_events WHERE id = ?")
+                .get(event.id)
+        ).toEqual({ actor_id: "1:operator", outcome: "succeeded" });
         expect(() =>
             database
                 .prepare(
@@ -163,6 +181,13 @@ describe("append-only audit events", () => {
                 actorId: requestContext.actor.id,
                 actorType: "user",
                 outcome: "accepted",
+                requestId: requestContext.requestId,
+            },
+            {
+                action: "job.execute",
+                actorId: requestContext.actor.id,
+                actorType: "user",
+                outcome: "attempted",
                 requestId: requestContext.requestId,
             },
             {

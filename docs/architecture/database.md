@@ -65,7 +65,7 @@ edit a released migration. Add the next numbered file instead.
 | Table                              | Purpose                                                               | Lifecycle                                                                |
 | ---------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `schema_migrations`                | Applied migration versions and immutable checksums.                   | Immutable audit history; never age-pruned.                               |
-| `audit_events`                     | Redacted request and privileged job lifecycle audit trail.            | Append-only triggers reject update/delete; no automatic age pruning.     |
+| `audit_events`                     | Redacted request and privileged job lifecycle audit trail.            | Triggers reject update, delete, and replacement. No automatic pruning.   |
 | `users`                            | Dashboard auth users.                                                 | Authoritative records; removed only by explicit auth flows.              |
 | `auth_sessions`                    | Selector plus hashed-validator Dashboard sessions.                    | Removed after `expires_at`.                                              |
 | `app_config`                       | Small persistent config, currently including `gateway_token`.         | Keyed upsert or explicit removal; naturally bounded.                     |

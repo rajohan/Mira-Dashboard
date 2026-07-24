@@ -41,6 +41,13 @@ CREATE INDEX idx_audit_events_request
 CREATE INDEX idx_audit_events_target
     ON audit_events(target_type, target_id, occurred_at DESC);
 
+CREATE TRIGGER audit_events_reject_replace
+BEFORE INSERT ON audit_events
+WHEN EXISTS (SELECT 1 FROM audit_events WHERE id = NEW.id)
+BEGIN
+    SELECT RAISE(ABORT, 'audit_events is append-only');
+END;
+
 CREATE TRIGGER audit_events_reject_update
 BEFORE UPDATE ON audit_events
 BEGIN

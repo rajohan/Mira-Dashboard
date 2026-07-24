@@ -211,6 +211,7 @@ describe("Dashboard SQLite lifecycle", () => {
                     .all()
             ).toEqual([
                 { name: "audit_events_reject_delete" },
+                { name: "audit_events_reject_replace" },
                 { name: "audit_events_reject_update" },
             ]);
             expect(existsSync(sqliteBackupDirectory(databasePath))).toBe(false);
@@ -298,6 +299,36 @@ describe("Dashboard SQLite lifecycle", () => {
                 { name: "idx_audit_events_request" },
                 { name: "idx_audit_events_target" },
             ]);
+        } finally {
+            database.close();
+        }
+    });
+
+    it("preserves append-only audit history during automated maintenance", () => {
+        const root = temporaryRoot("mira-db-audit-retention-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        const auditId = Bun.randomUUIDv7();
+        try {
+            applyDatabaseMigrations(database, databasePath);
+            database
+                .prepare(
+                    `INSERT INTO audit_events (
+                        id, actor_type, actor_id, action, target_type, target_id,
+                        outcome, metadata_json, occurred_at
+                     ) VALUES (
+                        ?, 'system', 'maintenance-test', 'maintenance.preserve',
+                        'audit-log', 'historical-event', 'succeeded', '{}',
+                        '2000-01-01T00:00:00.000Z'
+                     )`
+                )
+                .run(auditId);
+
+            pruneDatabaseHistory(database, new Date("2100-01-01T00:00:00.000Z"));
+
+            expect(
+                database.prepare("SELECT id FROM audit_events WHERE id = ?").get(auditId)
+            ).toEqual({ id: auditId });
         } finally {
             database.close();
         }

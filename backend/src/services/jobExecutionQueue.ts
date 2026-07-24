@@ -292,6 +292,12 @@ function insertJobExecutionInTransaction(input: InsertJobExecutionInput): JobExe
         );
     const execution = getJobExecution(id) as JobExecution;
     writeJobAudit(execution, "job.enqueue", "accepted", input.queuedAt);
+    if (status === "running") {
+        writeJobAudit(execution, "job.execute", "attempted", input.queuedAt, {
+            attempt: execution.attempt,
+            workerId: execution.leaseOwner,
+        });
+    }
     return execution;
 }
 

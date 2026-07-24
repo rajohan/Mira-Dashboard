@@ -78,11 +78,11 @@ Dashboard responses also set a central browser policy:
 
 - CSP defaults resources to self, blocks object/embed and framing, and keeps the
   existing same-origin WebSocket, HTTPS image/media preview, inline style, and
-  same-origin microphone flows available;
-- `X-Content-Type-Options: nosniff`;
-- `Referrer-Policy: no-referrer`;
+  same-origin microphone flows available.
+- `X-Content-Type-Options: nosniff`.
+- `Referrer-Policy: no-referrer`.
 - `Permissions-Policy` denies camera, geolocation, payment, and USB while
-  retaining same-origin microphone recording;
+  retaining same-origin microphone recording.
 - `X-Frame-Options: DENY` as clickjacking defense in depth.
 
 Routes that deliberately return a stricter CSP, such as sandboxed SVG previews,
@@ -104,23 +104,24 @@ route attempts and authenticated route-level denials retain their outcome.
 Worker-owned execution rows add their own lifecycle events:
 
 - `job.enqueue` records durable acceptance in the same SQLite transaction as
-  the queue row;
+  the queue row.
 - `job.execute` records worker attempt and terminal success, failure, or
-  cancellation;
+  cancellation.
 - `job.cancel` records queued cancellation or a running cancellation request.
 
 Async job events inherit the initiating request actor and `X-Request-ID`.
 Automatic schedule/startup/system work uses an explicit system actor. The
 schema also reserves a distinct automation actor type for scoped credentials,
 separate from users and the transitional legacy loopback identity. Callers
-select only operational lifecycle fields for audit metadata; the persistence
+select only operational lifecycle fields for audit metadata. The persistence
 layer also bounds depth/size and defensively redacts keys that look like
 credentials, request bodies, payloads, content, or process output. Command
 arguments, file content, config bodies, cookies, tokens, stdout, and stderr are
 never copied into the audit table.
 
-SQLite triggers reject every `UPDATE` or `DELETE` against `audit_events`.
-Consequently automated maintenance does not age-prune this table; a future
+SQLite triggers reject updates, deletes, and conflicting replacements against
+`audit_events`, including `INSERT OR REPLACE` with an existing event id.
+Consequently automated maintenance does not age-prune this table. A future
 retention/export policy must be introduced as an explicit forward migration,
 not an ad hoc deletion. Authenticated operators can page newest-first through
 `GET /api/audit-events`.

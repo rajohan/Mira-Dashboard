@@ -114,7 +114,7 @@ Unsafe browser API methods additionally pass exact Origin and Fetch Metadata
 checks before authentication. API and static responses receive central CSP,
 clickjacking, MIME-sniffing, referrer, permissions, and request-correlation
 headers. Direct non-browser clients remain supported when provenance headers
-are absent; they do not bypass the existing authentication policy.
+are absent. They do not bypass the existing authentication policy.
 
 ## Gateway Integration
 
