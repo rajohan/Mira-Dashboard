@@ -138,6 +138,16 @@ describe("server start scheduler policy", () => {
         }
     });
 
+    it("exports the elevated log rotation CLI from both runtime entrypoints", async () => {
+        const [serverStart, workerStart] = await Promise.all([
+            import("../src/serverStart.ts"),
+            import("../src/workerStart.ts"),
+        ]);
+
+        expect(serverStart.runLogRotationCli).toBeTypeOf("function");
+        expect(workerStart.runLogRotationCli).toBeTypeOf("function");
+    });
+
     it("resolves the dedicated worker entrypoint and keeps its event loop referenced", async () => {
         const { createWorkerKeepAliveHandle, isDirectWorkerEntrypoint } =
             await import("../src/workerStart.ts");
