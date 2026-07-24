@@ -11,20 +11,89 @@ important trust boundaries:
 
 ## Route Authentication
 
-All `/api/*` routes require a Dashboard session except:
+All `/api/*` routes require a Dashboard session except the exact public
+bootstrap/login surface:
 
 - `/api/health`
-- `/api/auth/*`
+- `GET /api/auth/bootstrap`
+- `GET /api/auth/session`
+- `POST /api/auth/register-first-user`
+- `POST /api/auth/login`
+- `POST /api/auth/login/{totp,recovery}`
+- `POST /api/auth/login/webauthn/{options,verify}`
+- `POST /api/auth/logout`
 
 An explicitly scoped automation credential can replace the session only for the
 small route allowlist documented below. It cannot authenticate WebSockets or
-other Dashboard route families.
+other Dashboard route families. Account-security routes are never public merely
+because they contain authentication functionality.
 
 The browser session is stored in the `mira_dashboard_session` HTTP-only cookie.
 The cookie is SameSite Strict and is Secure only when the request is HTTPS or a
-trusted forwarded proto says HTTPS.
+trusted forwarded proto says HTTPS. Sessions use a 30-day absolute lifetime and
+a configurable 30-minute idle lifetime. Polling does not extend idle time;
+frontend requests only touch activity after recent keyboard, pointer, touch, or
+focus activity. Session validators are stored only as SHA-256 hashes.
 
-Auth routes are rate-limited more tightly than general API routes.
+Auth routes are rate-limited more tightly than general API routes. Password,
+second-factor, and account-password failures also use persistent, hashed,
+account-scoped buckets with progressive cooldowns. Pending MFA logins expire
+after five minutes and are consumed after success or eight failed attempts.
+
+## Two-Step Login And Step-Up
+
+Password verification is always the first login step. Users without MFA receive
+the normal session response and are directed to **Settings → Dashboard** to
+enroll. Users with MFA receive only a short-lived
+`mira_dashboard_pending_login` cookie and method list; no durable session is
+created until one configured method succeeds.
+
+Supported second factors:
+
+- **Security key (YubiKey/WebAuthn/FIDO2):** origin-bound, phishing-resistant
+  public-key authentication with user verification required. Register two named
+  keys and store the backup separately. Dashboard stores credential public keys,
+  counters, transports, device/backup state, labels, and timestamps; it does not
+  store a YubiKey secret.
+- **Authenticator app (RFC 6238 TOTP):** interoperable SHA-1, six-digit,
+  30-second codes. Each seed is encrypted with versioned AES-256-GCM and
+  context-bound associated data using
+  `MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY`. The last accepted time step is stored and
+  reused codes are rejected atomically. The pinned `otplib` v13 package uses
+  its audited Noble/scure defaults and is tested by the library for Bun.
+  TOTP is supported but is not phishing-resistant.
+- **Recovery code:** ten high-entropy one-time codes are shown only when first
+  enabling MFA or explicitly rotating the set. Only a selector and
+  password-hashed validator are stored. A successful code is consumed
+  atomically.
+
+The first enrolled factor enables MFA, revokes every other session, rotates the
+current session, and returns the recovery-code set. The final active factor
+cannot be removed. Disabling MFA requires both a recent second factor and the
+current password, removes all factors/codes, and revokes all sessions.
+
+Host-control actions require a second-factor verification within the
+configurable recent-auth window (10 minutes by default). This includes config
+or workspace writes, raw secret reveal/config backup, Gateway restart,
+Docker/exec, backups, scheduled jobs/cron, PR/deploy operations, session
+mutations, job cancellation, and other centrally classified privileged
+mutations. A user without MFA receives `mfa_enrollment_required`; a stale MFA
+session receives `step_up_required`. The frontend opens one global verification
+dialog and requires the original action to be retried after successful step-up.
+
+Changing the Dashboard password requires the current password plus recent MFA
+when enabled, rotates the current session, and revokes every other session.
+Forgotten-password recovery is intentionally host-local:
+
+```bash
+cd /home/ubuntu/projects/mira-dashboard/backend
+bun run auth:reset-password -- --username <username>
+```
+
+Use `--reset-mfa` only for deliberate factor-loss recovery. The command requires
+an interactive TTY, never accepts password material through arguments or
+environment variables, preserves MFA by default, revokes all sessions and
+pending ceremonies, and writes an audit event.
 
 ## Scoped Automation Credentials
 
@@ -75,51 +144,64 @@ restart, backup actions, cache refreshes, log rotation, scheduled-job mutation,
 and all other unmapped routes are denied even if a credential contains every
 known scope. Add a new route or capability only through a reviewed code change.
 
-On protected routes, a bearer header takes precedence over cookie and loopback
+On protected routes, a bearer header takes precedence over cookie
 authentication. An invalid bearer returns `401`. A valid credential without the
 exact route scope returns `403`. Neither falls back to broader authentication.
 Allowed and denied automation mutations use the credential id as the
 append-only audit actor.
 
-Generate a client token and its Dashboard-side hash without writing the
-validator to a file:
+The Dashboard repository tracks a fixed local wrapper and one credential
+profile per OpenClaw caller. On the current host the runtime layout is:
+
+| Wrapper profile | Client token file under `/home/ubuntu/.config/mira-dashboard/automation/` | Exact scopes |
+| --- | --- | --- |
+| `heartbeat` | `openclaw-heartbeat.token` | `cache:read`, `reports:write` |
+| `daily-summary` | `openclaw-daily-summary.token` | `cache:read`, `reports:write` |
+| `daily-brief` | `openclaw-daily-brief.token` | `cache:read`, `reports:write`, `tasks:read` |
+| `task-tracking` | `openclaw-task-tracking.token` | `agents:write`, `tasks:read`, `tasks:write` |
+
+The directory must be owned by the OpenClaw user with mode `0700`; every token
+file must be a regular, non-symlink file owned by that user with mode `0600`.
+The tracked Dashboard helper
+`/home/ubuntu/projects/mira-dashboard/scripts/provisionDashboardAutomationCredential.ts`
+writes the full token directly to the correct file and prints only the
+hash-only Dashboard configuration entry. It refuses to overwrite an existing
+file. Run it once for each profile from an untracked host shell:
 
 ```bash
-bun -e 'const validator = crypto.getRandomValues(new Uint8Array(32)).toHex(); console.log(`client token: mira-ops.${validator}`); console.log(`Dashboard tokenHash: ${new Bun.CryptoHasher("sha256").update(validator).digest("hex")}`)'
+cd /home/ubuntu/projects/mira-dashboard
+bun scripts/provisionDashboardAutomationCredential.ts heartbeat
+bun scripts/provisionDashboardAutomationCredential.ts daily-summary
+bun scripts/provisionDashboardAutomationCredential.ts daily-brief
+bun scripts/provisionDashboardAutomationCredential.ts task-tracking
 ```
 
-Run this only in an untracked local shell connected to the intended secret
-store. Do not use Dashboard Terminal or tracked exec because their persisted
-job output would retain the validator. Treat the command output as secret
-material. Do not paste the client token into Dashboard configuration, logs,
-reports, PRs, or shell history.
-When wiring a caller, do not place the token literal in process arguments or an
-agent transcript. Load it from the caller's secret store and use an HTTP client
-or standard-input configuration that redacts authorization headers.
+Combine the four printed objects into the JSON array stored as
+`MIRA_DASHBOARD_AUTOMATION_CREDENTIALS` in Doppler. The full tokens remain only
+in the client files; they are not stored in Doppler, SQLite, prompts, cron
+payloads, unit files, or command arguments. The caller wrapper
+`/home/ubuntu/projects/mira-dashboard/scripts/miraDashboardApi.ts` reads the
+selected file only after checking type, ownership, exact mode, size, and token
+format. Request bodies come from standard input and the token is attached only
+as an `Authorization` header.
 
-## Transitional Loopback Auth Bypass
+Do not run provisioning through Dashboard Terminal or tracked exec because
+their persisted output would retain operational details. On a new host, create
+new credentials instead of restoring the full token files from Dashboard
+backups. Update the Doppler hash-only array in the same maintenance window and
+smoke-test every allowed and denied profile route.
 
-Loopback auth bypass is disabled unless:
+## No Loopback Authentication Bypass
 
-```bash
-MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1
-```
+Loopback is a transport location, not an identity. Requests to
+`127.0.0.1:3100` require either a valid browser session or an exact
+minimum-scope automation credential. `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH` is no
+longer a supported setting, and setting it grants no access.
 
-Even then, bypass only applies to direct loopback requests without forwarded
-client headers. A missing `Origin` header is accepted, so ordinary same-host
-`curl` or scripts can bypass the session cookie when this flag is enabled, but
-the request URL hostname must still be a recognized loopback name.
-If an `Origin` header is present, it must exactly match the request origin and
-both hostnames must be loopback names. Configured non-loopback origins never
-receive the loopback identity. Production smoke tests should normally use a real
-session cookie instead of relying on loopback bypass.
-
-The bypass remains temporarily available so existing local automation keeps
-working during migration. Configure a scoped credential, update each caller to
-send it, verify its exact workflows, and only then unset
-`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH`. Do not disable the bypass before every
-current caller has moved, because tokenless localhost requests will start
-returning `401`.
+Keep a distinct credential per local caller so heartbeat, task tracking, and
+report delivery can be revoked and audited independently. Tokenless localhost
+requests to protected routes must return `401`; a scoped token presented to an
+unmapped host-control route must return `403`.
 
 ## Origins And Proxies
 
@@ -134,8 +216,7 @@ allowed `Origin` when the browser sends one. Fetch Metadata must identify the
 request as `same-origin` or `none`; explicit `same-site` and `cross-site`
 mutations are rejected before authentication or route execution. Direct API
 clients that do not emit browser provenance headers remain supported and still
-require a scoped credential, session, or explicitly enabled transitional
-loopback-auth boundary.
+require a scoped credential or session.
 
 Only set `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` when the proxy strips or overwrites
 untrusted forwarding headers. A misconfigured trusted proxy can make rate limits
@@ -197,9 +278,8 @@ Worker-owned execution rows add their own lifecycle events:
 
 Async job events inherit the initiating request actor and `X-Request-ID`.
 Automatic schedule/startup/system work uses an explicit system actor. Scoped
-credentials use a distinct automation actor type, separate from users and the
-transitional legacy loopback identity. Callers select only operational
-lifecycle fields for audit metadata. The persistence
+credentials use a distinct automation actor type, separate from users. Callers
+select only operational lifecycle fields for audit metadata. The persistence
 layer also bounds depth/size and defensively redacts keys that look like
 credentials, request bodies, payloads, content, or process output. Command
 arguments, file content, config bodies, cookies, tokens, stdout, and stderr are
@@ -218,8 +298,8 @@ First-user bootstrap is special because it is unauthenticated by design. It must
 stay narrow:
 
 - reject once users exist;
-- persist and validate the submitted OpenClaw Gateway token before creating the
-  first user;
+- encrypt, persist, and validate the submitted OpenClaw Gateway token before
+  creating the first user;
 - serialize overlapping attempts;
 - avoid publishing a usable Dashboard user while Gateway validation is pending;
 - roll back submitted token and user/session state on failure;
@@ -229,10 +309,27 @@ stay narrow:
 After bootstrap is complete, `/api/auth/register-first-user` should behave as a
 closed setup endpoint and must not switch Gateway tokens.
 
+Bootstrap still creates an ordinary password-authenticated session after
+Gateway validation. It does not require a physical key during initial setup.
+Privileged actions remain blocked until the operator enrolls a security key or
+authenticator app from Dashboard settings.
+
+## Config Secret Display
+
+Structured OpenClaw config and `openclaw.json` are recursively masked by
+default. Submitted structured updates may carry the redaction sentinel only
+where the server can restore an existing value; clients cannot overwrite a
+secret with the placeholder. Raw `openclaw.json` is read-only while masked.
+Explicit raw reveal and full config backup require recent MFA and are audited.
+Other allowed config files retain their existing bounded file policy.
+
 ## Gateway Token Handling
 
-Do not print Gateway token values. Inspect only metadata such as length and
-timestamps.
+Do not print Gateway token values. `app_config.gateway_token` contains a
+versioned AES-256-GCM envelope bound to its storage context; the external
+`MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY` remains outside SQLite. A legacy
+plaintext value is encrypted in place before requests are served. Inspect only
+metadata such as length and timestamps.
 
 Startup token precedence:
 

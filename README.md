@@ -17,10 +17,18 @@ reference, operations runbooks, reports delivery, and development workflow.
 
 ## What it includes
 
-- Authenticated dashboard routes for chat, sessions, agents, tasks, logs, files, cron, Docker updater state, database checks, Moltbook, terminal access, and settings.
+- Password-first Dashboard login with WebAuthn security keys, authenticator-app
+  TOTP, one-time recovery codes, idle session expiry, and fresh-MFA step-up for
+  privileged actions.
+- Authenticated routes for chat, sessions, agents, tasks, logs, files, cron,
+  Docker updater state, database checks, Moltbook, terminal access, and
+  separate OpenClaw/Dashboard settings.
 - A backend API on port `3100` with route modules under `backend/src/routes`.
 - A shared WebSocket bridge for live OpenClaw Gateway updates.
-- Local SQLite storage for dashboard tasks, task updates, notifications, auth sessions, quota alert state, OpenClaw alert state, and agent task history.
+- Local SQLite storage for dashboard tasks, task updates, notifications,
+  selector/validator auth state, encrypted TOTP factors, WebAuthn public keys,
+  hashed recovery codes, quota alert state, OpenClaw alert state, and agent task
+  history.
 - Bun/TanStack Router frontend on port `5173` during development, proxying `/api` to the backend.
 
 ## Repository layout
@@ -109,8 +117,16 @@ verification.
   restore checks.
 - Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
-- Auth is enforced by the backend request policy for API routes except `/api/auth/*` and `/api/health`. Route modules should assume authenticated access unless explicitly public. Hash-only automation credentials can reach only centrally mapped read/write scopes, never Terminal/exec or the other privileged route families.
-- If `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is configured, the trusted proxy must overwrite or strip inbound `X-Real-IP` and `X-Forwarded-For` headers from untrusted clients before forwarding to the backend. These headers are used only for proxied client identity such as rate-limit buckets; optional loopback auth bypass requires `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` and is granted only to immediate loopback peers without forwarded-client headers.
+- Auth is enforced by the backend request policy for every API route except
+  `/api/health` and the exact bootstrap/login/logout/session endpoints. Factor
+  management lives under authenticated `/api/account/security/*`. Hash-only
+  automation credentials can reach only centrally mapped minimum scopes, never
+  Terminal/exec or the other privileged route families.
+- Direct loopback requests do not bypass authentication. Local automation,
+  including heartbeat/report/task callers, must send a minimum-scope automation
+  bearer credential. If `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is configured, the
+  trusted proxy must overwrite or strip inbound `X-Real-IP` and
+  `X-Forwarded-For` headers from untrusted clients.
 
 ## Production checkout and PR worktrees
 

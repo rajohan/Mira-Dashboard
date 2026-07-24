@@ -12,8 +12,10 @@ Do not commit `.env`, `.env.local`, token dumps, or generated secret files.
 | `PORT`                   | Optional          | backend server                           | HTTP port. Defaults to `3100`.                                                                              |
 | `NODE_ENV`               | Recommended       | backend/database                         | Production service sets `production`; tests set `test`.                                                     |
 
-If no environment Gateway token is present, the first-user bootstrap can store a
-token in `app_config.gateway_token`. Environment token precedence is:
+First-user bootstrap validates the submitted Gateway token and stores it as an
+AES-256-GCM encrypted fallback envelope in `app_config.gateway_token`. The
+external Dashboard secret-encryption key is required to decrypt it.
+Environment token precedence is:
 
 1. `OPENCLAW_GATEWAY_TOKEN`
 2. `OPENCLAW_TOKEN`
@@ -33,17 +35,32 @@ token in `app_config.gateway_token`. Environment token precedence is:
 
 ## Network, Auth, And Browser Access
 
-| Variable                                | Required | Default                        | Purpose                                                                                     |
-| --------------------------------------- | -------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
-| `MIRA_DASHBOARD_ALLOWED_ORIGINS`        | Optional | same-origin/localhost behavior | Comma-separated allowed origins for browser/WebSocket checks.                               |
-| `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS` | Optional | none                           | Strict JSON list of hash-only scoped automation credentials.                                |
-| `MIRA_DASHBOARD_TRUSTED_PROXY_IPS`      | Optional | none                           | Trusted proxy IPs. Only use if the proxy strips or overwrites untrusted forwarding headers. |
-| `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH`   | Optional | disabled unless set            | Enables the transitional loopback auth bypass when set to `1`.                              |
-| `OPENCLAW_GATEWAY_URL`                  | Optional | `ws://127.0.0.1:18789`         | Gateway WebSocket URL.                                                                      |
+| Variable                                    | Required                                | Default                        | Purpose                                                                                                      |
+| ------------------------------------------- | --------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `MIRA_DASHBOARD_ALLOWED_ORIGINS`            | Production browser access               | same-origin/localhost behavior | Comma-separated allowed origins for browser/WebSocket checks.                                                |
+| `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`     | Local non-browser callers               | none                           | Strict JSON list of hash-only, minimum-scope automation credentials. There is no loopback auth bypass.       |
+| `MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY`      | Always                                  | none                           | Base64 that decodes to exactly 32 bytes. External AES-256-GCM key for persisted Gateway token and TOTP seeds; preserve it with backups. |
+| `MIRA_DASHBOARD_WEBAUTHN_RP_ID`             | Security-key enrollment/use             | none                           | Stable DNS relying-party id, for example `dashboard.example.com`. Raw IP addresses are rejected.             |
+| `MIRA_DASHBOARD_WEBAUTHN_ORIGINS`           | Security-key enrollment/use             | none                           | Explicit comma-separated HTTPS origins belonging to the RP ID. `http://localhost` is allowed for dev only.  |
+| `MIRA_DASHBOARD_SESSION_IDLE_MINUTES`       | Optional                                | `30`                           | Idle session lifetime, integer `5`–`1440`. Polling alone does not refresh it.                                |
+| `MIRA_DASHBOARD_RECENT_AUTH_MINUTES`        | Optional                                | `10`                           | Fresh password/MFA verification window, integer `1`–`60`.                                                    |
+| `MIRA_DASHBOARD_TRUSTED_PROXY_IPS`          | Optional                                | none                           | Trusted proxy IPs. Only use if the proxy strips or overwrites untrusted forwarding headers.                  |
+| `OPENCLAW_GATEWAY_URL`                      | Optional                                | `ws://127.0.0.1:18789`         | Gateway WebSocket URL.                                                                                       |
 
 See [Auth and trust boundaries](../security/auth-and-trust-boundaries.md) for
-route auth, scope names, token generation, loopback migration, proxy trust,
-bootstrap, and token handling.
+route auth, scope names, token generation, two-step login, proxy trust,
+bootstrap, recovery, and token handling.
+
+Generate the Dashboard secret-envelope key in an untracked privileged shell and write it
+directly to Doppler. Do not print or persist it in Dashboard output:
+
+```bash
+bun -e 'console.log(crypto.getRandomValues(new Uint8Array(32)).toBase64())'
+```
+
+Losing this key makes the persisted Gateway fallback and existing TOTP seeds
+unusable after restore. It is not stored in SQLite. WebAuthn public keys and
+password-hashed recovery validators need no equivalent decryption key.
 
 ## Execution Roles And Resource Scopes
 

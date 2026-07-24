@@ -12,9 +12,8 @@ http://127.0.0.1:3100/api
 
 Browser/external access goes through the Dashboard UI and session cookie.
 Non-browser automation can use a deliberately scoped bearer credential.
-Tokenless localhost requests still need a session cookie unless the transitional
-`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` bypass is set and the request is a direct
-loopback request without forwarded-client headers.
+Tokenless localhost requests still need a session cookie. Direct loopback is
+not an authentication mechanism.
 
 ## Response Shape
 
@@ -46,14 +45,31 @@ their configured `agents:*`, `audit:read`, `cache:read`, `notifications:*`,
 terminal/exec, config/files, sessions/chat, Docker, deploy, restart, backups,
 cache refresh, and scheduled-job mutation are not automation-token accessible.
 Invalid or insufficient bearer credentials never fall back to a browser session
-or the transitional loopback bypass.
+or another authentication mechanism.
 
 Public routes:
 
 - `GET /api/health`
-- all `/api/auth/*` routes
+- `GET /api/auth/bootstrap`
+- `GET /api/auth/session`
+- `POST /api/auth/register-first-user`
+- `POST /api/auth/login`
+- `POST /api/auth/login/totp`
+- `POST /api/auth/login/recovery`
+- `POST /api/auth/login/webauthn/options`
+- `POST /api/auth/login/webauthn/verify`
+- `POST /api/auth/logout`
 
 The WebSocket endpoint `/ws` is also authenticated and origin-checked.
+
+Account-security endpoints under `/api/account/security/*` are protected
+session routes. They manage MFA, passwords, recovery codes, and browser
+sessions and never inherit public auth-route treatment.
+
+Sessions expire after 30 days absolutely and after 30 minutes of inactivity by
+default. Password and second-factor failures additionally use persistent
+account-scoped throttling. Privileged browser actions require a second-factor
+verification within the configured recent-auth window.
 
 Unsafe browser mutations must come from an allowed exact `Origin` and may not
 carry `Sec-Fetch-Site: same-site` or `cross-site`. Same-origin Dashboard calls
@@ -80,6 +96,7 @@ Common statuses:
 | ------ | ------------------------------------------------------------------------- |
 | `200`  | Read/update/action succeeded.                                             |
 | `201`  | Resource created.                                                         |
+| `202`  | Password accepted; a second login factor is still required.              |
 | `400`  | Invalid request JSON, params, or body.                                    |
 | `401`  | Missing/invalid authentication or invalid Gateway token during bootstrap. |
 | `403`  | Origin, scope, path, or proxy policy rejection.                           |
