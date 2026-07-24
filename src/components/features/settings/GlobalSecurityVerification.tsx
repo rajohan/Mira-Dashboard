@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import {
     useAccountSecurity,
+    usePasswordReauthentication,
     useRecoveryStepUp,
     useTotpStepUp,
     useWebAuthnStepUp,
@@ -14,7 +15,7 @@ import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
 import { Modal } from "../../ui/Modal";
 
-type VerificationRequest = "enroll" | "step-up" | undefined;
+type VerificationRequest = "enroll" | "password" | "step-up" | undefined;
 type CodeMethod = "recovery" | "totp" | undefined;
 
 function errorMessage(error: unknown): string {
@@ -25,14 +26,16 @@ function errorMessage(error: unknown): string {
 
 /** Handles central enrollment and fresh-MFA requirements for privileged actions. */
 export function GlobalSecurityVerification() {
-    const { isAuthenticated } = useAuthStore();
+    const { isAuthenticated, mfaEnabled } = useAuthStore();
     const { data } = useAccountSecurity(isAuthenticated);
+    const passwordReauth = usePasswordReauthentication();
     const totpStepUp = useTotpStepUp();
     const recoveryStepUp = useRecoveryStepUp();
     const webAuthnStepUp = useWebAuthnStepUp();
     const [request, setRequest] = useState<VerificationRequest>();
     const [codeMethod, setCodeMethod] = useState<CodeMethod>();
     const [code, setCode] = useState("");
+    const [password, setPassword] = useState("");
     const [error, setError] = useState<string>();
     const [isComplete, setIsComplete] = useState(false);
 
@@ -43,9 +46,16 @@ export function GlobalSecurityVerification() {
                     code?: string;
                 }>
             ).detail?.code;
-            setRequest(code === "mfa_enrollment_required" ? "enroll" : "step-up");
+            setRequest(
+                code === "mfa_enrollment_required"
+                    ? "enroll"
+                    : code === "recent_verification_required" && !mfaEnabled
+                      ? "password"
+                      : "step-up"
+            );
             setCodeMethod(undefined);
             setCode("");
+            setPassword("");
             setError(undefined);
             setIsComplete(false);
         }
@@ -57,14 +67,27 @@ export function GlobalSecurityVerification() {
                 onVerificationRequired
             );
         };
-    }, []);
+    }, [mfaEnabled]);
 
     function close(): void {
         setRequest(undefined);
         setCodeMethod(undefined);
         setCode("");
+        setPassword("");
         setError(undefined);
         setIsComplete(false);
+    }
+
+    async function verifyPassword(): Promise<void> {
+        if (!password) return;
+        setError(undefined);
+        try {
+            await passwordReauth.mutateAsync(password);
+            setPassword("");
+            setIsComplete(true);
+        } catch (error_) {
+            setError(errorMessage(error_));
+        }
     }
 
     async function verifyCode(): Promise<void> {
@@ -95,7 +118,10 @@ export function GlobalSecurityVerification() {
 
     const methods = data?.factors.methods ?? [];
     const isPending =
-        totpStepUp.isPending || recoveryStepUp.isPending || webAuthnStepUp.isPending;
+        passwordReauth.isPending ||
+        totpStepUp.isPending ||
+        recoveryStepUp.isPending ||
+        webAuthnStepUp.isPending;
 
     return (
         <Modal
@@ -105,7 +131,9 @@ export function GlobalSecurityVerification() {
             title={
                 request === "enroll"
                     ? "Protect privileged actions"
-                    : "Verify this privileged action"
+                    : request === "password"
+                      ? "Verify current password"
+                      : "Verify this privileged action"
             }
         >
             {request === "enroll" ? (
@@ -136,6 +164,38 @@ export function GlobalSecurityVerification() {
                     <Button className="w-full" onClick={close}>
                         Done
                     </Button>
+                </div>
+            ) : request === "password" ? (
+                <div className="space-y-3">
+                    <p className="text-sm text-primary-300">
+                        Confirm your current Dashboard password. The verification remains
+                        valid for a short period.
+                    </p>
+
+                    {error ? <Alert variant="error">{error}</Alert> : undefined}
+
+                    <form
+                        className="space-y-3"
+                        onSubmit={(event_) => {
+                            event_.preventDefault();
+                            void verifyPassword();
+                        }}
+                    >
+                        <Input
+                            autoComplete="current-password"
+                            label="Current password"
+                            onChange={(event_) => setPassword(event_.target.value)}
+                            type="password"
+                            value={password}
+                        />
+                        <Button
+                            className="w-full"
+                            disabled={isPending || !password}
+                            type="submit"
+                        >
+                            Verify
+                        </Button>
+                    </form>
                 </div>
             ) : (
                 <div className="space-y-3">

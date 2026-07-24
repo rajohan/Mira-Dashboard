@@ -45,9 +45,7 @@ export function isSensitiveConfigKey(key: string): boolean {
     const canonical = canonicalKey(key);
     return (
         SENSITIVE_CANONICAL_KEYS.has(canonical) ||
-        SENSITIVE_KEY_SUFFIXES.some(
-            (suffix) => canonical.length > suffix.length && canonical.endsWith(suffix)
-        )
+        SENSITIVE_KEY_SUFFIXES.some((suffix) => canonical.endsWith(suffix))
     );
 }
 

@@ -626,7 +626,12 @@ describe("Dashboard multi-factor authentication", () => {
                 },
             },
             storage: {
+                accessKey: "access-secret",
+                authToken: "auth-secret",
                 backupEncryptionKey: "backup-secret",
+                clientSecret: "client-secret",
+                encryptionKey: "encryption-secret",
+                secretKey: "secret-key-secret",
                 seed: "seed-secret",
             },
             gateway: { auth: { password: "gateway-secret" } },
@@ -641,7 +646,12 @@ describe("Dashboard multi-factor authentication", () => {
                 },
             },
             storage: {
+                accessKey: CONFIG_REDACTION_SENTINEL,
+                authToken: CONFIG_REDACTION_SENTINEL,
                 backupEncryptionKey: CONFIG_REDACTION_SENTINEL,
+                clientSecret: CONFIG_REDACTION_SENTINEL,
+                encryptionKey: CONFIG_REDACTION_SENTINEL,
+                secretKey: CONFIG_REDACTION_SENTINEL,
                 seed: CONFIG_REDACTION_SENTINEL,
             },
             gateway: {
@@ -675,8 +685,13 @@ describe("Dashboard multi-factor authentication", () => {
         ).toBe(true);
         const maskedJson = redactConfigJsonText(JSON.stringify(current));
         expect(maskedJson).not.toContain("discord-secret");
+        expect(maskedJson).not.toContain("access-secret");
+        expect(maskedJson).not.toContain("auth-secret");
         expect(maskedJson).not.toContain("backup-secret");
+        expect(maskedJson).not.toContain("client-secret");
+        expect(maskedJson).not.toContain("encryption-secret");
         expect(maskedJson).not.toContain("gateway-secret");
+        expect(maskedJson).not.toContain("secret-key-secret");
         expect(maskedJson).not.toContain("seed-secret");
         expect(redactConfigJsonText("{")).toBeUndefined();
     });

@@ -3904,6 +3904,62 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("dispatches security verification for a protected Docker stack restart", async () => {
+        const verificationCodes: string[] = [];
+        let view: ReturnType<typeof renderPage> | undefined;
+        const onVerificationRequired = (event: Event) => {
+            const code = (event as CustomEvent<{ code?: string }>).detail?.code;
+            if (code) {
+                verificationCodes.push(code);
+            }
+        };
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (method === "POST" && url === "/api/docker/stack/action") {
+                    return Response.json(
+                        {
+                            code: "step_up_required",
+                            error: "Recent MFA verification is required",
+                        },
+                        { status: 403 }
+                    );
+                }
+
+                return apiResponse(url, method, init);
+            }
+        );
+        addEventListener("mira:security-verification-required", onVerificationRequired);
+        try {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: fetchMock,
+                writable: true,
+            });
+
+            view = renderPage(createElement(Docker));
+            await waitFor(() => {
+                expect(screen.getByText("Updater overview")).toBeInTheDocument();
+            });
+
+            clickElement(screen.getByRole("button", { name: /restart stack/i }));
+            await waitFor(() => {
+                expect(verificationCodes).toContain("step_up_required");
+            });
+            expect(
+                screen.getByText(/Recent MFA verification is required/i)
+            ).toBeInTheDocument();
+        } finally {
+            view?.unmount();
+            view?.queryClient.clear();
+            removeEventListener(
+                "mira:security-verification-required",
+                onVerificationRequired
+            );
+        }
+    });
+
     it("clears stale Docker detail stats when live container stats are absent", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {

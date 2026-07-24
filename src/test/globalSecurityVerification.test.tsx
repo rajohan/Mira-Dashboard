@@ -39,6 +39,20 @@ const securitySummary: AccountSecuritySummary = {
     },
 };
 
+const passwordOnlySecuritySummary: AccountSecuritySummary = {
+    ...securitySummary,
+    factors: {
+        methods: [],
+        recoveryCodesRemaining: 0,
+        totpFactors: [],
+        webAuthnCredentials: [],
+    },
+    recentVerification: {
+        mfa: false,
+        password: false,
+    },
+};
+
 function renderVerification() {
     const queryClient = new QueryClient({
         defaultOptions: {
@@ -126,6 +140,96 @@ describe("Global security verification", () => {
         expect(
             screen.queryByRole("heading", { name: "Protect privileged actions" })
         ).not.toBeInTheDocument();
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("offers password reauthentication when MFA is not enabled", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "password",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-24T12:00:00.000Z",
+                mfaEnabled: false,
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const passwordCalls: Array<{
+            body: unknown;
+            method: string;
+            url: string;
+        }> = [];
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                async (
+                    input: RequestInfo | URL,
+                    init?: RequestInit
+                ): Promise<Response> => {
+                    const url = String(input);
+                    const method = init?.method ?? "GET";
+                    const body =
+                        typeof init?.body === "string"
+                            ? JSON.parse(init.body)
+                            : undefined;
+                    passwordCalls.push({ body, method, url });
+
+                    if (url === "/api/account/security" && method === "GET") {
+                        return Response.json(passwordOnlySecuritySummary);
+                    }
+                    if (
+                        url === "/api/account/security/reauth/password" &&
+                        method === "POST"
+                    ) {
+                        return Response.json({ isOk: true });
+                    }
+                    if (url === "/api/auth/session" && method === "GET") {
+                        return Response.json({
+                            authenticated: true,
+                            isBootstrapRequired: false,
+                            session: {
+                                authMethod: "password",
+                                expiresAt: "2026-08-24T12:00:00.000Z",
+                                lastSeenAt: "2026-07-24T12:00:00.000Z",
+                                mfaEnabled: false,
+                            },
+                            user: { id: 1, username: "raymond" },
+                        });
+                    }
+                    throw new Error(
+                        `Unexpected password verification request: ${method} ${url}`
+                    );
+                }
+            ),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalled();
+        });
+
+        dispatchVerificationRequired("recent_verification_required");
+        expect(
+            screen.getByRole("heading", { name: "Verify current password" })
+        ).toBeInTheDocument();
+        await userEvent.type(
+            screen.getByLabelText("Current password"),
+            "current-password"
+        );
+        await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+        expect(
+            await screen.findByText("Verification complete. Retry the privileged action.")
+        ).toBeInTheDocument();
+        expect(passwordCalls).toContainEqual({
+            body: { password: "current-password" },
+            method: "POST",
+            url: "/api/account/security/reauth/password",
+        });
         act(() => {
             queryClient.clear();
         });
