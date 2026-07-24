@@ -505,6 +505,13 @@ export function useDockerPrune() {
     });
 }
 
+/** Restarts the complete Docker stack through the authenticated API client. */
+export function restartDockerStack() {
+    return apiPostRequired<{ output?: string }>("/docker/stack/action", {
+        action: "restart",
+    });
+}
+
 /** Performs start Docker exec. */
 export function startDockerExec(containerId: string, command: string) {
     return apiPostRequired<{ jobId: string }>("/docker/exec/start", {

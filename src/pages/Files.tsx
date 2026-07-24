@@ -26,6 +26,7 @@ export function Files() {
         rootLoading,
         contentLoading,
         saveMutation,
+        revealPending,
         setError,
         setMarkdownPreview,
         setJsonPreview,
@@ -35,10 +36,16 @@ export function Files() {
         handleContentChange,
         handleSave,
         handleRefresh,
+        handleReveal,
     } = useFileExplorerState();
 
     const isLoading = rootLoading || contentLoading;
-    const isEditable = !!(fileContent && !largeFileWarning && !fileContent.isBinary);
+    const isEditable = !!(
+        fileContent &&
+        !largeFileWarning &&
+        !fileContent.isBinary &&
+        !fileContent.masked
+    );
     const syntaxClass = fileContent
         ? getSyntaxClass(fileContent.path.split("/").pop()!)
         : "";
@@ -85,6 +92,7 @@ export function Files() {
                     isEditable={isEditable}
                     hasChanges={hasChanges}
                     savePending={saveMutation.isPending}
+                    revealPending={revealPending}
                     editedContent={editedContent}
                     largeFileWarning={largeFileWarning}
                     markdownPreview={markdownPreview}
@@ -95,6 +103,9 @@ export function Files() {
                     jsonValidation={jsonValidation}
                     onSave={() => {
                         void handleSave();
+                    }}
+                    onReveal={() => {
+                        void handleReveal();
                     }}
                     onContentChange={handleContentChange}
                     onMarkdownPreviewChange={setMarkdownPreview}

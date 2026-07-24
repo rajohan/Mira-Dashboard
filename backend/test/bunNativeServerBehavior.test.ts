@@ -19,9 +19,17 @@ const AUTOMATION_CREDENTIALS = JSON.stringify([
 const state: {
     baseUrl: string;
     child?: ReturnType<typeof Bun.spawn>;
+    passwordSessionToken: string;
+    revokedSessionToken: string;
+    sessionToken: string;
+    staleSessionToken: string;
     temporaryRoot: string;
 } = {
     baseUrl: "",
+    passwordSessionToken: "",
+    revokedSessionToken: "",
+    sessionToken: "",
+    staleSessionToken: "",
     temporaryRoot: "",
 };
 
@@ -31,7 +39,11 @@ async function api<T>(
 ): Promise<{ body: T; status: number }> {
     const response = await fetch(`${state.baseUrl}${endpoint}`, {
         ...options,
-        headers: { "Content-Type": "application/json", ...options.headers },
+        headers: {
+            "Content-Type": "application/json",
+            Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
+            ...options.headers,
+        },
     });
     const text = await response.text();
     return {
@@ -50,6 +62,59 @@ function canRemoveTemporaryRoot(temporaryRoot: string): boolean {
         path.isAbsolute(temporaryRoot) &&
         path.basename(temporaryRoot).startsWith("mira-dashboard-bun-test-")
     );
+}
+
+async function connectDashboardSocket(sessionToken: string): Promise<WebSocket> {
+    const ws = new WebSocket(state.baseUrl.replace("http://", "ws://") + "/ws", {
+        headers: {
+            Cookie: `mira_dashboard_session=${encodeURIComponent(sessionToken)}`,
+        },
+    });
+    await new Promise<void>((resolve, reject) => {
+        const onMessage = (): void => {
+            cleanup();
+            resolve();
+        };
+        const onError = (): void => {
+            cleanup();
+            ws.close();
+            reject(new Error("WebSocket failed"));
+        };
+        const cleanup = (): void => {
+            clearTimeout(timer);
+            ws.removeEventListener("message", onMessage);
+            ws.removeEventListener("error", onError);
+        };
+        const timer = setTimeout(() => {
+            cleanup();
+            ws.close();
+            reject(new Error("Timed out waiting for ws state"));
+        }, 1000);
+        ws.addEventListener("message", onMessage);
+        ws.addEventListener("error", onError);
+    });
+    return ws;
+}
+
+function nextSocketMessage(
+    ws: WebSocket,
+    request: Record<string, unknown> & { id: string }
+): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+        const onMessage = (event: MessageEvent): void => {
+            const response = JSON.parse(String(event.data)) as Record<string, unknown>;
+            if (response.id !== request.id) return;
+            clearTimeout(timer);
+            ws.removeEventListener("message", onMessage);
+            resolve(response);
+        };
+        const timer = setTimeout(() => {
+            ws.removeEventListener("message", onMessage);
+            reject(new Error("Timed out waiting for ws response"));
+        }, 1000);
+        ws.addEventListener("message", onMessage);
+        ws.send(JSON.stringify(request));
+    });
 }
 
 async function drainReader(
@@ -99,6 +164,11 @@ describe("Bun-native dashboard backend", () => {
         );
         const serverScript = path.join(state.temporaryRoot, "native-server.ts");
         const serverModulePath = path.resolve(import.meta.dirname, "../src/server.ts");
+        const authModulePath = path.resolve(import.meta.dirname, "../src/auth.ts");
+        const databaseModulePath = path.resolve(
+            import.meta.dirname,
+            "../src/database.ts"
+        );
         const dockerActionsModulePath = path.resolve(
             import.meta.dirname,
             "../src/services/dockerActions.ts"
@@ -112,6 +182,8 @@ describe("Bun-native dashboard backend", () => {
             "../src/services/scheduledJobs.ts"
         );
         const serverModuleUrl = pathToFileURL(serverModulePath).href;
+        const authModuleUrl = pathToFileURL(authModulePath).href;
+        const databaseModuleUrl = pathToFileURL(databaseModulePath).href;
         const dockerActionsModuleUrl = pathToFileURL(dockerActionsModulePath).href;
         const execJobsModuleUrl = pathToFileURL(execJobsModulePath).href;
         const scheduledJobsModuleUrl = pathToFileURL(scheduledJobsModulePath).href;
@@ -119,14 +191,24 @@ describe("Bun-native dashboard backend", () => {
             serverScript,
             [
                 `import { createServer } from ${JSON.stringify(serverModuleUrl)};`,
+                `import { createSession, createUser } from ${JSON.stringify(authModuleUrl)};`,
+                `import { database } from ${JSON.stringify(databaseModuleUrl)};`,
                 `import { registerDockerExecutionActions } from ${JSON.stringify(dockerActionsModuleUrl)};`,
                 `import { registerExecExecutionActions } from ${JSON.stringify(execJobsModuleUrl)};`,
                 `import { startScheduledJobExecutor, stopScheduledJobExecutor } from ${JSON.stringify(scheduledJobsModuleUrl)};`,
                 "registerDockerExecutionActions();",
                 "registerExecExecutionActions();",
                 "startScheduledJobExecutor();",
+                "const user = await createUser('native-test-user', 'native-test-password');",
+                "const passwordUser = await createUser('native-password-user', 'native-test-password');",
+                "const passwordSessionToken = createSession(passwordUser.id, { userAgent: 'Native password test' });",
+                "const verifiedAt = new Date().toISOString();",
+                "database.prepare('UPDATE users SET mfa_enabled_at = ?, updated_at = ? WHERE id = ?').run(verifiedAt, verifiedAt, user.id);",
+                "const sessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: verifiedAt, userAgent: 'Native Bun test' });",
+                "const revokedSessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: verifiedAt, userAgent: 'Native revoked test' });",
+                "const staleSessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: new Date(Date.now() - 20 * 60_000).toISOString(), userAgent: 'Native stale test' });",
                 "const server = createServer(0);",
-                "console.log(JSON.stringify({ port: server.port }));",
+                "console.log(JSON.stringify({ passwordSessionToken, port: server.port, revokedSessionToken, sessionToken, staleSessionToken }));",
                 "process.on('SIGTERM', () => { Promise.all([server.stop(true), stopScheduledJobExecutor()]).then(() => process.exit(0)).catch(() => process.exit(1)); });",
             ].join("\n")
         );
@@ -141,7 +223,6 @@ describe("Bun-native dashboard backend", () => {
                     "dashboard.database"
                 ),
                 MIRA_DASHBOARD_AUTOMATION_CREDENTIALS: AUTOMATION_CREDENTIALS,
-                MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH: "1",
                 MIRA_DASHBOARD_FRONTEND_PATH: frontendRoot,
                 MIRA_DOCKER_COMPOSE_WRAPPER: composeWrapper,
                 MIRA_DOCKER_ROOT: dockerRoot,
@@ -190,8 +271,24 @@ describe("Bun-native dashboard backend", () => {
             throw new Error("Native server did not print port");
         }
         void drainReader(reader, decoder);
-        const { port } = JSON.parse(firstLine) as { port: number };
+        const {
+            passwordSessionToken,
+            port,
+            revokedSessionToken,
+            sessionToken,
+            staleSessionToken,
+        } = JSON.parse(firstLine) as {
+            passwordSessionToken: string;
+            port: number;
+            revokedSessionToken: string;
+            sessionToken: string;
+            staleSessionToken: string;
+        };
         state.baseUrl = `http://127.0.0.1:${port}`;
+        state.passwordSessionToken = passwordSessionToken;
+        state.revokedSessionToken = revokedSessionToken;
+        state.sessionToken = sessionToken;
+        state.staleSessionToken = staleSessionToken;
     });
 
     afterAll(async () => {
@@ -239,7 +336,7 @@ describe("Bun-native dashboard backend", () => {
         expect(bootstrap.status).toBe(200);
         expect(bootstrap.body).toEqual({
             hasGatewayToken: false,
-            isBootstrapRequired: true,
+            isBootstrapRequired: false,
         });
     });
 
@@ -313,8 +410,12 @@ describe("Bun-native dashboard backend", () => {
         });
     });
 
-    it("accepts native dashboard WebSocket connections from loopback", async () => {
-        const ws = new WebSocket(state.baseUrl.replace("http://", "ws://") + "/ws");
+    it("accepts authenticated native dashboard WebSocket connections", async () => {
+        const ws = new WebSocket(state.baseUrl.replace("http://", "ws://") + "/ws", {
+            headers: {
+                Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
+            },
+        });
         const message = await new Promise<Record<string, unknown>>((resolve, reject) => {
             const timer = setTimeout(
                 () => reject(new Error("Timed out waiting for ws state")),
@@ -336,6 +437,73 @@ describe("Bun-native dashboard backend", () => {
             sessions: [],
             type: "state",
         });
+    });
+
+    it("revalidates WebSocket sessions and requires fresh MFA for Gateway mutations", async () => {
+        const passwordSocket = await connectDashboardSocket(state.passwordSessionToken);
+        const enrollmentRequired = await nextSocketMessage(passwordSocket, {
+            id: "password-mutation",
+            method: "chat.send",
+            params: { message: "test" },
+            type: "req",
+            userActivity: true,
+        });
+        expect(enrollmentRequired).toMatchObject({
+            code: "mfa_enrollment_required",
+            id: "password-mutation",
+            isOk: false,
+            type: "response",
+        });
+        const readOnly = await nextSocketMessage(passwordSocket, {
+            id: "password-read",
+            method: "sessions.list",
+            params: {},
+            type: "req",
+        });
+        expect(readOnly).toMatchObject({
+            error: "Gateway not connected",
+            id: "password-read",
+            isOk: false,
+            type: "response",
+        });
+        passwordSocket.close();
+
+        const staleSocket = await connectDashboardSocket(state.staleSessionToken);
+        const stepUpRequired = await nextSocketMessage(staleSocket, {
+            id: "stale-mutation",
+            method: "sessions.patch",
+            params: { key: "agent:main:main" },
+            type: "req",
+        });
+        expect(stepUpRequired).toMatchObject({
+            code: "step_up_required",
+            id: "stale-mutation",
+            isOk: false,
+            type: "response",
+        });
+        staleSocket.close();
+
+        const revokedSocket = await connectDashboardSocket(state.revokedSessionToken);
+        const logout = await fetch(`${state.baseUrl}/api/auth/logout`, {
+            headers: {
+                Cookie: `mira_dashboard_session=${encodeURIComponent(state.revokedSessionToken)}`,
+            },
+            method: "POST",
+        });
+        expect(logout.status).toBe(200);
+        const closed = new Promise<CloseEvent>((resolve) => {
+            revokedSocket.addEventListener("close", resolve, { once: true });
+        });
+        revokedSocket.send(
+            JSON.stringify({
+                id: "revoked-read",
+                method: "sessions.list",
+                params: {},
+                type: "req",
+            })
+        );
+        const closeEvent = await closed;
+        expect(closeEvent.code).toBe(4401);
     });
 
     it("serves the app shell and hashed static assets", async () => {
@@ -367,6 +535,7 @@ describe("Bun-native dashboard backend", () => {
     it("preserves same-origin terminal execution and rejects cross-site mutations", async () => {
         const browserHeaders = {
             "Content-Type": "application/json",
+            Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
             Origin: state.baseUrl,
             "Sec-Fetch-Site": "same-origin",
         };
@@ -433,7 +602,7 @@ describe("Bun-native dashboard backend", () => {
         expect(auditPage.body.events).toContainEqual(
             expect.objectContaining({
                 action: "job.enqueue",
-                actor: { id: "mira-local", type: "loopback" },
+                actor: { id: "1:native-test-user", type: "user" },
                 outcome: "accepted",
                 requestId: terminalRequestId,
                 target: { id: jobId, type: "job-execution" },
@@ -442,7 +611,7 @@ describe("Bun-native dashboard backend", () => {
         expect(auditPage.body.events).toContainEqual(
             expect.objectContaining({
                 action: "job.execute",
-                actor: { id: "mira-local", type: "loopback" },
+                actor: { id: "1:native-test-user", type: "user" },
                 outcome: "succeeded",
                 requestId: terminalRequestId,
                 target: { id: jobId, type: "job-execution" },
@@ -460,6 +629,7 @@ describe("Bun-native dashboard backend", () => {
             body: JSON.stringify({ cwd: "/", path: "tmp" }),
             headers: {
                 "Content-Type": "application/json",
+                Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
                 Origin: "https://evil.example",
                 "Sec-Fetch-Site": "cross-site",
             },

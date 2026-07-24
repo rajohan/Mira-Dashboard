@@ -94,7 +94,7 @@ import {
     useAgentStatus,
     useAgentTaskHistory,
 } from "../hooks/useAgents";
-import { apiFetch, UnauthorizedError } from "../hooks/useApi";
+import { ApiError, apiFetch, UnauthorizedError } from "../hooks/useApi";
 import {
     useClearKopiaBackupAttention,
     useClearWalgBackupAttention,
@@ -183,8 +183,14 @@ import {
     useTerminalJob,
 } from "../hooks/useTerminal";
 import { useWeather } from "../hooks/useWeather";
+import { UNAUTHORIZED_EVENT_NAME } from "../lib/authBoundary";
 import { createSocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
+import {
+    hasRecentUserActivity,
+    installUserActivityTracking,
+    resetUserActivityForTests,
+} from "../lib/userActivity";
 import { compareLogEntriesByLineId } from "../pages/Logs";
 import { Reports } from "../pages/Reports";
 import { Tasks } from "../pages/Tasks";
@@ -538,7 +544,7 @@ function chatMessage(
     };
 }
 
-type FakeWebSocketListener = (event: { data?: string }) => void;
+type FakeWebSocketListener = (event: { code?: number; data?: string }) => void;
 
 class FakeWebSocket {
     static instances: FakeWebSocket[] = [];
@@ -557,7 +563,7 @@ class FakeWebSocket {
         FakeWebSocket.instances.push(this);
     }
 
-    private dispatch(type: string, event: { data?: string } = {}) {
+    private dispatch(type: string, event: { code?: number; data?: string } = {}) {
         const listeners = this.listeners.get(type) || [];
         for (const listener of listeners) {
             listener(event);
@@ -572,9 +578,9 @@ class FakeWebSocket {
         this.sent.push(data);
     }
 
-    close() {
+    close(code = 1000) {
         this.readyState = FakeWebSocket.CLOSED;
-        this.dispatch("close");
+        this.dispatch("close", { code });
     }
 
     open() {
@@ -605,10 +611,12 @@ function latestSocketRequest(socket: FakeWebSocket): {
 describe("Mira Dashboard frontend behavior", () => {
     beforeEach(() => {
         authActions.clearSession();
+        resetUserActivityForTests();
     });
 
     afterEach(() => {
         authActions.clearSession();
+        resetUserActivityForTests();
     });
 
     it("loads the app shell, router, login route, and local devtools modules", async () => {
@@ -670,6 +678,7 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(devtoolsView.container.firstChild).toBeTruthy();
             devtoolsView.unmount();
         } finally {
+            authActions.clearSession();
             Object.defineProperty(globalThis, "fetch", {
                 configurable: true,
                 value: originalFetch,
@@ -935,6 +944,7 @@ describe("Mira Dashboard frontend behavior", () => {
                     return Response.json({
                         authenticated: loginAttempts > 1,
                         isBootstrapRequired: false,
+                        session: loginAttempts > 1 ? { mfaEnabled: true } : undefined,
                         user:
                             loginAttempts > 1
                                 ? { id: 1, username: "raymond" }
@@ -969,13 +979,13 @@ describe("Mira Dashboard frontend behavior", () => {
         try {
             const view = render(createElement(RouterProvider, { router: testRouter }));
             await waitFor(() => {
-                expect(screen.getByText("Log in")).toBeInTheDocument();
+                expect(screen.getByText("Continue")).toBeInTheDocument();
                 expect(screen.queryByLabelText("Gateway Token")).not.toBeInTheDocument();
             });
 
             await userEvent.type(screen.getByLabelText("Username"), " raymond ");
             await userEvent.type(screen.getByLabelText("Password"), "wrong");
-            await userEvent.click(screen.getByRole("button", { name: "Log in" }));
+            await userEvent.click(screen.getByRole("button", { name: "Continue" }));
             await waitFor(() => {
                 expect(screen.getByText("Invalid credentials")).toBeInTheDocument();
                 expect(calls).toContain("GET /api/auth/bootstrap");
@@ -984,7 +994,7 @@ describe("Mira Dashboard frontend behavior", () => {
             const passwordInput = screen.getByLabelText("Password");
             await userEvent.clear(passwordInput);
             await userEvent.type(passwordInput, "correct-password");
-            await userEvent.click(screen.getByRole("button", { name: "Log in" }));
+            await userEvent.click(screen.getByRole("button", { name: "Continue" }));
             await waitFor(() => {
                 expect(screen.getByText("Logged in")).toBeInTheDocument();
             });
@@ -1000,6 +1010,114 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
+    it("does not issue a frontend session until TOTP login completes", async () => {
+        const { Login } = await import("../pages/Login");
+        const originalFetch = fetch;
+        const calls: string[] = [];
+        let isFactorVerified = false;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+                const url = String(input);
+                calls.push(`${init?.method ?? "GET"} ${url}`);
+                if (url === "/api/auth/bootstrap") {
+                    return Response.json({
+                        hasGatewayToken: true,
+                        isBootstrapRequired: false,
+                    });
+                }
+                if (url === "/api/auth/login" && init?.method === "POST") {
+                    return Response.json(
+                        {
+                            authenticated: false,
+                            methods: ["totp", "recovery"],
+                            mfaRequired: true,
+                        },
+                        { status: 202 }
+                    );
+                }
+                if (url === "/api/auth/login/totp" && init?.method === "POST") {
+                    expect(JSON.parse(String(init.body))).toEqual({
+                        code: "123456",
+                    });
+                    isFactorVerified = true;
+                    return Response.json({
+                        authenticated: true,
+                        mfaRequired: false,
+                    });
+                }
+                if (url === "/api/auth/session") {
+                    return Response.json({
+                        authenticated: isFactorVerified,
+                        isBootstrapRequired: false,
+                        session: isFactorVerified
+                            ? {
+                                  authMethod: "totp",
+                                  expiresAt: "2026-08-24T12:00:00.000Z",
+                                  lastSeenAt: "2026-07-24T12:00:00.000Z",
+                                  mfaEnabled: true,
+                              }
+                            : undefined,
+                        user: isFactorVerified
+                            ? { id: 1, username: "raymond" }
+                            : undefined,
+                    });
+                }
+                throw new Error(
+                    `Unexpected MFA login fetch: ${init?.method ?? "GET"} ${url}`
+                );
+            },
+            writable: true,
+        });
+
+        const rootRoute = createRootRoute({
+            component: () => createElement(Outlet),
+        });
+        const indexRoute = createRoute({
+            component: () => createElement("div", undefined, "MFA session ready"),
+            getParentRoute: () => rootRoute,
+            path: "/",
+        });
+        const loginRoute = createRoute({
+            component: Login,
+            getParentRoute: () => rootRoute,
+            path: "/login",
+        });
+        const testRouter = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/login"] }),
+            routeTree: rootRoute.addChildren([indexRoute, loginRoute]),
+        });
+
+        try {
+            const view = render(createElement(RouterProvider, { router: testRouter }));
+            await screen.findByRole("button", { name: "Continue" });
+            await userEvent.type(screen.getByLabelText("Username"), "raymond");
+            await userEvent.type(screen.getByLabelText("Password"), "correct-password");
+            await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+            await screen.findByRole("button", {
+                name: "Authenticator app",
+            });
+            expect(calls).not.toContain("GET /api/auth/session");
+
+            await userEvent.click(
+                screen.getByRole("button", { name: "Authenticator app" })
+            );
+            await userEvent.type(screen.getByLabelText("6-digit code"), "123456");
+            await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+            await screen.findByText("MFA session ready");
+            expect(calls).toContain("POST /api/auth/login/totp");
+            expect(calls).toContain("GET /api/auth/session");
+            view.unmount();
+        } finally {
+            authActions.clearSession();
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
+    });
+
     it("handles API authorization failures through the shared auth boundary", async () => {
         authActions.setSession({
             authenticated: true,
@@ -1007,9 +1125,10 @@ describe("Mira Dashboard frontend behavior", () => {
             user: { id: 1, username: "raymond" },
         });
         const unauthorizedEvents: Event[] = [];
-        addEventListener("openclaw:unauthorized", (event) => {
+        const unauthorizedHandler = (event: Event) => {
             unauthorizedEvents.push(event);
-        });
+        };
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
             value: jest.fn(async () =>
@@ -1018,10 +1137,65 @@ describe("Mira Dashboard frontend behavior", () => {
             writable: true,
         });
 
-        await expect(apiFetch("/tasks")).rejects.toBeInstanceOf(UnauthorizedError);
+        try {
+            await expect(apiFetch("/tasks")).rejects.toBeInstanceOf(UnauthorizedError);
+            expect(authStore.state.isAuthenticated).toBe(false);
+            expect(unauthorizedEvents).toHaveLength(1);
+        } finally {
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
 
-        expect(authStore.state.isAuthenticated).toBe(false);
-        expect(unauthorizedEvents).toHaveLength(1);
+    it("refreshes idle-session activity only after a real browser interaction", () => {
+        expect(hasRecentUserActivity()).toBe(false);
+        installUserActivityTracking();
+        dispatchEvent(new Event("pointerdown"));
+        expect(hasRecentUserActivity()).toBe(true);
+    });
+
+    it("surfaces privileged-action step-up requirements through one global event", async () => {
+        const verificationEvents: CustomEvent[] = [];
+        const handler = (event: Event) => {
+            verificationEvents.push(event as CustomEvent);
+        };
+        addEventListener("mira:security-verification-required", handler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json(
+                    {
+                        code: "recent_verification_required",
+                        error: "Recent password verification is required",
+                    },
+                    { status: 403 }
+                )
+            ),
+            writable: true,
+        });
+
+        try {
+            let error: unknown;
+            try {
+                await apiFetch("/restart", {
+                    method: "POST",
+                });
+            } catch (error_) {
+                error = error_;
+            }
+            expect(error).toBeInstanceOf(ApiError);
+            expect(error).toEqual(
+                expect.objectContaining({
+                    code: "recent_verification_required",
+                    status: 403,
+                })
+            );
+            expect(verificationEvents).toHaveLength(1);
+            expect(verificationEvents[0]?.detail).toEqual({
+                code: "recent_verification_required",
+            });
+        } finally {
+            removeEventListener("mira:security-verification-required", handler);
+        }
     });
 
     it("parses successful, empty, and failed API responses consistently", async () => {
@@ -1061,12 +1235,14 @@ describe("Mira Dashboard frontend behavior", () => {
             apiFetch("/tasks", { body: JSON.stringify({}), method: "POST" })
         ).rejects.toThrow("title is required");
         await expect(apiFetch("/broken")).rejects.toThrow("Unknown error");
-        expect(fetchMock).toHaveBeenCalledWith(
-            "/api/health",
-            expect.objectContaining({
-                credentials: "include",
-                headers: expect.objectContaining({ "Content-Type": "application/json" }),
-            })
+        const healthRequest = fetchMock.mock.calls.find(
+            ([input]) => input === "/api/health"
+        );
+        expect(healthRequest?.[1]).toEqual(
+            expect.objectContaining({ credentials: "include" })
+        );
+        expect(new Headers(healthRequest?.[1]?.headers).get("Content-Type")).toBe(
+            "application/json"
         );
     });
 
@@ -1234,6 +1410,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 method: "answer",
                 params: { question: true },
                 timeoutMs: 30_000,
+                userActivity: false,
             });
             socket.message({
                 type: "response",
@@ -1251,6 +1428,53 @@ describe("Mira Dashboard frontend behavior", () => {
                 error: "nope",
             });
             await expect(rejectedPromise).rejects.toBe("nope");
+
+            const verificationEvents: CustomEvent[] = [];
+            const verificationHandler = (event: Event) => {
+                verificationEvents.push(event as CustomEvent);
+            };
+            addEventListener("mira:security-verification-required", verificationHandler);
+            try {
+                const stepUpPromise = client.request("privileged.operation");
+                const stepUpRequest = latestSocketRequest(socket);
+                socket.message({
+                    type: "response",
+                    id: stepUpRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                await expect(stepUpPromise).rejects.toBe(
+                    "Recent MFA verification is required"
+                );
+                expect(verificationEvents).toHaveLength(1);
+                expect(verificationEvents[0]?.detail).toEqual({
+                    code: "step_up_required",
+                });
+            } finally {
+                removeEventListener(
+                    "mira:security-verification-required",
+                    verificationHandler
+                );
+            }
+
+            installUserActivityTracking();
+            dispatchEvent(new Event("pointerdown"));
+            const activeRequestPromise = client.request<{ active: boolean }>(
+                "active-request"
+            );
+            const activeRequest = latestSocketRequest(socket) as {
+                id: string;
+                userActivity?: boolean;
+            };
+            expect(activeRequest.userActivity).toBe(true);
+            socket.message({
+                type: "response",
+                id: activeRequest.id,
+                isOk: true,
+                payload: { active: true },
+            });
+            await expect(activeRequestPromise).resolves.toEqual({ active: true });
 
             socket.message({ type: "event", event: "agents.list", payload: [] });
             socket.error();
@@ -1395,6 +1619,50 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
+    it("logs out without reconnecting after a 4401 WebSocket close", () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            user: { id: 1, username: "raymond" },
+        });
+        const unauthorizedEvents: Event[] = [];
+        const unauthorizedHandler = (event: Event) => {
+            unauthorizedEvents.push(event);
+        };
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+
+        try {
+            const client = createSocketClient({
+                url: "ws://dashboard.test/socket",
+            });
+            client.connect();
+            const socket = FakeWebSocket.instances[0]!;
+            socket.open();
+            socket.close(4401);
+
+            expect(authStore.state.isAuthenticated).toBe(false);
+            expect(unauthorizedEvents).toHaveLength(1);
+            expect(timeoutSpy).not.toHaveBeenCalledWith(expect.any(Function), 2000);
+            expect(FakeWebSocket.instances).toHaveLength(1);
+        } finally {
+            timeoutSpy.mockRestore();
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
     it("connects the OpenClaw socket provider, publishes messages, and cleans up", async () => {
         const originalWebSocket = WebSocket;
         FakeWebSocket.instances = [];
@@ -1528,6 +1796,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 method: "ping",
                 params: { value: 1 },
                 timeoutMs: 30_000,
+                userActivity: true,
             });
             act(() => {
                 socket.message({

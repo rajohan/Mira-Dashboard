@@ -6,6 +6,11 @@ import gateway from "../gateway.ts";
 import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { objectFallback, stringFallback } from "../lib/values.ts";
+import {
+    hasConfigRedactionSentinel,
+    redactConfigSecrets,
+    restoreConfigRedactionSentinels,
+} from "../services/configRedaction.ts";
 import { OPENCLAW_GATEWAY_RESTART_ACTION } from "../services/openclawActions.ts";
 import {
     enqueueAndWaitForJobExecution,
@@ -236,7 +241,15 @@ export const openclawConfigRoutes = {
         GET: async () => {
             try {
                 const snapshot = await getConfigSnapshot();
-                return json({ ...snapshot.parsed, __hash: snapshot.hash });
+                const parsed = redactConfigSecrets(snapshot.parsed ?? {}) as Record<
+                    string,
+                    unknown
+                >;
+                return json({
+                    ...parsed,
+                    __hash: snapshot.hash,
+                    __masked: true,
+                });
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Failed to load config") },
@@ -259,11 +272,28 @@ export const openclawConfigRoutes = {
                 }
                 const configBody = { ...(body as Record<string, unknown>) };
                 delete configBody.__hash;
+                delete configBody.__masked;
+                const snapshot = await getConfigSnapshot();
+                const restoredConfigBody = restoreConfigRedactionSentinels(
+                    configBody,
+                    snapshot.parsed ?? {}
+                );
+                if (hasConfigRedactionSentinel(restoredConfigBody)) {
+                    return json(
+                        {
+                            error: "Masked secret placeholder has no corresponding stored value",
+                        },
+                        { status: 400 }
+                    );
+                }
                 const result = await patchConfigRaw(
-                    JSON.stringify(configBody),
+                    JSON.stringify(restoredConfigBody),
                     baseHash.trim()
                 );
-                return json({ isOk: true, result });
+                return json({
+                    isOk: true,
+                    result: redactConfigSecrets(result),
+                });
             } catch (error) {
                 return json(
                     { error: errorMessage(error, "Failed to update config") },

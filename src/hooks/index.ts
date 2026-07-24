@@ -5,6 +5,31 @@ export { apiDelete, apiFetch, apiPost, apiPut } from "./useApi";
 export { useQueryClient } from "@tanstack/react-query";
 
 // Domain hooks
+export type {
+    AccountSecuritySummary,
+    DashboardSession,
+    MfaMethod,
+    TotpEnrollment,
+} from "./useAccountSecurity";
+export {
+    accountSecurityKeys,
+    useAccountSecurity,
+    useChangePassword,
+    useConfirmTotpEnrollment,
+    useCreateTotpEnrollment,
+    useDisableMfa,
+    usePasswordReauthentication,
+    useRecoveryStepUp,
+    useRegisterSecurityKey,
+    useRemoveSecurityKey,
+    useRemoveTotpFactor,
+    useRevokeAllSessions,
+    useRevokeOtherSessions,
+    useRevokeSession,
+    useRotateRecoveryCodes,
+    useTotpStepUp,
+    useWebAuthnStepUp,
+} from "./useAccountSecurity";
 export {
     backupKeys,
     useClearKopiaBackupAttention,
@@ -39,7 +64,13 @@ export {
     useToggleCronJob,
     useUpdateCronJob,
 } from "./useCron";
-export { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
+export {
+    fileKeys,
+    useFileContent,
+    useFiles,
+    useRevealFile,
+    useSaveFile,
+} from "./useFiles";
 export { useHealth } from "./useHealth";
 export type {
     JobExecution,

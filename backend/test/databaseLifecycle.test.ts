@@ -22,6 +22,7 @@ import {
     validateDatabaseMigrationHistory,
 } from "../src/databaseMigrationRunner.ts";
 import { initialSchemaMigration } from "../src/databaseMigrations/0001InitialSchema.ts";
+import { databaseMigrations } from "../src/databaseMigrations/index.ts";
 import {
     prepareDatabaseStorage,
     secureSqliteFilePermissions,
@@ -59,6 +60,30 @@ function runSql(database: Database, sql: string): void {
     }
 }
 
+function seedMigrationVersion(database: Database, version: number): void {
+    database.run(`
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            checksum TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        ) STRICT
+    `);
+    for (const migration of databaseMigrations.slice(0, version)) {
+        database.run(migration.sql);
+        const checksum = new Bun.CryptoHasher("sha256")
+            .update(`${migration.version}\0${migration.name}\0${migration.sql}`)
+            .digest("hex");
+        database
+            .prepare(
+                `INSERT INTO schema_migrations (
+                    version, name, checksum, applied_at
+                 ) VALUES (?, ?, ?, ?)`
+            )
+            .run(migration.version, migration.name, checksum, "2026-07-23T00:00:00.000Z");
+    }
+}
+
 function mode(filePath: string): number {
     return statSync(filePath).mode & 0o777;
 }
@@ -84,10 +109,10 @@ describe("Dashboard SQLite lifecycle", () => {
             const first = applyDatabaseMigrations(database, databasePath);
             const second = applyDatabaseMigrations(database, databasePath);
 
-            expect(first.applied).toEqual([1, 2, 3, 4, 5]);
+            expect(first.applied).toEqual([1, 2, 3, 4, 5, 6]);
             expect(first.backup).toBeUndefined();
             expect(second).toEqual({ applied: [] });
-            expect(validateDatabaseMigrationHistory(database)).toBe(5);
+            expect(validateDatabaseMigrationHistory(database)).toBe(6);
             expect(
                 database
                     .query("SELECT name FROM pragma_table_info('auth_sessions')")
@@ -220,23 +245,18 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("upgrades an existing version 3 database with migrations 4 and 5", () => {
+    it("upgrades an existing version 3 database with migrations 4 through 6", () => {
         const root = temporaryRoot("mira-db-migrations-v3-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
         try {
-            applyDatabaseMigrations(database, databasePath);
-            database.run("DROP INDEX idx_notifications_read_retention");
-            database.run("DROP INDEX idx_chat_runtime_snapshots_retention");
-            database.run("DROP TABLE audit_events");
-            database.run("CREATE INDEX idx_notifications_read ON notifications(is_read)");
-            database.prepare("DELETE FROM schema_migrations WHERE version >= 4").run();
+            seedMigrationVersion(database, 3);
 
             expect(validateDatabaseMigrationHistory(database)).toBe(3);
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [4, 5],
+                applied: [4, 5, 6],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(5);
+            expect(validateDatabaseMigrationHistory(database)).toBe(6);
             expect(
                 database
                     .query(
@@ -268,18 +288,18 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("upgrades an existing version 4 database with only migration 5", () => {
+    it("upgrades an existing version 4 database with migrations 5 and 6", () => {
         const root = temporaryRoot("mira-db-migrations-v4-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
         try {
-            applyDatabaseMigrations(database, databasePath);
-            database.run("DROP TABLE audit_events");
-            database.prepare("DELETE FROM schema_migrations WHERE version = 5").run();
+            seedMigrationVersion(database, 4);
 
             expect(validateDatabaseMigrationHistory(database)).toBe(4);
-            expect(migrateDisposableDatabaseCopy(database)).toEqual({ applied: [5] });
-            expect(validateDatabaseMigrationHistory(database)).toBe(5);
+            expect(migrateDisposableDatabaseCopy(database)).toEqual({
+                applied: [5, 6],
+            });
+            expect(validateDatabaseMigrationHistory(database)).toBe(6);
             expect(
                 database
                     .query(
@@ -299,6 +319,62 @@ describe("Dashboard SQLite lifecycle", () => {
                 { name: "idx_audit_events_request" },
                 { name: "idx_audit_events_target" },
             ]);
+        } finally {
+            database.close();
+        }
+    });
+
+    it("revokes every pre-v6 Dashboard session during the MFA upgrade", () => {
+        const root = temporaryRoot("mira-db-migrations-v5-sessions-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        try {
+            seedMigrationVersion(database, 5);
+            const timestamp = "2026-07-23T00:00:00.000Z";
+            database
+                .prepare(
+                    `INSERT INTO users (
+                        username, password_hash, created_at, updated_at
+                     ) VALUES ('migration-user', 'hash', ?, ?)`
+                )
+                .run(timestamp, timestamp);
+            const userId = Number(
+                (
+                    database
+                        .query("SELECT id FROM users WHERE username = 'migration-user'")
+                        .get() as { id: number }
+                ).id
+            );
+            database
+                .prepare(
+                    `INSERT INTO auth_sessions (
+                        id, user_id, created_at, expires_at, validator_hash
+                     ) VALUES
+                       (?, ?, ?, ?, NULL),
+                       (?, ?, ?, ?, ?)`
+                )
+                .run(
+                    "a".repeat(64),
+                    userId,
+                    timestamp,
+                    "2099-01-01T00:00:00.000Z",
+                    "b".repeat(32),
+                    userId,
+                    timestamp,
+                    "2099-01-01T00:00:00.000Z",
+                    "c".repeat(64)
+                );
+
+            expect(
+                database.query("SELECT COUNT(*) AS count FROM auth_sessions").get()
+            ).toEqual({ count: 2 });
+            expect(migrateDisposableDatabaseCopy(database)).toEqual({
+                applied: [6],
+            });
+            expect(validateDatabaseMigrationHistory(database)).toBe(6);
+            expect(
+                database.query("SELECT COUNT(*) AS count FROM auth_sessions").get()
+            ).toEqual({ count: 0 });
         } finally {
             database.close();
         }
@@ -376,7 +452,7 @@ describe("Dashboard SQLite lifecycle", () => {
         try {
             expect(
                 database.query("SELECT COUNT(*) AS count FROM schema_migrations").get()
-            ).toEqual({ count: 5 });
+            ).toEqual({ count: 6 });
         } finally {
             database.close();
         }
@@ -402,7 +478,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 );
 
             const result = applyDatabaseMigrations(database, databasePath);
-            expect(result.applied).toEqual([1, 2, 3, 4, 5]);
+            expect(result.applied).toEqual([1, 2, 3, 4, 5, 6]);
             expect(result.backup).toMatchObject({
                 kind: "pre-migration",
                 restoreVerified: true,
@@ -456,14 +532,14 @@ describe("Dashboard SQLite lifecycle", () => {
                 .prepare(
                     `INSERT INTO schema_migrations (
                         version, name, checksum, applied_at
-                     ) VALUES (6, 'unknown', 'unknown', ?)`
+                     ) VALUES (7, 'unknown', 'unknown', ?)`
                 )
                 .run("2026-07-23T00:00:00.000Z");
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
-                "unknown SQLite migration version 6"
+                "unknown SQLite migration version 7"
             );
 
-            database.prepare("DELETE FROM schema_migrations WHERE version = 6").run();
+            database.prepare("DELETE FROM schema_migrations WHERE version = 7").run();
             database.prepare("DELETE FROM schema_migrations WHERE version = 2").run();
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
                 "not contiguous"
@@ -545,7 +621,10 @@ describe("Dashboard SQLite lifecycle", () => {
         };
         expect(preflightResult).toMatchObject({
             backup: { kind: "pre-deploy", restoreVerified: true },
-            migrationTest: { applied: [1, 2, 3, 4, 5], currentVersion: 5 },
+            migrationTest: {
+                applied: [1, 2, 3, 4, 5, 6],
+                currentVersion: 6,
+            },
         });
         expect(getSqliteBackupInventory(databasePath).count).toBe(1);
         const unchangedBackup = new Database(preflightResult.backup.path, {
@@ -729,18 +808,27 @@ describe("Dashboard SQLite lifecycle", () => {
             database
                 .prepare(
                     `INSERT INTO auth_sessions (
-                        id, user_id, created_at, expires_at, validator_hash
-                     ) VALUES (?, ?, ?, ?, NULL), (?, ?, ?, ?, NULL)`
+                        id, user_id, created_at, expires_at, validator_hash,
+                        last_seen_at, authenticated_at, auth_method
+                     ) VALUES
+                       (?, ?, ?, ?, ?, ?, ?, 'password'),
+                       (?, ?, ?, ?, ?, ?, ?, 'password')`
                 )
                 .run(
                     "old-session",
                     userId,
                     oldTimestamp,
                     oldTimestamp,
+                    "a".repeat(64),
+                    oldTimestamp,
+                    oldTimestamp,
                     "current-session",
                     userId,
                     currentTimestamp,
-                    "2026-08-01T00:00:00.000Z"
+                    "2026-08-01T00:00:00.000Z",
+                    "b".repeat(64),
+                    now.toISOString(),
+                    currentTimestamp
                 );
             database
                 .prepare(

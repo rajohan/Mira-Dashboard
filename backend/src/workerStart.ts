@@ -1,3 +1,4 @@
+import { validateAuthenticationConfig, validateStoredSecretConfig } from "./auth.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
 
 const WORKER_KEEP_ALIVE_INTERVAL_MS = 60_000;
@@ -14,6 +15,8 @@ export function createWorkerKeepAliveHandle(): NodeJS.Timeout {
 }
 
 export async function runDashboardWorker(): Promise<void> {
+    validateAuthenticationConfig();
+    validateStoredSecretConfig();
     const shutdown = Promise.withResolvers<NodeJS.Signals>();
     const stop = (signal: NodeJS.Signals) => shutdown.resolve(signal);
     const keepAlive = createWorkerKeepAliveHandle();

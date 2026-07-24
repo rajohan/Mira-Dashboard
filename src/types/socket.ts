@@ -3,6 +3,7 @@ import type { Session } from "./session";
 /** Represents socket envelope. */
 export interface SocketEnvelope {
     type?: string;
+    code?: string;
     id?: string;
     isOk?: boolean;
     error?: unknown;

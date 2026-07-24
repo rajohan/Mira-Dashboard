@@ -66,9 +66,15 @@ edit a released migration. Add the next numbered file instead.
 | ---------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `schema_migrations`                | Applied migration versions and immutable checksums.                   | Immutable audit history; never age-pruned.                               |
 | `audit_events`                     | Redacted request and privileged job lifecycle audit trail.            | Triggers reject update, delete, and replacement. No automatic pruning.   |
-| `users`                            | Dashboard auth users.                                                 | Authoritative records; removed only by explicit auth flows.              |
-| `auth_sessions`                    | Selector plus hashed-validator Dashboard sessions.                    | Removed after `expires_at`.                                              |
-| `app_config`                       | Small persistent config, currently including `gateway_token`.         | Keyed upsert or explicit removal; naturally bounded.                     |
+| `users`                            | Dashboard auth users and explicit MFA-enabled timestamp.              | Authoritative records; removed only by explicit auth flows.              |
+| `auth_sessions`                    | Hashed-validator sessions with idle, MFA, elevation, and device state. | Removed after idle/absolute expiry or explicit revocation.               |
+| `auth_pending_logins`              | Hashed-validator password-first MFA handoffs.                          | Five-minute expiry; consumed on success or bounded failures.             |
+| `auth_webauthn_challenges`         | Session/pending-bound registration and assertion challenges.          | Five-minute expiry; atomically consumed by verification.                 |
+| `user_totp_factors`                | Named TOTP factors with encrypted seeds and replay state.              | Unconfirmed setup expires; confirmed factors require explicit removal.   |
+| `user_webauthn_credentials`        | Named WebAuthn public keys, counters, transports, and device state.     | Retained until explicit removal; multiple backup keys are supported.     |
+| `user_recovery_codes`              | One-time recovery selectors and password-hashed validators.            | Consumed once; replaced as one set on rotation.                          |
+| `auth_rate_limit_buckets`          | Hashed account/failure buckets and progressive cooldown state.         | Cleared on success; stale state removed after 24 hours.                  |
+| `app_config`                       | Small persistent config, currently including an encrypted `gateway_token` envelope. | Keyed upsert or explicit removal; naturally bounded.          |
 | `tasks`                            | Local task records.                                                   | Done tasks are removed after 365 idle days.                              |
 | `task_events`                      | Audit/event records for task changes.                                 | Follows old done tasks; otherwise at most 5,000 rows per task.           |
 | `task_updates`                     | Markdown progress updates on tasks.                                   | Follows old done tasks; otherwise at most 5,000 rows per task.           |
@@ -90,6 +96,17 @@ edit a released migration. Add the next numbered file instead.
 | `chat_runtime_snapshot_events`     | Ordered durable replay events for those snapshots.                    | Follows retained snapshots; orphan rows are removed.                     |
 | `docker_managed_services`          | Docker updater managed service inventory.                             | Reconciled with current Compose inventory.                               |
 | `docker_update_events`             | Docker updater event history.                                         | 180 days and at most 5,000 rows.                                         |
+
+TOTP seeds and the persisted OpenClaw Gateway token are verifiable secrets and
+therefore cannot be one-way hashed. Dashboard encrypts them with versioned
+AES-256-GCM, per-record nonces, and context-bound associated data. The exact
+32-byte `MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY` remains outside SQLite and must
+be preserved with backup recovery material. Losing it makes the persisted
+Gateway fallback and restored TOTP factors unusable.
+Recovery-code validators and session/pending validators are one-way protected;
+plaintext recovery codes are displayed once and never stored. WebAuthn stores
+public keys, not YubiKey secrets. Migration v6 deletes all pre-v6 sessions so
+legacy reusable session ids do not survive the upgrade.
 
 ## Automated Backup And Restore Verification
 

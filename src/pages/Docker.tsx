@@ -23,6 +23,7 @@ import { Modal } from "../components/ui/Modal";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { Select } from "../components/ui/Select";
 import {
+    restartDockerStack,
     startDockerExec,
     stopDockerExec,
     useDeleteDockerImage,
@@ -173,17 +174,7 @@ export function Docker() {
     async function handleStackRestart() {
         showActionOutput("Restarting Docker stack...");
         try {
-            const response = await fetch("/api/docker/stack/action", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ action: "restart" }),
-            });
-            const result = (await response.json()) as { output?: string; error?: string };
-            if (!response.ok) {
-                throw new Error(result.error || "Failed to restart stack");
-            }
+            const result = await restartDockerStack();
             await refreshDockerSummary();
             showActionOutput(result.output || "Docker stack restart completed.");
         } catch (error) {

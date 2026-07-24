@@ -3,6 +3,7 @@ import path from "node:path";
 import gateway from "./gateway.ts";
 import { json } from "./http.ts";
 import { withRequestPolicy } from "./requestPolicy.ts";
+import { accountSecurityRoutes } from "./routes/accountSecurityRoutes.ts";
 import { agentRoutes } from "./routes/agentRoutes.ts";
 import { auditRoutes } from "./routes/auditRoutes.ts";
 import { authRoutes } from "./routes/authRoutes.ts";
@@ -85,6 +86,7 @@ const routeTable = {
     "/api/sessions": {
         GET: sessions,
     },
+    ...accountSecurityRoutes,
     ...agentRoutes,
     ...auditRoutes,
     ...authRoutes,

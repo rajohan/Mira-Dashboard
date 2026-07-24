@@ -22,10 +22,12 @@ On backend startup, the Gateway token is selected in this order:
 
 1. `OPENCLAW_GATEWAY_TOKEN`
 2. `OPENCLAW_TOKEN`
-3. persisted `app_config.gateway_token`
+3. decrypted `app_config.gateway_token` AES-GCM envelope
 
 Environment tokens win over the persisted database token. This is intentional:
 production should prefer Doppler-managed state over older bootstrap state.
+The fallback value is decrypted only in backend process memory using
+`MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY`; it is never returned to browsers.
 
 ## Bootstrap Validation
 
@@ -34,7 +36,7 @@ Dashboard user:
 
 1. Reject immediately if bootstrap is already closed.
 2. Serialize overlapping first-user attempts in the backend process.
-3. Persist and switch to the submitted token.
+3. Encrypt, persist, and switch to the submitted token.
 4. Wait for an authenticated Gateway hello with `gateway.initAndWait(...)`.
 5. Create the first user only after Gateway validation succeeds.
 6. Roll back the submitted token and user/session state if validation or user

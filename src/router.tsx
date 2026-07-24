@@ -35,7 +35,13 @@ const loginRoute = createRoute({
     beforeLoad: async () => {
         await authActions.initialize();
         if (authStore.state.isAuthenticated) {
-            throw redirect({ to: "/" });
+            if (authStore.state.mfaEnabled) {
+                throw redirect({ to: "/" });
+            }
+            throw redirect({
+                to: "/settings",
+                search: { view: "dashboard" },
+            });
         }
     },
     component: Login,
@@ -144,9 +150,19 @@ const moltbookRoute = createRoute({
     component: Moltbook,
 });
 
+/** Keeps only the supported Settings tab in the URL. */
+export function normalizeSettingsSearch(search: Record<string, unknown>): {
+    view?: "dashboard" | "openclaw";
+} {
+    return search.view === "dashboard" || search.view === "openclaw"
+        ? { view: search.view }
+        : {};
+}
+
 const settingsRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
     path: "/settings",
+    validateSearch: normalizeSettingsSearch,
     component: Settings,
 });
 

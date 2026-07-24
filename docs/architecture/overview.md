@@ -97,13 +97,18 @@ Key files:
 All `/api/*` routes are authenticated except:
 
 - `/api/health`
-- `/api/auth/*`
+- the exact bootstrap, session-state, login-factor, and logout endpoints under
+  `/api/auth/*`.
 
-The browser authenticates with an HTTP-only session cookie. Non-browser callers
-may use a hash-only bearer identity, but only for centrally mapped capabilities.
-The first-user bootstrap flow validates the OpenClaw Gateway token before
-creating the first user. The direct-loopback bypass remains a transitional
-compatibility path while local callers migrate to scoped credentials.
+The browser authenticates with an HTTP-only session cookie. Password-first
+login creates only a short-lived pending cookie when MFA is enabled; the
+durable session is created after WebAuthn, TOTP, or recovery verification.
+Sessions have absolute and idle expiration, and privileged actions require
+recent second-factor verification. Non-browser callers may use a hash-only
+bearer identity, but only for centrally mapped capabilities. Direct loopback is
+not an authentication mechanism. The first-user bootstrap flow validates the
+OpenClaw Gateway token before creating the first user, then directs the
+operator to Dashboard settings to enroll MFA.
 
 Rate limits:
 
@@ -117,8 +122,7 @@ Unsafe browser API methods additionally pass exact Origin and Fetch Metadata
 checks before authentication. API and static responses receive central CSP,
 clickjacking, MIME-sniffing, referrer, permissions, and request-correlation
 headers. Direct non-browser clients remain supported when provenance headers
-are absent. They still require a scoped credential, session, or the explicitly
-enabled transitional loopback bypass.
+are absent. They still require a scoped credential or session.
 
 ## Gateway Integration
 
@@ -129,7 +133,7 @@ Startup token precedence:
 
 1. `OPENCLAW_GATEWAY_TOKEN`
 2. `OPENCLAW_TOKEN`
-3. persisted `app_config.gateway_token`
+3. decrypted `app_config.gateway_token` AES-GCM envelope
 
 The Dashboard WebSocket at `/ws` requires:
 

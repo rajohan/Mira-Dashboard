@@ -12,12 +12,20 @@ interface AuthState {
     isAuthenticated: boolean;
     isInitialized: boolean;
     isBootstrapRequired: boolean;
+    mfaEnabled: boolean;
 }
 
 /** Represents the session API response. */
-interface SessionResponse {
+export interface SessionResponse {
     authenticated: boolean;
     isBootstrapRequired: boolean;
+    session?: {
+        authMethod: string;
+        expiresAt: string;
+        lastSeenAt: string;
+        mfaEnabled: boolean;
+        mfaVerifiedAt?: string;
+    };
     user: AuthUser | undefined;
 }
 
@@ -35,6 +43,7 @@ const initialState: AuthState = {
     isAuthenticated: false,
     isInitialized: false,
     isBootstrapRequired: false,
+    mfaEnabled: false,
 };
 
 /** Defines auth store. */
@@ -90,6 +99,7 @@ export const authActions: AuthActions = {
             isAuthenticated: payload.authenticated,
             isInitialized: true,
             isBootstrapRequired: payload.isBootstrapRequired,
+            mfaEnabled: payload.session?.mfaEnabled ?? false,
         }));
     },
 

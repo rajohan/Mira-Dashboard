@@ -26,7 +26,7 @@ cannot infer.
 | `/logs`          | `Logs.tsx`              | log file APIs                              |
 | `/database`      | `Database.tsx`          | Postgres/PgBouncer + Dashboard SQLite      |
 | `/moltbook`      | `Moltbook.tsx`          | Moltbook cache/API data                    |
-| `/settings`      | `Settings.tsx`          | OpenClaw config and Dashboard settings     |
+| `/settings`      | `Settings.tsx`          | OpenClaw config and Dashboard security tabs |
 | `/terminal`      | `Terminal.tsx`          | terminal helper APIs                       |
 
 ## Data Fetching Expectations
@@ -88,6 +88,9 @@ For destructive actions:
 
 ## Current Operational Surfaces
 
+- Settings persists an `OpenClaw`/`Dashboard` tab in `?view=`. The Dashboard
+  tab owns password, WebAuthn/YubiKey, TOTP, recovery-code, and browser-session
+  management; the OpenClaw tab retains runtime configuration.
 - Task search includes title, body, labels, assignee, automation schedule,
   session target, model, and thinking level. Text filters trim surrounding
   whitespace before matching. Automation filters remain distinct from Kanban

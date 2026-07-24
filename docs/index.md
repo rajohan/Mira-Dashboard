@@ -29,7 +29,7 @@ away from the system it describes.
 - [Troubleshooting](operations/troubleshooting.md) - symptom-oriented checks for
   Gateway, bootstrap, SQLite, Reports, Docker, frontend, and CI issues.
 - [Auth and trust boundaries](security/auth-and-trust-boundaries.md) - route
-  auth, scoped automation, loopback migration, proxy trust, bootstrap, secrets,
+  auth, scoped automation, no-loopback policy, proxy trust, bootstrap, secrets,
   and host operations.
 - [Local development](development/local-dev.md) - developer setup and commands.
 - [Testing and PR workflow](development/testing-and-prs.md) - validation gates,

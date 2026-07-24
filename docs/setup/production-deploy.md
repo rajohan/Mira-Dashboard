@@ -29,7 +29,9 @@ This is a single-host service:
 Both tracked units preserve the production environment contract by launching
 through Doppler project/config `rajohan/prd`. Auth and origin settings such as
 `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`,
-`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH`, and
+`MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY`,
+`MIRA_DASHBOARD_WEBAUTHN_RP_ID`,
+`MIRA_DASHBOARD_WEBAUTHN_ORIGINS`, and
 `MIRA_DASHBOARD_ALLOWED_ORIGINS` remain owned by Doppler. Do not duplicate their
 values in unit files.
 
@@ -105,36 +107,56 @@ curl http://127.0.0.1:3100/api/health
 curl http://127.0.0.1:3100/api/auth/bootstrap
 ```
 
-The queue endpoint requires a valid Dashboard session unless the explicitly
-configured direct-loopback bypass is enabled. Production currently sources
-`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` from Doppler, but the portable smoke test
-does not depend on that host-specific bypass.
+Every other API route requires a valid Dashboard session or an explicitly
+allowed minimum-scope bearer credential. Direct loopback is not an
+authentication mechanism. A tokenless local check should therefore fail:
+
+```bash
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  http://127.0.0.1:3100/api/cache/heartbeat)" = "401"
+```
 
 ### Scoped Automation Rollout
 
-Scoped bearer support is backward-compatible and does not itself change
-production credentials:
+The release removes direct-loopback bypass code. Provision and migrate local
+callers before restarting into this version:
 
-1. In an untracked local shell, generate a separate validator per automation
-   identity and store only its SHA-256 hash plus minimum scopes in
+1. In an untracked privileged shell, generate a separate validator per
+   automation identity. Store only its SHA-256 hash plus minimum scopes in
    `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`. Never generate it through Dashboard
    Terminal or another tracked exec path.
-2. Restart the web unit and confirm startup plus session-based browser flows.
-3. Add the full bearer token to each calling automation's secret store, update
-   its requests without putting the token in process arguments or transcripts,
-   and smoke-test only its required endpoints.
-4. Confirm allowed and denied calls have the expected automation actor and
-   scope in `/api/audit-events`.
-5. After every local caller has migrated, unset
-   `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH`, restart the web unit, and verify that
-   tokenless loopback calls return `401` while scoped calls still succeed.
+2. Keep the full validator only in the caller's secret store. Do not put it in
+   a prompt, command argument, transcript, unit file, or the same configuration
+   surface as its hash.
+   On this host, use the four `0600` files under
+   `/home/ubuntu/.config/mira-dashboard/automation/` through
+   `/home/ubuntu/projects/mira-dashboard/scripts/miraDashboardApi.ts`.
+3. Migrate and smoke-test every caller against the currently running
+   scoped-credential-compatible release:
+   - heartbeat: `cache:read`, `reports:write`;
+   - task tracking: `agents:write`, `tasks:read`, and `tasks:write`;
+   - daily summary: `cache:read`, `reports:write`;
+   - daily brief: `cache:read`, `reports:write`, `tasks:read`.
+4. Confirm allowed and intentionally denied calls have the expected automation
+   actor and scope in `/api/audit-events`.
+5. Deploy this release, restart the web unit, verify every scoped caller again,
+   and confirm tokenless loopback returns `401`.
 
-Never put the full token and its hash in the same configuration surface. Keep
-the legacy bypass enabled until the last caller has been verified so current
-task tracking, heartbeat, and report delivery do not lose functionality.
+The OpenClaw heartbeat must retain its dedicated
+`cache:read`/`reports:write` credential.
+Task/report credentials must not be reused for heartbeat.
 
 For an authenticated browser session, also verify:
 
+- a pre-v6 session is rejected and a fresh login succeeds;
+- first bootstrap still accepts username, password, and Gateway token, then
+  stores the Gateway token only as an encrypted envelope and directs the
+  operator to **Settings → Dashboard** for MFA enrollment;
+- two named security keys can be registered and one can authenticate while the
+  other remains offline;
+- TOTP and one-time recovery each complete a test verification;
+- privileged actions require fresh second-factor verification;
+- structured OpenClaw config is masked and raw reveal requires recent MFA;
 - header/WebSocket status is connected;
 - Jobs shows the execution queue and the worker becomes idle after startup seeds;
 - Dashboard page cards load;

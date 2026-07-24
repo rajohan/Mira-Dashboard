@@ -7,7 +7,6 @@ import { describe, expect, it, jest } from "bun:test";
 
 import {
     isAllowedDashboardOrigin,
-    isAllowedLoopbackAuthOrigin,
     readJson,
     readRequestBytes,
     sessionIdFromCookie,
@@ -709,52 +708,6 @@ describe("backend service utilities", () => {
         ).toBe(false);
     });
 
-    it("limits browser loopback auth to exact loopback origins", () => {
-        expect(
-            isAllowedLoopbackAuthOrigin(new Request("http://localhost:3100/api/tasks"))
-        ).toBe(true);
-        expect(
-            isAllowedLoopbackAuthOrigin(
-                new Request("http://127.0.0.1:3100/api/tasks", {
-                    headers: { origin: "http://127.0.0.1:3100" },
-                })
-            )
-        ).toBe(true);
-        expect(
-            isAllowedLoopbackAuthOrigin(
-                new Request("http://[::ffff:127.0.0.1]:3100/api/tasks", {
-                    headers: { origin: "http://[::ffff:127.0.0.1]:3100" },
-                })
-            )
-        ).toBe(true);
-        expect(
-            isAllowedLoopbackAuthOrigin(
-                new Request("https://evil.example:3100/api/tasks", {
-                    headers: { origin: "https://evil.example:3100" },
-                })
-            )
-        ).toBe(false);
-        expect(
-            isAllowedLoopbackAuthOrigin(
-                new Request("https://evil.example:3100/api/tasks")
-            )
-        ).toBe(false);
-        expect(
-            isAllowedLoopbackAuthOrigin(
-                new Request("http://localhost:3100/api/tasks", {
-                    headers: { origin: "http://127.0.0.1:3100" },
-                })
-            )
-        ).toBe(false);
-        expect(
-            isAllowedLoopbackAuthOrigin(
-                new Request("https://localhost:3100/api/tasks", {
-                    headers: { origin: "http://localhost:3100" },
-                })
-            )
-        ).toBe(false);
-    });
-
     it("uses fake server request addresses in tests", () => {
         expect(serverWithAddress("127.0.0.1").requestIP(new Request("http://x"))).toEqual(
             { address: "127.0.0.1", family: "IPv4", port: 12_345 }
@@ -795,8 +748,15 @@ describe("backend service utilities", () => {
         const persistenceError = new Error("audit storage unavailable");
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         const routes = withRequestPolicy(
-            { "/api/audit-failure": handler },
+            { "/api/tasks": handler },
             {
+                authenticateAutomation: () => ({
+                    kind: "authenticated",
+                    principal: {
+                        id: "audit-failure-test",
+                        scopes: new Set(["tasks:write"]),
+                    },
+                }),
                 persistAuditEvent: () => {
                     throw persistenceError;
                 },
@@ -805,7 +765,7 @@ describe("backend service utilities", () => {
 
         const response = await callTestRoute(
             routes,
-            "/api/audit-failure",
+            "/api/tasks",
             serverWithAddress("127.0.0.1"),
             { method: "POST" }
         );
@@ -897,9 +857,26 @@ describe("backend service utilities", () => {
                     method: "POST",
                 }
             );
-            expect(sameOriginMutation.status).toBe(200);
+            expect(sameOriginMutation.status).toBe(401);
+            await expect(sameOriginMutation.json()).resolves.toEqual({
+                error: "Unauthorized",
+            });
+
+            const publicSameOriginMutation = await callTestRoute(
+                routes,
+                "/api/auth/login",
+                server,
+                {
+                    headers: {
+                        origin: "http://localhost",
+                        "sec-fetch-site": "same-origin",
+                    },
+                    method: "POST",
+                }
+            );
+            expect(publicSameOriginMutation.status).toBe(200);
             const sameOriginRequestId =
-                sameOriginMutation.headers.get("x-request-id") || "";
+                publicSameOriginMutation.headers.get("x-request-id") || "";
             expect(
                 listAuditEvents(200)
                     .events.filter(
@@ -967,7 +944,10 @@ describe("backend service utilities", () => {
                 error: "Job capacity is full",
             });
 
-            const authRequest = new Request("http://localhost/api/auth/login");
+            resetRequestPolicyForTests();
+            const authRequest = new Request("http://localhost/api/auth/login", {
+                method: "POST",
+            });
             const authLogin = routes["/api/auth/login"];
             if (!authLogin) {
                 throw new Error("Missing auth login test route");

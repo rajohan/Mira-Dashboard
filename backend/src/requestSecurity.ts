@@ -47,7 +47,7 @@ export function requestIdFor(request: Request): string {
 /**
  * Rejects browser mutations that identify a cross-origin or same-site source.
  * Requests without browser provenance headers remain available to direct API
- * clients and the explicitly configured direct-loopback automation boundary.
+ * clients and scoped automation credentials.
  */
 export function isAllowedMutationSource(request: Request): boolean {
     if (SAFE_REQUEST_METHODS.has(request.method.toUpperCase())) {

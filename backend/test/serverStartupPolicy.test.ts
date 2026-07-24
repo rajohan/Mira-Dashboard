@@ -690,9 +690,13 @@ describe("server start scheduler policy", () => {
             expect(sendSpy).toHaveBeenCalledWith("state");
 
             options.websocket.message(ws, new TextEncoder().encode("hello"));
+            expect(closeSpy).toHaveBeenCalledWith(
+                4401,
+                "Dashboard session is no longer valid"
+            );
             options.websocket.error(ws, new Error("boom"));
             options.websocket.close(ws);
-            expect(messageHandler).toHaveBeenCalledWith(Buffer.from("hello"));
+            expect(messageHandler).not.toHaveBeenCalled();
             expect(errorHandler).toHaveBeenCalledWith(expect.any(Error));
             expect(closeHandler).toHaveBeenCalled();
         } finally {

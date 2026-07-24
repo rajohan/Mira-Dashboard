@@ -3,8 +3,10 @@ import { RouterProvider } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
+import { GlobalSecurityVerification } from "./components/features/settings/GlobalSecurityVerification";
 import { AppErrorFallback } from "./components/ui/AppErrorFallback";
 import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
+import { UNAUTHORIZED_EVENT_NAME } from "./lib/authBoundary";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
 
@@ -21,9 +23,9 @@ export default function App() {
             void router.navigate({ to: "/login" });
         };
 
-        addEventListener("openclaw:unauthorized", onUnauthorized);
+        addEventListener(UNAUTHORIZED_EVENT_NAME, onUnauthorized);
         return () => {
-            removeEventListener("openclaw:unauthorized", onUnauthorized);
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, onUnauthorized);
         };
     }, []);
 
@@ -32,6 +34,7 @@ export default function App() {
             <QueryClientProvider client={queryClient}>
                 <OpenClawSocketProvider>
                     <RouterProvider router={router} />
+                    <GlobalSecurityVerification />
                     {DashboardDevtools ? (
                         <Suspense fallback={undefined}>
                             <DashboardDevtools />
