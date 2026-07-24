@@ -123,6 +123,7 @@ interface BackendServerEntrypointOptions {
     isDirect?: boolean;
     reportFailure?: (error: unknown) => void;
     runServer?: () => Promise<void>;
+    startServer?: () => void;
     startOnImport?: string;
 }
 
@@ -149,19 +150,20 @@ export async function runBackendServer(port = resolveListenPort()): Promise<void
 
 /**
  * Awaits direct CLI startup while preserving non-blocking opt-in startup for
- * modules imported by tests or other runtimes.
+ * modules imported by other runtimes without claiming their process signals.
  */
 export async function startBackendServerEntrypoint({
     isDirect = isDirectEntrypoint(),
     reportFailure = reportBackendServerFailure,
     runServer = runBackendServer,
+    startServer = startBackendServer,
     startOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT,
 }: BackendServerEntrypointOptions = {}): Promise<void> {
     if (!shouldStartOnImport(startOnImport, isDirect)) {
         return;
     }
     if (!isDirect) {
-        void runServer().catch(reportFailure);
+        startServer();
         return;
     }
     try {

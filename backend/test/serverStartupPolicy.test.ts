@@ -68,23 +68,26 @@ describe("server start scheduler policy", () => {
         expect(shouldStartOnImport("0", false)).toBe(false);
 
         const disabledRunner = jest.fn(async () => {});
+        const disabledStarter = jest.fn(() => {});
         await startBackendServerEntrypoint({
             isDirect: false,
             runServer: disabledRunner,
+            startServer: disabledStarter,
             startOnImport: "0",
         });
         expect(disabledRunner).not.toHaveBeenCalled();
+        expect(disabledStarter).not.toHaveBeenCalled();
 
-        const importedServer = Promise.withResolvers<void>();
-        const importedRunner = jest.fn(() => importedServer.promise);
+        const importedRunner = jest.fn(async () => {});
+        const importedStarter = jest.fn(() => {});
         await startBackendServerEntrypoint({
             isDirect: false,
             runServer: importedRunner,
+            startServer: importedStarter,
             startOnImport: "1",
         });
-        expect(importedRunner).toHaveBeenCalledTimes(1);
-        importedServer.resolve();
-        await importedServer.promise;
+        expect(importedRunner).not.toHaveBeenCalled();
+        expect(importedStarter).toHaveBeenCalledTimes(1);
 
         const directServer = Promise.withResolvers<void>();
         let isDirectStartupComplete = false;
@@ -103,16 +106,15 @@ describe("server start scheduler policy", () => {
         expect(isDirectStartupComplete).toBe(true);
 
         const startupError = new Error("imported startup failed");
-        const reportedError = Promise.withResolvers<unknown>();
-        await startBackendServerEntrypoint({
-            isDirect: false,
-            reportFailure: reportedError.resolve,
-            runServer: async () => {
-                throw startupError;
-            },
-            startOnImport: "1",
-        });
-        expect(await reportedError.promise).toBe(startupError);
+        await expect(
+            startBackendServerEntrypoint({
+                isDirect: false,
+                startOnImport: "1",
+                startServer: () => {
+                    throw startupError;
+                },
+            })
+        ).rejects.toBe(startupError);
     });
 
     it("reports direct backend entrypoint failures", async () => {
