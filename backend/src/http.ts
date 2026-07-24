@@ -18,6 +18,16 @@ const configuredDashboardOrigins = new Set(
         .map((origin) => origin.trim())
         .filter(Boolean)
 );
+const allowedLoopbackHostnames = new Set([
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "[::1]",
+    "::ffff:127.0.0.1",
+    "[::ffff:127.0.0.1]",
+    "::ffff:7f00:1",
+    "[::ffff:7f00:1]",
+]);
 
 type HeaderInput = Record<string, string> | Array<[string, string]>;
 
@@ -152,6 +162,22 @@ export function isAllowedDashboardOrigin(request: Request): boolean {
     }
 }
 
+export function isAllowedLoopbackAuthOrigin(request: Request): boolean {
+    const origin = request.headers.get("origin");
+    if (!origin) return true;
+    try {
+        const parsedOrigin = new URL(origin);
+        const requestUrl = new URL(request.url);
+        return (
+            parsedOrigin.origin === requestUrl.origin &&
+            allowedLoopbackHostnames.has(parsedOrigin.hostname) &&
+            allowedLoopbackHostnames.has(requestUrl.hostname)
+        );
+    } catch {
+        return false;
+    }
+}
+
 export function sessionIdFromCookie(request: Request): string | undefined {
     const cookieHeader = request.headers.get("cookie");
     if (!cookieHeader) {
@@ -181,7 +207,7 @@ export function authUser(
         isLoopbackAuthEnabled &&
         !hasForwardedClient &&
         isLoopbackRequest(request, server) &&
-        isAllowedDashboardOrigin(request)
+        isAllowedLoopbackAuthOrigin(request)
     ) {
         return { id: 0, username: "mira-local" };
     }

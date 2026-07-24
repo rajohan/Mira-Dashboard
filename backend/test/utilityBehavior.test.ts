@@ -7,6 +7,7 @@ import { describe, expect, it, jest } from "bun:test";
 
 import {
     isAllowedDashboardOrigin,
+    isAllowedLoopbackAuthOrigin,
     readJson,
     readRequestBytes,
     sessionIdFromCookie,
@@ -702,6 +703,47 @@ describe("backend service utilities", () => {
                         "sec-fetch-site": "same-origin",
                     },
                     method: "POST",
+                })
+            )
+        ).toBe(false);
+    });
+
+    it("limits browser loopback auth to exact loopback origins", () => {
+        expect(
+            isAllowedLoopbackAuthOrigin(new Request("http://localhost:3100/api/tasks"))
+        ).toBe(true);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("http://127.0.0.1:3100/api/tasks", {
+                    headers: { origin: "http://127.0.0.1:3100" },
+                })
+            )
+        ).toBe(true);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("http://[::ffff:127.0.0.1]:3100/api/tasks", {
+                    headers: { origin: "http://[::ffff:127.0.0.1]:3100" },
+                })
+            )
+        ).toBe(true);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("https://evil.example:3100/api/tasks", {
+                    headers: { origin: "https://evil.example:3100" },
+                })
+            )
+        ).toBe(false);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("http://localhost:3100/api/tasks", {
+                    headers: { origin: "http://127.0.0.1:3100" },
+                })
+            )
+        ).toBe(false);
+        expect(
+            isAllowedLoopbackAuthOrigin(
+                new Request("https://localhost:3100/api/tasks", {
+                    headers: { origin: "http://localhost:3100" },
                 })
             )
         ).toBe(false);

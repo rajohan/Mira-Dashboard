@@ -33,8 +33,10 @@ MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1
 Even then, bypass only applies to direct loopback requests without forwarded
 client headers. A missing `Origin` header is accepted, so ordinary same-host
 `curl` or scripts can bypass the session cookie when this flag is enabled.
-If an `Origin` header is present, it must be allowed. Production smoke tests
-should normally use a real session cookie instead of relying on loopback bypass.
+If an `Origin` header is present, it must exactly match the request origin and
+both hostnames must be loopback names. Configured non-loopback origins never
+receive the loopback identity. Production smoke tests should normally use a real
+session cookie instead of relying on loopback bypass.
 
 ## Origins And Proxies
 

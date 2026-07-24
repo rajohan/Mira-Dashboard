@@ -238,6 +238,18 @@ describe("Bun-native dashboard backend", () => {
         expect(response.status).toBe(401);
     });
 
+    it("does not grant loopback API access to a rebound browser origin", async () => {
+        const port = new URL(state.baseUrl).port;
+        const reboundOrigin = `http://evil.example:${port}`;
+        const response = await fetch(`${state.baseUrl}/api/tasks`, {
+            headers: {
+                Host: `evil.example:${port}`,
+                Origin: reboundOrigin,
+            },
+        });
+        expect(response.status).toBe(401);
+    });
+
     it("rate limits auth routes using native Bun policy", async () => {
         let latest = new Response();
         for (let index = 0; index < 21; index += 1) {
