@@ -65,6 +65,7 @@ edit a released migration. Add the next numbered file instead.
 | Table                              | Purpose                                                               | Lifecycle                                                                |
 | ---------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `schema_migrations`                | Applied migration versions and immutable checksums.                   | Immutable audit history; never age-pruned.                               |
+| `audit_events`                     | Redacted request and privileged job lifecycle audit trail.            | Append-only triggers reject update/delete; no automatic age pruning.     |
 | `users`                            | Dashboard auth users.                                                 | Authoritative records; removed only by explicit auth flows.              |
 | `auth_sessions`                    | Selector plus hashed-validator Dashboard sessions.                    | Removed after `expires_at`.                                              |
 | `app_config`                       | Small persistent config, currently including `gateway_token`.         | Keyed upsert or explicit removal; naturally bounded.                     |
@@ -116,6 +117,11 @@ including global chat replay and read-notification safety nets, runs
 not run automatic `VACUUM`; freelist pages are reusable by SQLite and are not a
 hard size limit. Lifecycle status recommends a planned compaction only when at
 least 16 MiB and 25% of the database are simultaneously reusable.
+
+`audit_events` is deliberately excluded from maintenance deletion because its
+schema enforces append-only history. Any future archive/retention design must
+arrive through a reviewed forward migration that preserves required audit
+history.
 
 Snapshots live beside the database under `data/backups/` by default:
 

@@ -344,6 +344,8 @@ describe("Bun-native dashboard backend", () => {
             method: "POST",
         });
         expect(started.status).toBe(200);
+        const terminalRequestId = started.headers.get("x-request-id");
+        expect(terminalRequestId).toBeTruthy();
         const { jobId } = (await started.json()) as { jobId: string };
 
         let terminalResult:
@@ -369,6 +371,43 @@ describe("Bun-native dashboard backend", () => {
             status: "done",
             stdout: "terminal-policy-ok",
         });
+
+        const auditPage = await api<{
+            events: Array<{
+                action: string;
+                actor: { id: string; type: string };
+                metadata: Record<string, unknown>;
+                outcome: string;
+                requestId?: string;
+                target: { id: string; type: string };
+            }>;
+        }>("/api/audit-events?limit=100");
+        expect(auditPage.status).toBe(200);
+        expect(auditPage.body.events).toContainEqual(
+            expect.objectContaining({
+                action: "job.enqueue",
+                actor: { id: "mira-local", type: "loopback" },
+                outcome: "accepted",
+                requestId: terminalRequestId,
+                target: { id: jobId, type: "job-execution" },
+            })
+        );
+        expect(auditPage.body.events).toContainEqual(
+            expect.objectContaining({
+                action: "job.execute",
+                actor: { id: "mira-local", type: "loopback" },
+                outcome: "succeeded",
+                requestId: terminalRequestId,
+                target: { id: jobId, type: "job-execution" },
+            })
+        );
+        expect(
+            JSON.stringify(
+                auditPage.body.events
+                    .filter((event) => event.target.id === jobId)
+                    .map((event) => event.metadata)
+            )
+        ).not.toContain("terminal-policy-ok");
 
         const rejected = await fetch(`${state.baseUrl}/api/terminal/cd`, {
             body: JSON.stringify({ cwd: "/", path: "tmp" }),

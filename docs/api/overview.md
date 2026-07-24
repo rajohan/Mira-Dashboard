@@ -86,6 +86,7 @@ See [Endpoint reference](endpoints.md) for the route table.
 High-impact families:
 
 - auth and bootstrap: `/api/auth/*`
+- append-only audit history: `/api/audit-events`
 - OpenClaw config and restart: `/api/config`, `/api/restart`, `/api/skills`
 - chat/session bridge: `/api/sessions/*` plus `/ws`
 - tasks: `/api/tasks/*`

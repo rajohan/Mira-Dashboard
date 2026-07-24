@@ -4,6 +4,7 @@ import gateway from "./gateway.ts";
 import { json } from "./http.ts";
 import { withRequestPolicy } from "./requestPolicy.ts";
 import { agentRoutes } from "./routes/agentRoutes.ts";
+import { auditRoutes } from "./routes/auditRoutes.ts";
 import { authRoutes } from "./routes/authRoutes.ts";
 import { backupRoutes } from "./routes/backupRoutes.ts";
 import { cacheRoutes } from "./routes/cacheRoutes.ts";
@@ -85,6 +86,7 @@ const routeTable = {
         GET: sessions,
     },
     ...agentRoutes,
+    ...auditRoutes,
     ...authRoutes,
     ...backupRoutes,
     ...cacheRoutes,
