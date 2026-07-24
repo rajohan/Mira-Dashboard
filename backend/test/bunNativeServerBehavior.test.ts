@@ -5,6 +5,17 @@ import { pathToFileURL } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
+const AUTOMATION_VALIDATOR = "ab".repeat(32);
+const AUTOMATION_CREDENTIALS = JSON.stringify([
+    {
+        id: "native-reader",
+        scopes: ["tasks:read"],
+        tokenHash: new Bun.CryptoHasher("sha256")
+            .update(AUTOMATION_VALIDATOR)
+            .digest("hex"),
+    },
+]);
+
 const state: {
     baseUrl: string;
     child?: ReturnType<typeof Bun.spawn>;
@@ -129,6 +140,7 @@ describe("Bun-native dashboard backend", () => {
                     state.temporaryRoot,
                     "dashboard.database"
                 ),
+                MIRA_DASHBOARD_AUTOMATION_CREDENTIALS: AUTOMATION_CREDENTIALS,
                 MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH: "1",
                 MIRA_DASHBOARD_FRONTEND_PATH: frontendRoot,
                 MIRA_DOCKER_COMPOSE_WRAPPER: composeWrapper,
@@ -248,6 +260,35 @@ describe("Bun-native dashboard backend", () => {
             },
         });
         expect(response.status).toBe(401);
+    });
+
+    it("enforces scoped automation credentials in the native server", async () => {
+        const forwardedClient = { "x-real-ip": "203.0.113.25" };
+        const authorization = `Bearer native-reader.${AUTOMATION_VALIDATOR}`;
+        const allowed = await fetch(`${state.baseUrl}/api/tasks`, {
+            headers: { ...forwardedClient, authorization },
+        });
+        expect(allowed.status).toBe(200);
+
+        const denied = await fetch(`${state.baseUrl}/api/exec/start`, {
+            headers: { ...forwardedClient, authorization },
+            method: "POST",
+        });
+        expect(denied.status).toBe(403);
+        await expect(denied.json()).resolves.toEqual({
+            error: "Automation credential scope denied",
+        });
+
+        const invalid = await fetch(`${state.baseUrl}/api/tasks`, {
+            headers: {
+                ...forwardedClient,
+                authorization: `Bearer native-reader.${"ff".repeat(32)}`,
+            },
+        });
+        expect(invalid.status).toBe(401);
+        await expect(invalid.json()).resolves.toEqual({
+            error: "Invalid automation credential",
+        });
     });
 
     it("rate limits auth routes using native Bun policy", async () => {
