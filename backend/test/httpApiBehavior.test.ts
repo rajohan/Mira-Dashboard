@@ -9,6 +9,7 @@ const testState: {
     baseUrl: string;
     openclawRoot: string;
     originalEnv: Record<string, string | undefined>;
+    sessionToken?: string;
     server?: Server<unknown>;
     temporaryRoot: string;
 } = {
@@ -21,7 +22,6 @@ const testState: {
 const TEST_ENV_KEYS = [
     "HOME",
     "MIRA_DASHBOARD_DB_PATH",
-    "MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH",
     "MIRA_DASHBOARD_FRONTEND_PATH",
     "MIRA_DASHBOARD_LOGS_ROOT",
     "MIRA_DOCKER_COMPOSE_WRAPPER",
@@ -39,6 +39,9 @@ async function api<T>(
         ...options,
         headers: {
             "Content-Type": "application/json",
+            ...(testState.sessionToken && {
+                Cookie: `mira_dashboard_session=${encodeURIComponent(testState.sessionToken)}`,
+            }),
             ...options.headers,
         },
     });
@@ -47,6 +50,17 @@ async function api<T>(
         status: response.status,
         body: text ? (JSON.parse(text) as T) : (undefined as T),
     };
+}
+
+function sessionHeaders(headers: RequestInit["headers"] = {}): Headers {
+    const result = new Headers(headers);
+    if (testState.sessionToken) {
+        result.set(
+            "Cookie",
+            `mira_dashboard_session=${encodeURIComponent(testState.sessionToken)}`
+        );
+    }
+    return result;
 }
 
 function json(method: string, body: unknown): RequestInit {
@@ -265,7 +279,6 @@ describe("Mira Dashboard backend integration", () => {
             testState.temporaryRoot,
             "dashboard.database"
         );
-        process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH = "1";
         process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
         process.env.HOME = homeRoot;
         process.env.WORKSPACE_ROOT = workspaceRoot;
@@ -376,6 +389,23 @@ describe("Mira Dashboard backend integration", () => {
         expect(invalidLoginBody.body.error).toBe(
             "Create the first user before logging in"
         );
+
+        const { createSession, createUser } = await import("../src/auth.ts");
+        const { database } = await import("../src/database.ts");
+        const user = await createUser("functional-test-user", "functional-test-password");
+        const verifiedAt = new Date().toISOString();
+        database
+            .prepare(
+                `UPDATE users
+                 SET mfa_enabled_at = ?, updated_at = ?
+                 WHERE id = ?`
+            )
+            .run(verifiedAt, verifiedAt, user.id);
+        testState.sessionToken = createSession(user.id, {
+            authMethod: "webauthn",
+            mfaVerifiedAt: verifiedAt,
+            userAgent: "Mira Dashboard integration tests",
+        });
     });
 
     it("serves the app shell only for app routes, not missing assets", async () => {
@@ -400,7 +430,9 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("applies static and websocket guard branches without leaving the test root", async () => {
-        const apiMiss = await fetch(`${testState.baseUrl}/api/not-a-route`);
+        const apiMiss = await fetch(`${testState.baseUrl}/api/not-a-route`, {
+            headers: sessionHeaders(),
+        });
         expect(apiMiss.status).toBe(404);
         expect(await apiMiss.json()).toEqual({ error: "Not found" });
 
@@ -1505,7 +1537,9 @@ describe("Mira Dashboard backend integration", () => {
             `${testState.baseUrl}/api/jobs/functional.test.job`,
             {
                 body: "{",
-                headers: { "Content-Type": "application/json" },
+                headers: sessionHeaders({
+                    "Content-Type": "application/json",
+                }),
                 method: "PATCH",
             }
         );
@@ -1751,7 +1785,8 @@ describe("Mira Dashboard backend integration", () => {
         expect(traversal.body.error).toBe("Log file not found");
 
         const media = await fetch(
-            `${testState.baseUrl}/api/media?path=images/dashboard-test.txt`
+            `${testState.baseUrl}/api/media?path=images/dashboard-test.txt`,
+            { headers: sessionHeaders() }
         );
         expect(media.status).toBe(200);
         expect(media.headers.get("content-type")).toBe("text/plain; charset=utf-8");
@@ -1923,6 +1958,7 @@ describe("Mira Dashboard backend integration", () => {
 
         const stt = await fetch(`${testState.baseUrl}/api/stt/transcribe`, {
             body: "",
+            headers: sessionHeaders(),
             method: "POST",
         });
         expect(stt.status).toBe(400);
@@ -1996,7 +2032,9 @@ describe("Mira Dashboard backend integration", () => {
         try {
             const tts = await fetch(`${testState.baseUrl}/api/tts/speak`, {
                 body: JSON.stringify({ text: "Hei Mira" }),
-                headers: { "Content-Type": "application/json" },
+                headers: sessionHeaders({
+                    "Content-Type": "application/json",
+                }),
                 method: "POST",
             });
             expect(tts.status).toBe(200);
@@ -2006,7 +2044,9 @@ describe("Mira Dashboard backend integration", () => {
 
             const stt = await fetch(`${testState.baseUrl}/api/stt/transcribe`, {
                 body: new Uint8Array([4, 5, 6]),
-                headers: { "Content-Type": "audio/webm" },
+                headers: sessionHeaders({
+                    "Content-Type": "audio/webm",
+                }),
                 method: "POST",
             });
             expect(stt.status).toBe(200);
@@ -2073,7 +2113,9 @@ describe("Mira Dashboard backend integration", () => {
         try {
             const invalidJson = await fetch(`${testState.baseUrl}/api/tts/speak`, {
                 body: "{",
-                headers: { "Content-Type": "application/json" },
+                headers: sessionHeaders({
+                    "Content-Type": "application/json",
+                }),
                 method: "POST",
             });
             expect(invalidJson.status).toBe(400);
@@ -2106,7 +2148,9 @@ describe("Mira Dashboard backend integration", () => {
 
             const stt = await fetch(`${testState.baseUrl}/api/stt/transcribe`, {
                 body: new Uint8Array([7, 8, 9]),
-                headers: { "Content-Type": "audio/mp3" },
+                headers: sessionHeaders({
+                    "Content-Type": "audio/mp3",
+                }),
                 method: "POST",
             });
             expect(stt.status).toBe(500);

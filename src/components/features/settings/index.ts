@@ -1,3 +1,4 @@
+export { AccountSecuritySection } from "./AccountSecuritySection";
 export { AgentAccessSection } from "./AgentAccessSection";
 export { ChannelSection } from "./ChannelSection";
 export { HeartbeatSection } from "./HeartbeatSection";

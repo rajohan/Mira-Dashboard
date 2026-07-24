@@ -11,6 +11,10 @@ import {
     writeTextNoFollowAnchoredGuarded,
 } from "../lib/guardedOps.ts";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
+import {
+    CONFIG_REDACTION_SENTINEL,
+    redactConfigJsonText,
+} from "../services/configRedaction.ts";
 
 const MAX_FILE_SIZE = 1024 * 1024;
 const MAX_CONFIG_WRITE_SIZE = 2 * 1024 * 1024;
@@ -224,15 +228,32 @@ export const configFileRoutes = {
             }
             const content = buffer.toString("utf8");
             const isBinary = isBinaryContent(content);
-            return json({
-                content: isBinary ? "[Binary file]" : content,
+            const shouldMask =
+                relativePath === "openclaw.json" &&
+                new URL(request.url).searchParams.get("reveal") !== "1";
+            const responseContent =
+                shouldMask && !isBinary ? redactConfigJsonText(content) : content;
+            const maskingError =
+                shouldMask && responseContent === undefined
+                    ? stat.size > MAX_FILE_SIZE
+                        ? "truncated_json"
+                        : "invalid_json"
+                    : undefined;
+            const response = json({
+                content: isBinary ? "[Binary file]" : (responseContent ?? ""),
                 isBinary,
+                masked: shouldMask,
+                maskingError,
                 modified: stat.mtime.toISOString(),
                 path: `config:${relativePath}`,
                 relativePath,
                 size: stat.size,
                 truncated: stat.size > MAX_FILE_SIZE || undefined,
             });
+            if (relativePath === "openclaw.json" && !shouldMask) {
+                response.headers.set("Cache-Control", "no-store");
+            }
+            return response;
         },
 
         PUT: async (request: Request) => {
@@ -267,6 +288,14 @@ export const configFileRoutes = {
                 Buffer.byteLength(body.content, "utf8") > MAX_CONFIG_WRITE_SIZE
             ) {
                 return json({ error: "Invalid content" }, { status: 400 });
+            }
+            if (body.content.includes(CONFIG_REDACTION_SENTINEL)) {
+                return json(
+                    {
+                        error: "Masked config cannot be saved; reveal and verify the file first",
+                    },
+                    { status: 400 }
+                );
             }
             const root = openclawRoot();
             if (!root) {

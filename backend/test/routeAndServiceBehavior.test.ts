@@ -24,6 +24,7 @@ import type {
     OpenClawGatewayClientInstance,
     OpenClawGatewayClientOptions,
 } from "../src/lib/openclawGatewayClient.ts";
+import { CONFIG_REDACTION_SENTINEL } from "../src/services/configRedaction.ts";
 
 const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
@@ -241,6 +242,7 @@ afterEach(async () => {
             "DELETE FROM auth_sessions WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'coverage-%')"
         )
         .run();
+    database.prepare("DELETE FROM auth_rate_limit_buckets").run();
     database.prepare("DELETE FROM users WHERE username LIKE 'coverage-%'").run();
 });
 
@@ -321,6 +323,20 @@ describe("backend route and service behavior", () => {
             server
         );
         expect(invalidLogin.status).toBe(401);
+        const { recordAuthenticationFailure, clearAuthenticationFailures } =
+            await import("../src/services/authenticationThrottle.ts");
+        recordAuthenticationFailure("login-password", username);
+        recordAuthenticationFailure("login-password", username);
+        const throttledLogin = await authRoutes["/api/auth/login"].POST(
+            jsonRequest("/api/auth/login", {
+                password: "correct-password",
+                username,
+            }),
+            server
+        );
+        expect(throttledLogin.status).toBe(429);
+        expect(throttledLogin.headers.get("retry-after")).toBeTruthy();
+        clearAuthenticationFailures("login-password", username);
 
         const invalidLoginBody = await authRoutes["/api/auth/login"].POST(
             jsonRequest("/api/auth/login", ["not", "an", "object"]),
@@ -503,7 +519,7 @@ describe("backend route and service behavior", () => {
             error: "First-user setup is already in progress",
         });
         expect(validationTokens).toEqual(["test-gateway-token-a"]);
-        expect(getPersistedGatewayToken()).toBe("test-gateway-token-a");
+        expect(getPersistedGatewayToken()).toBe("test-gateway-token");
 
         gatewayValidation.resolve();
         const response = await responsePromise;
@@ -1636,12 +1652,32 @@ describe("backend route and service behavior", () => {
             new Request("https://test.local/api/config-files/openclaw.json")
         );
         await expect(read.json()).resolves.toMatchObject({
-            content: '{"model":"codex"}\n',
+            content: '{\n  "model": "codex"\n}\n',
             isBinary: false,
+            masked: true,
             path: "config:openclaw.json",
             relativePath: "openclaw.json",
             size: 18,
         });
+
+        writeFileSync(path.join(root, "openclaw.json"), "{");
+        const invalidMaskedRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/openclaw.json")
+        );
+        await expect(invalidMaskedRead.json()).resolves.toMatchObject({
+            content: "",
+            masked: true,
+            maskingError: "invalid_json",
+        });
+        const invalidRevealedRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/openclaw.json?reveal=1")
+        );
+        expect(invalidRevealedRead.headers.get("Cache-Control")).toBe("no-store");
+        await expect(invalidRevealedRead.json()).resolves.toMatchObject({
+            content: "{",
+            masked: false,
+        });
+        writeFileSync(path.join(root, "openclaw.json"), '{"model":"codex"}\n');
 
         const invalidWrite = await configFileRoutes["/api/config-files/*"].PUT(
             new Request("https://test.local/api/config-files/openclaw.json", {
@@ -1688,6 +1724,20 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(tooLargeConfigWrite.status).toBe(400);
+
+        const maskedPlaceholderWrite = await configFileRoutes["/api/config-files/*"].PUT(
+            new Request("https://test.local/api/config-files/openclaw.json", {
+                body: JSON.stringify({
+                    content: `{"token":"${CONFIG_REDACTION_SENTINEL}"}`,
+                }),
+                headers: { "Content-Type": "application/json" },
+                method: "PUT",
+            })
+        );
+        expect(maskedPlaceholderWrite.status).toBe(400);
+        await expect(maskedPlaceholderWrite.json()).resolves.toEqual({
+            error: "Masked config cannot be saved; reveal and verify the file first",
+        });
 
         const written = await configFileRoutes["/api/config-files/*"].PUT(
             new Request("https://test.local/api/config-files/openclaw.json", {
@@ -1757,6 +1807,19 @@ describe("backend route and service behavior", () => {
         expect(hardLinkedConfigWrite.status).toBe(403);
 
         writeFileSync(path.join(root, "openclaw.json"), "x".repeat(2 * 1024 * 1024 + 1));
+        const oversizedMaskedRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/openclaw.json")
+        );
+        await expect(oversizedMaskedRead.json()).resolves.toMatchObject({
+            content: "",
+            masked: true,
+            maskingError: "truncated_json",
+            truncated: true,
+        });
+        const oversizedRevealedRead = await configFileRoutes["/api/config-files/*"].GET(
+            new Request("https://test.local/api/config-files/openclaw.json?reveal=1")
+        );
+        expect(oversizedRevealedRead.headers.get("Cache-Control")).toBe("no-store");
         const oversizedExistingWrite = await configFileRoutes["/api/config-files/*"].PUT(
             new Request("https://test.local/api/config-files/openclaw.json", {
                 body: JSON.stringify({ content: "{}\n" }),

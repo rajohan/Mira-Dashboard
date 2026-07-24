@@ -388,20 +388,47 @@ describe("backend service behavior", () => {
             createSession,
             createFirstUser,
             createUser,
+            didDeletePersistedGatewayTokenIfMatches,
             deleteSession,
             findUserByUsername,
             getAuthUserFromSessionId,
             getPersistedGatewayToken,
             hashPassword,
+            recentAuthenticationTtlMs,
+            sessionIdleTtlMs,
+            validateAuthenticationConfig,
+            validateStoredSecretConfig,
             verifyPassword,
             persistGatewayToken,
         } = await import("../src/auth.ts");
+        rememberEnvironment("MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY");
+        const configuredSecretEncryptionKey =
+            process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY;
+        if (!configuredSecretEncryptionKey) {
+            throw new Error("Test secret-encryption key was not configured");
+        }
 
         try {
             const hash = await hashPassword("correct horse battery staple");
             expect(await verifyPassword("correct horse battery staple", hash)).toBe(true);
             expect(await verifyPassword("wrong password", hash)).toBe(false);
             expect(await verifyPassword("password", "not-a-valid-hash")).toBe(false);
+            expect(sessionIdleTtlMs()).toBe(30 * 60_000);
+            expect(recentAuthenticationTtlMs()).toBe(10 * 60_000);
+            expect(sessionIdleTtlMs("5")).toBe(5 * 60_000);
+            expect(recentAuthenticationTtlMs("60")).toBe(60 * 60_000);
+            expect(() => sessionIdleTtlMs("4")).toThrow();
+            expect(() => recentAuthenticationTtlMs("61")).toThrow();
+            expect(() => sessionIdleTtlMs("not-a-number")).toThrow();
+            expect(() => recentAuthenticationTtlMs("1.5")).toThrow();
+            expect(validateAuthenticationConfig()).toBeUndefined();
+            expect(validateStoredSecretConfig()).toBeUndefined();
+            delete process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY;
+            expect(() => validateStoredSecretConfig()).toThrow(
+                "MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY is not configured"
+            );
+            process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY =
+                configuredSecretEncryptionKey;
 
             const user = await createUser(username, "test-password");
             expect(user).toMatchObject({ username: normalizedUsername });
@@ -467,14 +494,44 @@ describe("backend service behavior", () => {
                     "2026-07-23T00:00:00.000Z",
                     "2099-01-01T00:00:00.000Z"
                 );
-            expect(getAuthUserFromSessionId(legacySessionId)).toEqual(user);
+            expect(getAuthUserFromSessionId(legacySessionId)).toBeUndefined();
             deleteSession(legacySessionId);
             expect(getAuthUserFromSessionId(legacySessionId)).toBeUndefined();
 
             persistGatewayToken("token-one");
             expect(getPersistedGatewayToken()).toBe("token-one");
+            const encryptedGatewayToken = database
+                .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
+                .get() as { value: string };
+            expect(encryptedGatewayToken.value).toStartWith("v1.");
+            expect(encryptedGatewayToken.value).not.toContain("token-one");
+            process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY = new Uint8Array(32)
+                .fill(8)
+                .toBase64();
+            expect(() => validateStoredSecretConfig()).toThrow(
+                "Failed to decrypt stored secret"
+            );
+            process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY =
+                configuredSecretEncryptionKey;
+            expect(validateStoredSecretConfig()).toBeUndefined();
             persistGatewayToken("token-two");
             expect(getPersistedGatewayToken()).toBe("token-two");
+            expect(didDeletePersistedGatewayTokenIfMatches("wrong-token")).toBe(false);
+            expect(didDeletePersistedGatewayTokenIfMatches("token-two")).toBe(true);
+            expect(getPersistedGatewayToken()).toBeUndefined();
+
+            database
+                .prepare(
+                    `INSERT INTO app_config (key, value, updated_at)
+                     VALUES ('gateway_token', ?, ?)`
+                )
+                .run("legacy-plaintext-token", new Date().toISOString());
+            expect(getPersistedGatewayToken()).toBe("legacy-plaintext-token");
+            const migratedGatewayToken = database
+                .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
+                .get() as { value: string };
+            expect(migratedGatewayToken.value).toStartWith("v1.");
+            expect(migratedGatewayToken.value).not.toContain("legacy-plaintext-token");
         } finally {
             database
                 .prepare(

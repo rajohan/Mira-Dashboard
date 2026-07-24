@@ -72,10 +72,44 @@ doppler run --config prd --project rajohan -- bun dist/serverStart.js
 See [Secrets and environment](secrets-and-env.md) for the full list. The
 minimum production setup normally needs:
 
-- `OPENCLAW_GATEWAY_TOKEN` or a bootstrap-entered token stored in SQLite;
+- `OPENCLAW_GATEWAY_TOKEN` or a bootstrap-entered token stored encrypted in SQLite;
+- `MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY` for the encrypted Gateway-token
+  envelope and TOTP factors;
+- one stable HTTPS hostname configured through
+  `MIRA_DASHBOARD_WEBAUTHN_RP_ID` and
+  `MIRA_DASHBOARD_WEBAUTHN_ORIGINS` for security keys;
+- separate minimum-scope `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS` entries for
+  heartbeat, task tracking, and report producers;
 - `MIRA_GITHUB_TOKEN` for Dashboard PR operations;
 - optional provider keys for Moltbook, ElevenLabs, OpenRouter, and Synthetic
   health checks depending on enabled Dashboard features.
+
+## Provision Local OpenClaw API Callers
+
+The Dashboard does not trust localhost as an identity. From the Dashboard
+checkout, provision four independent caller credentials:
+
+```bash
+cd /home/ubuntu/projects/mira-dashboard
+install -d -m 0700 /home/ubuntu/.config/mira-dashboard/automation
+bun scripts/provisionDashboardAutomationCredential.ts heartbeat
+bun scripts/provisionDashboardAutomationCredential.ts daily-summary
+bun scripts/provisionDashboardAutomationCredential.ts daily-brief
+bun scripts/provisionDashboardAutomationCredential.ts task-tracking
+```
+
+The provisioner writes the full tokens directly to four owner-only `0600`
+files under `/home/ubuntu/.config/mira-dashboard/automation/`. It prints only
+the corresponding ids, SHA-256 validator hashes, and minimum scopes. Combine
+those four printed objects into the JSON array supplied through the Doppler
+secret `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`.
+
+Do not copy the full token files into Doppler, SQLite, shell history, prompts,
+cron payloads, reports, or host backups. A replacement host gets newly
+generated tokens and an updated hash-only Doppler array. See
+[Scoped automation credentials](../security/auth-and-trust-boundaries.md#scoped-automation-credentials)
+for the exact file names, scopes, wrapper behavior, rotation, and denied-route
+tests.
 
 ## Create The Systemd User Services
 
@@ -122,6 +156,12 @@ If the database has no users, the UI shows first-user setup. The bootstrap flow:
    auth/hello;
 3. persists the Gateway token only if validation succeeds;
 4. creates the first Dashboard user and auth session.
+
+Bootstrap itself remains password-based and does not require a physical key.
+After it succeeds, open **Settings → Dashboard**, enroll two named security
+keys (or another deliberate factor combination), and store the one-time
+recovery codes offline. Privileged actions remain blocked until MFA is
+enrolled.
 
 Check bootstrap state:
 

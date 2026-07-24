@@ -1858,7 +1858,10 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     throw new Error(`Unexpected page API call: ${method} ${url}`);
 }
 
-function renderPage(children: ReactNode, options: { withSocket?: boolean } = {}) {
+function renderPage(
+    children: ReactNode,
+    options: { withRouter?: boolean; withSocket?: boolean } = {}
+) {
     const queryClient = new QueryClient({
         defaultOptions: {
             queries: { retry: false, staleTime: Infinity },
@@ -1868,6 +1871,26 @@ function renderPage(children: ReactNode, options: { withSocket?: boolean } = {})
     const content = options.withSocket
         ? createElement(OpenClawSocketProvider, undefined, children)
         : children;
+    if (options.withRouter) {
+        const rootRoute = createRootRoute();
+        const pageRoute = createRoute({
+            component: () => content,
+            getParentRoute: () => rootRoute,
+            path: "/settings",
+        });
+        const router = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/settings"] }),
+            routeTree: rootRoute.addChildren([pageRoute]),
+        });
+        return {
+            ...render(
+                <QueryClientProvider client={queryClient}>
+                    <RouterProvider router={router} />
+                </QueryClientProvider>
+            ),
+            queryClient,
+        };
+    }
 
     return {
         ...render(createElement(QueryClientProvider, { client: queryClient }, content)),
@@ -2019,7 +2042,9 @@ describe("Mira Dashboard pages", () => {
     });
 
     it("renders the main data pages from their API contracts", async () => {
-        const pages: Array<[ReactNode, string, { withSocket?: boolean }?]> = [
+        const pages: Array<
+            [ReactNode, string, { withRouter?: boolean; withSocket?: boolean }?]
+        > = [
             [createElement(Agents), "Active (1)"],
             [createElement(Dashboard), "Spydeberg", { withSocket: true }],
             [createElement(Database), "metabase"],
@@ -2029,7 +2054,7 @@ describe("Mira Dashboard pages", () => {
             [createElement(Logs), "openclaw.log", { withSocket: true }],
             [createElement(Moltbook), "Dashboard testing"],
             [createElement(PullRequests), "Expand backend coverage"],
-            [createElement(Settings), "Model Configuration"],
+            [createElement(Settings), "Model Configuration", { withRouter: true }],
             [createElement(Terminal), "~"],
         ];
 
@@ -2420,7 +2445,7 @@ describe("Mira Dashboard pages", () => {
                     writable: true,
                 },
             });
-            renderPage(createElement(Settings));
+            renderPage(createElement(Settings), { withRouter: true });
             expect(await screen.findByText("Model Configuration")).toBeInTheDocument();
 
             await user.click(screen.getByRole("button", { name: /^backup$/i }));

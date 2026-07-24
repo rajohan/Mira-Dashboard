@@ -3,10 +3,12 @@ import { RouterProvider } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
+import { GlobalSecurityVerification } from "./components/features/settings/GlobalSecurityVerification";
 import { AppErrorFallback } from "./components/ui/AppErrorFallback";
 import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
+import { authActions } from "./stores/authStore";
 
 const isEnableDevtools = import.meta.env?.MODE !== "production";
 const DashboardDevtools = isEnableDevtools
@@ -18,6 +20,7 @@ export default function App() {
     useEffect(() => {
         /** Performs on unauthorized. */
         const onUnauthorized = () => {
+            authActions.clearSession();
             void router.navigate({ to: "/login" });
         };
 
@@ -32,6 +35,7 @@ export default function App() {
             <QueryClientProvider client={queryClient}>
                 <OpenClawSocketProvider>
                     <RouterProvider router={router} />
+                    <GlobalSecurityVerification />
                     {DashboardDevtools ? (
                         <Suspense fallback={undefined}>
                             <DashboardDevtools />

@@ -82,6 +82,35 @@ To force Gateway token entry during bootstrap too:
 sqlite3 data/mira-dashboard.db "DELETE FROM app_config WHERE key='gateway_token';"
 ```
 
+## Reset A Forgotten Dashboard Password
+
+There is intentionally no password-reset page, email reset, recovery file
+watched by the web service, or unauthenticated reset endpoint. Use the
+host-local interactive command from an SSH/console TTY:
+
+```bash
+cd /home/ubuntu/projects/mira-dashboard/backend
+bun run auth:reset-password -- --username <username>
+```
+
+The single standalone `--` ends Bun script options; `--username` is passed to
+the reset program. The program reads the new password twice with terminal echo
+disabled, preserves MFA, revokes every session and pending ceremony, clears
+authentication cooldowns, and appends an audit event. It never accepts password
+material through command arguments or environment variables.
+
+Only when all registered second factors are also lost, run the deliberate
+break-glass variant:
+
+```bash
+bun run auth:reset-password -- --username <username> --reset-mfa
+```
+
+`--reset-mfa` deletes registered WebAuthn credentials, encrypted TOTP factors,
+and recovery-code validators. Sign in with the new password and immediately
+enroll two named security keys (or a key plus TOTP), then store the newly shown
+recovery codes offline.
+
 ## Inspect Gateway Token Metadata Without Printing It
 
 ```bash
@@ -89,7 +118,44 @@ cd /home/ubuntu/projects/mira-dashboard/backend
 sqlite3 data/mira-dashboard.db "SELECT key, length(value), updated_at FROM app_config WHERE key='gateway_token';"
 ```
 
-Do not print token values.
+Do not print token values. A current row must contain a versioned encrypted
+envelope; startup automatically upgrades a legacy plaintext row when
+`MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY` is available.
+
+## Provision Or Rotate OpenClaw Dashboard Callers
+
+Client bearer tokens live only as regular owner-only `0600` files in:
+
+```text
+/home/ubuntu/.config/mira-dashboard/automation/
+```
+
+Use the tracked workspace provisioner; it writes the full token directly to
+the file and prints only the Dashboard-side hash/scopes object:
+
+```bash
+cd /home/ubuntu/projects/mira-dashboard
+bun scripts/provisionDashboardAutomationCredential.ts <profile>
+```
+
+Valid profiles are `heartbeat`, `daily-summary`, `daily-brief`, and
+`task-tracking`. The provisioner refuses to overwrite an existing file. For
+rotation, first move the existing `0600` token file to an owner-only
+`.previous` file in the same `0700` directory. Run the provisioner to create
+the replacement at the canonical path, replace the matching hash-only object
+in `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`, restart the Dashboard web service,
+and smoke-test the caller. Keep the old hash only in an owner-protected offline
+rollback record; never leave its object in the active credential array. The
+wrapper ignores the disabled `.previous` token file. Remove both rollback
+artifacts through the normal secret-retirement procedure as soon as the smoke
+test succeeds. Reactivate the previous hash and restore the previous file
+together only during an explicit rollback. Never expose either full token
+through a command argument, prompt, terminal transcript, or Dashboard-managed
+exec output.
+
+The authoritative file names, scopes, caller commands, and new-host procedure
+are in [Auth and trust boundaries](../security/auth-and-trust-boundaries.md#scoped-automation-credentials)
+and [New VPS setup](../setup/new-vps.md#provision-local-openclaw-api-callers).
 
 ## Frontend Not Built
 
@@ -228,28 +294,24 @@ planning.
 
 ## Reports Smoke Test
 
-`/api/reports` is authenticated by default. Use a browser-created session
-cookie, log in with a temporary cookie jar, or run these curls only in an
-environment where `MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1` is intentionally set.
-
-Cookie jar login:
+`/api/reports` is authenticated. Prefer the browser, or use a dedicated
+temporary automation credential with only `reports:read` and `reports:write`.
+Read its bearer token without echo and pass it to curl through standard input,
+not a command argument:
 
 ```bash
-read -r -p "Dashboard username: " dashboard_user
-read -r -s -p "Dashboard password: " dashboard_password
+read -r -s -p "Dashboard reports bearer: " dashboard_reports_bearer
 printf "\n"
-cookie_jar="$(mktemp)"
-login_body="$(bun -e 'console.log(JSON.stringify({ username: process.argv[1], password: process.argv[2] }))' "$dashboard_user" "$dashboard_password")"
-curl -sS -c "$cookie_jar" \
-  -H "Content-Type: application/json" \
-  -d "$login_body" \
-  http://127.0.0.1:3100/api/auth/login
+dashboard_reports_curl() {
+  printf 'header = "Authorization: Bearer %s"\n' \
+    "$dashboard_reports_bearer" | curl --config - "$@"
+}
 ```
 
 Create:
 
 ```bash
-curl -sS -b "$cookie_jar" -X POST http://127.0.0.1:3100/api/reports \
+dashboard_reports_curl -sS -X POST http://127.0.0.1:3100/api/reports \
   -H "Content-Type: application/json" \
   -d '{
     "type":"custom",
@@ -265,7 +327,10 @@ curl -sS -b "$cookie_jar" -X POST http://127.0.0.1:3100/api/reports \
 List:
 
 ```bash
-curl -sS -b "$cookie_jar" http://127.0.0.1:3100/api/reports?type=custom
+dashboard_reports_curl -sS \
+  "http://127.0.0.1:3100/api/reports?type=custom"
+unset dashboard_reports_bearer
+unset -f dashboard_reports_curl
 ```
 
 Delete the smoke report from the UI or with `DELETE /api/reports/:id`.

@@ -1,9 +1,11 @@
 import type { Server } from "bun";
 
-import { type AuthUser, getAuthUserFromSessionId } from "./auth.ts";
+import { type AuthSession, type AuthUser, getAuthSessionFromSessionId } from "./auth.ts";
 
 const SESSION_COOKIE = "mira_dashboard_session";
+const PENDING_LOGIN_COOKIE = "mira_dashboard_pending_login";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const PENDING_LOGIN_TTL_MS = 5 * 60_000;
 const DEFAULT_JSON_BODY_LIMIT = 2 * 1024 * 1024;
 const TRUSTED_PROXY_IPS = new Set(
     (process.env.MIRA_DASHBOARD_TRUSTED_PROXY_IPS || "")
@@ -11,24 +13,12 @@ const TRUSTED_PROXY_IPS = new Set(
         .map((value) => value.trim())
         .filter(Boolean)
 );
-const isLoopbackAuthEnabled = process.env.MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH === "1";
 const configuredDashboardOrigins = new Set(
     (process.env.MIRA_DASHBOARD_ALLOWED_ORIGINS || "")
         .split(",")
         .map((origin) => origin.trim())
         .filter(Boolean)
 );
-const allowedLoopbackHostnames = new Set([
-    "localhost",
-    "127.0.0.1",
-    "::1",
-    "[::1]",
-    "::ffff:127.0.0.1",
-    "[::ffff:127.0.0.1]",
-    "::ffff:7f00:1",
-    "[::ffff:7f00:1]",
-]);
-
 type HeaderInput = Record<string, string> | Array<[string, string]>;
 
 interface BunResponseInit {
@@ -143,10 +133,6 @@ export function isTrustedProxyAddress(address?: string | undefined): boolean {
     );
 }
 
-export function isLoopbackRequest(request: Request, server: Server<unknown>): boolean {
-    return isLoopbackAddress(requestIp(request, server));
-}
-
 export function isAllowedDashboardOrigin(request: Request): boolean {
     const origin = request.headers.get("origin");
     if (!origin) return true;
@@ -162,34 +148,16 @@ export function isAllowedDashboardOrigin(request: Request): boolean {
     }
 }
 
-export function isAllowedLoopbackAuthOrigin(request: Request): boolean {
-    const origin = request.headers.get("origin");
-    try {
-        const requestUrl = new URL(request.url);
-        if (!allowedLoopbackHostnames.has(requestUrl.hostname)) {
-            return false;
-        }
-        if (!origin) return true;
-        const parsedOrigin = new URL(origin);
-        return (
-            parsedOrigin.origin === requestUrl.origin &&
-            allowedLoopbackHostnames.has(parsedOrigin.hostname)
-        );
-    } catch {
-        return false;
-    }
-}
-
-export function sessionIdFromCookie(request: Request): string | undefined {
+function cookieValue(request: Request, name: string): string | undefined {
     const cookieHeader = request.headers.get("cookie");
     if (!cookieHeader) {
         return undefined;
     }
     for (const part of cookieHeader.split(";")) {
         const trimmed = part.trim();
-        if (trimmed.startsWith(`${SESSION_COOKIE}=`)) {
+        if (trimmed.startsWith(`${name}=`)) {
             try {
-                return decodeURIComponent(trimmed.slice(SESSION_COOKIE.length + 1));
+                return decodeURIComponent(trimmed.slice(name.length + 1));
             } catch {
                 return undefined;
             }
@@ -198,23 +166,27 @@ export function sessionIdFromCookie(request: Request): string | undefined {
     return undefined;
 }
 
-export function authUser(
-    request: Request,
-    server: Server<unknown>
-): AuthUser | undefined {
-    const hasForwardedClient =
-        Boolean(request.headers.get("x-forwarded-for")) ||
-        Boolean(request.headers.get("x-real-ip"));
-    if (
-        isLoopbackAuthEnabled &&
-        !hasForwardedClient &&
-        isLoopbackRequest(request, server) &&
-        isAllowedLoopbackAuthOrigin(request)
-    ) {
-        return { id: 0, username: "mira-local" };
-    }
+export function sessionIdFromCookie(request: Request): string | undefined {
+    return cookieValue(request, SESSION_COOKIE);
+}
+
+export function pendingLoginFromCookie(request: Request): string | undefined {
+    return cookieValue(request, PENDING_LOGIN_COOKIE);
+}
+
+/** Resolves the full browser session and only touches idle activity on explicit UI activity. */
+export function authSession(request: Request): AuthSession | undefined {
     const sessionId = sessionIdFromCookie(request);
-    return sessionId ? getAuthUserFromSessionId(sessionId) : undefined;
+    return sessionId
+        ? getAuthSessionFromSessionId(sessionId, {
+              touchActivity: request.headers.get("x-mira-user-activity")?.trim() === "1",
+          })
+        : undefined;
+}
+
+export function authUser(request: Request): AuthUser | undefined {
+    const session = authSession(request);
+    return session ? { id: session.id, username: session.username } : undefined;
 }
 
 export function isSecureRequest(request: Request, server: Server<unknown>): boolean {
@@ -266,9 +238,51 @@ export function clearSessionCookie(request: Request, server: Server<unknown>): s
     return cookieParts.join("; ");
 }
 
+export function pendingLoginCookie(
+    request: Request,
+    server: Server<unknown>,
+    pendingLogin: string
+): string {
+    const cookieParts = [
+        `${PENDING_LOGIN_COOKIE}=${encodeURIComponent(pendingLogin)}`,
+        "Path=/api/auth",
+        "HttpOnly",
+        "SameSite=Strict",
+        `Max-Age=${Math.floor(PENDING_LOGIN_TTL_MS / 1000)}`,
+    ];
+    if (isSecureRequest(request, server)) {
+        cookieParts.push("Secure");
+    }
+    return cookieParts.join("; ");
+}
+
+export function clearPendingLoginCookie(
+    request: Request,
+    server: Server<unknown>
+): string {
+    const cookieParts = [
+        `${PENDING_LOGIN_COOKIE}=`,
+        "Path=/api/auth",
+        "HttpOnly",
+        "SameSite=Strict",
+        "Max-Age=0",
+    ];
+    if (isSecureRequest(request, server)) {
+        cookieParts.push("Secure");
+    }
+    return cookieParts.join("; ");
+}
+
 export function withCookie(response: Response, cookie: string): Response {
+    return withCookies(response, [cookie]);
+}
+
+export function withCookies(response: Response, cookies: string[]): Response {
     const headers = new Headers(response.headers);
-    headers.set("Set-Cookie", cookie);
+    headers.delete("Set-Cookie");
+    for (const cookie of cookies) {
+        headers.append("Set-Cookie", cookie);
+    }
     return new Response(response.body, {
         headers,
         status: response.status,

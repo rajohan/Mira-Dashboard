@@ -33,6 +33,7 @@ export interface AgentConfig {
 /** Represents OpenClaw config. */
 export interface OpenClawConfig {
     __hash?: string;
+    __masked?: boolean;
     agents?: {
         defaults?: {
             skills?: string[];
@@ -198,8 +199,9 @@ async function createBackup(): Promise<{
 
 // Hooks
 /** Provides config. */
-export function useConfig() {
+export function useConfig(isEnabled = true) {
     return useQuery({
+        enabled: isEnabled,
         queryKey: ["config"],
         queryFn: fetchConfig,
         staleTime: 60_000, // 1 minute
@@ -207,8 +209,9 @@ export function useConfig() {
 }
 
 /** Provides skills. */
-export function useSkills() {
+export function useSkills(isEnabled = true) {
     return useQuery({
+        enabled: isEnabled,
         queryKey: ["skills"],
         queryFn: fetchSkills,
         staleTime: 60_000,

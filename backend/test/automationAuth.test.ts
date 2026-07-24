@@ -358,7 +358,7 @@ describe("scoped automation authentication", () => {
             request("/api/agents/status"),
             server
         );
-        expect(loopbackAgentRead.status).toBe(200);
+        expect(loopbackAgentRead.status).toBe(401);
         expect(auditRows(loopbackAgentRead.headers.get("x-request-id"))).toEqual([]);
 
         const readOnlyWrite = await routes["/api/tasks"].POST(
@@ -403,14 +403,14 @@ describe("scoped automation authentication", () => {
             request("/api/tasks", "GET", "Basic handled-upstream"),
             server
         );
-        expect(unrelatedAuthorization.status).toBe(200);
+        expect(unrelatedAuthorization.status).toBe(401);
 
         const legacyLoopback = await routes["/api/tasks"].GET(
             request("/api/tasks"),
             server
         );
-        expect(legacyLoopback.status).toBe(200);
-        expect(tasksHandler).toHaveBeenCalledTimes(4);
+        expect(legacyLoopback.status).toBe(401);
+        expect(tasksHandler).toHaveBeenCalledTimes(2);
     });
 
     it("fails closed when a denied automation audit cannot be stored", async () => {

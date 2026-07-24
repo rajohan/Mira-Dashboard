@@ -38,6 +38,17 @@ async function fetchFileContent(path: string): Promise<FileContent> {
     return apiFetchRequired<FileContent>(endpoint);
 }
 
+/** Fetches an explicitly revealed config file after privileged step-up. */
+async function revealFileContent(path: string): Promise<FileContent> {
+    if (!path.startsWith("config:")) {
+        throw new Error("Only Dashboard config files support secret reveal");
+    }
+    const configPath = path.replace("config:", "");
+    return apiFetchRequired<FileContent>(
+        `/config-files/${encodeURIComponent(configPath)}?reveal=1`
+    );
+}
+
 /** Performs save file content. */
 async function saveFileContent(path: string, content: string): Promise<void> {
     const isConfig = path.startsWith("config:");
@@ -82,5 +93,12 @@ export function useSaveFile() {
         onSuccess: (_, { path }) => {
             queryClient.invalidateQueries({ queryKey: fileKeys.content(path) });
         },
+    });
+}
+
+/** Provides an uncached, explicit secret-reveal request for a config file. */
+export function useRevealFile() {
+    return useMutation({
+        mutationFn: revealFileContent,
     });
 }

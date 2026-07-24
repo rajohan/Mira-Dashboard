@@ -16,6 +16,8 @@ export interface FileContent {
     size: number;
     modified: string;
     isBinary: boolean;
+    masked?: boolean;
+    maskingError?: "invalid_json" | "truncated_json";
     isImage?: boolean;
     mimeType?: string;
 }
