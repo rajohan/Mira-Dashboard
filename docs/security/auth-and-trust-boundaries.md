@@ -66,7 +66,8 @@ The route allowlist is fail-closed:
 
 Agent status reads (`GET`/`HEAD /api/agents/status`,
 `/api/agents/:id/status`, and `/api/agents/tasks/history`) require
-`agents:write` because their handlers reconcile stale task state in SQLite.
+`agents:write` because their handlers reconcile stale task state in SQLite. The
+request policy audits them as mutations even though they use safe HTTP methods.
 
 Terminal/exec, config, file access, sessions/chat, Docker, deploy/review,
 restart, backup actions, cache refreshes, log rotation, scheduled-job mutation,

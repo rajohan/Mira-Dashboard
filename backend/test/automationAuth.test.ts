@@ -259,8 +259,15 @@ describe("scoped automation authentication", () => {
                     isOk: Boolean(handlerRequest.url && handlerServer.requestIP),
                 })
         );
+        const agentStatusHandler = jest.fn(
+            (handlerRequest: Request, handlerServer: Server<unknown>) =>
+                Response.json({
+                    isOk: Boolean(handlerRequest.url && handlerServer.requestIP),
+                })
+        );
         const routes = withRequestPolicy(
             {
+                "/api/agents/status": { GET: agentStatusHandler },
                 "/api/exec/start": { POST: execHandler },
                 "/api/tasks": {
                     GET: tasksHandler,
@@ -308,6 +315,40 @@ describe("scoped automation authentication", () => {
                 metadata: {
                     automationScope: "tasks:write",
                     method: "POST",
+                    status: 200,
+                },
+                outcome: "accepted",
+            },
+        ]);
+
+        const agentReconciliation = await routes["/api/agents/status"].GET(
+            request("/api/agents/status", "GET", writerAuthorization),
+            server
+        );
+        expect(agentReconciliation.status).toBe(200);
+        expect(
+            auditRows(agentReconciliation.headers.get("x-request-id")).map((row) => ({
+                actorId: row.actor_id,
+                actorType: row.actor_type,
+                metadata: JSON.parse(row.metadata_json) as Record<string, unknown>,
+                outcome: row.outcome,
+            }))
+        ).toEqual([
+            {
+                actorId: "mira-writer",
+                actorType: "automation",
+                metadata: {
+                    automationScope: "agents:write",
+                    method: "GET",
+                },
+                outcome: "attempted",
+            },
+            {
+                actorId: "mira-writer",
+                actorType: "automation",
+                metadata: {
+                    automationScope: "agents:write",
+                    method: "GET",
                     status: 200,
                 },
                 outcome: "accepted",
@@ -368,9 +409,7 @@ describe("scoped automation authentication", () => {
 
     it("fails closed when a denied automation audit cannot be stored", async () => {
         const serialized = credentialsJson();
-        const handler = jest.fn(
-            (_request: Request, _server: Server<unknown>) => new Response("must not run")
-        );
+        const handler = jest.fn(() => new Response("must not run"));
         const persistenceError = new Error("audit storage unavailable");
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
@@ -385,7 +424,11 @@ describe("scoped automation authentication", () => {
                 }
             );
 
-            const response = await routes["/api/exec/start"].POST(
+            const securedPost = routes["/api/exec/start"].POST as unknown as (
+                request: Request,
+                server: Server<unknown>
+            ) => Promise<Response>;
+            const response = await securedPost(
                 request(
                     "/api/exec/start",
                     "POST",

@@ -211,7 +211,12 @@ function auditOutcomeForStatus(status: number): AuditOutcome {
 }
 
 function isAuditedMutation(isApi: boolean, request: Request): boolean {
-    return isApi && !SAFE_REQUEST_METHODS.has(request.method.toUpperCase());
+    if (!isApi) return false;
+    const method = request.method.toUpperCase();
+    return (
+        !SAFE_REQUEST_METHODS.has(method) ||
+        requiredAutomationScope(request)?.endsWith(":write") === true
+    );
 }
 
 function writeRequestAudit(
