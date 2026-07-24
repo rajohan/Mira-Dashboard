@@ -53,8 +53,8 @@ The route allowlist is fail-closed:
 
 | Scope                 | Allowed route and method family             |
 | --------------------- | ------------------------------------------- |
-| `agents:read`         | `GET`/`HEAD /api/agents/*`                  |
-| `agents:write`        | `PUT /api/agents/:id/metadata`              |
+| `agents:read`         | `GET`/`HEAD /api/agents/config`             |
+| `agents:write`        | `PUT /api/agents/:id/metadata`; state-reconciling agent reads |
 | `audit:read`          | `GET`/`HEAD /api/audit-events`              |
 | `cache:read`          | `GET`/`HEAD /api/cache/*`                   |
 | `notifications:read`  | `GET`/`HEAD /api/notifications/*`           |
@@ -63,6 +63,10 @@ The route allowlist is fail-closed:
 | `reports:write`       | Unsafe methods under `/api/reports/*`       |
 | `tasks:read`          | `GET`/`HEAD /api/tasks/*`                   |
 | `tasks:write`         | Unsafe methods under `/api/tasks/*`         |
+
+Agent status reads (`GET`/`HEAD /api/agents/status`,
+`/api/agents/:id/status`, and `/api/agents/tasks/history`) require
+`agents:write` because their handlers reconcile stale task state in SQLite.
 
 Terminal/exec, config, file access, sessions/chat, Docker, deploy/review,
 restart, backup actions, cache refreshes, log rotation, scheduled-job mutation,

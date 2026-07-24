@@ -315,7 +315,7 @@ function secureHandler(
                 automationPrincipal &&
                 (!automationScope || !automationPrincipal.scopes.has(automationScope))
             ) {
-                didWriteRequestAudit(
+                const didRecordDenial = didWriteRequestAudit(
                     requestActor(undefined, automationPrincipal),
                     "denied",
                     request,
@@ -325,6 +325,9 @@ function secureHandler(
                     automationScope,
                     persistAuditEvent
                 );
+                if (!didRecordDenial) {
+                    return json({ error: "Audit trail unavailable" }, { status: 503 });
+                }
                 return json(
                     { error: "Automation credential scope denied" },
                     { status: 403 }

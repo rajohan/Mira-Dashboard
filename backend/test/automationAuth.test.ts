@@ -208,7 +208,11 @@ describe("scoped automation authentication", () => {
             ["POST", "/api/reports", "reports:write"],
             ["GET", "/api/notifications", "notifications:read"],
             ["PUT", "/api/agents/main/metadata", "agents:write"],
-            ["GET", "/api/agents/status", "agents:read"],
+            ["GET", "/api/agents/config", "agents:read"],
+            ["GET", "/api/agents/status", "agents:write"],
+            ["GET", "/api/agents/main/status", "agents:write"],
+            ["GET", "/api/agents/tasks/history", "agents:write"],
+            ["GET", "/api/agents/unknown", undefined],
             ["GET", "/api/audit-events", "audit:read"],
             ["GET", "/api/cache/heartbeat", "cache:read"],
             ["POST", "/api/cache/git.workspace/refresh", undefined],
@@ -360,5 +364,47 @@ describe("scoped automation authentication", () => {
         );
         expect(legacyLoopback.status).toBe(200);
         expect(tasksHandler).toHaveBeenCalledTimes(4);
+    });
+
+    it("fails closed when a denied automation audit cannot be stored", async () => {
+        const serialized = credentialsJson();
+        const handler = jest.fn(
+            (_request: Request, _server: Server<unknown>) => new Response("must not run")
+        );
+        const persistenceError = new Error("audit storage unavailable");
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const routes = withRequestPolicy(
+                { "/api/exec/start": { POST: handler } },
+                {
+                    authenticateAutomation: (automationRequest) =>
+                        authenticateAutomationRequest(automationRequest, serialized),
+                    persistAuditEvent: () => {
+                        throw persistenceError;
+                    },
+                }
+            );
+
+            const response = await routes["/api/exec/start"].POST(
+                request(
+                    "/api/exec/start",
+                    "POST",
+                    authorization("mira-writer", WRITER_VALIDATOR)
+                ),
+                loopbackServer()
+            );
+
+            expect(response.status).toBe(503);
+            await expect(response.json()).resolves.toEqual({
+                error: "Audit trail unavailable",
+            });
+            expect(handler).not.toHaveBeenCalled();
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.stringContaining("denied persistence failed"),
+                persistenceError
+            );
+        } finally {
+            errorSpy.mockRestore();
+        }
     });
 });

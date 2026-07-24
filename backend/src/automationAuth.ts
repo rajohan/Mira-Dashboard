@@ -223,7 +223,16 @@ export function requiredAutomationScope(request: Request): AutomationScope | und
     if (method === "PUT" && /^\/api\/agents\/[^/]+\/metadata$/u.test(pathname)) {
         return "agents:write";
     }
-    if (isPathAtOrBelow(pathname, "/api/agents") && SAFE_METHODS.has(method)) {
+    if (
+        SAFE_METHODS.has(method) &&
+        (pathname === "/api/agents/status" ||
+            pathname === "/api/agents/tasks/history" ||
+            /^\/api\/agents\/[^/]+\/status$/u.test(pathname))
+    ) {
+        // These reads reconcile stale task history and therefore persist updates.
+        return "agents:write";
+    }
+    if (pathname === "/api/agents/config" && SAFE_METHODS.has(method)) {
         return "agents:read";
     }
     if (pathname === "/api/audit-events" && SAFE_METHODS.has(method)) {
