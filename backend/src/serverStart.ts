@@ -119,6 +119,18 @@ export function shouldStartOnImport(
     return startOnImport === "1" || isDirect;
 }
 
+interface BackendServerEntrypointOptions {
+    isDirect?: boolean;
+    reportFailure?: (error: unknown) => void;
+    runServer?: () => Promise<void>;
+    startOnImport?: string;
+}
+
+function reportBackendServerFailure(error: unknown): void {
+    console.error("[Backend] Failed:", error);
+    process.exitCode = 1;
+}
+
 /** Runs the web process until systemd or an operator requests a clean shutdown. */
 export async function runBackendServer(port = resolveListenPort()): Promise<void> {
     const shutdown = Promise.withResolvers<NodeJS.Signals>();
@@ -135,11 +147,30 @@ export async function runBackendServer(port = resolveListenPort()): Promise<void
     }
 }
 
-if (shouldStartOnImport()) {
-    try {
-        await runBackendServer();
-    } catch (error) {
-        console.error("[Backend] Failed:", error);
-        process.exitCode = 1;
+/**
+ * Awaits direct CLI startup while preserving non-blocking opt-in startup for
+ * modules imported by tests or other runtimes.
+ */
+export async function startBackendServerEntrypoint({
+    isDirect = isDirectEntrypoint(),
+    reportFailure = reportBackendServerFailure,
+    runServer = runBackendServer,
+    startOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT,
+}: BackendServerEntrypointOptions = {}): Promise<void> {
+    if (!shouldStartOnImport(startOnImport, isDirect)) {
+        return;
     }
+    if (!isDirect) {
+        void runServer().catch(reportFailure);
+        return;
+    }
+    try {
+        await runServer();
+    } catch (error) {
+        reportFailure(error);
+    }
+}
+
+if (shouldStartOnImport()) {
+    await startBackendServerEntrypoint();
 }

@@ -33,8 +33,12 @@ describe("server start scheduler policy", () => {
     });
 
     it("resolves backend startup entrypoint and gateway token decisions without starting services", async () => {
-        const { isDirectEntrypoint, resolveGatewayToken, shouldStartOnImport } =
-            await import("../src/serverStart.ts");
+        const {
+            isDirectEntrypoint,
+            resolveGatewayToken,
+            shouldStartOnImport,
+            startBackendServerEntrypoint,
+        } = await import("../src/serverStart.ts");
 
         expect(
             resolveGatewayToken(
@@ -62,6 +66,74 @@ describe("server start scheduler policy", () => {
         expect(shouldStartOnImport("1", false)).toBe(true);
         expect(shouldStartOnImport(undefined, true)).toBe(true);
         expect(shouldStartOnImport("0", false)).toBe(false);
+
+        const disabledRunner = jest.fn(async () => {});
+        await startBackendServerEntrypoint({
+            isDirect: false,
+            runServer: disabledRunner,
+            startOnImport: "0",
+        });
+        expect(disabledRunner).not.toHaveBeenCalled();
+
+        const importedServer = Promise.withResolvers<void>();
+        const importedRunner = jest.fn(() => importedServer.promise);
+        await startBackendServerEntrypoint({
+            isDirect: false,
+            runServer: importedRunner,
+            startOnImport: "1",
+        });
+        expect(importedRunner).toHaveBeenCalledTimes(1);
+        importedServer.resolve();
+        await importedServer.promise;
+
+        const directServer = Promise.withResolvers<void>();
+        let isDirectStartupComplete = false;
+        const runDirectStartup = async () => {
+            await startBackendServerEntrypoint({
+                isDirect: true,
+                runServer: () => directServer.promise,
+            });
+            isDirectStartupComplete = true;
+        };
+        const directStartup = runDirectStartup();
+        await Bun.sleep(0);
+        expect(isDirectStartupComplete).toBe(false);
+        directServer.resolve();
+        await directStartup;
+        expect(isDirectStartupComplete).toBe(true);
+
+        const startupError = new Error("imported startup failed");
+        const reportedError = Promise.withResolvers<unknown>();
+        await startBackendServerEntrypoint({
+            isDirect: false,
+            reportFailure: reportedError.resolve,
+            runServer: async () => {
+                throw startupError;
+            },
+            startOnImport: "1",
+        });
+        expect(await reportedError.promise).toBe(startupError);
+    });
+
+    it("reports direct backend entrypoint failures", async () => {
+        const originalExitCode = process.exitCode ?? 0;
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const startupError = new Error("direct startup failed");
+        const { startBackendServerEntrypoint } = await import("../src/serverStart.ts");
+        try {
+            process.exitCode = 0;
+            await startBackendServerEntrypoint({
+                isDirect: true,
+                runServer: async () => {
+                    throw startupError;
+                },
+            });
+            expect(errorSpy).toHaveBeenCalledWith("[Backend] Failed:", startupError);
+            expect(process.exitCode).toBe(1);
+        } finally {
+            errorSpy.mockRestore();
+            process.exitCode = originalExitCode;
+        }
     });
 
     it("resolves the dedicated worker entrypoint and keeps its event loop referenced", async () => {
@@ -407,17 +479,43 @@ describe("server start scheduler policy", () => {
             await stopBackendServer();
             await stopBackendServer();
 
-            const existingSigintListeners = process.listeners("SIGINT");
-            const existingSigtermListeners = process.listeners("SIGTERM");
-            const runningServer = runBackendServer(0);
-            const sigtermListener = process
-                .listeners("SIGTERM")
-                .find((listener) => !existingSigtermListeners.includes(listener));
-            expect(sigtermListener).toBeTypeOf("function");
-            sigtermListener?.("SIGTERM");
-            await runningServer;
-            expect(process.listeners("SIGINT")).toEqual(existingSigintListeners);
-            expect(process.listeners("SIGTERM")).toEqual(existingSigtermListeners);
+            for (const signal of ["SIGINT", "SIGTERM"] as const) {
+                const existingListeners = {
+                    SIGINT: process.listeners("SIGINT"),
+                    SIGTERM: process.listeners("SIGTERM"),
+                };
+                const runningServer = runBackendServer(0);
+                const addedListeners = {
+                    SIGINT: process
+                        .listeners("SIGINT")
+                        .filter(
+                            (listener) => !existingListeners.SIGINT.includes(listener)
+                        ),
+                    SIGTERM: process
+                        .listeners("SIGTERM")
+                        .filter(
+                            (listener) => !existingListeners.SIGTERM.includes(listener)
+                        ),
+                };
+                const shutdownListener = addedListeners[signal][0] as
+                    NodeJS.SignalsListener | undefined;
+                if (!shutdownListener) {
+                    const cleanupListener = (addedListeners.SIGINT[0] ??
+                        addedListeners.SIGTERM[0]) as NodeJS.SignalsListener | undefined;
+                    if (cleanupListener) {
+                        cleanupListener(signal);
+                        await runningServer;
+                    } else {
+                        await stopBackendServer();
+                        void runningServer.catch(() => {});
+                    }
+                    throw new TypeError(`${signal} shutdown listener not found`);
+                }
+                shutdownListener(signal);
+                await runningServer;
+                expect(process.listeners("SIGINT")).toEqual(existingListeners.SIGINT);
+                expect(process.listeners("SIGTERM")).toEqual(existingListeners.SIGTERM);
+            }
         } finally {
             errorSpy.mockRestore();
             warnSpy.mockRestore();

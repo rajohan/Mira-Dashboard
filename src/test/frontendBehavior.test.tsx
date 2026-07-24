@@ -805,6 +805,9 @@ describe("Mira Dashboard frontend behavior", () => {
         const tasksRoute = createRoute({
             getParentRoute: () => authenticatedRoute,
             path: "/tasks",
+            validateSearch: (search: Record<string, unknown>) => ({
+                view: typeof search.view === "string" ? search.view : undefined,
+            }),
             component: () => createElement("div", undefined, "Tasks child"),
         });
         const loginRoute = createRoute({
@@ -861,6 +864,17 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(pageScroll.scrollTop).toBe(0);
             expect(pageScroll.scrollLeft).toBe(0);
             expect(screen.getAllByLabelText("Close navigation menu")).toHaveLength(1);
+
+            pageScroll.scrollTop = 320;
+            pageScroll.scrollLeft = 16;
+            await act(async () => {
+                await testRouter.navigate({
+                    to: "/tasks",
+                    search: { view: "queued" },
+                });
+            });
+            expect(pageScroll.scrollTop).toBe(320);
+            expect(pageScroll.scrollLeft).toBe(16);
 
             await userEvent.click(screen.getByText("Log out"));
             await waitFor(() => {
