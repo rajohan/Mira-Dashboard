@@ -4904,9 +4904,24 @@ describe("shared component helpers", () => {
 
         const view = renderWithQueryClient(<DatabaseOverviewCard />);
 
-        expect(await screen.findByText("3 hints")).toBeInTheDocument();
+        expect(
+            await screen.findByText(
+                "PostgreSQL may reclaim ~6.0 GB (75.0%). Review table bloat and compaction options"
+            )
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                "1 large table exceeds the dead-tuple threshold. Review autovacuum"
+            )
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText("1 query averages at least 500 ms. Review query performance")
+        ).toBeInTheDocument();
         expect(screen.getByText("Dashboard SQLite")).toBeInTheDocument();
         expect(screen.getByText("4/4")).toBeInTheDocument();
+        const databaseCard = screen.getByRole("heading", { name: "Database" })
+            .parentElement?.parentElement;
+        expect(databaseCard).not.toHaveClass("xl:col-span-2");
         const postgresqlSection = screen
             .getByRole("heading", { name: "PostgreSQL" })
             .closest("section");

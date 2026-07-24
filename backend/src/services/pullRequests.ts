@@ -1116,7 +1116,7 @@ async function cleanupPullRequestWorktree(
                 status: "warning",
                 branch,
                 path: worktreePath,
-                message: `Skipped cleanup for ${branch}; worktree path is outside ${dashboardWorktreeRoot}`,
+                message: `Skipped cleanup for ${branch}. Worktree path is outside ${dashboardWorktreeRoot}`,
             };
         }
 
@@ -1130,7 +1130,7 @@ async function cleanupPullRequestWorktree(
                 status: "warning",
                 branch,
                 path: worktreePath,
-                message: `Skipped cleanup for ${branch}; worktree has local changes`,
+                message: `Skipped cleanup for ${branch}. Worktree has local changes`,
             };
         }
 
@@ -1343,7 +1343,7 @@ export async function ensureProductionCheckout(signal?: AbortSignal): Promise<vo
     }
 
     if (!status.isClean) {
-        throw new Error("Production checkout has local changes; refusing deploy/merge");
+        throw new Error("Production checkout has local changes. Refusing deploy/merge");
     }
 }
 
@@ -1355,7 +1355,7 @@ export async function ensureProductionReadyForDeploy(
 
     if (!status.isSafeForDeploy) {
         throw new Error(
-            `Production checkout must be clean ${DEFAULT_BASE} before deploy; current branch=${status.branch}, clean=${status.isClean}`
+            `Production checkout must be clean ${DEFAULT_BASE} before deploy. Current branch=${status.branch}, clean=${status.isClean}`
         );
     }
 }
@@ -1459,7 +1459,7 @@ async function scheduleRestartHealthCheck(
         ...job,
         status: "isOk",
         updatedAt: dateToISOString(new Date()),
-        note: "Restarted web and worker services; health checks passed",
+        note: "Restarted web and worker services. Health checks passed",
     };
     const failedJob: DeploymentJob = {
         ...job,
@@ -1552,7 +1552,7 @@ async function runDeploymentJob(
             updatedAt: dateToISOString(new Date()),
             commit: commit.trim(),
             commitTitle: commitTitle.trim(),
-            note: "Build passed; restart + health check scheduled",
+            note: "Build passed. Restart + health check scheduled",
         };
         writeDeploymentJob(restartScheduled);
         await scheduleRestartHealthCheck(restartScheduled, signal);
@@ -1735,11 +1735,11 @@ export async function approvePullRequest(
     return {
         isOk: true,
         message: syncError
-            ? `PR #${number} merged; production sync failed`
+            ? `PR #${number} merged. Production sync failed`
             : deployError
-              ? `PR #${number} merged; deploy failed to start`
+              ? `PR #${number} merged. Deploy failed to start`
               : willDeploy
-                ? `PR #${number} merged; deploy started`
+                ? `PR #${number} merged. Deploy started`
                 : `PR #${number} merged`,
         deployment,
         deployError,

@@ -110,6 +110,13 @@ export async function getCacheEntry(key: string): Promise<CacheEntryRow | undefi
     return mapCacheEntry(row);
 }
 
+/** Marks a cache entry stale without discarding its last successful payload. */
+export function invalidateCacheEntry(key: string, now = new Date()): void {
+    database
+        .prepare("UPDATE cache_entries SET expires_at = ? WHERE key = ?")
+        .run(now.toISOString(), key);
+}
+
 /** Returns all cache entries. */
 export async function getAllCacheEntries(): Promise<CacheEntryRow[]> {
     const rows = database

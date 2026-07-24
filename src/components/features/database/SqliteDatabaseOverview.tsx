@@ -2,6 +2,7 @@ import type { DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";
+import { DatabaseAttentionCard } from "./DatabaseAttentionCard";
 import { formatBytes, formatNumber } from "./databaseUtilities";
 
 interface Properties {
@@ -70,6 +71,8 @@ export function SqliteDatabaseOverview({ sqlite }: Properties) {
                     </div>
                 </Card>
             </div>
+
+            <DatabaseAttentionCard reasons={sqlite.attention} source="SQLite" />
 
             <div className="grid gap-4 xl:grid-cols-2">
                 <Card variant="bordered">
@@ -145,19 +148,6 @@ export function SqliteDatabaseOverview({ sqlite }: Properties) {
                     </dl>
                 </Card>
             </div>
-
-            {sqlite.attention.length > 0 ? (
-                <Card variant="bordered" className="border-amber-500/40">
-                    <h3 className="font-semibold text-amber-200">
-                        SQLite needs attention
-                    </h3>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-primary-200">
-                        {sqlite.attention.map((reason) => (
-                            <li key={reason}>{reason}</li>
-                        ))}
-                    </ul>
-                </Card>
-            ) : undefined}
         </div>
     );
 }

@@ -36,7 +36,7 @@ export interface ScheduledJobRun {
     id: number;
     jobId: string;
     status: "queued" | "running" | "success" | "failed" | "cancelled";
-    triggerType: "manual" | "schedule" | "startup";
+    triggerType: "manual" | "schedule" | "startup" | "system";
     startedAt: string;
     queuedAt: string;
     finishedAt?: string | undefined;

@@ -3,7 +3,7 @@ import { Database } from "lucide-react";
 import { useCacheEntry } from "../../../hooks/useCache";
 import { type DatabaseOverviewResponse } from "../../../hooks/useDatabase";
 import { Card } from "../../ui/Card";
-import { formatBytes } from "../database/databaseUtilities";
+import { formatBytes, postgresMaintenanceAttention } from "../database/databaseUtilities";
 
 function isDatabaseOverviewResponse(value: unknown): value is DatabaseOverviewResponse {
     if (!value || typeof value !== "object") return false;
@@ -27,12 +27,11 @@ export function DatabaseOverviewCard() {
     const overview = database?.overview;
     const waitingClients = overview?.pgbouncer.waitingClients ?? 0;
     const maintenance = overview?.maintenance;
-    const maintenanceHintCount =
-        maintenance?.hintCount ?? (maintenance?.status === "review" ? 1 : 0);
+    const postgresAttention = postgresMaintenanceAttention(maintenance);
     const sqlite = database?.sqlite;
 
     return (
-        <Card className="xl:col-span-2">
+        <Card>
             <div className="mb-3 flex items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">
                     Database
@@ -101,11 +100,12 @@ export function DatabaseOverviewCard() {
                                 {waitingClients}
                             </span>
                         </div>
-                        {maintenance?.status === "review" ? (
-                            <div className="text-xs text-primary-400">
-                                {maintenanceHintCount}{" "}
-                                {maintenanceHintCount === 1 ? "hint" : "hints"}
-                            </div>
+                        {postgresAttention.length > 0 ? (
+                            <ul className="space-y-1 text-xs text-yellow-300">
+                                {postgresAttention.map((reason) => (
+                                    <li key={reason}>{reason}</li>
+                                ))}
+                            </ul>
                         ) : undefined}
                     </section>
 

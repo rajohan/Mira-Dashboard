@@ -2,6 +2,7 @@ import { type Database } from "bun:sqlite";
 
 import { database, getMiraDatabasePath } from "../database.ts";
 import { validateDatabaseMigrationHistory } from "../databaseMigrationRunner.ts";
+import { errorMessage } from "../lib/errors.ts";
 import { createVerifiedSqliteBackup, pruneSqliteBackups } from "../sqliteBackup.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
 import {
@@ -341,12 +342,44 @@ export function runSqliteMaintenance(now = new Date()) {
     };
 }
 
-export function registerSqliteMaintenanceScheduledJob(): void {
+interface SqliteMaintenanceScheduledJobOptions {
+    enqueueDatabaseSummaryRefresh?: () => void;
+}
+
+export function registerSqliteMaintenanceScheduledJob(
+    options: SqliteMaintenanceScheduledJobOptions = {}
+): void {
     registerScheduledJobAction(
         SQLITE_MAINTENANCE_JOB_ID,
         (_job, _signal, context) => {
             context.protectFromCancellation();
-            return Promise.resolve(runSqliteMaintenance());
+            const result = runSqliteMaintenance();
+            if (!options.enqueueDatabaseSummaryRefresh) {
+                return result;
+            }
+            try {
+                options.enqueueDatabaseSummaryRefresh();
+                return {
+                    ...result,
+                    cacheRefresh: { status: "queued" },
+                };
+            } catch (error) {
+                const message = errorMessage(
+                    error,
+                    "Database summary cache refresh enqueue failed"
+                );
+                console.warn(
+                    "[SQLiteMaintenance] Database summary cache refresh enqueue failed:",
+                    message
+                );
+                return {
+                    ...result,
+                    cacheRefresh: {
+                        message,
+                        status: "failed",
+                    },
+                };
+            }
         },
         { timeoutMs: SQLITE_MAINTENANCE_TIMEOUT_MS }
     );

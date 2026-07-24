@@ -2166,6 +2166,76 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("places database attention directly below each source overview", async () => {
+        const user = userEvent.setup();
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                const response = await apiResponse(url, method, init);
+                if (url !== "/api/cache/database.summary") {
+                    return response;
+                }
+
+                const envelope = (await response.json()) as {
+                    data: {
+                        overview: Record<string, unknown>;
+                        sqlite: {
+                            attention: string[];
+                            status: "healthy" | "review";
+                        };
+                    };
+                };
+                envelope.data.overview.maintenance = {
+                    estimatedReclaimableBytes: 6_442_450_944,
+                    estimatedReclaimablePercent: 75,
+                    highDeadTupleTableCount: 1,
+                    hintCount: 3,
+                    isBloatAssessmentIncomplete: false,
+                    physicalTableBytes: 8_589_934_592,
+                    requiresBloatReview: true,
+                    reviewMinimumBytes: 1_073_741_824,
+                    reviewThresholdBytes: 5_368_709_120,
+                    reviewThresholdPercent: 25,
+                    slowQueryCount: 1,
+                    status: "review",
+                    unassessedPhysicalBytes: 0,
+                    unassessedTableCount: 0,
+                };
+                envelope.data.sqlite.attention = ["SQLite test maintenance reason"];
+                envelope.data.sqlite.status = "review";
+                return Response.json(envelope);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Database));
+
+        const postgresOverviewLabel = await screen.findByText("Comet torrents");
+        const postgresOverview = postgresOverviewLabel.parentElement?.parentElement;
+        const postgresAttention = screen.getByRole("heading", {
+            name: "PostgreSQL needs attention",
+        }).parentElement;
+        expect(postgresOverview?.nextElementSibling).toBe(postgresAttention);
+        expect(
+            screen.getByText("1 query averages at least 500 ms. Review query performance")
+        ).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Dashboard SQLite" }));
+
+        const sqliteOverview =
+            screen.getByText("Database file").parentElement?.parentElement;
+        const sqliteAttention = screen.getByRole("heading", {
+            name: "SQLite needs attention",
+        }).parentElement;
+        expect(sqliteOverview?.nextElementSibling).toBe(sqliteAttention);
+        expect(screen.getByText("SQLite test maintenance reason")).toBeInTheDocument();
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("shows the agents error state without the configured-agents empty state", async () => {
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,

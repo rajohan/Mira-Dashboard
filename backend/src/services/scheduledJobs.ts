@@ -65,7 +65,7 @@ const scheduledJobRuntimeState: {
 export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
 export type ScheduledJobRunStatus =
     "queued" | "running" | "success" | "failed" | "cancelled";
-export type ScheduledJobTriggerType = "manual" | "schedule" | "startup";
+export type ScheduledJobTriggerType = "manual" | "schedule" | "startup" | "system";
 export interface ScheduledJobActionContext {
     executionId: string;
     pauseWorkerClaims: () => () => void;

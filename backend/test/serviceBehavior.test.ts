@@ -761,6 +761,8 @@ describe("backend service behavior", () => {
 
     it("writes successful cache entries and preserves existing data when requested", async () => {
         const key = `test.cache.success.${Bun.randomUUIDv7()}`;
+        const { getCacheEntry, invalidateCacheEntry } =
+            await import("../src/lib/cacheStore.ts");
         const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
 
         try {
@@ -801,9 +803,194 @@ describe("backend service behavior", () => {
             expect(row.consecutive_failures).toBe(0);
             expect(row.error_message).toBeNull();
             expect(JSON.parse(row.metadata_json)).toEqual({ source: "preserved" });
+
+            invalidateCacheEntry(key, new Date(0));
+            expect(await getCacheEntry(key)).toMatchObject({
+                data: JSON.stringify({ version: 1 }),
+                status: "stale",
+            });
+            expect(() => invalidateCacheEntry(`${key}.missing`)).not.toThrow();
         } finally {
             database.prepare("DELETE FROM cache_entries WHERE key = ?").run(key);
         }
+    });
+
+    it("invalidates database metrics on startup and queues lifecycle refreshes", async () => {
+        const key = "database.summary";
+        const originalEntry = database
+            .prepare("SELECT * FROM cache_entries WHERE key = ?")
+            .get(key) as
+            | {
+                  consecutive_failures: number;
+                  data_json: string | null;
+                  error_code: string | null;
+                  error_message: string | null;
+                  expires_at: string;
+                  key: string;
+                  last_attempt_at: string;
+                  metadata_json: string;
+                  source: string;
+                  status: string;
+                  updated_at: string | null;
+              }
+            | undefined;
+        const { enqueueDatabaseSummaryRefresh, registerCacheRefreshScheduledJobs } =
+            await import("../src/services/cacheRefresh.ts");
+        const { getCacheEntry } = await import("../src/lib/cacheStore.ts");
+        const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
+        const { getScheduledJob, updateScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
+
+        registerCacheRefreshScheduledJobs({ seedStrategy: "none" });
+        const originalJobEnabled =
+            getScheduledJob("cache.database.summary")?.enabled ?? true;
+        updateScheduledJob("cache.database.summary", { enabled: true });
+        const baselineRunId = (
+            database
+                .prepare("SELECT COALESCE(MAX(id), 0) AS id FROM scheduled_job_runs")
+                .get() as { id: number }
+        ).id;
+        const createdRunIds: number[] = [];
+        const removeCreatedRuns = () => {
+            for (const runId of createdRunIds) {
+                database
+                    .prepare("DELETE FROM job_executions WHERE scheduled_run_id = ?")
+                    .run(runId);
+                database
+                    .prepare("DELETE FROM scheduled_job_runs WHERE id = ?")
+                    .run(runId);
+            }
+            createdRunIds.length = 0;
+        };
+        cleanupCallbacks.push(() => {
+            removeCreatedRuns();
+            database.prepare("DELETE FROM cache_entries WHERE key = ?").run(key);
+            if (originalEntry) {
+                database
+                    .prepare(
+                        `INSERT INTO cache_entries (
+                             key, data_json, source, updated_at, last_attempt_at,
+                             expires_at, status, error_code, error_message,
+                             consecutive_failures, metadata_json
+                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                    )
+                    .run(
+                        originalEntry.key,
+                        originalEntry.data_json,
+                        originalEntry.source,
+                        originalEntry.updated_at,
+                        originalEntry.last_attempt_at,
+                        originalEntry.expires_at,
+                        originalEntry.status,
+                        originalEntry.error_code,
+                        originalEntry.error_message,
+                        originalEntry.consecutive_failures,
+                        originalEntry.metadata_json
+                    );
+            }
+            updateScheduledJob("cache.database.summary", {
+                enabled: originalJobEnabled,
+            });
+        });
+
+        writeCacheSuccess({
+            data: { migrations: "old" },
+            key,
+            metadata: { source: "startup-test" },
+            source: "unit",
+            ttl: 1,
+            ttlUnit: "hours",
+        });
+        registerCacheRefreshScheduledJobs({
+            refreshDatabaseOnStartup: true,
+            seedStrategy: "queue",
+        });
+
+        const startupRuns = database
+            .prepare(
+                `SELECT id
+                 FROM scheduled_job_runs
+                 WHERE id > ?
+                 ORDER BY id`
+            )
+            .all(baselineRunId) as Array<{ id: number }>;
+        createdRunIds.push(...startupRuns.map((run) => run.id));
+        const startupDatabaseRun = database
+            .prepare(
+                `SELECT run.id, run.status, run.trigger_type AS triggerType,
+                        execution.available_at AS availableAt,
+                        execution.queued_at AS queuedAt
+                 FROM scheduled_job_runs AS run
+                 JOIN job_executions AS execution
+                   ON execution.scheduled_run_id = run.id
+                 WHERE run.id > ? AND run.job_id = 'cache.database.summary'
+                 ORDER BY run.id DESC
+                 LIMIT 1`
+            )
+            .get(baselineRunId) as {
+            availableAt: string;
+            id: number;
+            queuedAt: string;
+            status: string;
+            triggerType: string;
+        };
+        expect(startupDatabaseRun).toMatchObject({
+            status: "queued",
+            triggerType: "startup",
+        });
+        expect(
+            Date.parse(startupDatabaseRun.availableAt) -
+                Date.parse(startupDatabaseRun.queuedAt)
+        ).toBeLessThan(2500);
+        expect(await getCacheEntry(key)).toMatchObject({
+            data: JSON.stringify({ migrations: "old" }),
+            status: "stale",
+        });
+
+        removeCreatedRuns();
+        writeCacheSuccess({
+            data: { migrations: "current" },
+            key,
+            metadata: { source: "maintenance-test" },
+            source: "unit",
+            ttl: 1,
+            ttlUnit: "hours",
+        });
+        enqueueDatabaseSummaryRefresh();
+
+        const systemRun = database
+            .prepare(
+                `SELECT id, job_id AS jobId, status, trigger_type AS triggerType
+                 FROM scheduled_job_runs
+                 WHERE job_id = 'cache.database.summary'
+                 ORDER BY id DESC
+                 LIMIT 1`
+            )
+            .get() as {
+            id: number;
+            jobId: string;
+            status: string;
+            triggerType: string;
+        };
+        createdRunIds.push(systemRun.id);
+        expect(systemRun).toMatchObject({
+            jobId: "cache.database.summary",
+            status: "queued",
+            triggerType: "system",
+        });
+        expect(
+            database
+                .prepare(
+                    `SELECT status, trigger_type AS triggerType
+                     FROM job_executions
+                     WHERE scheduled_run_id = ?`
+                )
+                .get(systemRun.id)
+        ).toEqual({ status: "queued", triggerType: "system" });
+        expect(await getCacheEntry(key)).toMatchObject({
+            data: JSON.stringify({ migrations: "current" }),
+            status: "stale",
+        });
     });
 
     it("rejects unsupported and aborted cache refresh producer requests", async () => {
@@ -1595,7 +1782,7 @@ printf 'scheduled\n'
             expect(row).toEqual({
                 commit_sha: "def5678",
                 commit_title: "Deployable dashboard commit",
-                note: "Build passed; restart + health check scheduled",
+                note: "Build passed. Restart + health check scheduled",
                 status: "restart-scheduled",
             });
             await expect(Bun.file(gitLog).text()).resolves.toContain(
@@ -2101,7 +2288,7 @@ fi
                 deployment: undefined,
                 deployError: undefined,
                 isOk: true,
-                message: "PR #11 merged; production sync failed",
+                message: "PR #11 merged. Production sync failed",
                 syncError: expect.stringContaining("remote moved unexpectedly"),
             });
             await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");

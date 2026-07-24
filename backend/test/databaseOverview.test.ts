@@ -392,10 +392,12 @@ describe("database overview service", () => {
             );
             database.run("DROP TABLE overview_reclaimable_fixture");
             expect(
-                getDashboardSqliteOverview(now).attention.some((reason) =>
+                getDashboardSqliteOverview(now).attention.find((reason) =>
                     reason.startsWith("SQLite can reclaim ")
                 )
-            ).toBe(true);
+            ).toMatch(
+                /^SQLite can reclaim \d+\.\d MiB \(\d+\.\d%\)\. Consider a planned VACUUM$/u
+            );
         } finally {
             database.run("DROP TABLE IF EXISTS overview_reclaimable_fixture");
             database
