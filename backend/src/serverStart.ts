@@ -119,6 +119,27 @@ export function shouldStartOnImport(
     return startOnImport === "1" || isDirect;
 }
 
+/** Runs the web process until systemd or an operator requests a clean shutdown. */
+export async function runBackendServer(port = resolveListenPort()): Promise<void> {
+    const shutdown = Promise.withResolvers<NodeJS.Signals>();
+    const stop = (signal: NodeJS.Signals) => shutdown.resolve(signal);
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    try {
+        startBackendServer(port);
+        await shutdown.promise;
+    } finally {
+        process.removeListener("SIGINT", stop);
+        process.removeListener("SIGTERM", stop);
+        await stopBackendServer();
+    }
+}
+
 if (shouldStartOnImport()) {
-    startBackendServer();
+    try {
+        await runBackendServer();
+    } catch (error) {
+        console.error("[Backend] Failed:", error);
+        process.exitCode = 1;
+    }
 }

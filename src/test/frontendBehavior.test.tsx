@@ -802,6 +802,11 @@ describe("Mira Dashboard frontend behavior", () => {
             path: "/",
             component: () => createElement("div", undefined, "Index child"),
         });
+        const tasksRoute = createRoute({
+            getParentRoute: () => authenticatedRoute,
+            path: "/tasks",
+            component: () => createElement("div", undefined, "Tasks child"),
+        });
         const loginRoute = createRoute({
             getParentRoute: () => rootRoute,
             path: "/login",
@@ -811,7 +816,7 @@ describe("Mira Dashboard frontend behavior", () => {
             history: createMemoryHistory({ initialEntries: ["/"] }),
             routeTree: rootRoute.addChildren([
                 loginRoute,
-                authenticatedRoute.addChildren([indexRoute]),
+                authenticatedRoute.addChildren([indexRoute, tasksRoute]),
             ]),
         });
         const queryClient = new QueryClient({
@@ -842,6 +847,20 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(
                 screen.getAllByLabelText("Close navigation menu").length
             ).toBeGreaterThan(1);
+
+            const pageScroll = screen.getByText("Layout child content").parentElement;
+            expect(pageScroll).toBeInstanceOf(HTMLDivElement);
+            if (!(pageScroll instanceof HTMLDivElement)) {
+                throw new TypeError("Layout page scroll container not found");
+            }
+            pageScroll.scrollTop = 480;
+            pageScroll.scrollLeft = 24;
+            await act(async () => {
+                await testRouter.navigate({ to: "/tasks" });
+            });
+            expect(pageScroll.scrollTop).toBe(0);
+            expect(pageScroll.scrollLeft).toBe(0);
+            expect(screen.getAllByLabelText("Close navigation menu")).toHaveLength(1);
 
             await userEvent.click(screen.getByText("Log out"));
             await waitFor(() => {

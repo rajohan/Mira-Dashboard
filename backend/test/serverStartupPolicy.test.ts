@@ -374,7 +374,7 @@ describe("server start scheduler policy", () => {
         }
     });
 
-    it("starts and stops the backend server with isolated runtime state", async () => {
+    it("starts, stops, and handles web shutdown signals with isolated runtime state", async () => {
         const environmentKeys = [
             "MIRA_DASHBOARD_DB_PATH",
             "MIRA_DASHBOARD_DISABLE_SCHEDULER",
@@ -399,13 +399,25 @@ describe("server start scheduler policy", () => {
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
         try {
-            const { startBackendServer, stopBackendServer } =
+            const { runBackendServer, startBackendServer, stopBackendServer } =
                 await import("../src/serverStart.ts");
 
             startBackendServer(0);
             startBackendServer(0);
             await stopBackendServer();
             await stopBackendServer();
+
+            const existingSigintListeners = process.listeners("SIGINT");
+            const existingSigtermListeners = process.listeners("SIGTERM");
+            const runningServer = runBackendServer(0);
+            const sigtermListener = process
+                .listeners("SIGTERM")
+                .find((listener) => !existingSigtermListeners.includes(listener));
+            expect(sigtermListener).toBeTypeOf("function");
+            sigtermListener?.("SIGTERM");
+            await runningServer;
+            expect(process.listeners("SIGINT")).toEqual(existingSigintListeners);
+            expect(process.listeners("SIGTERM")).toEqual(existingSigtermListeners);
         } finally {
             errorSpy.mockRestore();
             warnSpy.mockRestore();

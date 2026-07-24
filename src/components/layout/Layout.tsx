@@ -15,7 +15,14 @@ import {
     Users,
     X,
 } from "lucide-react";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import {
+    type ReactNode,
+    useEffect,
+    useId,
+    useLayoutEffect,
+    useRef,
+    useState,
+} from "react";
 
 import { PULL_REQUEST_NAV_REFRESH_MS, useCacheEntry, usePullRequests } from "../../hooks";
 import { cn } from "../../utils/cn";
@@ -54,6 +61,7 @@ interface SystemHostCache {
 /** Renders the layout UI. */
 export function Layout({ children }: LayoutProperties) {
     const location = useLocation();
+    const pageScrollReference = useRef<HTMLDivElement>(null);
     const sidebarId = useId();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const { data: systemHost } = useCacheEntry<SystemHostCache>("system.host", 60_000);
@@ -63,6 +71,13 @@ export function Layout({ children }: LayoutProperties) {
 
     useEffect(() => {
         setIsSidebarOpen(false);
+    }, [location.pathname]);
+
+    useLayoutEffect(() => {
+        const pageScroll = pageScrollReference.current;
+        if (!pageScroll) return;
+        pageScroll.scrollTop = 0;
+        pageScroll.scrollLeft = 0;
     }, [location.pathname]);
 
     const sidebar = (
@@ -156,7 +171,9 @@ export function Layout({ children }: LayoutProperties) {
                     sidebarId={sidebarId}
                     onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
                 />
-                <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+                <div ref={pageScrollReference} className="min-h-0 flex-1 overflow-auto">
+                    {children}
+                </div>
             </main>
         </div>
     );
