@@ -84,10 +84,10 @@ describe("Dashboard SQLite lifecycle", () => {
             const first = applyDatabaseMigrations(database, databasePath);
             const second = applyDatabaseMigrations(database, databasePath);
 
-            expect(first.applied).toEqual([1, 2, 3, 4]);
+            expect(first.applied).toEqual([1, 2, 3, 4, 5]);
             expect(first.backup).toBeUndefined();
             expect(second).toEqual({ applied: [] });
-            expect(validateDatabaseMigrationHistory(database)).toBe(4);
+            expect(validateDatabaseMigrationHistory(database)).toBe(5);
             expect(
                 database
                     .query("SELECT name FROM pragma_table_info('auth_sessions')")
@@ -200,13 +200,27 @@ describe("Dashboard SQLite lifecycle", () => {
             expect(notificationPlan.map((row) => row.detail).join("\n")).toContain(
                 "USING COVERING INDEX idx_notifications_report_id"
             );
+            expect(
+                database
+                    .query(
+                        `SELECT name
+                         FROM sqlite_schema
+                         WHERE type = 'trigger' AND tbl_name = 'audit_events'
+                         ORDER BY name`
+                    )
+                    .all()
+            ).toEqual([
+                { name: "audit_events_reject_delete" },
+                { name: "audit_events_reject_replace" },
+                { name: "audit_events_reject_update" },
+            ]);
             expect(existsSync(sqliteBackupDirectory(databasePath))).toBe(false);
         } finally {
             database.close();
         }
     });
 
-    it("upgrades an existing version 3 database with only migration 4", () => {
+    it("upgrades an existing version 3 database with migrations 4 and 5", () => {
         const root = temporaryRoot("mira-db-migrations-v3-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
@@ -214,12 +228,15 @@ describe("Dashboard SQLite lifecycle", () => {
             applyDatabaseMigrations(database, databasePath);
             database.run("DROP INDEX idx_notifications_read_retention");
             database.run("DROP INDEX idx_chat_runtime_snapshots_retention");
+            database.run("DROP TABLE audit_events");
             database.run("CREATE INDEX idx_notifications_read ON notifications(is_read)");
-            database.prepare("DELETE FROM schema_migrations WHERE version = 4").run();
+            database.prepare("DELETE FROM schema_migrations WHERE version >= 4").run();
 
             expect(validateDatabaseMigrationHistory(database)).toBe(3);
-            expect(migrateDisposableDatabaseCopy(database)).toEqual({ applied: [4] });
-            expect(validateDatabaseMigrationHistory(database)).toBe(4);
+            expect(migrateDisposableDatabaseCopy(database)).toEqual({
+                applied: [4, 5],
+            });
+            expect(validateDatabaseMigrationHistory(database)).toBe(5);
             expect(
                 database
                     .query(
@@ -237,6 +254,81 @@ describe("Dashboard SQLite lifecycle", () => {
                 { name: "idx_chat_runtime_snapshots_retention" },
                 { name: "idx_notifications_read_retention" },
             ]);
+            expect(
+                database
+                    .query(
+                        `SELECT name
+                         FROM sqlite_schema
+                         WHERE type = 'table' AND name = 'audit_events'`
+                    )
+                    .get()
+            ).toEqual({ name: "audit_events" });
+        } finally {
+            database.close();
+        }
+    });
+
+    it("upgrades an existing version 4 database with only migration 5", () => {
+        const root = temporaryRoot("mira-db-migrations-v4-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        try {
+            applyDatabaseMigrations(database, databasePath);
+            database.run("DROP TABLE audit_events");
+            database.prepare("DELETE FROM schema_migrations WHERE version = 5").run();
+
+            expect(validateDatabaseMigrationHistory(database)).toBe(4);
+            expect(migrateDisposableDatabaseCopy(database)).toEqual({ applied: [5] });
+            expect(validateDatabaseMigrationHistory(database)).toBe(5);
+            expect(
+                database
+                    .query(
+                        `SELECT name
+                         FROM sqlite_schema
+                         WHERE type = 'index'
+                           AND name IN (
+                               'idx_audit_events_occurred',
+                               'idx_audit_events_request',
+                               'idx_audit_events_target'
+                           )
+                         ORDER BY name`
+                    )
+                    .all()
+            ).toEqual([
+                { name: "idx_audit_events_occurred" },
+                { name: "idx_audit_events_request" },
+                { name: "idx_audit_events_target" },
+            ]);
+        } finally {
+            database.close();
+        }
+    });
+
+    it("preserves append-only audit history during automated maintenance", () => {
+        const root = temporaryRoot("mira-db-audit-retention-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        const auditId = Bun.randomUUIDv7();
+        try {
+            applyDatabaseMigrations(database, databasePath);
+            database
+                .prepare(
+                    `INSERT INTO audit_events (
+                        id, actor_type, actor_id, action, target_type, target_id,
+                        outcome, metadata_json, occurred_at
+                     ) VALUES (
+                        ?, 'system', 'maintenance-test', 'maintenance.preserve',
+                        'audit-log', 'historical-event', 'succeeded', '{}',
+                        '2000-01-01T00:00:00.000Z'
+                     )`
+                )
+                .run(auditId);
+
+            pruneDatabaseHistory(database, new Date("2100-01-01T00:00:00.000Z"));
+
+            expect(
+                database.prepare("SELECT id FROM audit_events WHERE id = ?").get(auditId)
+            ).toEqual({ id: auditId });
         } finally {
             database.close();
         }
@@ -284,7 +376,7 @@ describe("Dashboard SQLite lifecycle", () => {
         try {
             expect(
                 database.query("SELECT COUNT(*) AS count FROM schema_migrations").get()
-            ).toEqual({ count: 4 });
+            ).toEqual({ count: 5 });
         } finally {
             database.close();
         }
@@ -310,7 +402,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 );
 
             const result = applyDatabaseMigrations(database, databasePath);
-            expect(result.applied).toEqual([1, 2, 3, 4]);
+            expect(result.applied).toEqual([1, 2, 3, 4, 5]);
             expect(result.backup).toMatchObject({
                 kind: "pre-migration",
                 restoreVerified: true,
@@ -364,14 +456,14 @@ describe("Dashboard SQLite lifecycle", () => {
                 .prepare(
                     `INSERT INTO schema_migrations (
                         version, name, checksum, applied_at
-                     ) VALUES (5, 'unknown', 'unknown', ?)`
+                     ) VALUES (6, 'unknown', 'unknown', ?)`
                 )
                 .run("2026-07-23T00:00:00.000Z");
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
-                "unknown SQLite migration version 5"
+                "unknown SQLite migration version 6"
             );
 
-            database.prepare("DELETE FROM schema_migrations WHERE version = 5").run();
+            database.prepare("DELETE FROM schema_migrations WHERE version = 6").run();
             database.prepare("DELETE FROM schema_migrations WHERE version = 2").run();
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
                 "not contiguous"
@@ -453,7 +545,7 @@ describe("Dashboard SQLite lifecycle", () => {
         };
         expect(preflightResult).toMatchObject({
             backup: { kind: "pre-deploy", restoreVerified: true },
-            migrationTest: { applied: [1, 2, 3, 4], currentVersion: 4 },
+            migrationTest: { applied: [1, 2, 3, 4, 5], currentVersion: 5 },
         });
         expect(getSqliteBackupInventory(databasePath).count).toBe(1);
         const unchangedBackup = new Database(preflightResult.backup.path, {

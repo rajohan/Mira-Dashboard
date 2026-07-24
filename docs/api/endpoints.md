@@ -21,6 +21,12 @@ route files under `backend/src/routes/` for exact validation details.
 | `POST` | `/api/auth/login`               | Creates a Dashboard auth session.                   |
 | `POST` | `/api/auth/logout`              | Deletes current auth session cookie.                |
 
+## Audit
+
+| Method | Path                | Purpose                                                                  |
+| ------ | ------------------- | ------------------------------------------------------------------------ |
+| `GET`  | `/api/audit-events` | Pages append-only redacted events newest-first (`limit`, `before` cursor). |
+
 ## Agents
 
 | Method | Path                        | Purpose                                         |

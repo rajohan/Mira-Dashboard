@@ -70,7 +70,8 @@ The backend is native Bun:
 Bun's documented Node compatibility layer remains intentional for APIs Bun
 does not expose directly: path manipulation, host/temporary-directory
 information, directory enumeration, permission/no-follow filesystem
-operations, and synchronous Ed25519 key handling.
+operations, synchronous Ed25519 key handling, and request-scoped
+`AsyncLocalStorage`.
 
 Key files:
 
@@ -80,7 +81,9 @@ Key files:
 | `backend/src/routes.ts`                  | Route table assembly.                                             |
 | `backend/src/requestPolicy.ts`           | Auth requirement, rate limiting, error wrapper.                   |
 | `backend/src/requestSecurity.ts`         | Mutation provenance, request IDs, browser response headers.       |
+| `backend/src/requestAuditContext.ts`     | Request actor/correlation context for queued work.                |
 | `backend/src/http.ts`                    | JSON helpers, cookies, origin/proxy/IP helpers.                   |
+| `backend/src/services/auditEvents.ts`    | Redacted append-only audit persistence and cursor reads.          |
 | `backend/src/gateway.ts`                 | OpenClaw Gateway client lifecycle and Dashboard WebSocket fanout. |
 | `backend/src/database.ts`                | SQLite path, PRAGMAs, migration startup, database proxy.          |
 | `backend/src/databaseMigrationRunner.ts` | Version/checksum validation and transactional migrations.         |
@@ -111,7 +114,7 @@ Unsafe browser API methods additionally pass exact Origin and Fetch Metadata
 checks before authentication. API and static responses receive central CSP,
 clickjacking, MIME-sniffing, referrer, permissions, and request-correlation
 headers. Direct non-browser clients remain supported when provenance headers
-are absent; they do not bypass the existing authentication policy.
+are absent. They do not bypass the existing authentication policy.
 
 ## Gateway Integration
 

@@ -4,6 +4,13 @@ import {
     type JobResourceClass,
     jobResourcePriority,
 } from "../lib/jobResources.ts";
+import { currentRequestAuditContext } from "../requestAuditContext.ts";
+import {
+    type AuditActor,
+    type AuditOutcome,
+    auditProvenanceForTarget,
+    writeAuditEvent,
+} from "./auditEvents.ts";
 
 const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_EXECUTION_LIST_LIMIT = 200;
@@ -187,8 +194,69 @@ function leaseExpiry(timestamp: string, leaseMs = DEFAULT_LEASE_MS): string {
     return new Date(Date.parse(timestamp) + leaseMs).toISOString();
 }
 
-/** Inserts a queue row inside the caller's transaction. */
-export function insertJobExecution(input: InsertJobExecutionInput): JobExecution {
+function systemActor(triggerType: JobExecutionTriggerType): AuditActor {
+    return { id: `job-${triggerType}`, type: "system" };
+}
+
+function jobAuditProvenance(
+    executionId: string,
+    triggerType: JobExecutionTriggerType
+): { actor: AuditActor; requestId: string | undefined } {
+    const requestContext = currentRequestAuditContext();
+    if (requestContext) {
+        return {
+            actor: requestContext.actor,
+            requestId: requestContext.requestId,
+        };
+    }
+    return (
+        auditProvenanceForTarget("job.enqueue", "job-execution", executionId) ?? {
+            actor: systemActor(triggerType),
+            requestId: undefined,
+        }
+    );
+}
+
+/**
+ * Records the backend-generated transition timestamp already persisted on the
+ * job row. Route payloads never supply this value.
+ */
+function writeJobAudit(
+    execution: Pick<
+        JobExecution,
+        | "actionKey"
+        | "displayName"
+        | "id"
+        | "resourceClass"
+        | "scheduledJobId"
+        | "triggerType"
+    >,
+    action: "job.cancel" | "job.enqueue" | "job.execute",
+    outcome: AuditOutcome,
+    transitionAt: string,
+    metadata: Record<string, unknown> = {}
+): void {
+    const provenance = jobAuditProvenance(execution.id, execution.triggerType);
+    writeAuditEvent({
+        actor: provenance.actor,
+        action,
+        metadata: {
+            actionKey: execution.actionKey,
+            displayName: execution.displayName,
+            resourceClass: execution.resourceClass,
+            scheduledJobId: execution.scheduledJobId,
+            triggerType: execution.triggerType,
+            ...metadata,
+        },
+        occurredAt: transitionAt,
+        outcome,
+        requestId: provenance.requestId,
+        targetId: execution.id,
+        targetType: "job-execution",
+    });
+}
+
+function insertJobExecutionInTransaction(input: InsertJobExecutionInput): JobExecution {
     const id = input.id ?? Bun.randomUUIDv7();
     const status = input.status ?? "queued";
     const startedAt = status === "running" ? input.queuedAt : undefined;
@@ -226,7 +294,36 @@ export function insertJobExecution(input: InsertJobExecutionInput): JobExecution
             status === "running" ? 1 : 0,
             input.timeoutMs
         );
-    return getJobExecution(id) as JobExecution;
+    const execution = getJobExecution(id) as JobExecution;
+    writeJobAudit(execution, "job.enqueue", "accepted", input.queuedAt);
+    if (status === "running") {
+        writeJobAudit(execution, "job.execute", "attempted", input.queuedAt, {
+            attempt: execution.attempt,
+            workerId: execution.leaseOwner,
+        });
+    }
+    return execution;
+}
+
+/** Atomically inserts queue and audit rows, reusing an existing caller transaction. */
+export function insertJobExecution(input: InsertJobExecutionInput): JobExecution {
+    if (database.inTransaction) {
+        return insertJobExecutionInTransaction(input);
+    }
+
+    database.run("BEGIN IMMEDIATE");
+    try {
+        const execution = insertJobExecutionInTransaction(input);
+        database.run("COMMIT");
+        return execution;
+    } catch (error) {
+        try {
+            database.run("ROLLBACK");
+        } catch {
+            // Preserve the insertion or audit error.
+        }
+        throw error;
+    }
 }
 
 export function getJobExecution(id: string): JobExecution | undefined {
@@ -430,6 +527,15 @@ function finishExpiredExecution(row: JobExecutionRow, finishedAt: string): void 
         message,
         status,
     });
+    if (execution) {
+        writeJobAudit(
+            execution,
+            "job.execute",
+            status === "cancelled" ? "cancelled" : "failed",
+            finishedAt,
+            { recovery: "lease-expired" }
+        );
+    }
     if (recoveryHandler && execution) {
         recoveryHandler(execution);
     }
@@ -488,7 +594,14 @@ function claimExecutionRow(
             )
             .run(timestamp, row.scheduled_run_id);
     }
-    return getJobExecution(row.id);
+    const execution = getJobExecution(row.id);
+    if (execution) {
+        writeJobAudit(execution, "job.execute", "attempted", timestamp, {
+            attempt: execution.attempt,
+            workerId,
+        });
+    }
+    return execution;
 }
 
 export function claimNextJobExecution(
@@ -656,8 +769,20 @@ export function finishJobExecution(
                     row.scheduled_run_id
                 );
         }
+        const execution = getJobExecution(id) as JobExecution;
+        writeJobAudit(
+            execution,
+            "job.execute",
+            finalStatus === "success"
+                ? "succeeded"
+                : finalStatus === "cancelled"
+                  ? "cancelled"
+                  : "failed",
+            finishedAt,
+            { attempt: execution.attempt }
+        );
         database.run("COMMIT");
-        return getJobExecution(id) as JobExecution;
+        return execution;
     } catch (error) {
         try {
             database.run("ROLLBACK");
@@ -713,8 +838,16 @@ export function cancelJobExecution(id: string, timestamp = nowIso()): JobExecuti
         } else {
             throw statusError("Completed job executions cannot be cancelled", 409);
         }
+        const execution = getJobExecution(id) as JobExecution;
+        writeJobAudit(
+            execution,
+            "job.cancel",
+            row.status === "queued" ? "cancelled" : "accepted",
+            timestamp,
+            { previousStatus: row.status }
+        );
         database.run("COMMIT");
-        return getJobExecution(id) as JobExecution;
+        return execution;
     } catch (error) {
         try {
             database.run("ROLLBACK");

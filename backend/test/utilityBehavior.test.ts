@@ -35,6 +35,7 @@ import { isAllowedMutationSource, withRequestSecurity } from "../src/requestSecu
 import { routes as appRoutes } from "../src/routes.ts";
 import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
 import { isValidAgentId } from "../src/services/agents.ts";
+import { listAuditEvents } from "../src/services/auditEvents.ts";
 import { mapBackupJob } from "../src/services/backups.ts";
 import * as jobExecutionQueueModule from "../src/services/jobExecutionQueue.ts";
 import { getResolvedRoots, validatePrNumber } from "../src/services/pullRequests.ts";
@@ -861,6 +862,17 @@ describe("backend service utilities", () => {
                 }
             );
             expect(sameOriginMutation.status).toBe(200);
+            const sameOriginRequestId =
+                sameOriginMutation.headers.get("x-request-id") || "";
+            expect(
+                listAuditEvents(200)
+                    .events.filter(
+                        (event) =>
+                            event.requestId === sameOriginRequestId &&
+                            event.action === "http.request"
+                    )
+                    .map((event) => event.outcome)
+            ).toEqual(["accepted", "attempted"]);
 
             const crossOriginMutation = await callTestRoute(
                 routes,
@@ -878,6 +890,17 @@ describe("backend service utilities", () => {
             await expect(crossOriginMutation.json()).resolves.toEqual({
                 error: "Forbidden request origin",
             });
+            const crossOriginRequestId =
+                crossOriginMutation.headers.get("x-request-id") || "";
+            expect(
+                listAuditEvents(200)
+                    .events.filter(
+                        (event) =>
+                            event.requestId === crossOriginRequestId &&
+                            event.action === "http.request"
+                    )
+                    .map((event) => event.outcome)
+            ).toEqual([]);
 
             const missingOriginCrossSiteMutation = await callTestRoute(
                 routes,

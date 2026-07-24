@@ -4,11 +4,17 @@ import type { Server } from "bun";
 
 import { authUser, HttpError, isTrustedProxyAddress, json, requestIp } from "./http.ts";
 import { errorMessage, httpStatusCode } from "./lib/errors.ts";
+import { runWithRequestAuditContext } from "./requestAuditContext.ts";
 import {
     isAllowedMutationSource,
     requestIdFor,
     withRequestSecurity,
 } from "./requestSecurity.ts";
+import {
+    type AuditActor,
+    type AuditOutcome,
+    writeAuditEvent,
+} from "./services/auditEvents.ts";
 
 type BunHandler = (
     request: Request,
@@ -55,6 +61,7 @@ const authRule: RateLimitRule = {
 const buckets = new Map<string, RateLimitBucket>();
 const BUCKET_CLEANUP_INTERVAL_MS = 60_000;
 const BUCKET_STALE_MS = Math.max(apiRule.windowMs, authRule.windowMs) * 2;
+const SAFE_REQUEST_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const rateLimitState: { bucketCleanupTimer: Timer | undefined } = {
     bucketCleanupTimer: undefined,
 };
@@ -173,13 +180,69 @@ async function callHandler(
     return handler(request, server);
 }
 
+function requestActor(user: ReturnType<typeof authUser>): AuditActor {
+    if (!user) return { id: "anonymous", type: "anonymous" };
+    return user.id === 0
+        ? { id: user.username, type: "loopback" }
+        : { id: `${user.id}:${user.username}`, type: "user" };
+}
+
+function auditOutcomeForStatus(status: number): AuditOutcome {
+    if (status === 401 || status === 403) return "denied";
+    return status >= 400 ? "failed" : "accepted";
+}
+
+function isAuditedMutation(isApi: boolean, request: Request): boolean {
+    return isApi && !SAFE_REQUEST_METHODS.has(request.method.toUpperCase());
+}
+
+function writeRequestAudit(
+    actor: AuditActor,
+    outcome: AuditOutcome,
+    request: Request,
+    requestId: string,
+    routePath: string,
+    status?: number
+): void {
+    writeAuditEvent({
+        actor,
+        action: "http.request",
+        metadata: {
+            method: request.method.toUpperCase(),
+            ...(status !== undefined && { status }),
+        },
+        outcome,
+        requestId,
+        targetId: routePath,
+        targetType: "http-route",
+    });
+}
+
+function tryWriteRequestAudit(
+    actor: AuditActor,
+    outcome: AuditOutcome,
+    request: Request,
+    requestId: string,
+    routePath: string,
+    status?: number
+): void {
+    try {
+        writeRequestAudit(actor, outcome, request, requestId, routePath, status);
+    } catch (error) {
+        console.error(`[Audit] Request ${requestId} outcome persistence failed:`, error);
+    }
+}
+
 function secureHandler(routePath: string, handler: BunHandler | Response): BunHandler {
     return async (request, server) => {
         const response = await (async () => {
             const pathname = new URL(request.url).pathname || routePath;
+            const isApi = isApiRoute(pathname);
+            const isMutation = isAuditedMutation(isApi, request);
+            const requestIdentifier = requestIdFor(request);
             const rateRule = isAuthRoute(pathname)
                 ? authRule
-                : isApiRoute(pathname)
+                : isApi
                   ? apiRule
                   : undefined;
             if (rateRule) {
@@ -187,51 +250,87 @@ function secureHandler(routePath: string, handler: BunHandler | Response): BunHa
                 if (limited) return limited;
             }
 
-            if (isApiRoute(pathname) && !isAllowedMutationSource(request)) {
+            if (isApi && !isAllowedMutationSource(request)) {
                 return json({ error: "Forbidden request origin" }, { status: 403 });
             }
 
-            if (
-                isApiRoute(pathname) &&
-                !isAuthRoute(pathname) &&
-                !isPublicApiRoute(pathname) &&
-                !authUser(request, server)
-            ) {
+            const requiresAuthentication =
+                isApi && !isAuthRoute(pathname) && !isPublicApiRoute(pathname);
+            const user =
+                requiresAuthentication || isMutation
+                    ? authUser(request, server)
+                    : undefined;
+            if (requiresAuthentication && !user) {
                 return json({ error: "Unauthorized" }, { status: 401 });
             }
 
+            const actor = requestActor(user);
+            let handlerResponse: Response;
+            let didRecordAttempt = false;
             try {
-                const handlerResponse = await callHandler(handler, request, server);
-                if (!rateRule) return handlerResponse;
-                const key = rateLimitKey(rateRule, request, server);
-                const bucket = buckets.get(key);
-                if (!bucket) return handlerResponse;
-                return withRateLimitHeaders(
-                    handlerResponse,
-                    rateRule,
-                    rateRule.max - bucket.used,
-                    bucket.resetAt
+                if (isMutation) {
+                    writeRequestAudit(
+                        actor,
+                        "attempted",
+                        request,
+                        requestIdentifier,
+                        routePath
+                    );
+                    didRecordAttempt = true;
+                }
+                handlerResponse = await runWithRequestAuditContext(
+                    { actor, requestId: requestIdentifier },
+                    () => callHandler(handler, request, server)
                 );
             } catch (error) {
                 if (error instanceof HttpError) {
-                    return json({ error: error.message }, { status: error.statusCode });
-                }
-                if (error instanceof SyntaxError) {
-                    return json({ error: "Invalid JSON" }, { status: 400 });
-                }
-                const mappedStatus = httpStatusCode(error);
-                if (mappedStatus !== 500) {
-                    return json(
-                        { error: errorMessage(error, "Request failed") },
-                        { status: mappedStatus }
+                    handlerResponse = json(
+                        { error: error.message },
+                        { status: error.statusCode }
                     );
+                } else if (error instanceof SyntaxError) {
+                    handlerResponse = json({ error: "Invalid JSON" }, { status: 400 });
+                } else {
+                    const mappedStatus = httpStatusCode(error);
+                    if (mappedStatus === 500) {
+                        console.error(
+                            `[BunServer] Request ${requestIdentifier} failed:`,
+                            error
+                        );
+                        handlerResponse = json(
+                            { error: "Internal server error" },
+                            { status: 500 }
+                        );
+                    } else {
+                        handlerResponse = json(
+                            { error: errorMessage(error, "Request failed") },
+                            { status: mappedStatus }
+                        );
+                    }
                 }
-                console.error(
-                    `[BunServer] Request ${requestIdFor(request)} failed:`,
-                    error
-                );
-                return json({ error: "Internal server error" }, { status: 500 });
             }
+
+            if (isMutation && didRecordAttempt) {
+                tryWriteRequestAudit(
+                    actor,
+                    auditOutcomeForStatus(handlerResponse.status),
+                    request,
+                    requestIdentifier,
+                    routePath,
+                    handlerResponse.status
+                );
+            }
+
+            if (!rateRule) return handlerResponse;
+            const key = rateLimitKey(rateRule, request, server);
+            const bucket = buckets.get(key);
+            if (!bucket) return handlerResponse;
+            return withRateLimitHeaders(
+                handlerResponse,
+                rateRule,
+                rateRule.max - bucket.used,
+                bucket.resetAt
+            );
         })();
 
         return withRequestSecurity(request, response, server);
