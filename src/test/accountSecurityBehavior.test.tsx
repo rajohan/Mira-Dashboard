@@ -690,7 +690,9 @@ describe("Dashboard account security", () => {
 
         const { queryClient } = renderAccountSecurity();
         await screen.findByText("Primary YubiKey");
-        await userEvent.click(screen.getByRole("button", { name: "Add key" }));
+        const addKey = screen.getByRole("button", { name: "Add key" });
+        expect(addKey).toHaveClass("shrink-0", "whitespace-nowrap");
+        await userEvent.click(addKey);
         expect(
             screen.getByRole("heading", { name: "Register security key" })
         ).toBeInTheDocument();
@@ -699,7 +701,11 @@ describe("Dashboard account security", () => {
             screen.getByRole("button", { name: "Touch and register key" })
         );
         expect(await screen.findByText("Security key registered")).toBeInTheDocument();
-        expect(await screen.findByText("key-recovery-one")).toBeInTheDocument();
+        expect(await screen.findByText("key-recovery-one")).toHaveClass(
+            "min-w-0",
+            "break-all",
+            "whitespace-normal"
+        );
         expect(
             calls.some(
                 (call) =>

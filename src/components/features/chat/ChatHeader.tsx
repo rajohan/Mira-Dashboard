@@ -1,4 +1,4 @@
-import { Bot, MessagesSquare } from "lucide-react";
+import { Bot, Brain, Cpu, Gauge, MessagesSquare } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { Session } from "../../../types/session";
@@ -90,14 +90,29 @@ export function ChatHeader({
                         </p>
                         {selectedSession ? (
                             <>
-                                <Badge className="whitespace-nowrap">
-                                    Model: {selectedSession.model || "Unknown"}
+                                <Badge
+                                    aria-label={`Model: ${selectedSession.model || "Unknown"}`}
+                                    className="whitespace-nowrap"
+                                    title="Model"
+                                >
+                                    <Cpu aria-hidden="true" className="size-3.5" />
+                                    {selectedSession.model || "Unknown"}
                                 </Badge>
-                                <Badge className="whitespace-nowrap">
-                                    Thinking: {selectedChatThinkingLabel(selectedSession)}
+                                <Badge
+                                    aria-label={`Thinking: ${selectedChatThinkingLabel(selectedSession)}`}
+                                    className="whitespace-nowrap"
+                                    title="Thinking"
+                                >
+                                    <Brain aria-hidden="true" className="size-3.5" />
+                                    {selectedChatThinkingLabel(selectedSession)}
                                 </Badge>
-                                <Badge className="whitespace-nowrap">
-                                    Speed: {selectedChatSpeedLabel(selectedSession)}
+                                <Badge
+                                    aria-label={`Speed: ${selectedChatSpeedLabel(selectedSession)}`}
+                                    className="whitespace-nowrap"
+                                    title="Speed"
+                                >
+                                    <Gauge aria-hidden="true" className="size-3.5" />
+                                    {selectedChatSpeedLabel(selectedSession)}
                                 </Badge>
                             </>
                         ) : undefined}

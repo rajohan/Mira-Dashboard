@@ -1773,6 +1773,31 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
+    if (method === "GET" && url === "/api/account/security") {
+        return Response.json({
+            factors: {
+                methods: [],
+                recoveryCodesRemaining: 0,
+                totpFactors: [],
+                webAuthnCredentials: [],
+            },
+            recentVerification: {
+                mfa: false,
+                password: true,
+            },
+            recommendation: {
+                minimumSecurityKeys: 2,
+                needsBackupSecurityKey: true,
+            },
+            sessions: [],
+            totp: { available: true },
+            webAuthn: {
+                available: true,
+                rpId: "dashboard.example.com",
+            },
+        });
+    }
+
     if (url === "/api/config") {
         if (method === "PUT") {
             const body = parseRequestBody(init);
@@ -2047,14 +2072,14 @@ describe("Mira Dashboard pages", () => {
         > = [
             [createElement(Agents), "Active (1)"],
             [createElement(Dashboard), "Spydeberg", { withSocket: true }],
-            [createElement(Database), "metabase"],
+            [createElement(Database), "SQLite runtime"],
             [createElement(Docker), "dashboard"],
             [createElement(Files), "README.md"],
             [createElement(Jobs), "Heartbeat"],
             [createElement(Logs), "openclaw.log", { withSocket: true }],
             [createElement(Moltbook), "Dashboard testing"],
             [createElement(PullRequests), "Expand backend coverage"],
-            [createElement(Settings), "Model Configuration", { withRouter: true }],
+            [createElement(Settings), "Two-step login", { withRouter: true }],
             [createElement(Terminal), "~"],
         ];
 
@@ -2149,8 +2174,7 @@ describe("Mira Dashboard pages", () => {
 
         const view = renderPage(createElement(Database));
 
-        const databaseRows = await screen.findAllByText("metabase");
-        expect(databaseRows.length).toBeGreaterThan(0);
+        expect(await screen.findByText("SQLite runtime")).toBeInTheDocument();
         await act(async () => {
             await view.queryClient.invalidateQueries({
                 queryKey: ["cache", "database.summary"],
@@ -2162,7 +2186,7 @@ describe("Mira Dashboard pages", () => {
                 "Database refresh failed. Showing the last loaded metrics. Database metrics temporarily unavailable"
             )
         ).toBeInTheDocument();
-        expect(screen.getAllByText("metabase").length).toBeGreaterThan(0);
+        expect(screen.getByText("SQLite runtime")).toBeInTheDocument();
 
         view.unmount();
         view.queryClient.clear();
@@ -2172,17 +2196,18 @@ describe("Mira Dashboard pages", () => {
         const user = userEvent.setup();
         const view = renderPage(createElement(Database));
 
-        const initialPostgresRows = await screen.findAllByText("metabase");
-        expect(initialPostgresRows.length).toBeGreaterThan(0);
-        expect(screen.queryByText("Reusable space")).not.toBeInTheDocument();
-
-        await user.click(screen.getByRole("button", { name: "Dashboard SQLite" }));
-
         expect(await screen.findByText("Reusable space")).toBeInTheDocument();
         expect(screen.getByText("SQLite runtime")).toBeInTheDocument();
         expect(screen.queryByText("metabase")).not.toBeInTheDocument();
+        const sqliteButton = screen.getByRole("button", { name: "Dashboard SQLite" });
+        const postgresButton = screen.getByRole("button", { name: "PostgreSQL (1)" });
+        expect(sqliteButton).toHaveAttribute("aria-pressed", "true");
+        expect(
+            sqliteButton.compareDocumentPosition(postgresButton) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
 
-        await user.click(screen.getByRole("button", { name: "PostgreSQL (1)" }));
+        await user.click(postgresButton);
         const restoredPostgresRows = await screen.findAllByText("metabase");
         expect(restoredPostgresRows.length).toBeGreaterThan(0);
         expect(screen.queryByText("SQLite runtime")).not.toBeInTheDocument();
@@ -2237,6 +2262,17 @@ describe("Mira Dashboard pages", () => {
 
         const view = renderPage(createElement(Database));
 
+        await screen.findByText("SQLite runtime");
+        const sqliteOverview =
+            screen.getByText("Database file").parentElement?.parentElement;
+        const sqliteAttention = screen.getByRole("heading", {
+            name: "SQLite needs attention",
+        }).parentElement;
+        expect(sqliteOverview?.nextElementSibling).toBe(sqliteAttention);
+        expect(screen.getByText("SQLite test maintenance reason")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "PostgreSQL (1)" }));
+
         const postgresOverviewLabel = await screen.findByText("Comet torrents");
         const postgresOverview = postgresOverviewLabel.parentElement?.parentElement;
         const postgresAttention = screen.getByRole("heading", {
@@ -2246,16 +2282,6 @@ describe("Mira Dashboard pages", () => {
         expect(
             screen.getByText("1 query averages at least 500 ms. Review query performance")
         ).toBeInTheDocument();
-
-        await user.click(screen.getByRole("button", { name: "Dashboard SQLite" }));
-
-        const sqliteOverview =
-            screen.getByText("Database file").parentElement?.parentElement;
-        const sqliteAttention = screen.getByRole("heading", {
-            name: "SQLite needs attention",
-        }).parentElement;
-        expect(sqliteOverview?.nextElementSibling).toBe(sqliteAttention);
-        expect(screen.getByText("SQLite test maintenance reason")).toBeInTheDocument();
 
         view.unmount();
         view.queryClient.clear();
@@ -2446,6 +2472,20 @@ describe("Mira Dashboard pages", () => {
                 },
             });
             renderPage(createElement(Settings), { withRouter: true });
+            expect(await screen.findByText("Two-step login")).toBeInTheDocument();
+            const dashboardSettingsButton = screen.getByRole("button", {
+                name: "Dashboard settings",
+            });
+            const openClawSettingsButton = screen.getByRole("button", {
+                name: "OpenClaw settings",
+            });
+            expect(dashboardSettingsButton).toHaveAttribute("aria-pressed", "true");
+            expect(
+                dashboardSettingsButton.compareDocumentPosition(openClawSettingsButton) &
+                    Node.DOCUMENT_POSITION_FOLLOWING
+            ).toBeTruthy();
+
+            await user.click(openClawSettingsButton);
             expect(await screen.findByText("Model Configuration")).toBeInTheDocument();
 
             await user.click(screen.getByRole("button", { name: /^backup$/i }));
@@ -3182,7 +3222,7 @@ describe("Mira Dashboard pages", () => {
 
         await waitFor(() => {
             expect(screen.getByText(/Context: 0.5k \/ 1k \(53%\)/)).toBeInTheDocument();
-            expect(screen.getByText("Model: codex")).toBeInTheDocument();
+            expect(screen.getByLabelText("Model: codex")).toHaveTextContent("codex");
             expect(screen.queryByText(/MAIN ·/u)).not.toBeInTheDocument();
         });
         await waitFor(() => {

@@ -288,29 +288,21 @@ export function AccountSecuritySection() {
     return (
         <div className="space-y-4">
             {error ? (
-                <Alert variant="error">
+                <Alert
+                    dismissLabel="Dismiss security error"
+                    onDismiss={() => setError(undefined)}
+                    variant="error"
+                >
                     {error}
-                    <Button
-                        className="ml-auto"
-                        onClick={() => setError(undefined)}
-                        size="sm"
-                        variant="ghost"
-                    >
-                        ×
-                    </Button>
                 </Alert>
             ) : undefined}
             {success ? (
-                <Alert variant="success">
+                <Alert
+                    dismissLabel="Dismiss security success"
+                    onDismiss={() => setSuccess(undefined)}
+                    variant="success"
+                >
                     {success}
-                    <Button
-                        className="ml-auto"
-                        onClick={() => setSuccess(undefined)}
-                        size="sm"
-                        variant="ghost"
-                    >
-                        ×
-                    </Button>
                 </Alert>
             ) : undefined}
 
@@ -363,6 +355,7 @@ export function AccountSecuritySection() {
                             </p>
                         </div>
                         <Button
+                            className="shrink-0 whitespace-nowrap"
                             disabled={isBusy || !data.webAuthn.available}
                             onClick={() => {
                                 if (!requiresManagementVerification()) return;
@@ -447,6 +440,7 @@ export function AccountSecuritySection() {
                             </p>
                         </div>
                         <Button
+                            className="shrink-0 whitespace-nowrap"
                             disabled={isBusy || !data.totp.available}
                             onClick={() => {
                                 if (!requiresManagementVerification()) return;
@@ -990,10 +984,10 @@ export function AccountSecuritySection() {
                         These full codes are shown once. Store them offline; do not put
                         them in Dashboard notes or screenshots.
                     </Alert>
-                    <div className="my-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="my-4 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
                         {recoveryCodes?.map((code) => (
                             <code
-                                className="rounded bg-primary-900 p-2 text-center text-xs text-primary-100"
+                                className="min-w-0 rounded bg-primary-900 p-2 text-center text-xs break-all whitespace-normal text-primary-100"
                                 key={code}
                             >
                                 {code}

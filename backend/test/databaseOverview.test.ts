@@ -318,9 +318,9 @@ describe("database overview service", () => {
         }
     });
 
-    it("requests review for missing, disabled, stale, failed, and compaction states", async () => {
+    it("requests review for lifecycle failures and only material compaction states", async () => {
         const { database } = await import("../src/database.ts");
-        const { getDashboardSqliteOverview } =
+        const { getDashboardSqliteOverview, sqliteReusableSpaceAttention } =
             await import("../src/services/sqliteOverview.ts");
         const now = new Date("2026-07-23T12:00:00.000Z");
         try {
@@ -395,7 +395,13 @@ describe("database overview service", () => {
                 getDashboardSqliteOverview(now).attention.find((reason) =>
                     reason.startsWith("SQLite can reclaim ")
                 )
-            ).toMatch(
+            ).toBeUndefined();
+            expect(sqliteReusableSpaceAttention(19 * 1024 * 1024, 59.7)).toBeUndefined();
+            expect(sqliteReusableSpaceAttention(256 * 1024 * 1024, 49.9)).toBeUndefined();
+            expect(sqliteReusableSpaceAttention(256 * 1024 * 1024, 50)).toMatch(
+                /^SQLite can reclaim 256\.0 MiB \(50\.0%\)\. Consider a planned VACUUM$/u
+            );
+            expect(sqliteReusableSpaceAttention(1024 * 1024 * 1024, 10)).toMatch(
                 /^SQLite can reclaim \d+\.\d MiB \(\d+\.\d%\)\. Consider a planned VACUUM$/u
             );
         } finally {

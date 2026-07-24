@@ -17,9 +17,9 @@ import { useDatabaseOverview } from "../hooks/useDatabase";
 type DatabaseSource = "postgresql" | "sqlite";
 
 function initialDatabaseSource(): DatabaseSource {
-    return new URLSearchParams(location.search).get("source") === "sqlite"
-        ? "sqlite"
-        : "postgresql";
+    return new URLSearchParams(location.search).get("source") === "postgresql"
+        ? "postgresql"
+        : "sqlite";
 }
 
 /** Renders the database UI. */
@@ -56,15 +56,6 @@ export function Database() {
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <Button
                         type="button"
-                        variant={selectedSource === "postgresql" ? "primary" : "ghost"}
-                        aria-pressed={selectedSource === "postgresql"}
-                        onClick={() => setSource("postgresql")}
-                        className="justify-center"
-                    >
-                        PostgreSQL ({data.databases.length})
-                    </Button>
-                    <Button
-                        type="button"
                         variant={selectedSource === "sqlite" ? "primary" : "ghost"}
                         aria-pressed={selectedSource === "sqlite"}
                         onClick={() => setSource("sqlite")}
@@ -72,6 +63,15 @@ export function Database() {
                         disabled={!data.sqlite}
                     >
                         Dashboard SQLite
+                    </Button>
+                    <Button
+                        type="button"
+                        variant={selectedSource === "postgresql" ? "primary" : "ghost"}
+                        aria-pressed={selectedSource === "postgresql"}
+                        onClick={() => setSource("postgresql")}
+                        className="justify-center"
+                    >
+                        PostgreSQL ({data.databases.length})
                     </Button>
                 </div>
             </Card>

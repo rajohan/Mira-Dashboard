@@ -273,8 +273,8 @@ The Dashboard SQLite source and heartbeat mark review when:
 - the maintenance job is missing or disabled, has never succeeded, or its
   newest successful run is older than 48 hours;
 - the latest SQLite maintenance run ended in a non-success terminal state;
-- reusable pages are both at least 16 MiB and at least 25% of the database,
-  indicating that a planned file compaction may be worthwhile.
+- reusable pages are at least 1 GiB, or both at least 256 MiB and at least 50%
+  of the database, indicating that a planned file compaction may be worthwhile.
 
 Inspect the `database.maintenance` job on Jobs and the Database page's attention
 list. A manual deploy preflight can create and restore-verify a fresh snapshot:
@@ -287,10 +287,10 @@ cd /home/ubuntu/projects/mira-dashboard/backend
 
 “Reusable space” is SQLite freelist capacity that can be reused by future
 writes. It has no configured maximum and is not PostgreSQL-style dead tuples.
-The combined absolute/relative review threshold avoids warnings for harmless
-small freelists. A review is still advisory: file shrinking with `VACUUM`
-requires a separate maintenance decision with enough temporary disk and service
-planning.
+The absolute-or-combined review threshold keeps ordinary churn in small
+databases informational and catches only material file savings. A review is
+still advisory: file shrinking with `VACUUM` requires a separate maintenance
+decision with enough temporary disk and service planning.
 
 ## Reports Smoke Test
 

@@ -300,7 +300,8 @@ describe("shared component helpers", () => {
         expect(screen.getByText("sh")).toBeInTheDocument();
     });
 
-    it("renders alert variants and clamps progress bar width", () => {
+    it("renders alert variants, right-aligned dismissal, and clamped progress", async () => {
+        const onDismiss = jest.fn();
         expect(getProgressColor(10)).toBe("green");
         expect(getProgressColor(50)).toBe("blue");
         expect(getProgressColor(89)).toBe("orange");
@@ -308,7 +309,12 @@ describe("shared component helpers", () => {
 
         render(
             <>
-                <Alert variant="success" title="Saved">
+                <Alert
+                    dismissLabel="Dismiss saved message"
+                    onDismiss={onDismiss}
+                    variant="success"
+                    title="Saved"
+                >
                     Done
                 </Alert>
                 <Alert variant="warning">Careful</Alert>
@@ -319,6 +325,13 @@ describe("shared component helpers", () => {
         expect(screen.getByText("Saved")).toBeInTheDocument();
         expect(screen.getByText("Done")).toBeInTheDocument();
         expect(screen.getByText("Careful")).toBeInTheDocument();
+        const dismiss = screen.getByRole("button", {
+            name: "Dismiss saved message",
+        });
+        expect(dismiss).toHaveClass("ml-auto", "shrink-0", "self-start");
+        expect(dismiss.parentElement?.lastElementChild).toBe(dismiss);
+        await userEvent.click(dismiss);
+        expect(onDismiss).toHaveBeenCalledTimes(1);
         expect(document.querySelector(".bg-purple-500")).toHaveStyle({
             width: "100%",
         });

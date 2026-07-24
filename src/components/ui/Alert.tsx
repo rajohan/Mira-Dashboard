@@ -1,6 +1,7 @@
-import { AlertCircle, CheckCircle, Info, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle, Info, X, XCircle } from "lucide-react";
 
 import { cn } from "../../utils/cn";
+import { Button } from "./Button";
 
 /** Defines alert variant. */
 type AlertVariant = "error" | "success" | "warning" | "info";
@@ -11,6 +12,8 @@ interface AlertProperties {
     title?: string;
     children: React.ReactNode;
     className?: string;
+    dismissLabel?: string;
+    onDismiss?: () => void;
 }
 
 const variants: Record<
@@ -44,7 +47,14 @@ const variants: Record<
 };
 
 /** Renders the alert UI. */
-export function Alert({ variant = "info", title, children, className }: AlertProperties) {
+export function Alert({
+    variant = "info",
+    title,
+    children,
+    className,
+    dismissLabel = "Dismiss notification",
+    onDismiss,
+}: AlertProperties) {
     const { border, bg, text, icon } = variants[variant];
 
     return (
@@ -58,10 +68,22 @@ export function Alert({ variant = "info", title, children, className }: AlertPro
             )}
         >
             <span className="mt-0.5 shrink-0">{icon}</span>
-            <div className="flex-1">
+            <div className="min-w-0 flex-1">
                 {title && <p className="font-medium">{title}</p>}
                 <div className={title ? "text-sm opacity-90" : ""}>{children}</div>
             </div>
+            {onDismiss ? (
+                <Button
+                    aria-label={dismissLabel}
+                    className="-m-1 ml-auto shrink-0 self-start text-current"
+                    onClick={onDismiss}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                >
+                    <X aria-hidden="true" className="size-4" />
+                </Button>
+            ) : undefined}
         </div>
     );
 }

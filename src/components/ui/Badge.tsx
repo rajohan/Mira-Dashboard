@@ -1,8 +1,9 @@
 import { clsx } from "clsx";
+import type { HTMLAttributes } from "react";
 import { twMerge } from "tailwind-merge";
 
 /** Provides props for badge. */
-interface BadgeProperties {
+interface BadgeProperties extends HTMLAttributes<HTMLSpanElement> {
     children: React.ReactNode;
     variant?:
         | "default"
@@ -14,7 +15,6 @@ interface BadgeProperties {
         | "hook"
         | "cron"
         | "subagent";
-    className?: string;
 }
 
 const variantStyles: Record<string, string> = {
@@ -30,7 +30,12 @@ const variantStyles: Record<string, string> = {
 };
 
 /** Renders the badge UI. */
-export function Badge({ children, variant = "default", className }: BadgeProperties) {
+export function Badge({
+    children,
+    variant = "default",
+    className,
+    ...properties
+}: BadgeProperties) {
     const combined = twMerge(
         clsx(
             "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium",
@@ -38,7 +43,11 @@ export function Badge({ children, variant = "default", className }: BadgePropert
             className
         )
     );
-    return <span className={combined}>{children}</span>;
+    return (
+        <span className={combined} {...properties}>
+            {children}
+        </span>
+    );
 }
 
 /** Returns session type variant. */
