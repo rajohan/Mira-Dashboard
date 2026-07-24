@@ -1159,8 +1159,8 @@ describe("Mira Dashboard frontend behavior", () => {
             value: jest.fn(async () =>
                 Response.json(
                     {
-                        code: "step_up_required",
-                        error: "Recent MFA verification is required",
+                        code: "recent_verification_required",
+                        error: "Recent password verification is required",
                     },
                     { status: 403 }
                 )
@@ -1180,13 +1180,13 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(error).toBeInstanceOf(ApiError);
             expect(error).toEqual(
                 expect.objectContaining({
-                    code: "step_up_required",
+                    code: "recent_verification_required",
                     status: 403,
                 })
             );
             expect(verificationEvents).toHaveLength(1);
             expect(verificationEvents[0]?.detail).toEqual({
-                code: "step_up_required",
+                code: "recent_verification_required",
             });
         } finally {
             removeEventListener("mira:security-verification-required", handler);
@@ -1405,6 +1405,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 method: "answer",
                 params: { question: true },
                 timeoutMs: 30_000,
+                userActivity: false,
             });
             socket.message({
                 type: "response",
@@ -1422,6 +1423,53 @@ describe("Mira Dashboard frontend behavior", () => {
                 error: "nope",
             });
             await expect(rejectedPromise).rejects.toBe("nope");
+
+            const verificationEvents: CustomEvent[] = [];
+            const verificationHandler = (event: Event) => {
+                verificationEvents.push(event as CustomEvent);
+            };
+            addEventListener("mira:security-verification-required", verificationHandler);
+            try {
+                const stepUpPromise = client.request("privileged.operation");
+                const stepUpRequest = latestSocketRequest(socket);
+                socket.message({
+                    type: "response",
+                    id: stepUpRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                await expect(stepUpPromise).rejects.toBe(
+                    "Recent MFA verification is required"
+                );
+                expect(verificationEvents).toHaveLength(1);
+                expect(verificationEvents[0]?.detail).toEqual({
+                    code: "step_up_required",
+                });
+            } finally {
+                removeEventListener(
+                    "mira:security-verification-required",
+                    verificationHandler
+                );
+            }
+
+            installUserActivityTracking();
+            dispatchEvent(new Event("pointerdown"));
+            const activeRequestPromise = client.request<{ active: boolean }>(
+                "active-request"
+            );
+            const activeRequest = latestSocketRequest(socket) as {
+                id: string;
+                userActivity?: boolean;
+            };
+            expect(activeRequest.userActivity).toBe(true);
+            socket.message({
+                type: "response",
+                id: activeRequest.id,
+                isOk: true,
+                payload: { active: true },
+            });
+            await expect(activeRequestPromise).resolves.toEqual({ active: true });
 
             socket.message({ type: "event", event: "agents.list", payload: [] });
             socket.error();
@@ -1699,6 +1747,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 method: "ping",
                 params: { value: 1 },
                 timeoutMs: 30_000,
+                userActivity: true,
             });
             act(() => {
                 socket.message({

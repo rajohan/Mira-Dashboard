@@ -1,31 +1,26 @@
-import { lstat, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+import {
+    DASHBOARD_AUTOMATION_PROFILE_NAMES,
+    DASHBOARD_AUTOMATION_PROFILES,
+    type DashboardAutomationProfile,
+    isDashboardAutomationProfile,
+} from "./dashboardAutomationProfiles.ts";
 
 const DASHBOARD_ORIGIN = "http://127.0.0.1:3100";
 const REQUEST_TIMEOUT_MS = 30_000;
 const TOKEN_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}\.[a-f0-9]{64}$/u;
 const ALLOWED_METHODS = new Set(["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"]);
-const TOKEN_FILES = {
-    "daily-brief": "openclaw-daily-brief.token",
-    "daily-summary": "openclaw-daily-summary.token",
-    heartbeat: "openclaw-heartbeat.token",
-    "task-tracking": "openclaw-task-tracking.token",
-} as const;
-
-type CredentialProfile = keyof typeof TOKEN_FILES;
-const CREDENTIAL_PROFILE_NAMES: string[] = Object.keys(TOKEN_FILES);
-
-function isCredentialProfile(value: string): value is CredentialProfile {
-    return CREDENTIAL_PROFILE_NAMES.includes(value);
-}
 
 function usage(): string {
     return [
         "Usage:",
         "  bun scripts/miraDashboardApi.ts <profile> <method> <api-path>",
         "",
-        `Profiles: ${Object.keys(TOKEN_FILES).join(", ")}`,
+        `Profiles: ${DASHBOARD_AUTOMATION_PROFILE_NAMES.join(", ")}`,
         "Request bodies are read from stdin and never from command-line arguments.",
         "",
         "Examples:",
@@ -35,37 +30,42 @@ function usage(): string {
     ].join("\n");
 }
 
-function credentialFile(profile: CredentialProfile): string {
+function credentialFile(profile: DashboardAutomationProfile): string {
     return path.join(
         os.homedir(),
         ".config",
         "mira-dashboard",
         "automation",
-        TOKEN_FILES[profile]
+        DASHBOARD_AUTOMATION_PROFILES[profile].fileName
     );
 }
 
-async function readCredential(profile: CredentialProfile): Promise<string> {
+async function readCredential(profile: DashboardAutomationProfile): Promise<string> {
     const tokenPath = credentialFile(profile);
-    const stat = await lstat(tokenPath);
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-        throw new Error(`Credential is not a regular file: ${tokenPath}`);
+    const file = await open(tokenPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+        const stat = await file.stat();
+        if (!stat.isFile()) {
+            throw new Error(`Credential is not a regular file: ${tokenPath}`);
+        }
+        if ((stat.mode & 0o777) !== 0o600) {
+            throw new Error(`Credential permissions must be 0600: ${tokenPath}`);
+        }
+        if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+            throw new Error(`Credential must be owned by the current user: ${tokenPath}`);
+        }
+        if (stat.size > 256) {
+            throw new Error(`Credential file is unexpectedly large: ${tokenPath}`);
+        }
+        const tokenContents = await file.readFile({ encoding: "utf8" });
+        const token = tokenContents.trim();
+        if (!TOKEN_PATTERN.test(token)) {
+            throw new Error(`Credential has an invalid format: ${tokenPath}`);
+        }
+        return token;
+    } finally {
+        await file.close();
     }
-    if ((stat.mode & 0o777) !== 0o600) {
-        throw new Error(`Credential permissions must be 0600: ${tokenPath}`);
-    }
-    if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
-        throw new Error(`Credential must be owned by the current user: ${tokenPath}`);
-    }
-    if (stat.size > 256) {
-        throw new Error(`Credential file is unexpectedly large: ${tokenPath}`);
-    }
-    const tokenContents = await readFile(tokenPath, "utf8");
-    const token = tokenContents.trim();
-    if (!TOKEN_PATTERN.test(token)) {
-        throw new Error(`Credential has an invalid format: ${tokenPath}`);
-    }
-    return token;
 }
 
 function requestUrl(apiPath: string): URL {
@@ -100,7 +100,7 @@ async function main(arguments_: string[]): Promise<void> {
         !rawMethod ||
         !rawApiPath ||
         extraArguments.length > 0 ||
-        !isCredentialProfile(rawProfile)
+        !isDashboardAutomationProfile(rawProfile)
     ) {
         throw new TypeError(usage());
     }

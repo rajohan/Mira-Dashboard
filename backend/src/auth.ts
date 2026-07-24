@@ -587,11 +587,21 @@ export function getAuthSessionFromSessionId(
     if (!parsedToken) {
         return undefined;
     }
-    cleanupExpiredSessions(now);
     const row = readSessionRow(parsedToken.selector);
     if (
         !row?.validator_hash ||
         !areSessionHashesEqual(row.validator_hash, parsedToken.validatorHash)
+    ) {
+        return undefined;
+    }
+    const nowMs = now.getTime();
+    const expiresAt = Date.parse(row.expires_at);
+    const lastSeenAt = Date.parse(row.last_seen_at ?? row.created_at);
+    if (
+        !Number.isFinite(expiresAt) ||
+        !Number.isFinite(lastSeenAt) ||
+        expiresAt <= nowMs ||
+        lastSeenAt <= nowMs - sessionIdleTtlMs()
     ) {
         return undefined;
     }
@@ -600,7 +610,6 @@ export function getAuthSessionFromSessionId(
         return undefined;
     }
 
-    const lastSeenAt = Date.parse(session.lastSeenAt);
     if (
         touchActivity &&
         Number.isFinite(lastSeenAt) &&

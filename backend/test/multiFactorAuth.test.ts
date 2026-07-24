@@ -680,4 +680,83 @@ describe("Dashboard multi-factor authentication", () => {
         expect(maskedJson).not.toContain("seed-secret");
         expect(redactConfigJsonText("{")).toBeUndefined();
     });
+
+    it("restores array placeholders only through unique stable identities", () => {
+        const current = {
+            agents: [
+                { id: "primary", label: "Primary", token: "primary-secret" },
+                { id: "backup", label: "Backup", token: "backup-secret" },
+                { id: 42, label: "Numeric", token: "numeric-secret" },
+                { name: "named", password: "named-secret" },
+                { username: "raymond", secret: "user-secret" },
+                { slug: "worker", apiKey: "slug-secret" },
+            ],
+        };
+        const redacted = redactConfigSecrets(current) as {
+            agents: Array<Record<string, unknown>>;
+        };
+        expect(redacted.agents[0]?.token).toBe(CONFIG_REDACTION_SENTINEL);
+        expect(hasConfigRedactionSentinel(redacted.agents)).toBe(true);
+
+        expect(
+            restoreConfigRedactionSentinels(
+                {
+                    agents: [
+                        { id: "backup", token: CONFIG_REDACTION_SENTINEL },
+                        { id: "primary", token: CONFIG_REDACTION_SENTINEL },
+                        { id: 42, token: CONFIG_REDACTION_SENTINEL },
+                        { name: "named", password: CONFIG_REDACTION_SENTINEL },
+                        { username: "raymond", secret: CONFIG_REDACTION_SENTINEL },
+                        { slug: "worker", apiKey: CONFIG_REDACTION_SENTINEL },
+                        { id: "new", enabled: true },
+                    ],
+                },
+                current
+            )
+        ).toEqual({
+            agents: [
+                { id: "backup", token: "backup-secret" },
+                { id: "primary", token: "primary-secret" },
+                { id: 42, token: "numeric-secret" },
+                { name: "named", password: "named-secret" },
+                { username: "raymond", secret: "user-secret" },
+                { slug: "worker", apiKey: "slug-secret" },
+                { id: "new", enabled: true },
+            ],
+        });
+
+        const ambiguous = restoreConfigRedactionSentinels(
+            [
+                { id: "duplicate", token: CONFIG_REDACTION_SENTINEL },
+                { id: "duplicate", token: CONFIG_REDACTION_SENTINEL },
+                { id: "", token: CONFIG_REDACTION_SENTINEL },
+                { id: NaN, token: CONFIG_REDACTION_SENTINEL },
+                { label: "position-only", token: CONFIG_REDACTION_SENTINEL },
+                [CONFIG_REDACTION_SENTINEL],
+                undefined,
+            ],
+            [
+                { id: "duplicate", token: "first-secret" },
+                { id: "duplicate", token: "second-secret" },
+            ]
+        );
+        expect(hasConfigRedactionSentinel(ambiguous)).toBe(true);
+
+        const duplicateCurrent = restoreConfigRedactionSentinels(
+            [{ id: "duplicate", token: CONFIG_REDACTION_SENTINEL }],
+            [
+                { id: "duplicate", token: "first-secret" },
+                { id: "duplicate", token: "second-secret" },
+            ]
+        );
+        expect(hasConfigRedactionSentinel(duplicateCurrent)).toBe(true);
+        expect(
+            hasConfigRedactionSentinel(
+                restoreConfigRedactionSentinels(
+                    [{ id: "primary", token: CONFIG_REDACTION_SENTINEL }],
+                    { agents: current.agents }
+                )
+            )
+        ).toBe(true);
+    });
 });

@@ -3,6 +3,7 @@ import readline from "node:readline";
 import { hashPassword } from "./auth.ts";
 import { database } from "./database.ts";
 import { writeAuditEvent } from "./services/auditEvents.ts";
+import { normalizeLoginPassword } from "./services/authenticationRequest.ts";
 import { clearAuthenticationFailures } from "./services/authenticationThrottle.ts";
 
 interface ResetArguments {
@@ -100,12 +101,6 @@ async function readSecret(prompt: string): Promise<string> {
     });
 }
 
-function validatePassword(password: string): void {
-    if (password.length < 8 || password.length > 256) {
-        throw new TypeError("Password must be 8-256 characters");
-    }
-}
-
 async function resetPassword(arguments_: ResetArguments): Promise<void> {
     const user = database
         .prepare(
@@ -119,7 +114,9 @@ async function resetPassword(arguments_: ResetArguments): Promise<void> {
     }
 
     const password = await readSecret("New Dashboard password: ");
-    validatePassword(password);
+    if (!normalizeLoginPassword(password)) {
+        throw new TypeError("Password must be 8-256 characters");
+    }
     const confirmation = await readSecret("Confirm new password: ");
     if (password !== confirmation) {
         throw new Error("Passwords do not match");

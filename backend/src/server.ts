@@ -4,11 +4,17 @@ import path from "node:path";
 
 import type { Server, ServerWebSocket } from "bun";
 
-import { validateAuthenticationConfig, validateStoredSecretConfig } from "./auth.ts";
+import {
+    getAuthSessionFromSessionId,
+    hasRecentMfaVerification,
+    validateAuthenticationConfig,
+    validateStoredSecretConfig,
+} from "./auth.ts";
 import { validateAutomationCredentials } from "./automationAuth.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import gateway from "./gateway.ts";
-import { authUser, isAllowedDashboardOrigin } from "./http.ts";
+import { isAllowedDashboardOrigin, sessionIdFromCookie } from "./http.ts";
+import { requiresRecentMfaForGatewayMethod } from "./requestPolicy.ts";
 import { withRequestSecurity } from "./requestSecurity.ts";
 import { routes } from "./routes.ts";
 import { validateTotpStorageConfig } from "./services/multiFactorAuth.ts";
@@ -18,11 +24,52 @@ interface DashboardSocketData {
     closeHandlers: Array<() => void>;
     errorHandlers: Array<(error: unknown) => void>;
     messageHandlers: Array<(data: string | Buffer) => void>;
+    sessionToken: string;
     socket?: DashboardSocket;
     userId: number;
 }
 
+interface DashboardSocketRequest {
+    id?: string;
+    method?: string;
+    type?: string;
+    userActivity?: boolean;
+}
+
 const SERVER_IDLE_TIMEOUT_SECONDS = 240;
+
+function dashboardSocketRequest(data: string | Buffer): DashboardSocketRequest {
+    try {
+        const value = JSON.parse(data.toString()) as Record<string, unknown>;
+        return {
+            ...(typeof value.id === "string" && { id: value.id }),
+            ...(typeof value.method === "string" && { method: value.method }),
+            ...(typeof value.type === "string" && { type: value.type }),
+            ...(value.userActivity === true && { userActivity: true }),
+        };
+    } catch {
+        return {};
+    }
+}
+
+function sendSocketAuthenticationError(
+    ws: ServerWebSocket<DashboardSocketData>,
+    request: DashboardSocketRequest,
+    code: "mfa_enrollment_required" | "step_up_required"
+): void {
+    ws.send(
+        JSON.stringify({
+            code,
+            error:
+                code === "step_up_required"
+                    ? "Recent MFA verification is required"
+                    : "Multi-factor authentication must be enabled",
+            id: request.id,
+            isOk: false,
+            type: "response",
+        })
+    );
+}
 
 function hasHiddenStaticSegment(relativePath: string): boolean {
     return relativePath.split(path.sep).some((segment) => segment.startsWith("."));
@@ -83,7 +130,35 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
             }
         },
         message(ws: ServerWebSocket<DashboardSocketData>, message: string | Buffer) {
+            if (
+                typeof ws.data.sessionToken !== "string" ||
+                !Number.isSafeInteger(ws.data.userId)
+            ) {
+                ws.close(4401, "Dashboard session is no longer valid");
+                return;
+            }
             const data = typeof message === "string" ? message : Buffer.from(message);
+            const socketRequest = dashboardSocketRequest(data);
+            const session = getAuthSessionFromSessionId(ws.data.sessionToken, {
+                touchActivity: socketRequest.userActivity === true,
+            });
+            if (!session || session.id !== ws.data.userId) {
+                ws.close(4401, "Dashboard session is no longer valid");
+                return;
+            }
+            if (
+                (socketRequest.type === "request" || socketRequest.type === "req") &&
+                socketRequest.method &&
+                requiresRecentMfaForGatewayMethod(socketRequest.method) &&
+                (!session.mfaEnabled || !hasRecentMfaVerification(session))
+            ) {
+                sendSocketAuthenticationError(
+                    ws,
+                    socketRequest,
+                    session.mfaEnabled ? "step_up_required" : "mfa_enrollment_required"
+                );
+                return;
+            }
             for (const handler of ws.data.messageHandlers) {
                 handler(data);
             }
@@ -109,8 +184,11 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
                         server
                     );
                 }
-                const user = authUser(request);
-                if (!user) {
+                const sessionToken = sessionIdFromCookie(request);
+                const session = sessionToken
+                    ? getAuthSessionFromSessionId(sessionToken)
+                    : undefined;
+                if (!sessionToken || !session) {
                     return withRequestSecurity(
                         request,
                         new Response("Unauthorized", { status: 401 }),
@@ -122,7 +200,8 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
                         closeHandlers: [],
                         errorHandlers: [],
                         messageHandlers: [],
-                        userId: user.id,
+                        sessionToken,
+                        userId: session.id,
                     },
                 });
                 return isUpgraded

@@ -94,6 +94,14 @@ const PUBLIC_API_METHODS = new Map<string, ReadonlySet<string>>([
     ["/api/auth/register-first-user", new Set(["POST"])],
     ["/api/auth/session", new Set(["GET", "HEAD"])],
 ]);
+const READ_ONLY_GATEWAY_METHODS = new Set([
+    "chat.history",
+    "chat.runtimeSnapshot",
+    "models.list",
+    "sessions.list",
+    "subscribe",
+    "unsubscribe",
+]);
 const rateLimitState: { bucketCleanupTimer: Timer | undefined } = {
     bucketCleanupTimer: undefined,
 };
@@ -293,6 +301,11 @@ export function requiresRecentMfa(request: Request): boolean {
     ].some(
         (prefix) => pathname === prefix.replace(/\/$/u, "") || pathname.startsWith(prefix)
     );
+}
+
+/** Requires fresh MFA for every Gateway RPC except the explicit read-only set. */
+export function requiresRecentMfaForGatewayMethod(method: string): boolean {
+    return !READ_ONLY_GATEWAY_METHODS.has(method);
 }
 
 function writeRequestAudit(

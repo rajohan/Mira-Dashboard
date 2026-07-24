@@ -779,7 +779,7 @@ export function AccountSecuritySection() {
 
             {verificationMode === undefined ? undefined : (
                 <Modal
-                    isOpen={verificationMode !== undefined}
+                    isOpen
                     onClose={() => {
                         setVerificationCode("");
                         setPassword("");
@@ -827,42 +827,61 @@ export function AccountSecuritySection() {
                                     Use security key
                                 </Button>
                             ) : undefined}
-                            {data.factors.methods.includes("totp") ? (
+                            {data.factors.methods.includes("totp") ||
+                            data.factors.methods.includes("recovery") ? (
                                 <form
                                     className="space-y-2"
                                     onSubmit={(event_) => {
                                         event_.preventDefault();
-                                        void verifyMfa("totp");
+                                        void verifyMfa(
+                                            data.factors.methods.includes("totp")
+                                                ? "totp"
+                                                : "recovery"
+                                        );
                                     }}
                                 >
                                     <Input
                                         autoComplete="one-time-code"
-                                        inputMode="numeric"
-                                        label="Authenticator code"
+                                        inputMode={
+                                            data.factors.methods.includes("recovery")
+                                                ? "text"
+                                                : "numeric"
+                                        }
+                                        label={
+                                            data.factors.methods.includes("totp") &&
+                                            data.factors.methods.includes("recovery")
+                                                ? "Authenticator or recovery code"
+                                                : data.factors.methods.includes("totp")
+                                                  ? "Authenticator code"
+                                                  : "Recovery code"
+                                        }
                                         onChange={(event_) =>
                                             setVerificationCode(event_.target.value)
                                         }
                                         value={verificationCode}
                                     />
-                                    <Button
-                                        className="w-full"
-                                        disabled={isBusy || !verificationCode.trim()}
-                                        type="submit"
-                                        variant="secondary"
-                                    >
-                                        Verify TOTP
-                                    </Button>
+                                    {data.factors.methods.includes("totp") ? (
+                                        <Button
+                                            className="w-full"
+                                            disabled={isBusy || !verificationCode.trim()}
+                                            type="submit"
+                                            variant="secondary"
+                                        >
+                                            Verify TOTP
+                                        </Button>
+                                    ) : undefined}
+                                    {data.factors.methods.includes("recovery") ? (
+                                        <Button
+                                            className="w-full"
+                                            disabled={isBusy || !verificationCode.trim()}
+                                            onClick={() => void verifyMfa("recovery")}
+                                            type="button"
+                                            variant="ghost"
+                                        >
+                                            Use recovery code
+                                        </Button>
+                                    ) : undefined}
                                 </form>
-                            ) : undefined}
-                            {data.factors.methods.includes("recovery") ? (
-                                <Button
-                                    className="w-full"
-                                    disabled={isBusy || !verificationCode.trim()}
-                                    onClick={() => void verifyMfa("recovery")}
-                                    variant="ghost"
-                                >
-                                    Use entered value as recovery code
-                                </Button>
                             ) : undefined}
                         </div>
                     )}

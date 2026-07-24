@@ -19,11 +19,17 @@ const AUTOMATION_CREDENTIALS = JSON.stringify([
 const state: {
     baseUrl: string;
     child?: ReturnType<typeof Bun.spawn>;
+    passwordSessionToken: string;
+    revokedSessionToken: string;
     sessionToken: string;
+    staleSessionToken: string;
     temporaryRoot: string;
 } = {
     baseUrl: "",
+    passwordSessionToken: "",
+    revokedSessionToken: "",
     sessionToken: "",
+    staleSessionToken: "",
     temporaryRoot: "",
 };
 
@@ -56,6 +62,58 @@ function canRemoveTemporaryRoot(temporaryRoot: string): boolean {
         path.isAbsolute(temporaryRoot) &&
         path.basename(temporaryRoot).startsWith("mira-dashboard-bun-test-")
     );
+}
+
+async function connectDashboardSocket(sessionToken: string): Promise<WebSocket> {
+    const ws = new WebSocket(state.baseUrl.replace("http://", "ws://") + "/ws", {
+        headers: {
+            Cookie: `mira_dashboard_session=${encodeURIComponent(sessionToken)}`,
+        },
+    });
+    await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error("Timed out waiting for ws state")),
+            1000
+        );
+        ws.addEventListener(
+            "message",
+            () => {
+                clearTimeout(timer);
+                resolve();
+            },
+            { once: true }
+        );
+        ws.addEventListener(
+            "error",
+            () => {
+                clearTimeout(timer);
+                reject(new Error("WebSocket failed"));
+            },
+            { once: true }
+        );
+    });
+    return ws;
+}
+
+function nextSocketMessage(
+    ws: WebSocket,
+    request: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error("Timed out waiting for ws response")),
+            1000
+        );
+        ws.addEventListener(
+            "message",
+            (event) => {
+                clearTimeout(timer);
+                resolve(JSON.parse(String(event.data)) as Record<string, unknown>);
+            },
+            { once: true }
+        );
+        ws.send(JSON.stringify(request));
+    });
 }
 
 async function drainReader(
@@ -141,11 +199,15 @@ describe("Bun-native dashboard backend", () => {
                 "registerExecExecutionActions();",
                 "startScheduledJobExecutor();",
                 "const user = await createUser('native-test-user', 'native-test-password');",
+                "const passwordUser = await createUser('native-password-user', 'native-test-password');",
+                "const passwordSessionToken = createSession(passwordUser.id, { userAgent: 'Native password test' });",
                 "const verifiedAt = new Date().toISOString();",
                 "database.prepare('UPDATE users SET mfa_enabled_at = ?, updated_at = ? WHERE id = ?').run(verifiedAt, verifiedAt, user.id);",
                 "const sessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: verifiedAt, userAgent: 'Native Bun test' });",
+                "const revokedSessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: verifiedAt, userAgent: 'Native revoked test' });",
+                "const staleSessionToken = createSession(user.id, { authMethod: 'webauthn', mfaVerifiedAt: new Date(Date.now() - 20 * 60_000).toISOString(), userAgent: 'Native stale test' });",
                 "const server = createServer(0);",
-                "console.log(JSON.stringify({ port: server.port, sessionToken }));",
+                "console.log(JSON.stringify({ passwordSessionToken, port: server.port, revokedSessionToken, sessionToken, staleSessionToken }));",
                 "process.on('SIGTERM', () => { Promise.all([server.stop(true), stopScheduledJobExecutor()]).then(() => process.exit(0)).catch(() => process.exit(1)); });",
             ].join("\n")
         );
@@ -208,12 +270,24 @@ describe("Bun-native dashboard backend", () => {
             throw new Error("Native server did not print port");
         }
         void drainReader(reader, decoder);
-        const { port, sessionToken } = JSON.parse(firstLine) as {
+        const {
+            passwordSessionToken,
+            port,
+            revokedSessionToken,
+            sessionToken,
+            staleSessionToken,
+        } = JSON.parse(firstLine) as {
+            passwordSessionToken: string;
             port: number;
+            revokedSessionToken: string;
             sessionToken: string;
+            staleSessionToken: string;
         };
         state.baseUrl = `http://127.0.0.1:${port}`;
+        state.passwordSessionToken = passwordSessionToken;
+        state.revokedSessionToken = revokedSessionToken;
         state.sessionToken = sessionToken;
+        state.staleSessionToken = staleSessionToken;
     });
 
     afterAll(async () => {
@@ -362,6 +436,73 @@ describe("Bun-native dashboard backend", () => {
             sessions: [],
             type: "state",
         });
+    });
+
+    it("revalidates WebSocket sessions and requires fresh MFA for Gateway mutations", async () => {
+        const passwordSocket = await connectDashboardSocket(state.passwordSessionToken);
+        const enrollmentRequired = await nextSocketMessage(passwordSocket, {
+            id: "password-mutation",
+            method: "chat.send",
+            params: { message: "test" },
+            type: "req",
+            userActivity: true,
+        });
+        expect(enrollmentRequired).toMatchObject({
+            code: "mfa_enrollment_required",
+            id: "password-mutation",
+            isOk: false,
+            type: "response",
+        });
+        const readOnly = await nextSocketMessage(passwordSocket, {
+            id: "password-read",
+            method: "sessions.list",
+            params: {},
+            type: "req",
+        });
+        expect(readOnly).toMatchObject({
+            error: "Gateway not connected",
+            id: "password-read",
+            isOk: false,
+            type: "response",
+        });
+        passwordSocket.close();
+
+        const staleSocket = await connectDashboardSocket(state.staleSessionToken);
+        const stepUpRequired = await nextSocketMessage(staleSocket, {
+            id: "stale-mutation",
+            method: "sessions.patch",
+            params: { key: "agent:main:main" },
+            type: "req",
+        });
+        expect(stepUpRequired).toMatchObject({
+            code: "step_up_required",
+            id: "stale-mutation",
+            isOk: false,
+            type: "response",
+        });
+        staleSocket.close();
+
+        const revokedSocket = await connectDashboardSocket(state.revokedSessionToken);
+        const logout = await fetch(`${state.baseUrl}/api/auth/logout`, {
+            headers: {
+                Cookie: `mira_dashboard_session=${encodeURIComponent(state.revokedSessionToken)}`,
+            },
+            method: "POST",
+        });
+        expect(logout.status).toBe(200);
+        const closed = new Promise<CloseEvent>((resolve) => {
+            revokedSocket.addEventListener("close", resolve, { once: true });
+        });
+        revokedSocket.send(
+            JSON.stringify({
+                id: "revoked-read",
+                method: "sessions.list",
+                params: {},
+                type: "req",
+            })
+        );
+        const closeEvent = await closed;
+        expect(closeEvent.code).toBe(4401);
     });
 
     it("serves the app shell and hashed static assets", async () => {

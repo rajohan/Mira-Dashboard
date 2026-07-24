@@ -169,6 +169,14 @@ export function FileEditorPanel({
                         </div>
                     </div>
 
+                    {fileContent?.maskingError ? (
+                        <div className="border-b border-yellow-800/70 bg-yellow-950/40 px-4 py-3 text-sm text-yellow-200">
+                            {fileContent.maskingError === "truncated_json"
+                                ? "The masked preview is unavailable because this config exceeds the safe preview limit. Reveal is read-only for oversized files."
+                                : "The masked preview is unavailable because this config is not valid JSON. Verify with MFA and reveal it to repair the raw file."}
+                        </div>
+                    ) : undefined}
+
                     <div className="flex-1 overflow-hidden">
                         {contentLoading ? (
                             <div className="flex h-full items-center justify-center text-primary-400">

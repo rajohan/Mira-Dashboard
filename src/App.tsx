@@ -8,6 +8,7 @@ import { AppErrorFallback } from "./components/ui/AppErrorFallback";
 import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
 import { queryClient } from "./lib/queryClient";
 import { router } from "./router";
+import { authActions } from "./stores/authStore";
 
 const isEnableDevtools = import.meta.env?.MODE !== "production";
 const DashboardDevtools = isEnableDevtools
@@ -19,6 +20,7 @@ export default function App() {
     useEffect(() => {
         /** Performs on unauthorized. */
         const onUnauthorized = () => {
+            authActions.clearSession();
             void router.navigate({ to: "/login" });
         };
 

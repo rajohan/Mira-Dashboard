@@ -2,42 +2,18 @@ import { chmod, lstat, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const PROFILES = {
-    "daily-brief": {
-        fileName: "openclaw-daily-brief.token",
-        id: "openclaw-daily-brief",
-        scopes: ["cache:read", "reports:write", "tasks:read"],
-    },
-    "daily-summary": {
-        fileName: "openclaw-daily-summary.token",
-        id: "openclaw-daily-summary",
-        scopes: ["cache:read", "reports:write"],
-    },
-    heartbeat: {
-        fileName: "openclaw-heartbeat.token",
-        id: "openclaw-heartbeat",
-        scopes: ["cache:read", "reports:write"],
-    },
-    "task-tracking": {
-        fileName: "openclaw-task-tracking.token",
-        id: "openclaw-task-tracking",
-        scopes: ["agents:write", "tasks:read", "tasks:write"],
-    },
-} as const;
-
-type CredentialProfile = keyof typeof PROFILES;
-const CREDENTIAL_PROFILE_NAMES: string[] = Object.keys(PROFILES);
-
-function isCredentialProfile(value: string): value is CredentialProfile {
-    return CREDENTIAL_PROFILE_NAMES.includes(value);
-}
+import {
+    DASHBOARD_AUTOMATION_PROFILE_NAMES,
+    DASHBOARD_AUTOMATION_PROFILES,
+    isDashboardAutomationProfile,
+} from "./dashboardAutomationProfiles.ts";
 
 function usage(): string {
     return [
         "Usage:",
         "  bun scripts/provisionDashboardAutomationCredential.ts <profile>",
         "",
-        `Profiles: ${Object.keys(PROFILES).join(", ")}`,
+        `Profiles: ${DASHBOARD_AUTOMATION_PROFILE_NAMES.join(", ")}`,
         "",
         "The full bearer token is written directly to its 0600 client file.",
         "Only the hash-only Dashboard configuration entry is printed.",
@@ -68,11 +44,15 @@ async function main(arguments_: string[]): Promise<void> {
         return;
     }
     const [rawProfile, ...extraArguments] = arguments_;
-    if (!rawProfile || !isCredentialProfile(rawProfile) || extraArguments.length > 0) {
+    if (
+        !rawProfile ||
+        !isDashboardAutomationProfile(rawProfile) ||
+        extraArguments.length > 0
+    ) {
         throw new TypeError(usage());
     }
 
-    const profile = PROFILES[rawProfile];
+    const profile = DASHBOARD_AUTOMATION_PROFILES[rawProfile];
     const directory = credentialDirectory();
     await ensureCredentialDirectory(directory);
 

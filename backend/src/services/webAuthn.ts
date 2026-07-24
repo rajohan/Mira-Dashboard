@@ -50,6 +50,20 @@ export interface WebAuthnChallengeContext {
     userId: number;
 }
 
+export interface WebAuthnServerAdapter {
+    generateAuthenticationOptions: typeof generateAuthenticationOptions;
+    generateRegistrationOptions: typeof generateRegistrationOptions;
+    verifyAuthenticationResponse: typeof verifyAuthenticationResponse;
+    verifyRegistrationResponse: typeof verifyRegistrationResponse;
+}
+
+const defaultWebAuthnServerAdapter: WebAuthnServerAdapter = {
+    generateAuthenticationOptions,
+    generateRegistrationOptions,
+    verifyAuthenticationResponse,
+    verifyRegistrationResponse,
+};
+
 interface WebAuthnChallengeRow {
     challenge: string;
     expires_at: string;
@@ -314,14 +328,16 @@ function credentialsForUser(userId: number): WebAuthnCredentialRow[] {
 export async function createWebAuthnRegistrationOptions(
     context: WebAuthnChallengeContext,
     username: string,
-    now = new Date()
+    now = new Date(),
+    adapter: WebAuthnServerAdapter = defaultWebAuthnServerAdapter
 ): Promise<PublicKeyCredentialCreationOptionsJSON> {
     if (context.purpose !== "registration") {
         throw new TypeError("Registration requires a registration challenge");
     }
+    validateChallengeContext(context);
     const config = webAuthnConfig();
     const existingCredentials = credentialsForUser(context.userId);
-    const options = await generateRegistrationOptions({
+    const options = await adapter.generateRegistrationOptions({
         attestationType: "none",
         authenticatorSelection: {
             authenticatorAttachment: "cross-platform",
@@ -349,7 +365,8 @@ export async function verifyWebAuthnRegistration(
     context: WebAuthnChallengeContext,
     response: RegistrationResponseJSON,
     label: string,
-    now = new Date()
+    now = new Date(),
+    adapter: WebAuthnServerAdapter = defaultWebAuthnServerAdapter
 ): Promise<
     | {
           confirmation: FactorConfirmation;
@@ -367,7 +384,7 @@ export async function verifyWebAuthnRegistration(
     const config = webAuthnConfig();
     let verification;
     try {
-        verification = await verifyRegistrationResponse({
+        verification = await adapter.verifyRegistrationResponse({
             expectedChallenge: challenge.challenge,
             expectedOrigin: config.expectedOrigins,
             expectedRPID: config.rpId,
@@ -467,17 +484,19 @@ export async function verifyWebAuthnRegistration(
 /** Starts a user-bound WebAuthn login or step-up assertion. */
 export async function createWebAuthnAuthenticationOptions(
     context: WebAuthnChallengeContext,
-    now = new Date()
+    now = new Date(),
+    adapter: WebAuthnServerAdapter = defaultWebAuthnServerAdapter
 ): Promise<PublicKeyCredentialRequestOptionsJSON> {
     if (context.purpose === "registration") {
         throw new TypeError("Authentication requires a login or step-up challenge");
     }
+    validateChallengeContext(context);
     const config = webAuthnConfig();
     const credentials = credentialsForUser(context.userId);
     if (credentials.length === 0) {
         throw new Error("No WebAuthn credentials are configured");
     }
-    const options = await generateAuthenticationOptions({
+    const options = await adapter.generateAuthenticationOptions({
         allowCredentials: credentials.map((credential) => ({
             id: credential.id,
             transports: parseTransports(credential.transports_json),
@@ -494,7 +513,8 @@ export async function createWebAuthnAuthenticationOptions(
 export async function verifyWebAuthnAuthentication(
     context: WebAuthnChallengeContext,
     response: AuthenticationResponseJSON,
-    now = new Date()
+    now = new Date(),
+    adapter: WebAuthnServerAdapter = defaultWebAuthnServerAdapter
 ): Promise<WebAuthnFactorSummary | undefined> {
     if (context.purpose === "registration" || !CREDENTIAL_ID_PATTERN.test(response.id)) {
         return undefined;
@@ -526,7 +546,7 @@ export async function verifyWebAuthnAuthentication(
     const config = webAuthnConfig();
     let verification;
     try {
-        verification = await verifyAuthenticationResponse({
+        verification = await adapter.verifyAuthenticationResponse({
             credential: {
                 counter: credential.counter,
                 id: credential.id,

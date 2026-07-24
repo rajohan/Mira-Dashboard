@@ -28,7 +28,10 @@ export function useFileExplorerState() {
     const [jsonPreview, setJsonPreview] = useState(true);
     const [codeEditMode, setCodeEditMode] = useState(false);
     const [error, setError] = useState<string | undefined>(undefined);
-    const [revealedFileContent, setRevealedFileContent] = useState<FileContent>();
+    const [revealedFileContent, setRevealedFileContent] = useState<{
+        content: FileContent;
+        sourcePath: string;
+    }>();
 
     const queryClient = useQueryClient();
     const {
@@ -43,7 +46,11 @@ export function useFileExplorerState() {
     } = useFileContent(selectedPath);
     const saveMutation = useSaveFile();
     const revealMutation = useRevealFile();
-    const fileContent = revealedFileContent ?? maskedFileContent;
+    const fileContent =
+        revealedFileContent !== undefined &&
+        revealedFileContent.sourcePath === selectedPath
+            ? revealedFileContent.content
+            : maskedFileContent;
 
     useEffect(() => {
         if (rootFiles.length > 0) {
@@ -183,10 +190,11 @@ export function useFileExplorerState() {
     /** Reveals a config file only after the server accepts privileged step-up. */
     const handleReveal = async () => {
         if (!selectedPath) return;
+        const sourcePath = selectedPath;
         setError(undefined);
         try {
-            const revealed = await revealMutation.mutateAsync(selectedPath);
-            setRevealedFileContent(revealed);
+            const revealed = await revealMutation.mutateAsync(sourcePath);
+            setRevealedFileContent({ content: revealed, sourcePath });
         } catch (error_) {
             setError(
                 error_ instanceof Error ? error_.message : "Failed to reveal config"

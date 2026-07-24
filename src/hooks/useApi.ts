@@ -1,3 +1,4 @@
+import { isSecurityVerificationCode } from "../lib/securityVerification";
 import { hasRecentUserActivity } from "../lib/userActivity";
 import { authActions } from "../stores/authStore";
 
@@ -62,10 +63,7 @@ export async function apiFetch<T>(
         } catch {
             error = { error: "Unknown error" };
         }
-        if (
-            error.code === "step_up_required" ||
-            error.code === "mfa_enrollment_required"
-        ) {
+        if (isSecurityVerificationCode(error.code)) {
             dispatchEvent(
                 new CustomEvent("mira:security-verification-required", {
                     detail: { code: error.code },

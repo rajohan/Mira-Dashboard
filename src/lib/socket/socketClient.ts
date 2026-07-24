@@ -1,4 +1,6 @@
 import type { SocketEnvelope } from "../../types/socket";
+import { isSecurityVerificationCode } from "../securityVerification";
+import { hasRecentUserActivity } from "../userActivity";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -105,6 +107,16 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                         if (data.isOk) {
                             pending.resolve(data.payload);
                         } else {
+                            if (isSecurityVerificationCode(data.code)) {
+                                dispatchEvent(
+                                    new CustomEvent(
+                                        "mira:security-verification-required",
+                                        {
+                                            detail: { code: data.code },
+                                        }
+                                    )
+                                );
+                            }
                             pending.reject(data.error);
                         }
                     }
@@ -193,6 +205,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                         method,
                         params: parameters,
                         timeoutMs: requestTimeoutMs,
+                        userActivity: hasRecentUserActivity(),
                     })
                 );
             } catch (error) {

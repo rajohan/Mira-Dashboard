@@ -118,10 +118,15 @@ verification.
 - Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
 - Auth is enforced by the backend request policy for every API route except
-  `/api/health` and the exact bootstrap/login/logout/session endpoints. Factor
-  management lives under authenticated `/api/account/security/*`. Hash-only
-  automation credentials can reach only centrally mapped minimum scopes, never
-  Terminal/exec or the other privileged route families.
+  `GET|HEAD /api/health`, `GET|HEAD /api/auth/bootstrap`,
+  `POST /api/auth/register-first-user`, `POST /api/auth/login`,
+  `POST /api/auth/login/totp`, `POST /api/auth/login/recovery`,
+  `POST /api/auth/login/webauthn/options`,
+  `POST /api/auth/login/webauthn/verify`, `POST /api/auth/logout`, and
+  `GET|HEAD /api/auth/session`. Factor management lives under authenticated
+  `/api/account/security/*`. Hash-only automation credentials can reach only
+  centrally mapped minimum scopes, never Terminal/exec or the other privileged
+  route families.
 - Direct loopback requests do not bypass authentication. Local automation,
   including heartbeat/report/task callers, must send a minimum-scope automation
   bearer credential. If `MIRA_DASHBOARD_TRUSTED_PROXY_IPS` is configured, the

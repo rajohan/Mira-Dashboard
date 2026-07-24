@@ -15,48 +15,48 @@ route files under `backend/src/routes/` for exact validation details.
 
 These exact routes are public; `/api/auth/*` is not a wildcard exemption.
 
-| Method | Path                                      | Purpose                                                                 |
-| ------ | ----------------------------------------- | ----------------------------------------------------------------------- |
-| `GET`  | `/api/auth/bootstrap`                     | Returns first-user/bootstrap state.                                     |
-| `GET`  | `/api/auth/session`                       | Returns current auth/session state.                                     |
-| `POST` | `/api/auth/register-first-user`           | Validates Gateway token and creates the first user/session.              |
-| `POST` | `/api/auth/login`                         | Verifies password; returns a session or a pending MFA login with `202`.  |
-| `POST` | `/api/auth/login/totp`                    | Completes pending login with an authenticator-app code.                  |
-| `POST` | `/api/auth/login/recovery`                | Completes pending login and consumes a one-time recovery code.           |
-| `POST` | `/api/auth/login/webauthn/options`        | Creates options for pending security-key login.                          |
-| `POST` | `/api/auth/login/webauthn/verify`         | Verifies a pending security-key assertion and creates the session.       |
-| `POST` | `/api/auth/logout`                        | Deletes the current auth session and cookies.                            |
+| Method | Path                               | Purpose                                                                 |
+| ------ | ---------------------------------- | ----------------------------------------------------------------------- |
+| `GET`  | `/api/auth/bootstrap`              | Returns first-user/bootstrap state.                                     |
+| `GET`  | `/api/auth/session`                | Returns current auth/session state.                                     |
+| `POST` | `/api/auth/register-first-user`    | Validates Gateway token and creates the first user/session.             |
+| `POST` | `/api/auth/login`                  | Verifies password; returns a session or a pending MFA login with `202`. |
+| `POST` | `/api/auth/login/totp`             | Completes pending login with an authenticator-app code.                 |
+| `POST` | `/api/auth/login/recovery`         | Completes pending login and consumes a one-time recovery code.          |
+| `POST` | `/api/auth/login/webauthn/options` | Creates options for pending security-key login.                         |
+| `POST` | `/api/auth/login/webauthn/verify`  | Verifies a pending security-key assertion and creates the session.      |
+| `POST` | `/api/auth/logout`                 | Deletes the current auth session and cookies.                           |
 
 ## Account Security
 
 All account-security routes require a valid browser session. Factor management
 requires recent password or MFA verification according to the account state.
 
-| Method   | Path                                                        | Purpose                                                        |
-| -------- | ----------------------------------------------------------- | -------------------------------------------------------------- |
-| `GET`    | `/api/account/security`                                     | Lists MFA state, factors, configuration, and browser sessions. |
-| `POST`   | `/api/account/security/reauth/password`                     | Refreshes recent password verification.                        |
-| `POST`   | `/api/account/security/password/change`                     | Changes password, rotates current session, revokes the rest.   |
-| `POST`   | `/api/account/security/step-up/totp`                        | Refreshes recent MFA with TOTP.                                |
-| `POST`   | `/api/account/security/step-up/recovery`                    | Refreshes recent MFA and consumes a recovery code.             |
-| `POST`   | `/api/account/security/step-up/webauthn/options`            | Creates security-key step-up options.                          |
-| `POST`   | `/api/account/security/step-up/webauthn/verify`             | Verifies security-key step-up.                                 |
-| `POST`   | `/api/account/security/totp/setup`                          | Starts encrypted TOTP enrollment.                              |
-| `POST`   | `/api/account/security/totp/confirm`                        | Confirms and activates a TOTP factor.                          |
-| `DELETE` | `/api/account/security/totp/:factorId`                      | Removes a TOTP factor, but never the final factor.             |
-| `POST`   | `/api/account/security/webauthn/register/options`           | Starts registration for a named security key.                 |
-| `POST`   | `/api/account/security/webauthn/register/verify`            | Verifies and stores a security-key public credential.          |
-| `DELETE` | `/api/account/security/webauthn/:credentialId`              | Removes a security key, but never the final factor.            |
-| `POST`   | `/api/account/security/recovery-codes/rotate`               | Invalidates and replaces all recovery codes.                   |
-| `POST`   | `/api/account/security/mfa/disable`                         | Disables MFA after password plus recent second factor.         |
-| `DELETE` | `/api/account/security/sessions/:sessionId`                 | Revokes one browser session.                                   |
-| `POST`   | `/api/account/security/sessions/revoke-others`              | Revokes every other browser session.                           |
-| `POST`   | `/api/account/security/sessions/revoke-all`                 | Revokes every session, including the current one.              |
+| Method   | Path                                              | Purpose                                                        |
+| -------- | ------------------------------------------------- | -------------------------------------------------------------- |
+| `GET`    | `/api/account/security`                           | Lists MFA state, factors, configuration, and browser sessions. |
+| `POST`   | `/api/account/security/reauth/password`           | Refreshes recent password verification.                        |
+| `POST`   | `/api/account/security/password/change`           | Changes password, rotates current session, revokes the rest.   |
+| `POST`   | `/api/account/security/step-up/totp`              | Refreshes recent MFA with TOTP.                                |
+| `POST`   | `/api/account/security/step-up/recovery`          | Refreshes recent MFA and consumes a recovery code.             |
+| `POST`   | `/api/account/security/step-up/webauthn/options`  | Creates security-key step-up options.                          |
+| `POST`   | `/api/account/security/step-up/webauthn/verify`   | Verifies security-key step-up.                                 |
+| `POST`   | `/api/account/security/totp/setup`                | Starts encrypted TOTP enrollment.                              |
+| `POST`   | `/api/account/security/totp/confirm`              | Confirms and activates a TOTP factor.                          |
+| `DELETE` | `/api/account/security/totp/:factorId`            | Removes a TOTP factor, but never the final factor.             |
+| `POST`   | `/api/account/security/webauthn/register/options` | Starts registration for a named security key.                  |
+| `POST`   | `/api/account/security/webauthn/register/verify`  | Verifies and stores a security-key public credential.          |
+| `DELETE` | `/api/account/security/webauthn/:credentialId`    | Removes a security key, but never the final factor.            |
+| `POST`   | `/api/account/security/recovery-codes/rotate`     | Invalidates and replaces all recovery codes.                   |
+| `POST`   | `/api/account/security/mfa/disable`               | Disables MFA after password plus recent second factor.         |
+| `DELETE` | `/api/account/security/sessions/:sessionId`       | Revokes one browser session.                                   |
+| `POST`   | `/api/account/security/sessions/revoke-others`    | Revokes every other browser session.                           |
+| `POST`   | `/api/account/security/sessions/revoke-all`       | Revokes every session, including the current one.              |
 
 ## Audit
 
-| Method | Path                | Purpose                                                                  |
-| ------ | ------------------- | ------------------------------------------------------------------------ |
+| Method | Path                | Purpose                                                                    |
+| ------ | ------------------- | -------------------------------------------------------------------------- |
 | `GET`  | `/api/audit-events` | Pages append-only redacted events newest-first (`limit`, `before` cursor). |
 
 ## Agents
@@ -200,8 +200,9 @@ queued or running action should stop.
 
 File routes reject hidden paths and paths outside their configured roots.
 `openclaw.json` reads are recursively masked and read-only by default.
-`?reveal=1` requires recent MFA before returning raw values; writes reject the
-redaction sentinel as literal content.
+`?reveal=1` requires recent MFA before returning raw values. `PUT /api/config`
+preserves valid masked placeholders server-side, while literal
+`PUT /api/config-files/openclaw.json` content rejects the redaction sentinel.
 `/api/media` accepts `preview=text` only for bounded TXT, JSON, CSV, and Markdown
 files, and `preview=image` only for sandboxed SVG display.
 `/api/chat/media/outgoing/*?preview=text` applies the same 1 MiB bound to managed

@@ -144,11 +144,14 @@ rotation, first move the existing `0600` token file to an owner-only
 `.previous` file in the same `0700` directory. Run the provisioner to create
 the replacement at the canonical path, replace the matching hash-only object
 in `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`, restart the Dashboard web service,
-and smoke-test the caller. Keep the old hash and `.previous` file only until
-the smoke test succeeds, then remove both through the normal secret-retirement
-procedure. A failed rollout is recovered by restoring the previous hash and
-file together. Never expose either full token through a command argument,
-prompt, terminal transcript, or Dashboard-managed exec output.
+and smoke-test the caller. Keep the old hash only in an owner-protected offline
+rollback record; never leave its object in the active credential array. The
+wrapper ignores the disabled `.previous` token file. Remove both rollback
+artifacts through the normal secret-retirement procedure as soon as the smoke
+test succeeds. Reactivate the previous hash and restore the previous file
+together only during an explicit rollback. Never expose either full token
+through a command argument, prompt, terminal transcript, or Dashboard-managed
+exec output.
 
 The authoritative file names, scopes, caller commands, and new-host procedure
 are in [Auth and trust boundaries](../security/auth-and-trust-boundaries.md#scoped-automation-credentials)

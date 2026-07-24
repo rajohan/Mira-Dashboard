@@ -34,6 +34,7 @@ const SENSITIVE_KEY_SUFFIXES = [
     "signingkey",
     "token",
 ] as const;
+const STABLE_ARRAY_IDENTITY_KEYS = ["id", "name", "username", "slug"] as const;
 
 function canonicalKey(key: string): string {
     return key.replaceAll(/[^a-z0-9]/giu, "").toLowerCase();
@@ -83,10 +84,28 @@ export function hasConfigRedactionSentinel(value: unknown): boolean {
     );
 }
 
+function stableArrayEntryIdentity(value: unknown): string | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const record = value as Record<string, unknown>;
+    for (const key of STABLE_ARRAY_IDENTITY_KEYS) {
+        const identity = record[key];
+        if (typeof identity === "string" && identity.trim()) {
+            return `${key}:string:${identity}`;
+        }
+        if (typeof identity === "number" && Number.isFinite(identity)) {
+            return `${key}:number:${identity}`;
+        }
+    }
+    return undefined;
+}
+
 /**
  * Replaces masked placeholders in a submitted partial config with the
  * corresponding server-side values. Missing originals remain sentinels and
- * are rejected by the caller.
+ * are rejected by the caller. Array entries containing sentinels are matched
+ * only by a unique stable identity, never by their submitted position.
  */
 export function restoreConfigRedactionSentinels(
     submitted: unknown,
@@ -97,9 +116,31 @@ export function restoreConfigRedactionSentinels(
     }
     if (Array.isArray(submitted)) {
         const currentEntries = Array.isArray(current) ? current : [];
-        return submitted.map((entry, index) =>
-            restoreConfigRedactionSentinels(entry, currentEntries[index])
+        const submittedIdentities = submitted.map((entry) =>
+            stableArrayEntryIdentity(entry)
         );
+        const identityCounts = new Map<string, number>();
+        for (const identity of submittedIdentities) {
+            if (identity) {
+                identityCounts.set(identity, (identityCounts.get(identity) ?? 0) + 1);
+            }
+        }
+        return submitted.map((entry, index) => {
+            if (!hasConfigRedactionSentinel(entry)) {
+                return restoreConfigRedactionSentinels(entry, undefined);
+            }
+            const identity = submittedIdentities[index];
+            if (!identity || identityCounts.get(identity) !== 1) {
+                return restoreConfigRedactionSentinels(entry, undefined);
+            }
+            const matches = currentEntries.filter(
+                (candidate) => stableArrayEntryIdentity(candidate) === identity
+            );
+            return restoreConfigRedactionSentinels(
+                entry,
+                matches.length === 1 ? matches[0] : undefined
+            );
+        });
     }
     if (!submitted || typeof submitted !== "object") {
         return submitted;

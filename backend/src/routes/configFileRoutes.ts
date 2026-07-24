@@ -233,24 +233,27 @@ export const configFileRoutes = {
                 new URL(request.url).searchParams.get("reveal") !== "1";
             const responseContent =
                 shouldMask && !isBinary ? redactConfigJsonText(content) : content;
-            if (shouldMask && responseContent === undefined) {
-                return json(
-                    {
-                        error: "Config cannot be rendered safely because it is not valid JSON",
-                    },
-                    { status: 422 }
-                );
-            }
-            return json({
-                content: isBinary ? "[Binary file]" : responseContent,
+            const maskingError =
+                shouldMask && responseContent === undefined
+                    ? stat.size > MAX_FILE_SIZE
+                        ? "truncated_json"
+                        : "invalid_json"
+                    : undefined;
+            const response = json({
+                content: isBinary ? "[Binary file]" : (responseContent ?? ""),
                 isBinary,
                 masked: shouldMask,
+                maskingError,
                 modified: stat.mtime.toISOString(),
                 path: `config:${relativePath}`,
                 relativePath,
                 size: stat.size,
                 truncated: stat.size > MAX_FILE_SIZE || undefined,
             });
+            if (relativePath === "openclaw.json" && !shouldMask) {
+                response.headers.set("Cache-Control", "no-store");
+            }
+            return response;
         },
 
         PUT: async (request: Request) => {

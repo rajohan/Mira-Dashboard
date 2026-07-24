@@ -120,18 +120,18 @@ hyphens and must start with a letter or digit.
 
 The route allowlist is fail-closed:
 
-| Scope                 | Allowed route and method family             |
-| --------------------- | ------------------------------------------- |
-| `agents:read`         | `GET`/`HEAD /api/agents/config`             |
+| Scope                 | Allowed route and method family                               |
+| --------------------- | ------------------------------------------------------------- |
+| `agents:read`         | `GET`/`HEAD /api/agents/config`                               |
 | `agents:write`        | `PUT /api/agents/:id/metadata`; state-reconciling agent reads |
-| `audit:read`          | `GET`/`HEAD /api/audit-events`              |
-| `cache:read`          | `GET`/`HEAD /api/cache/*`                   |
-| `notifications:read`  | `GET`/`HEAD /api/notifications/*`           |
-| `notifications:write` | Unsafe methods under `/api/notifications/*` |
-| `reports:read`        | `GET`/`HEAD /api/reports/*`                 |
-| `reports:write`       | Unsafe methods under `/api/reports/*`       |
-| `tasks:read`          | `GET`/`HEAD /api/tasks/*`                   |
-| `tasks:write`         | Unsafe methods under `/api/tasks/*`         |
+| `audit:read`          | `GET`/`HEAD /api/audit-events`                                |
+| `cache:read`          | `GET`/`HEAD /api/cache/*`                                     |
+| `notifications:read`  | `GET`/`HEAD /api/notifications/*`                             |
+| `notifications:write` | Unsafe methods under `/api/notifications/*`                   |
+| `reports:read`        | `GET`/`HEAD /api/reports/*`                                   |
+| `reports:write`       | Unsafe methods under `/api/reports/*`                         |
+| `tasks:read`          | `GET`/`HEAD /api/tasks/*`                                     |
+| `tasks:write`         | Unsafe methods under `/api/tasks/*`                           |
 
 Agent status reads (`GET`/`HEAD /api/agents/status`,
 `/api/agents/:id/status`, and `/api/agents/tasks/history`) require
@@ -153,12 +153,12 @@ append-only audit actor.
 The Dashboard repository tracks a fixed local wrapper and one credential
 profile per OpenClaw caller. On the current host the runtime layout is:
 
-| Wrapper profile | Client token file under `/home/ubuntu/.config/mira-dashboard/automation/` | Exact scopes |
-| --- | --- | --- |
-| `heartbeat` | `openclaw-heartbeat.token` | `cache:read`, `reports:write` |
-| `daily-summary` | `openclaw-daily-summary.token` | `cache:read`, `reports:write` |
-| `daily-brief` | `openclaw-daily-brief.token` | `cache:read`, `reports:write`, `tasks:read` |
-| `task-tracking` | `openclaw-task-tracking.token` | `agents:write`, `tasks:read`, `tasks:write` |
+| Wrapper profile | Client token file under `/home/ubuntu/.config/mira-dashboard/automation/` | Exact scopes                                |
+| --------------- | ------------------------------------------------------------------------- | ------------------------------------------- |
+| `heartbeat`     | `openclaw-heartbeat.token`                                                | `cache:read`, `reports:write`               |
+| `daily-summary` | `openclaw-daily-summary.token`                                            | `cache:read`, `reports:write`               |
+| `daily-brief`   | `openclaw-daily-brief.token`                                              | `cache:read`, `reports:write`, `tasks:read` |
+| `task-tracking` | `openclaw-task-tracking.token`                                            | `agents:write`, `tasks:read`, `tasks:write` |
 
 The directory must be owned by the OpenClaw user with mode `0700`; every token
 file must be a regular, non-symlink file owned by that user with mode `0600`.
@@ -298,8 +298,8 @@ First-user bootstrap is special because it is unauthenticated by design. It must
 stay narrow:
 
 - reject once users exist;
-- encrypt, persist, and validate the submitted OpenClaw Gateway token before
-  creating the first user;
+- validate the submitted OpenClaw Gateway token, then encrypt and persist it,
+  before creating the first user;
 - serialize overlapping attempts;
 - avoid publishing a usable Dashboard user while Gateway validation is pending;
 - roll back submitted token and user/session state on failure;

@@ -2954,6 +2954,105 @@ describe("shared component helpers", () => {
         queryClient.clear();
     });
 
+    it("does not show a late secret reveal after selecting another config file", async () => {
+        const { promise: revealResponse, resolve: resolveReveal } =
+            Promise.withResolvers<Response>();
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+
+                if (url === "/api/files" && method === "GET") {
+                    return Response.json({ files: [] });
+                }
+                if (url === "/api/config-files/openclaw.json" && method === "GET") {
+                    return Response.json({
+                        content: '{"token":"__MIRA_REDACTED__"}',
+                        isBinary: false,
+                        masked: true,
+                        modified: "",
+                        path: "config:openclaw.json",
+                        size: 31,
+                    });
+                }
+                if (url === "/api/config-files/other.json" && method === "GET") {
+                    return Response.json({
+                        content: '{"other":"masked"}',
+                        isBinary: false,
+                        masked: true,
+                        modified: "",
+                        path: "config:other.json",
+                        size: 18,
+                    });
+                }
+                if (
+                    url === "/api/config-files/openclaw.json?reveal=1" &&
+                    method === "GET"
+                ) {
+                    return revealResponse;
+                }
+
+                throw new Error(`Unexpected reveal-race test fetch: ${method} ${url}`);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const queryClient = createQueryClient();
+        const wrapper = ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        );
+        const { result, unmount } = renderHook(() => useFileExplorerState(), {
+            wrapper,
+        });
+
+        act(() => {
+            result.current.handleSelect("config:openclaw.json");
+        });
+        await waitFor(() => {
+            expect(result.current.fileContent?.content).toContain("__MIRA_REDACTED__");
+        });
+
+        let revealPromise: Promise<void> | undefined;
+        act(() => {
+            revealPromise = result.current.handleReveal();
+        });
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/config-files/openclaw.json?reveal=1",
+                expect.objectContaining({ credentials: "include" })
+            );
+        });
+
+        act(() => {
+            result.current.handleSelect("config:other.json");
+        });
+        await waitFor(() => {
+            expect(result.current.fileContent?.content).toBe('{"other":"masked"}');
+        });
+
+        resolveReveal(
+            Response.json({
+                content: '{"token":"raw-secret"}',
+                isBinary: false,
+                modified: "",
+                path: "config:openclaw.json",
+                size: 22,
+            })
+        );
+        await act(async () => {
+            await revealPromise;
+        });
+        expect(result.current.selectedPath).toBe("config:other.json");
+        expect(result.current.fileContent?.content).toBe('{"other":"masked"}');
+
+        unmount();
+        queryClient.clear();
+    });
+
     it("keeps cached report metrics visible when a refresh fails", async () => {
         const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
             const url = String(input);
@@ -3817,6 +3916,7 @@ describe("shared component helpers", () => {
         const onSaveAgents = jest.fn(async () => {});
         const onToggleSkill = jest.fn();
         const onSaveFile = jest.fn();
+        const onRevealFile = jest.fn();
         const onContentChange = jest.fn();
         const onMarkdownPreviewChange = jest.fn();
         const onJsonPreviewChange = jest.fn();
@@ -3942,6 +4042,8 @@ describe("shared component helpers", () => {
                     fileContent={{
                         content: "{bad json",
                         isBinary: false,
+                        masked: true,
+                        maskingError: "invalid_json",
                         modified: "",
                         path: "config:openclaw.json",
                         size: 9,
@@ -3959,6 +4061,7 @@ describe("shared component helpers", () => {
                     isJsonEditing={true}
                     jsonValidation={{ error: "Expected brace", valid: false }}
                     onSave={onSaveFile}
+                    onReveal={onRevealFile}
                     onContentChange={onContentChange}
                     onMarkdownPreviewChange={onMarkdownPreviewChange}
                     onJsonPreviewChange={onJsonPreviewChange}
@@ -3967,6 +4070,11 @@ describe("shared component helpers", () => {
             </QueryClientProvider>
         );
         expect(screen.getByText("Invalid JSON")).toBeInTheDocument();
+        expect(
+            screen.getByText(/masked preview is unavailable.*not valid JSON/i)
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Reveal secrets" }));
+        expect(onRevealFile).toHaveBeenCalledTimes(1);
         expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
 
         rerender(
