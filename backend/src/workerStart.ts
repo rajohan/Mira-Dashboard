@@ -2,6 +2,8 @@ import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobW
 
 const WORKER_KEEP_ALIVE_INTERVAL_MS = 60_000;
 
+export { runLogRotationCli } from "./services/logRotation.ts";
+
 export function isDirectWorkerEntrypoint(isMain = import.meta.main): boolean {
     return isMain;
 }
