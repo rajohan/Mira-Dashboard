@@ -9,8 +9,11 @@ import { SQLITE_MAINTENANCE_JOB_ID } from "./sqliteMaintenance.ts";
 
 const SQLITE_BACKUP_REVIEW_AGE_HOURS = 48;
 const SQLITE_MAINTENANCE_REVIEW_AGE_HOURS = 48;
-const SQLITE_REUSABLE_SPACE_REVIEW_BYTES = 16 * 1024 * 1024;
-const SQLITE_REUSABLE_SPACE_REVIEW_PERCENT = 25;
+const MEBIBYTE = 1024 * 1024;
+const GIBIBYTE = 1024 * MEBIBYTE;
+const SQLITE_REUSABLE_SPACE_REVIEW_BYTES = GIBIBYTE;
+const SQLITE_REUSABLE_SPACE_REVIEW_MINIMUM_BYTES = 256 * MEBIBYTE;
+const SQLITE_REUSABLE_SPACE_REVIEW_PERCENT = 50;
 const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
 
 function fileBytes(filePath: string): number {
@@ -38,6 +41,20 @@ function fileMode(filePath: string): string | undefined {
 function pragmaNumber(name: "freelist_count" | "page_count" | "page_size"): number {
     const row = database.query(`PRAGMA ${name}`).get() as Record<string, number>;
     return Number(row[name] ?? 0);
+}
+
+/** Returns an operator advisory only when file compaction would reclaim material space. */
+export function sqliteReusableSpaceAttention(
+    freeBytes: number,
+    freePercent: number
+): string | undefined {
+    const requiresReview =
+        freeBytes >= SQLITE_REUSABLE_SPACE_REVIEW_BYTES ||
+        (freeBytes >= SQLITE_REUSABLE_SPACE_REVIEW_MINIMUM_BYTES &&
+            freePercent >= SQLITE_REUSABLE_SPACE_REVIEW_PERCENT);
+    if (!requiresReview) return undefined;
+
+    return `SQLite can reclaim ${(freeBytes / MEBIBYTE).toFixed(1)} MiB (${freePercent.toFixed(1)}%). Consider a planned VACUUM`;
 }
 
 export function getDashboardSqliteOverview(now = new Date()) {
@@ -171,14 +188,8 @@ export function getDashboardSqliteOverview(now = new Date()) {
     ) {
         attention.push(`Latest SQLite maintenance ${lastMaintenance.status}`);
     }
-    if (
-        freeBytes >= SQLITE_REUSABLE_SPACE_REVIEW_BYTES &&
-        freePercent >= SQLITE_REUSABLE_SPACE_REVIEW_PERCENT
-    ) {
-        attention.push(
-            `SQLite can reclaim ${(freeBytes / (1024 * 1024)).toFixed(1)} MiB (${freePercent.toFixed(1)}%). Consider a planned VACUUM`
-        );
-    }
+    const reusableSpaceAttention = sqliteReusableSpaceAttention(freeBytes, freePercent);
+    if (reusableSpaceAttention) attention.push(reusableSpaceAttention);
 
     return {
         attention,

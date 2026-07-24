@@ -57,9 +57,11 @@ describe("ChatHeader", () => {
         );
 
         expect(screen.getByText(/less than 5 seconds ago/u)).toBeInTheDocument();
-        expect(screen.getByText("Model: gpt-5.6-sol")).toBeInTheDocument();
-        expect(screen.getByText("Thinking: medium")).toBeInTheDocument();
-        expect(screen.getByText("Speed: Auto")).toBeInTheDocument();
+        expect(screen.getByLabelText("Model: gpt-5.6-sol")).toHaveTextContent(
+            "gpt-5.6-sol"
+        );
+        expect(screen.getByLabelText("Thinking: medium")).toHaveTextContent("medium");
+        expect(screen.getByLabelText("Speed: Auto")).toHaveTextContent("Auto");
         expect(screen.queryByText(/MAIN/u)).not.toBeInTheDocument();
         expect(screen.queryByText(/gpt-5\.6-sol · Context:/u)).not.toBeInTheDocument();
 
@@ -83,7 +85,7 @@ describe("ChatHeader", () => {
             />
         );
 
-        expect(screen.getByText("Speed: Standard")).toBeInTheDocument();
+        expect(screen.getByLabelText("Speed: Standard")).toHaveTextContent("Standard");
         expect(screen.queryByText("Speed: Default (Standard)")).not.toBeInTheDocument();
     });
 

@@ -118,7 +118,7 @@ type SettingsView = "dashboard" | "openclaw";
 export function Settings() {
     const navigate = useNavigate();
     const search = useLocation({ select: (location_) => location_.search });
-    const view: SettingsView = search.view === "dashboard" ? "dashboard" : "openclaw";
+    const view: SettingsView = search.view === "openclaw" ? "openclaw" : "dashboard";
     const setView = (nextView: SettingsView) => {
         void navigate({
             replace: true,
@@ -400,20 +400,20 @@ export function Settings() {
             <Card className="p-2" variant="bordered">
                 <div className="grid grid-cols-2 gap-2">
                     <Button
-                        aria-pressed={view === "openclaw"}
-                        className="justify-center"
-                        onClick={() => setView("openclaw")}
-                        variant={view === "openclaw" ? "primary" : "secondary"}
-                    >
-                        OpenClaw settings
-                    </Button>
-                    <Button
                         aria-pressed={view === "dashboard"}
                         className="justify-center"
                         onClick={() => setView("dashboard")}
                         variant={view === "dashboard" ? "primary" : "secondary"}
                     >
                         Dashboard settings
+                    </Button>
+                    <Button
+                        aria-pressed={view === "openclaw"}
+                        className="justify-center"
+                        onClick={() => setView("openclaw")}
+                        variant={view === "openclaw" ? "primary" : "secondary"}
+                    >
+                        OpenClaw settings
                     </Button>
                 </div>
             </Card>

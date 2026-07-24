@@ -133,7 +133,9 @@ including global chat replay and read-notification safety nets, runs
 `PRAGMA optimize`, and requests a passive WAL checkpoint. It deliberately does
 not run automatic `VACUUM`; freelist pages are reusable by SQLite and are not a
 hard size limit. Lifecycle status recommends a planned compaction only when at
-least 16 MiB and 25% of the database are simultaneously reusable.
+least 1 GiB is reusable, or when at least 256 MiB and 50% of the database are
+simultaneously reusable. Small databases therefore keep normal freelist churn
+visible without turning it into recurring operator work.
 
 `audit_events` is deliberately excluded from maintenance deletion because its
 schema enforces append-only history. Any future archive/retention design must
