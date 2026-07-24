@@ -1,11 +1,25 @@
+import { hasRecentUserActivity } from "../lib/userActivity";
 import { authActions } from "../stores/authStore";
 
 const API_BASE = "/api";
 
+/** Represents a structured non-success API response. */
+export class ApiError extends Error {
+    readonly status: number;
+    readonly code?: string;
+
+    constructor(message: string, status: number, code?: string) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+        this.code = code;
+    }
+}
+
 /** Implements unauthorized error. */
-export class UnauthorizedError extends Error {
+export class UnauthorizedError extends ApiError {
     constructor() {
-        super("Unauthorized");
+        super("Unauthorized", 401, "unauthorized");
         this.name = "UnauthorizedError";
     }
 }
@@ -21,10 +35,11 @@ export async function apiFetch<T>(
     endpoint: string,
     options?: RequestInit
 ): Promise<T | undefined> {
-    const headers: HeadersInit = {
-        "Content-Type": "application/json",
-        ...options?.headers,
-    };
+    const headers = new Headers(options?.headers);
+    headers.set("Content-Type", "application/json");
+    if (hasRecentUserActivity()) {
+        headers.set("X-Mira-User-Activity", "1");
+    }
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
@@ -38,13 +53,30 @@ export async function apiFetch<T>(
     }
 
     if (!response.ok) {
-        let error: { error?: string };
+        let error: { code?: string; error?: string };
         try {
-            error = (await response.json()) as { error?: string };
+            error = (await response.json()) as {
+                code?: string;
+                error?: string;
+            };
         } catch {
             error = { error: "Unknown error" };
         }
-        throw new Error(error.error || `HTTP ${response.status}`);
+        if (
+            error.code === "step_up_required" ||
+            error.code === "mfa_enrollment_required"
+        ) {
+            dispatchEvent(
+                new CustomEvent("mira:security-verification-required", {
+                    detail: { code: error.code },
+                })
+            );
+        }
+        throw new ApiError(
+            error.error || `HTTP ${response.status}`,
+            response.status,
+            error.code
+        );
     }
 
     if (response.status === 204) {

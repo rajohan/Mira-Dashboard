@@ -1,4 +1,4 @@
-import { File, Save } from "lucide-react";
+import { Eye, File, Save } from "lucide-react";
 
 import type { FileContent } from "../../../types/file";
 import {
@@ -21,6 +21,7 @@ interface FileEditorPanelProperties {
     isEditable: boolean;
     hasChanges: boolean;
     savePending: boolean;
+    revealPending?: boolean;
     editedContent: string;
     largeFileWarning: boolean;
     markdownPreview: boolean;
@@ -30,6 +31,7 @@ interface FileEditorPanelProperties {
     isJsonEditing: boolean;
     jsonValidation: { valid: boolean; error: string | undefined };
     onSave: () => void;
+    onReveal?: () => void;
     onContentChange: (value: string) => void;
     onMarkdownPreviewChange: (isValue: boolean) => void;
     onJsonPreviewChange: (isValue: boolean) => void;
@@ -44,6 +46,7 @@ export function FileEditorPanel({
     isEditable,
     hasChanges,
     savePending,
+    revealPending = false,
     editedContent,
     largeFileWarning,
     markdownPreview,
@@ -53,6 +56,7 @@ export function FileEditorPanel({
     isJsonEditing,
     jsonValidation,
     onSave,
+    onReveal = () => {},
     onContentChange,
     onMarkdownPreviewChange,
     onJsonPreviewChange,
@@ -112,6 +116,24 @@ export function FileEditorPanel({
                                     Unsaved changes
                                 </span>
                             )}
+                            {fileContent?.masked ? (
+                                <>
+                                    <span className="text-xs text-yellow-400">
+                                        Secrets masked
+                                    </span>
+                                    <Button
+                                        disabled={revealPending}
+                                        onClick={onReveal}
+                                        size="sm"
+                                        variant="secondary"
+                                    >
+                                        <Eye size={14} />
+                                        {revealPending
+                                            ? "Revealing..."
+                                            : "Reveal secrets"}
+                                    </Button>
+                                </>
+                            ) : undefined}
                             {isJsonEditing && (
                                 <span
                                     className={

@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
+import { GlobalSecurityVerification } from "./components/features/settings/GlobalSecurityVerification";
 import { AppErrorFallback } from "./components/ui/AppErrorFallback";
 import { OpenClawSocketProvider } from "./hooks/useOpenClawSocket";
 import { queryClient } from "./lib/queryClient";
@@ -32,6 +33,7 @@ export default function App() {
             <QueryClientProvider client={queryClient}>
                 <OpenClawSocketProvider>
                     <RouterProvider router={router} />
+                    <GlobalSecurityVerification />
                     {DashboardDevtools ? (
                         <Suspense fallback={undefined}>
                             <DashboardDevtools />

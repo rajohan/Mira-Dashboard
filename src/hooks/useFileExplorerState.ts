@@ -1,11 +1,17 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import type { FileNode } from "../types/file";
+import type { FileContent, FileNode } from "../types/file";
 import { getFileExtension, isJsonFile } from "../utils/fileUtilities";
 import { validateJsonString } from "../utils/json";
 import { apiFetchRequired } from "./useApi";
-import { fileKeys, useFileContent, useFiles, useSaveFile } from "./useFiles";
+import {
+    fileKeys,
+    useFileContent,
+    useFiles,
+    useRevealFile,
+    useSaveFile,
+} from "./useFiles";
 
 /** Defines max preview size. */
 export const MAX_PREVIEW_SIZE = 100_000;
@@ -22,6 +28,7 @@ export function useFileExplorerState() {
     const [jsonPreview, setJsonPreview] = useState(true);
     const [codeEditMode, setCodeEditMode] = useState(false);
     const [error, setError] = useState<string | undefined>(undefined);
+    const [revealedFileContent, setRevealedFileContent] = useState<FileContent>();
 
     const queryClient = useQueryClient();
     const {
@@ -30,11 +37,13 @@ export function useFileExplorerState() {
         refetch: refetchRoot,
     } = useFiles();
     const {
-        data: fileContent,
+        data: maskedFileContent,
         isLoading: contentLoading,
         refetch: refetchContent,
     } = useFileContent(selectedPath);
     const saveMutation = useSaveFile();
+    const revealMutation = useRevealFile();
+    const fileContent = revealedFileContent ?? maskedFileContent;
 
     useEffect(() => {
         if (rootFiles.length > 0) {
@@ -116,6 +125,7 @@ export function useFileExplorerState() {
     /** Responds to select events. */
     const handleSelect = (path: string) => {
         setSelectedPath(path);
+        setRevealedFileContent(undefined);
         setHasChanges(false);
         setError(undefined);
     };
@@ -163,9 +173,24 @@ export function useFileExplorerState() {
 
     /** Responds to refresh events. */
     const handleRefresh = () => {
+        setRevealedFileContent(undefined);
         void refetchRoot();
         if (selectedPath) {
             void refetchContent();
+        }
+    };
+
+    /** Reveals a config file only after the server accepts privileged step-up. */
+    const handleReveal = async () => {
+        if (!selectedPath) return;
+        setError(undefined);
+        try {
+            const revealed = await revealMutation.mutateAsync(selectedPath);
+            setRevealedFileContent(revealed);
+        } catch (error_) {
+            setError(
+                error_ instanceof Error ? error_.message : "Failed to reveal config"
+            );
         }
     };
 
@@ -186,6 +211,7 @@ export function useFileExplorerState() {
         rootLoading,
         contentLoading,
         saveMutation,
+        revealPending: revealMutation.isPending,
         setError,
         setMarkdownPreview,
         setJsonPreview,
@@ -195,5 +221,6 @@ export function useFileExplorerState() {
         handleContentChange,
         handleSave,
         handleRefresh,
+        handleReveal,
     };
 }

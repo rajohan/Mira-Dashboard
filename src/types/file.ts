@@ -16,6 +16,7 @@ export interface FileContent {
     size: number;
     modified: string;
     isBinary: boolean;
+    masked?: boolean;
     isImage?: boolean;
     mimeType?: string;
 }
