@@ -234,7 +234,7 @@ function secureHandler(routePath: string, handler: BunHandler | Response): BunHa
             }
         })();
 
-        return withRequestSecurity(request, response);
+        return withRequestSecurity(request, response, server);
     };
 }
 

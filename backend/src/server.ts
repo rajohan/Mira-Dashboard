@@ -96,14 +96,16 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
                 if (!isAllowedDashboardOrigin(request)) {
                     return withRequestSecurity(
                         request,
-                        new Response("Forbidden", { status: 403 })
+                        new Response("Forbidden", { status: 403 }),
+                        server
                     );
                 }
                 const user = authUser(request, server);
                 if (!user) {
                     return withRequestSecurity(
                         request,
-                        new Response("Unauthorized", { status: 401 })
+                        new Response("Unauthorized", { status: 401 }),
+                        server
                     );
                 }
                 const isUpgraded = server.upgrade(request, {
@@ -118,10 +120,15 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
                     ? undefined
                     : withRequestSecurity(
                           request,
-                          new Response("WebSocket upgrade failed", { status: 400 })
+                          new Response("WebSocket upgrade failed", { status: 400 }),
+                          server
                       );
             }
-            return withRequestSecurity(request, await staticResponse(url.pathname));
+            return withRequestSecurity(
+                request,
+                await staticResponse(url.pathname),
+                server
+            );
         },
         websocket,
     });

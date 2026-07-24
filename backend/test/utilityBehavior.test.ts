@@ -30,6 +30,7 @@ import {
     stringFallback,
 } from "../src/lib/values.ts";
 import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
+import { withRequestSecurity } from "../src/requestSecurity.ts";
 import { routes as appRoutes } from "../src/routes.ts";
 import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
 import { isValidAgentId } from "../src/services/agents.ts";
@@ -734,12 +735,35 @@ describe("backend service utilities", () => {
             expect(health.headers.get("content-security-policy")).toContain(
                 "frame-ancestors 'none'"
             );
+            expect(health.headers.get("content-security-policy")).toContain(
+                "connect-src 'self' ws://localhost"
+            );
             expect(health.headers.get("permissions-policy")).toContain(
                 "microphone=(self)"
             );
             expect(health.headers.get("referrer-policy")).toBe("no-referrer");
             expect(health.headers.get("x-content-type-options")).toBe("nosniff");
             expect(health.headers.get("x-frame-options")).toBe("DENY");
+
+            const secureOrigin = withRequestSecurity(
+                // eslint-disable-next-line unicorn/prefer-https -- Simulates TLS termination at a trusted proxy.
+                new Request("http://dashboard.example/api/health", {
+                    headers: { "x-forwarded-proto": "https" },
+                }),
+                new Response(),
+                serverWithAddress("127.0.0.1")
+            );
+            expect(secureOrigin.headers.get("content-security-policy")).toContain(
+                "connect-src 'self' wss://dashboard.example"
+            );
+            const directSecureOrigin = withRequestSecurity(
+                new Request("https://dashboard.example/api/health"),
+                new Response(),
+                serverWithAddress("203.0.113.10")
+            );
+            expect(directSecureOrigin.headers.get("content-security-policy")).toContain(
+                "connect-src 'self' wss://dashboard.example"
+            );
 
             const sameOriginMutation = await callTestRoute(
                 routes,

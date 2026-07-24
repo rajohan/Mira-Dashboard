@@ -284,7 +284,7 @@ describe("Bun-native dashboard backend", () => {
         expect(appRoute.status).toBe(200);
         expect(appRoute.headers.get("content-type")).toContain("text/html");
         expect(appRoute.headers.get("content-security-policy")).toContain(
-            "connect-src 'self' ws: wss:"
+            `connect-src 'self' ${state.baseUrl.replace(/^http/u, "ws")}`
         );
         expect(appRoute.headers.get("permissions-policy")).toContain("microphone=(self)");
         expect(appRoute.headers.get("x-content-type-options")).toBe("nosniff");

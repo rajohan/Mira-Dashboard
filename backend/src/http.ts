@@ -199,7 +199,7 @@ export function authUser(
     return sessionId ? getAuthUserFromSessionId(sessionId) : undefined;
 }
 
-function isSecureRequest(request: Request, server: Server<unknown>): boolean {
+export function isSecureRequest(request: Request, server: Server<unknown>): boolean {
     try {
         if (new URL(request.url).protocol === "https:") {
             return true;

@@ -1,20 +1,9 @@
-import { isAllowedDashboardOrigin } from "./http.ts";
+import type { Server } from "bun";
+
+import { isAllowedDashboardOrigin, isSecureRequest } from "./http.ts";
 
 const SAFE_REQUEST_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const ALLOWED_FETCH_SITES = new Set(["none", "same-origin"]);
-const CONTENT_SECURITY_POLICY = [
-    "default-src 'self'",
-    "base-uri 'none'",
-    "connect-src 'self' ws: wss:",
-    "font-src 'self' data:",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-    "img-src 'self' data: blob: https:",
-    "media-src 'self' data: blob: https:",
-    "object-src 'none'",
-    "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-].join("; ");
 const PERMISSIONS_POLICY = [
     "camera=()",
     "geolocation=()",
@@ -24,6 +13,26 @@ const PERMISSIONS_POLICY = [
 ].join(", ");
 
 const requestIds = new WeakMap<Request, string>();
+
+function contentSecurityPolicyFor(request: Request, server: Server<unknown>): string {
+    const requestUrl = new URL(request.url);
+    const webSocketProtocol = isSecureRequest(request, server) ? "wss:" : "ws:";
+    const webSocketOrigin = `${webSocketProtocol}//${requestUrl.host}`;
+
+    return [
+        "default-src 'self'",
+        "base-uri 'none'",
+        `connect-src 'self' ${webSocketOrigin}`,
+        "font-src 'self' data:",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+        "img-src 'self' data: blob: https:",
+        "media-src 'self' data: blob: https:",
+        "object-src 'none'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+    ].join("; ");
+}
 
 /** Returns the server-generated correlation identifier for a request. */
 export function requestIdFor(request: Request): string {
@@ -55,11 +64,15 @@ export function isAllowedMutationSource(request: Request): boolean {
 }
 
 /** Adds correlation and browser hardening headers without consuming the body. */
-export function withRequestSecurity(request: Request, response: Response): Response {
+export function withRequestSecurity(
+    request: Request,
+    response: Response,
+    server: Server<unknown>
+): Response {
     const headers = new Headers(response.headers);
     headers.set("X-Request-ID", requestIdFor(request));
     if (!headers.has("Content-Security-Policy")) {
-        headers.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+        headers.set("Content-Security-Policy", contentSecurityPolicyFor(request, server));
     }
     headers.set("Permissions-Policy", PERMISSIONS_POLICY);
     headers.set("Referrer-Policy", "no-referrer");

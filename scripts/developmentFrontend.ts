@@ -1,5 +1,6 @@
-import dashboard from "../index.html";
 import type { Server } from "bun";
+
+import dashboard from "../index.html";
 
 const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || "5173");
@@ -15,7 +16,10 @@ interface WebSocketProxyData {
     protocol: string;
 }
 
-function forwardedBrowserOrigin(request: Request, targetOrigin: string): string | undefined {
+function forwardedBrowserOrigin(
+    request: Request,
+    targetOrigin: string
+): string | undefined {
     const sourceUrl = new URL(request.url);
     const origin = request.headers.get("origin");
     return origin === sourceUrl.origin ? targetOrigin : origin || undefined;
@@ -26,6 +30,8 @@ function addForwardedClientHeaders(
     clientAddress: string | undefined,
     protocol: string
 ): void {
+    headers.delete("x-forwarded-for");
+    headers.delete("x-real-ip");
     if (clientAddress) {
         headers.set("x-forwarded-for", clientAddress);
         headers.set("x-real-ip", clientAddress);
@@ -42,11 +48,7 @@ async function proxyApi(
     const headers = new Headers(request.headers);
     headers.set("host", targetUrl.host);
     const clientAddress = server.requestIP(request)?.address;
-    addForwardedClientHeaders(
-        headers,
-        clientAddress,
-        sourceUrl.protocol.slice(0, -1)
-    );
+    addForwardedClientHeaders(headers, clientAddress, sourceUrl.protocol.slice(0, -1));
     const forwardedOrigin = forwardedBrowserOrigin(request, targetUrl.origin);
     if (forwardedOrigin) {
         headers.set("origin", forwardedOrigin);
