@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { Server, ServerWebSocket } from "bun";
 
+import { validateAutomationCredentials } from "./automationAuth.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import gateway from "./gateway.ts";
 import { authUser, isAllowedDashboardOrigin } from "./http.ts";
@@ -62,6 +63,7 @@ function dashboardSocketFromBun(
 }
 
 export function createServer(port = resolveListenPort()): Server<DashboardSocketData> {
+    validateAutomationCredentials();
     const websocket = {
         close(ws: ServerWebSocket<DashboardSocketData>) {
             for (const handler of ws.data.closeHandlers) {

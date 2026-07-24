@@ -16,13 +16,82 @@ All `/api/*` routes require a Dashboard session except:
 - `/api/health`
 - `/api/auth/*`
 
+An explicitly scoped automation credential can replace the session only for the
+small route allowlist documented below. It cannot authenticate WebSockets or
+other Dashboard route families.
+
 The browser session is stored in the `mira_dashboard_session` HTTP-only cookie.
 The cookie is SameSite Strict and is Secure only when the request is HTTPS or a
 trusted forwarded proto says HTTPS.
 
 Auth routes are rate-limited more tightly than general API routes.
 
-## Loopback Auth Bypass
+## Scoped Automation Credentials
+
+Configure hash-only credentials in the Dashboard runtime:
+
+```text
+MIRA_DASHBOARD_AUTOMATION_CREDENTIALS=[{"id":"mira-ops","tokenHash":"<64 lowercase hex characters>","scopes":["agents:write","cache:read","reports:write","tasks:read","tasks:write"]}]
+```
+
+Each client sends:
+
+```http
+Authorization: Bearer mira-ops.<64-lowercase-hex-validator>
+```
+
+The validator is 32 random bytes encoded as lowercase hex. Dashboard stores
+only its lowercase SHA-256 hash in configuration, compares hashes in constant
+time, and fails startup when the credential list, ids, hashes, scopes, or
+duplicates are invalid. Keep the full bearer token only in the calling
+automation's secret store.
+Send it only over direct loopback or HTTPS, never over remote plaintext HTTP.
+Credential ids are 1–64 lowercase letters, digits, dots, underscores, or
+hyphens and must start with a letter or digit.
+
+The route allowlist is fail-closed:
+
+| Scope                 | Allowed route and method family             |
+| --------------------- | ------------------------------------------- |
+| `agents:read`         | `GET`/`HEAD /api/agents/*`                  |
+| `agents:write`        | `PUT /api/agents/:id/metadata`              |
+| `audit:read`          | `GET`/`HEAD /api/audit-events`              |
+| `cache:read`          | `GET`/`HEAD /api/cache/*`                   |
+| `notifications:read`  | `GET`/`HEAD /api/notifications/*`           |
+| `notifications:write` | Unsafe methods under `/api/notifications/*` |
+| `reports:read`        | `GET`/`HEAD /api/reports/*`                 |
+| `reports:write`       | Unsafe methods under `/api/reports/*`       |
+| `tasks:read`          | `GET`/`HEAD /api/tasks/*`                   |
+| `tasks:write`         | Unsafe methods under `/api/tasks/*`         |
+
+Terminal/exec, config, file access, sessions/chat, Docker, deploy/review,
+restart, backup actions, cache refreshes, log rotation, scheduled-job mutation,
+and all other unmapped routes are denied even if a credential contains every
+known scope. Add a new route or capability only through a reviewed code change.
+
+On protected routes, a bearer header takes precedence over cookie and loopback
+authentication. An invalid bearer returns `401`. A valid credential without the
+exact route scope returns `403`. Neither falls back to broader authentication.
+Allowed and denied automation mutations use the credential id as the
+append-only audit actor.
+
+Generate a client token and its Dashboard-side hash without writing the
+validator to a file:
+
+```bash
+bun -e 'const validator = crypto.getRandomValues(new Uint8Array(32)).toHex(); console.log(`client token: mira-ops.${validator}`); console.log(`Dashboard tokenHash: ${new Bun.CryptoHasher("sha256").update(validator).digest("hex")}`)'
+```
+
+Run this only in an untracked local shell connected to the intended secret
+store. Do not use Dashboard Terminal or tracked exec because their persisted
+job output would retain the validator. Treat the command output as secret
+material. Do not paste the client token into Dashboard configuration, logs,
+reports, PRs, or shell history.
+When wiring a caller, do not place the token literal in process arguments or an
+agent transcript. Load it from the caller's secret store and use an HTTP client
+or standard-input configuration that redacts authorization headers.
+
+## Transitional Loopback Auth Bypass
 
 Loopback auth bypass is disabled unless:
 
@@ -37,6 +106,13 @@ If an `Origin` header is present, it must exactly match the request origin and
 both hostnames must be loopback names. Configured non-loopback origins never
 receive the loopback identity. Production smoke tests should normally use a real
 session cookie instead of relying on loopback bypass.
+
+The bypass remains temporarily available so existing local automation keeps
+working during migration. Configure a scoped credential, update each caller to
+send it, verify its exact workflows, and only then unset
+`MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH`. Do not disable the bypass before every
+current caller has moved, because tokenless localhost requests will start
+returning `401`.
 
 ## Origins And Proxies
 
@@ -110,10 +186,10 @@ Worker-owned execution rows add their own lifecycle events:
 - `job.cancel` records queued cancellation or a running cancellation request.
 
 Async job events inherit the initiating request actor and `X-Request-ID`.
-Automatic schedule/startup/system work uses an explicit system actor. The
-schema also reserves a distinct automation actor type for scoped credentials,
-separate from users and the transitional legacy loopback identity. Callers
-select only operational lifecycle fields for audit metadata. The persistence
+Automatic schedule/startup/system work uses an explicit system actor. Scoped
+credentials use a distinct automation actor type, separate from users and the
+transitional legacy loopback identity. Callers select only operational
+lifecycle fields for audit metadata. The persistence
 layer also bounds depth/size and defensively redacts keys that look like
 credentials, request bodies, payloads, content, or process output. Command
 arguments, file content, config bodies, cookies, tokens, stdout, and stderr are
