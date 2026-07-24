@@ -389,6 +389,50 @@ describe("persistent job execution queue", () => {
         });
     });
 
+    it("cancels queued system work when its scheduled job is disabled", async () => {
+        const actionKey = `test.disabled-system-${Bun.randomUUIDv7()}`;
+        const jobId = `test-queue-disabled-${Bun.randomUUIDv7()}`;
+        let actionCalls = 0;
+        testJobIds.add(jobId);
+        registerScheduledJobAction(actionKey, () => {
+            actionCalls += 1;
+            return { unexpected: true };
+        });
+        upsertScheduledJob({
+            actionKey,
+            enabled: true,
+            id: jobId,
+            intervalSeconds: 3600,
+            name: "Disabled system test job",
+            scheduleType: "interval",
+        });
+        const run = enqueueScheduledJob(jobId, "system");
+        testExecutionIds.add(run.executionId as string);
+        expect(updateScheduledJob(jobId, { enabled: false })).toMatchObject({
+            enabled: false,
+        });
+
+        startScheduledJobExecutor();
+        const execution = await waitForJobExecution(run.executionId as string, {
+            pollIntervalMs: 10,
+            timeoutMs: 5000,
+        });
+
+        expect(execution).toMatchObject({
+            message: "Scheduled job was disabled before execution",
+            status: "cancelled",
+        });
+        expect(actionCalls).toBe(0);
+        expect(
+            database
+                .prepare("SELECT status, message FROM scheduled_job_runs WHERE id = ?")
+                .get(run.id)
+        ).toEqual({
+            message: "Scheduled job was disabled before execution",
+            status: "cancelled",
+        });
+    });
+
     it("cancels queued work when its scheduled job is removed", async () => {
         const actionKey = `test.removed-job-${Bun.randomUUIDv7()}`;
         const jobId = `test-queue-removed-${Bun.randomUUIDv7()}`;

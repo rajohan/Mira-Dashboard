@@ -991,6 +991,37 @@ describe("backend service behavior", () => {
             data: JSON.stringify({ migrations: "current" }),
             status: "stale",
         });
+
+        removeCreatedRuns();
+        writeCacheSuccess({
+            data: { migrations: "paused" },
+            key,
+            metadata: { source: "disabled-maintenance-test" },
+            source: "unit",
+            ttl: 1,
+            ttlUnit: "hours",
+        });
+        updateScheduledJob("cache.database.summary", { enabled: false });
+        const disabledBaselineRunId = (
+            database
+                .prepare("SELECT COALESCE(MAX(id), 0) AS id FROM scheduled_job_runs")
+                .get() as { id: number }
+        ).id;
+
+        expect(() => enqueueDatabaseSummaryRefresh()).not.toThrow();
+        expect(
+            database
+                .prepare(
+                    `SELECT COUNT(*) AS count
+                     FROM scheduled_job_runs
+                     WHERE id > ? AND job_id = 'cache.database.summary'`
+                )
+                .get(disabledBaselineRunId)
+        ).toEqual({ count: 0 });
+        expect(await getCacheEntry(key)).toMatchObject({
+            data: JSON.stringify({ migrations: "paused" }),
+            status: "stale",
+        });
     });
 
     it("reports database-summary refresh results from SQLite maintenance", async () => {
