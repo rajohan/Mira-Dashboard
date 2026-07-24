@@ -30,7 +30,7 @@ import {
     stringFallback,
 } from "../src/lib/values.ts";
 import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
-import { withRequestSecurity } from "../src/requestSecurity.ts";
+import { isAllowedMutationSource, withRequestSecurity } from "../src/requestSecurity.ts";
 import { routes as appRoutes } from "../src/routes.ts";
 import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
 import { isValidAgentId } from "../src/services/agents.ts";
@@ -659,8 +659,49 @@ describe("backend service utilities", () => {
         ).toBe(true);
         expect(
             isAllowedDashboardOrigin(
+                new Request("https://mira.lan:3100/api", {
+                    headers: { origin: "https://mira.lan:3100" },
+                })
+            )
+        ).toBe(true);
+        expect(
+            isAllowedDashboardOrigin(
+                new Request("https://mira.lan:3100/api", {
+                    // eslint-disable-next-line unicorn/prefer-https -- Verifies that a cross-scheme origin is rejected.
+                    headers: { origin: "http://mira.lan:3100" },
+                })
+            )
+        ).toBe(false);
+        expect(
+            isAllowedDashboardOrigin(
                 new Request("http://localhost:3100/api", {
                     headers: { origin: "not a url" },
+                })
+            )
+        ).toBe(false);
+    });
+
+    it("allows exact same-origin mutations on non-loopback hosts", () => {
+        expect(
+            isAllowedMutationSource(
+                new Request("https://mira.lan:3100/api/tasks", {
+                    headers: {
+                        origin: "https://mira.lan:3100",
+                        "sec-fetch-site": "same-origin",
+                    },
+                    method: "POST",
+                })
+            )
+        ).toBe(true);
+        expect(
+            isAllowedMutationSource(
+                new Request("https://mira.lan:3100/api/tasks", {
+                    headers: {
+                        // eslint-disable-next-line unicorn/prefer-https -- Verifies that a cross-scheme origin is rejected.
+                        origin: "http://mira.lan:3100",
+                        "sec-fetch-site": "same-origin",
+                    },
+                    method: "POST",
                 })
             )
         ).toBe(false);

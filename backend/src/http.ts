@@ -18,14 +18,6 @@ const configuredDashboardOrigins = new Set(
         .map((origin) => origin.trim())
         .filter(Boolean)
 );
-const allowedLoopbackHostnames = new Set([
-    "localhost",
-    "127.0.0.1",
-    "::1",
-    "[::1]",
-    "::ffff:127.0.0.1",
-    "[::ffff:127.0.0.1]",
-]);
 
 type HeaderInput = Record<string, string> | Array<[string, string]>;
 
@@ -152,10 +144,8 @@ export function isAllowedDashboardOrigin(request: Request): boolean {
         const parsedOrigin = new URL(origin);
         const requestUrl = new URL(request.url);
         return (
-            configuredDashboardOrigins.has(parsedOrigin.origin) ||
-            (allowedLoopbackHostnames.has(parsedOrigin.hostname) &&
-                allowedLoopbackHostnames.has(requestUrl.hostname) &&
-                parsedOrigin.host === requestUrl.host)
+            parsedOrigin.origin === requestUrl.origin ||
+            configuredDashboardOrigins.has(parsedOrigin.origin)
         );
     } catch {
         return false;
