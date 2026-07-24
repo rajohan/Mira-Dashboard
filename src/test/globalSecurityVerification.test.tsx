@@ -5,17 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 
 import { GlobalSecurityVerification } from "../components/features/settings/GlobalSecurityVerification";
 import type { AccountSecuritySummary } from "../hooks/useAccountSecurity";
+import {
+    dispatchSecurityVerificationRequired,
+    type SecurityVerificationCode,
+} from "../lib/securityVerification";
 import { authActions } from "../stores/authStore";
+import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
 
 const originalFetch = fetch;
-const originalPublicKeyCredentialDescriptor = Object.getOwnPropertyDescriptor(
-    globalThis,
-    "PublicKeyCredential"
-);
-const originalCredentialsDescriptor = Object.getOwnPropertyDescriptor(
-    navigator,
-    "credentials"
-);
+const webAuthnBrowser = createWebAuthnBrowserTestHarness();
 
 const securitySummary: AccountSecuritySummary = {
     factors: {
@@ -56,42 +54,9 @@ function renderVerification() {
     return { ...view, queryClient };
 }
 
-function dispatchVerificationRequired(
-    code: "mfa_enrollment_required" | "recent_verification_required" | "step_up_required"
-): void {
+function dispatchVerificationRequired(code: SecurityVerificationCode): void {
     act(() => {
-        dispatchEvent(
-            new CustomEvent("mira:security-verification-required", {
-                detail: { code },
-            })
-        );
-    });
-}
-
-function installWebAuthnBrowser(): void {
-    Object.defineProperty(globalThis, "PublicKeyCredential", {
-        configurable: true,
-        value: class TestPublicKeyCredential {},
-        writable: true,
-    });
-    Object.defineProperty(navigator, "credentials", {
-        configurable: true,
-        value: {
-            get: async () => ({
-                authenticatorAttachment: "cross-platform",
-                getClientExtensionResults: () => ({}),
-                id: "credential-browser",
-                rawId: new Uint8Array([1, 2, 3]).buffer,
-                response: {
-                    authenticatorData: new Uint8Array([4]).buffer,
-                    clientDataJSON: new Uint8Array([5]).buffer,
-                    signature: new Uint8Array([6]).buffer,
-                    userHandle: undefined,
-                },
-                type: "public-key",
-            }),
-        },
-        writable: true,
+        dispatchSecurityVerificationRequired(code);
     });
 }
 
@@ -120,20 +85,7 @@ afterEach(() => {
             writable: true,
         },
     });
-    if (originalPublicKeyCredentialDescriptor) {
-        Object.defineProperty(
-            globalThis,
-            "PublicKeyCredential",
-            originalPublicKeyCredentialDescriptor
-        );
-    } else {
-        Reflect.deleteProperty(globalThis, "PublicKeyCredential");
-    }
-    if (originalCredentialsDescriptor) {
-        Object.defineProperty(navigator, "credentials", originalCredentialsDescriptor);
-    } else {
-        Reflect.deleteProperty(navigator, "credentials");
-    }
+    webAuthnBrowser.restore();
 });
 
 describe("Global security verification", () => {
@@ -180,7 +132,7 @@ describe("Global security verification", () => {
     });
 
     it("handles recovery, TOTP, and security-key step-up ceremonies", async () => {
-        installWebAuthnBrowser();
+        webAuthnBrowser.install();
         const calls: Array<{ body: unknown; method: string; url: string }> = [];
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,

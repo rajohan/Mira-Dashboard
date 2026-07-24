@@ -1,4 +1,7 @@
-import { isSecurityVerificationCode } from "../lib/securityVerification";
+import {
+    dispatchSecurityVerificationRequired,
+    isSecurityVerificationCode,
+} from "../lib/securityVerification";
 import { hasRecentUserActivity } from "../lib/userActivity";
 import { authActions } from "../stores/authStore";
 
@@ -64,11 +67,7 @@ export async function apiFetch<T>(
             error = { error: "Unknown error" };
         }
         if (isSecurityVerificationCode(error.code)) {
-            dispatchEvent(
-                new CustomEvent("mira:security-verification-required", {
-                    detail: { code: error.code },
-                })
-            );
+            dispatchSecurityVerificationRequired(error.code);
         }
         throw new ApiError(
             error.error || `HTTP ${response.status}`,

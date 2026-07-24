@@ -15,3 +15,13 @@ export function isSecurityVerificationCode(
         SECURITY_VERIFICATION_CODES.has(value as SecurityVerificationCode)
     );
 }
+
+export function dispatchSecurityVerificationRequired(
+    code: SecurityVerificationCode
+): void {
+    dispatchEvent(
+        new CustomEvent("mira:security-verification-required", {
+            detail: { code },
+        })
+    );
+}

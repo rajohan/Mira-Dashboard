@@ -71,47 +71,48 @@ async function connectDashboardSocket(sessionToken: string): Promise<WebSocket> 
         },
     });
     await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(
-            () => reject(new Error("Timed out waiting for ws state")),
-            1000
-        );
-        ws.addEventListener(
-            "message",
-            () => {
-                clearTimeout(timer);
-                resolve();
-            },
-            { once: true }
-        );
-        ws.addEventListener(
-            "error",
-            () => {
-                clearTimeout(timer);
-                reject(new Error("WebSocket failed"));
-            },
-            { once: true }
-        );
+        const onMessage = (): void => {
+            cleanup();
+            resolve();
+        };
+        const onError = (): void => {
+            cleanup();
+            ws.close();
+            reject(new Error("WebSocket failed"));
+        };
+        const cleanup = (): void => {
+            clearTimeout(timer);
+            ws.removeEventListener("message", onMessage);
+            ws.removeEventListener("error", onError);
+        };
+        const timer = setTimeout(() => {
+            cleanup();
+            ws.close();
+            reject(new Error("Timed out waiting for ws state"));
+        }, 1000);
+        ws.addEventListener("message", onMessage);
+        ws.addEventListener("error", onError);
     });
     return ws;
 }
 
 function nextSocketMessage(
     ws: WebSocket,
-    request: Record<string, unknown>
+    request: Record<string, unknown> & { id: string }
 ): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(
-            () => reject(new Error("Timed out waiting for ws response")),
-            1000
-        );
-        ws.addEventListener(
-            "message",
-            (event) => {
-                clearTimeout(timer);
-                resolve(JSON.parse(String(event.data)) as Record<string, unknown>);
-            },
-            { once: true }
-        );
+        const onMessage = (event: MessageEvent): void => {
+            const response = JSON.parse(String(event.data)) as Record<string, unknown>;
+            if (response.id !== request.id) return;
+            clearTimeout(timer);
+            ws.removeEventListener("message", onMessage);
+            resolve(response);
+        };
+        const timer = setTimeout(() => {
+            ws.removeEventListener("message", onMessage);
+            reject(new Error("Timed out waiting for ws response"));
+        }, 1000);
+        ws.addEventListener("message", onMessage);
         ws.send(JSON.stringify(request));
     });
 }

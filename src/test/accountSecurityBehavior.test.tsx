@@ -7,22 +7,16 @@ import { createElement } from "react";
 import { AccountSecuritySection } from "../components/features/settings/AccountSecuritySection";
 import type { AccountSecuritySummary } from "../hooks/useAccountSecurity";
 import { authActions } from "../stores/authStore";
+import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
 
 const originalFetch = fetch;
-const originalPublicKeyCredentialDescriptor = Object.getOwnPropertyDescriptor(
-    globalThis,
-    "PublicKeyCredential"
-);
-const originalCredentialsDescriptor = Object.getOwnPropertyDescriptor(
-    navigator,
-    "credentials"
-);
 const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
     navigator,
     "clipboard"
 );
 const originalCreateObjectUrl = URL.createObjectURL;
 const originalRevokeObjectUrl = URL.revokeObjectURL;
+const webAuthnBrowser = createWebAuthnBrowserTestHarness();
 
 afterEach(() => {
     authActions.clearSession();
@@ -33,20 +27,7 @@ afterEach(() => {
             writable: true,
         },
     });
-    if (originalPublicKeyCredentialDescriptor) {
-        Object.defineProperty(
-            globalThis,
-            "PublicKeyCredential",
-            originalPublicKeyCredentialDescriptor
-        );
-    } else {
-        Reflect.deleteProperty(globalThis, "PublicKeyCredential");
-    }
-    if (originalCredentialsDescriptor) {
-        Object.defineProperty(navigator, "credentials", originalCredentialsDescriptor);
-    } else {
-        Reflect.deleteProperty(navigator, "credentials");
-    }
+    webAuthnBrowser.restore();
     if (originalClipboardDescriptor) {
         Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
     } else {
@@ -190,48 +171,6 @@ function installAccountFetch(
         writable: true,
     });
     return { calls, fetchMock };
-}
-
-function installWebAuthnBrowser(): void {
-    Object.defineProperty(globalThis, "PublicKeyCredential", {
-        configurable: true,
-        value: class TestPublicKeyCredential {},
-        writable: true,
-    });
-    Object.defineProperty(navigator, "credentials", {
-        configurable: true,
-        value: {
-            create: async () => ({
-                authenticatorAttachment: "cross-platform",
-                getClientExtensionResults: () => ({}),
-                id: "credential-browser",
-                rawId: new Uint8Array([1, 2, 3]).buffer,
-                response: {
-                    attestationObject: new Uint8Array([4]).buffer,
-                    clientDataJSON: new Uint8Array([5]).buffer,
-                    getAuthenticatorData: () => new Uint8Array([6]).buffer,
-                    getPublicKey: () => new Uint8Array([7]).buffer,
-                    getPublicKeyAlgorithm: () => -7,
-                    getTransports: () => ["usb"],
-                },
-                type: "public-key",
-            }),
-            get: async () => ({
-                authenticatorAttachment: "cross-platform",
-                getClientExtensionResults: () => ({}),
-                id: "credential-browser",
-                rawId: new Uint8Array([1, 2, 3]).buffer,
-                response: {
-                    authenticatorData: new Uint8Array([4]).buffer,
-                    clientDataJSON: new Uint8Array([5]).buffer,
-                    signature: new Uint8Array([6]).buffer,
-                    userHandle: undefined,
-                },
-                type: "public-key",
-            }),
-        },
-        writable: true,
-    });
 }
 
 function renderAccountSecurity() {
@@ -515,7 +454,7 @@ describe("Dashboard account security", () => {
     });
 
     it("supports recovery-only step-up, factor removal, session revocation, and disable", async () => {
-        const securitySummary = summary({
+        let securitySummary = summary({
             methods: ["recovery"],
             recentMfa: true,
         });
@@ -535,17 +474,32 @@ describe("Dashboard account security", () => {
                     method === "DELETE"
                 ) {
                     removalAttempts += 1;
-                    return removalAttempts === 1
-                        ? Response.json(
-                              { error: "Temporary removal failure" },
-                              { status: 500 }
-                          )
-                        : Response.json({ isOk: true });
+                    if (removalAttempts === 1) {
+                        return Response.json(
+                            { error: "Temporary removal failure" },
+                            { status: 500 }
+                        );
+                    }
+                    securitySummary = {
+                        ...securitySummary,
+                        factors: {
+                            ...securitySummary.factors,
+                            webAuthnCredentials: [],
+                        },
+                    };
+                    return Response.json({ isOk: true });
                 }
                 if (
                     method === "DELETE" &&
                     url.startsWith("/api/account/security/totp/")
                 ) {
+                    securitySummary = {
+                        ...securitySummary,
+                        factors: {
+                            ...securitySummary.factors,
+                            totpFactors: [],
+                        },
+                    };
                     return Response.json({ isOk: true });
                 }
                 if (
@@ -576,6 +530,11 @@ describe("Dashboard account security", () => {
                 }
                 if (url === "/api/account/security/mfa/disable" && method === "POST") {
                     expect(body).toEqual({ password: "current-password" });
+                    securitySummary = summary({
+                        enabled: false,
+                        methods: [],
+                        recentMfa: false,
+                    });
                     return Response.json({ isOk: true });
                 }
                 return;
@@ -603,12 +562,18 @@ describe("Dashboard account security", () => {
         expect(await screen.findByText("Temporary removal failure")).toBeInTheDocument();
         await userEvent.click(screen.getByRole("button", { name: "Remove factor" }));
         expect(await screen.findByText("Security key removed")).toBeInTheDocument();
+        await waitFor(() => {
+            expect(screen.queryByText("Primary YubiKey")).not.toBeInTheDocument();
+        });
 
         await userEvent.click(
             screen.getByRole("button", { name: "Remove Authenticator app" })
         );
         await userEvent.click(screen.getByRole("button", { name: "Remove factor" }));
         expect(await screen.findByText("Authenticator app removed")).toBeInTheDocument();
+        await waitFor(() => {
+            expect(screen.queryByText("Authenticator app")).not.toBeInTheDocument();
+        });
 
         await userEvent.click(screen.getByRole("button", { name: "Rotate codes" }));
         expect(await screen.findByText("rotated-one")).toBeInTheDocument();
@@ -639,16 +604,6 @@ describe("Dashboard account security", () => {
             ).toBe(true);
         });
 
-        await userEvent.click(screen.getByRole("button", { name: "Disable MFA" }));
-        await userEvent.type(
-            screen.getByLabelText("Current password"),
-            "current-password"
-        );
-        await userEvent.click(
-            screen.getByRole("button", { name: "Disable and revoke sessions" })
-        );
-        expect(await screen.findByText("Two-step login disabled")).toBeInTheDocument();
-
         await userEvent.click(screen.getByRole("button", { name: "Log out all" }));
         await waitFor(() => {
             expect(
@@ -659,11 +614,22 @@ describe("Dashboard account security", () => {
                 )
             ).toBe(true);
         });
+
+        await userEvent.click(screen.getByRole("button", { name: "Disable MFA" }));
+        await userEvent.type(
+            screen.getByLabelText("Current password"),
+            "current-password"
+        );
+        await userEvent.click(
+            screen.getByRole("button", { name: "Disable and revoke sessions" })
+        );
+        expect(await screen.findByText("Two-step login disabled")).toBeInTheDocument();
+        expect(await screen.findByText("Not enabled")).toBeInTheDocument();
         queryClient.clear();
     });
 
     it("registers a named backup security key through the browser ceremony", async () => {
-        installWebAuthnBrowser();
+        webAuthnBrowser.install();
         const recoveryCodes = ["key-recovery-one", "key-recovery-two"];
         const { calls } = installAccountFetch(
             () => summary(),

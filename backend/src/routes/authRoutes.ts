@@ -428,8 +428,8 @@ export function createAuthRoutes(
                 if (existingSession) {
                     deleteSession(existingSession);
                 }
-                const methods = user.mfa_enabled_at ? mfaMethodsForUser(user.id) : [];
                 if (user.mfa_enabled_at) {
+                    const methods = mfaMethodsForUser(user.id);
                     if (methods.length === 0) {
                         return json(
                             { error: "Multi-factor authentication is unavailable" },

@@ -487,17 +487,21 @@ describe("MFA authentication routes", () => {
             server
         );
         const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
-        const unavailable = await unavailableRoutes[
-            "/api/auth/login/webauthn/options"
-        ].POST(
-            request("/api/auth/login/webauthn/options", {
-                cookie: pendingCookie(anotherAttempt),
-                method: "POST",
-            }),
-            server
-        );
-        expect(unavailable.status).toBe(503);
-        expect(consoleError).toHaveBeenCalled();
+        try {
+            const unavailable = await unavailableRoutes[
+                "/api/auth/login/webauthn/options"
+            ].POST(
+                request("/api/auth/login/webauthn/options", {
+                    cookie: pendingCookie(anotherAttempt),
+                    method: "POST",
+                }),
+                server
+            );
+            expect(unavailable.status).toBe(503);
+            expect(consoleError).toHaveBeenCalled();
+        } finally {
+            consoleError.mockRestore();
+        }
     });
 });
 
