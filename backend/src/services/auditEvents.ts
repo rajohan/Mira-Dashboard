@@ -57,7 +57,7 @@ interface AuditEventCursor {
     occurredAt: string;
 }
 
-const MAX_AUDIT_PAGE_SIZE = 200;
+export const MAX_AUDIT_PAGE_SIZE = 200;
 const MAX_IDENTIFIER_LENGTH = 256;
 const MAX_METADATA_BYTES = 4096;
 const MAX_METADATA_DEPTH = 3;
@@ -135,15 +135,24 @@ function sanitizedMetadataValue(
     }
     if (depth >= MAX_METADATA_DEPTH) return "[truncated]";
     if (Array.isArray(value)) {
-        return value
-            .slice(0, MAX_METADATA_ITEMS)
+        const wasTruncated = value.length > MAX_METADATA_ITEMS;
+        const sanitized = value
+            .slice(0, wasTruncated ? MAX_METADATA_ITEMS - 1 : MAX_METADATA_ITEMS)
             .map((item) => sanitizedMetadataValue(item, depth + 1))
             .filter((item) => item !== undefined);
+        if (wasTruncated) sanitized.push("[truncated]");
+        return sanitized;
     }
     if (typeof value !== "object") return undefined;
 
+    const entries = Object.entries(value);
+    const wasTruncated = entries.length > MAX_METADATA_ITEMS;
+    const limitedEntries = entries.slice(
+        0,
+        wasTruncated ? MAX_METADATA_ITEMS - 1 : MAX_METADATA_ITEMS
+    );
     const sanitized: Record<string, unknown> = {};
-    for (const [key, nestedValue] of Object.entries(value).slice(0, MAX_METADATA_ITEMS)) {
+    for (const [key, nestedValue] of limitedEntries) {
         if (
             !key ||
             key.length > 128 ||
@@ -159,6 +168,7 @@ function sanitizedMetadataValue(
         const nested = sanitizedMetadataValue(nestedValue, depth + 1);
         if (nested !== undefined) sanitized[key] = nested;
     }
+    if (wasTruncated) sanitized.truncated = "[truncated]";
     return sanitized;
 }
 
@@ -188,6 +198,7 @@ export function writeAuditEvent(input: WriteAuditEventInput): AuditEvent {
     const targetId = identifier(input.targetId, "target ID");
     const normalizedRequestId = requestId(input.requestId);
     const timestamp = occurredAtIso(input.occurredAt);
+    const serializedMetadata = metadataJson(input.metadata);
     database
         .prepare(
             `INSERT INTO audit_events (
@@ -204,10 +215,19 @@ export function writeAuditEvent(input: WriteAuditEventInput): AuditEvent {
             targetId,
             input.outcome,
             sqlNullable(normalizedRequestId),
-            metadataJson(input.metadata),
+            serializedMetadata,
             timestamp
         );
-    return getAuditEvent(id) as AuditEvent;
+    return {
+        id,
+        actor: { id: actorId, type: actorType },
+        action,
+        target: { id: targetId, type: targetType },
+        outcome: input.outcome,
+        requestId: normalizedRequestId,
+        metadata: parseMetadata(serializedMetadata),
+        occurredAt: timestamp,
+    };
 }
 
 export function getAuditEvent(id: string): AuditEvent | undefined {

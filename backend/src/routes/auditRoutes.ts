@@ -1,7 +1,5 @@
 import { json } from "../http.ts";
-import { listAuditEvents } from "../services/auditEvents.ts";
-
-const MAX_AUDIT_PAGE_SIZE = 200;
+import { listAuditEvents, MAX_AUDIT_PAGE_SIZE } from "../services/auditEvents.ts";
 
 function auditLimit(value: string | null): number | Response {
     if (value === null) return 50;

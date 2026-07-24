@@ -217,6 +217,10 @@ function jobAuditProvenance(
     );
 }
 
+/**
+ * Records the backend-generated transition timestamp already persisted on the
+ * job row. Route payloads never supply this value.
+ */
 function writeJobAudit(
     execution: Pick<
         JobExecution,
@@ -229,7 +233,7 @@ function writeJobAudit(
     >,
     action: "job.cancel" | "job.enqueue" | "job.execute",
     outcome: AuditOutcome,
-    occurredAt: string,
+    transitionAt: string,
     metadata: Record<string, unknown> = {}
 ): void {
     const provenance = jobAuditProvenance(execution.id, execution.triggerType);
@@ -244,7 +248,7 @@ function writeJobAudit(
             triggerType: execution.triggerType,
             ...metadata,
         },
-        occurredAt,
+        occurredAt: transitionAt,
         outcome,
         requestId: provenance.requestId,
         targetId: execution.id,

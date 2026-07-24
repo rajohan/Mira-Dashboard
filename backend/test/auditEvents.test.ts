@@ -82,6 +82,29 @@ describe("append-only audit events", () => {
         ).toThrow("CHECK constraint failed");
     });
 
+    it("marks metadata collections that exceed the item limit", () => {
+        const event = writeAuditEvent({
+            actor: { id: "metadata-test", type: "system" },
+            action: "security.metadata-limit",
+            metadata: {
+                array: Array.from({ length: 40 }, (_, index) => index),
+                object: Object.fromEntries(
+                    Array.from({ length: 40 }, (_, index) => [`field-${index}`, index])
+                ),
+            },
+            outcome: "succeeded",
+            targetId: `metadata-${Bun.randomUUIDv7()}`,
+            targetType: "test-target",
+        });
+
+        const array = event.metadata.array as unknown[];
+        const object = event.metadata.object as Record<string, unknown>;
+        expect(array).toHaveLength(32);
+        expect(array.at(-1)).toBe("[truncated]");
+        expect(Object.keys(object)).toHaveLength(32);
+        expect(object.truncated).toBe("[truncated]");
+    });
+
     it("paginates deterministically and preserves target provenance", () => {
         const actor = { id: "mira-automation", type: "automation" } as const;
         const requestId = Bun.randomUUIDv7();
