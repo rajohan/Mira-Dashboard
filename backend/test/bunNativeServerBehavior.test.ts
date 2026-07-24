@@ -250,16 +250,22 @@ describe("Bun-native dashboard backend", () => {
         expect(response.status).toBe(401);
     });
 
-    it("does not grant loopback API access to a rebound browser origin", async () => {
+    it("does not grant loopback API access to a rebound host or browser origin", async () => {
         const port = new URL(state.baseUrl).port;
         const reboundOrigin = `http://evil.example:${port}`;
-        const response = await fetch(`${state.baseUrl}/api/tasks`, {
+        const reboundHost = { Host: `evil.example:${port}` };
+        const originResponse = await fetch(`${state.baseUrl}/api/tasks`, {
             headers: {
-                Host: `evil.example:${port}`,
+                ...reboundHost,
                 Origin: reboundOrigin,
             },
         });
-        expect(response.status).toBe(401);
+        expect(originResponse.status).toBe(401);
+
+        const originlessResponse = await fetch(`${state.baseUrl}/api/tasks`, {
+            headers: reboundHost,
+        });
+        expect(originlessResponse.status).toBe(401);
     });
 
     it("enforces scoped automation credentials in the native server", async () => {

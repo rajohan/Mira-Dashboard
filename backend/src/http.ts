@@ -164,14 +164,16 @@ export function isAllowedDashboardOrigin(request: Request): boolean {
 
 export function isAllowedLoopbackAuthOrigin(request: Request): boolean {
     const origin = request.headers.get("origin");
-    if (!origin) return true;
     try {
-        const parsedOrigin = new URL(origin);
         const requestUrl = new URL(request.url);
+        if (!allowedLoopbackHostnames.has(requestUrl.hostname)) {
+            return false;
+        }
+        if (!origin) return true;
+        const parsedOrigin = new URL(origin);
         return (
             parsedOrigin.origin === requestUrl.origin &&
-            allowedLoopbackHostnames.has(parsedOrigin.hostname) &&
-            allowedLoopbackHostnames.has(requestUrl.hostname)
+            allowedLoopbackHostnames.has(parsedOrigin.hostname)
         );
     } catch {
         return false;

@@ -101,7 +101,8 @@ MIRA_DASHBOARD_ENABLE_LOOPBACK_AUTH=1
 
 Even then, bypass only applies to direct loopback requests without forwarded
 client headers. A missing `Origin` header is accepted, so ordinary same-host
-`curl` or scripts can bypass the session cookie when this flag is enabled.
+`curl` or scripts can bypass the session cookie when this flag is enabled, but
+the request URL hostname must still be a recognized loopback name.
 If an `Origin` header is present, it must exactly match the request origin and
 both hostnames must be loopback names. Configured non-loopback origins never
 receive the loopback identity. Production smoke tests should normally use a real
@@ -139,9 +140,11 @@ reverse proxy, that proxy must still strip or overwrite client-supplied
 forwarding headers before forwarding to Dashboard.
 
 The tracked frontend development proxy overwrites forwarding identity with the
-actual client peer and rewrites only its own same-origin browser `Origin` to the
-backend target. Cross-site origins remain unchanged and are rejected by the
-backend.
+actual client peer. If Bun cannot resolve that peer, it forwards an explicit
+non-loopback `unknown` sentinel so the backend cannot mistake the proxy
+connection for a direct loopback caller. The proxy rewrites only its own
+same-origin browser `Origin` to the backend target. Cross-site origins remain
+unchanged and are rejected by the backend.
 
 ## Response Security And Correlation
 

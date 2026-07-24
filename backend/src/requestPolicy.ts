@@ -53,6 +53,7 @@ interface RateLimitRule {
 
 interface RequestPolicyOptions {
     authenticateAutomation?: (request: Request) => AutomationAuthentication;
+    persistAuditEvent?: typeof writeAuditEvent;
 }
 
 const apiRule: RateLimitRule = {
@@ -220,9 +221,10 @@ function writeRequestAudit(
     requestId: string,
     routePath: string,
     status?: number,
-    automationScope?: AutomationScope
+    automationScope?: AutomationScope,
+    persistAuditEvent: typeof writeAuditEvent = writeAuditEvent
 ): void {
-    writeAuditEvent({
+    persistAuditEvent({
         actor,
         action: "http.request",
         metadata: {
@@ -237,15 +239,16 @@ function writeRequestAudit(
     });
 }
 
-function tryWriteRequestAudit(
+function didWriteRequestAudit(
     actor: AuditActor,
     outcome: AuditOutcome,
     request: Request,
     requestId: string,
     routePath: string,
     status?: number,
-    automationScope?: AutomationScope
-): void {
+    automationScope?: AutomationScope,
+    persistAuditEvent: typeof writeAuditEvent = writeAuditEvent
+): boolean {
     try {
         writeRequestAudit(
             actor,
@@ -254,17 +257,24 @@ function tryWriteRequestAudit(
             requestId,
             routePath,
             status,
-            automationScope
+            automationScope,
+            persistAuditEvent
         );
+        return true;
     } catch (error) {
-        console.error(`[Audit] Request ${requestId} outcome persistence failed:`, error);
+        console.error(
+            `[Audit] Request ${requestId} ${outcome} persistence failed:`,
+            error
+        );
+        return false;
     }
 }
 
 function secureHandler(
     routePath: string,
     handler: BunHandler | Response,
-    authenticateAutomation: (request: Request) => AutomationAuthentication
+    authenticateAutomation: (request: Request) => AutomationAuthentication,
+    persistAuditEvent: typeof writeAuditEvent
 ): BunHandler {
     return async (request, server) => {
         const response = await (async () => {
@@ -305,14 +315,15 @@ function secureHandler(
                 automationPrincipal &&
                 (!automationScope || !automationPrincipal.scopes.has(automationScope))
             ) {
-                tryWriteRequestAudit(
+                didWriteRequestAudit(
                     requestActor(undefined, automationPrincipal),
                     "denied",
                     request,
                     requestIdentifier,
                     routePath,
                     403,
-                    automationScope
+                    automationScope,
+                    persistAuditEvent
                 );
                 return json(
                     { error: "Automation credential scope denied" },
@@ -330,19 +341,22 @@ function secureHandler(
             const actor = requestActor(user, automationPrincipal);
             let handlerResponse: Response;
             let didRecordAttempt = false;
-            try {
-                if (isMutation) {
-                    writeRequestAudit(
-                        actor,
-                        "attempted",
-                        request,
-                        requestIdentifier,
-                        routePath,
-                        undefined,
-                        automationScope
-                    );
-                    didRecordAttempt = true;
+            if (isMutation) {
+                didRecordAttempt = didWriteRequestAudit(
+                    actor,
+                    "attempted",
+                    request,
+                    requestIdentifier,
+                    routePath,
+                    undefined,
+                    automationScope,
+                    persistAuditEvent
+                );
+                if (!didRecordAttempt) {
+                    return json({ error: "Audit trail unavailable" }, { status: 503 });
                 }
+            }
+            try {
                 handlerResponse = await runWithRequestAuditContext(
                     { actor, requestId: requestIdentifier },
                     () => callHandler(handler, request, server)
@@ -376,14 +390,15 @@ function secureHandler(
             }
 
             if (isMutation && didRecordAttempt) {
-                tryWriteRequestAudit(
+                didWriteRequestAudit(
                     actor,
                     auditOutcomeForStatus(handlerResponse.status),
                     request,
                     requestIdentifier,
                     routePath,
                     handlerResponse.status,
-                    automationScope
+                    automationScope,
+                    persistAuditEvent
                 );
             }
 
@@ -406,10 +421,11 @@ function secureHandler(
 function secureEntry(
     routePath: string,
     entry: BunRouteEntry,
-    authenticateAutomation: (request: Request) => AutomationAuthentication
+    authenticateAutomation: (request: Request) => AutomationAuthentication,
+    persistAuditEvent: typeof writeAuditEvent
 ): BunRouteEntry {
     if (typeof entry === "function" || entry instanceof Response) {
-        return secureHandler(routePath, entry, authenticateAutomation);
+        return secureHandler(routePath, entry, authenticateAutomation, persistAuditEvent);
     }
 
     return Object.fromEntries(
@@ -418,7 +434,8 @@ function secureEntry(
             secureHandler(
                 routePath,
                 handler as BunHandler | Response,
-                authenticateAutomation
+                authenticateAutomation,
+                persistAuditEvent
             ),
         ])
     ) as BunRouteEntry;
@@ -430,10 +447,16 @@ export function withRequestPolicy<T extends Record<string, unknown>>(
 ): T {
     const authenticateAutomation =
         options.authenticateAutomation ?? authenticateAutomationRequest;
+    const persistAuditEvent = options.persistAuditEvent ?? writeAuditEvent;
     return Object.fromEntries(
         Object.entries(routes).map(([routePath, entry]) => [
             routePath,
-            secureEntry(routePath, entry as BunRouteEntry, authenticateAutomation),
+            secureEntry(
+                routePath,
+                entry as BunRouteEntry,
+                authenticateAutomation,
+                persistAuditEvent
+            ),
         ])
     ) as T;
 }
