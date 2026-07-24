@@ -93,7 +93,7 @@ retain their route-specific policy.
 Every allowed unsafe API request writes an immutable `attempted` event before
 its route handler runs. The final HTTP outcome is appended separately as
 `accepted`, `denied`, or `failed`. An audit-write failure before route execution
-fails the request closed. If persistence of the final outcome fails after a
+causes the request to fail closed. If persistence of the outcome fails after a
 handler has completed, the failure is logged with the request ID without
 turning the completed mutation into a misleading, retriable response.
 Cross-origin requests, missing sessions on protected routes, and requests
