@@ -176,7 +176,7 @@ export function getDashboardSqliteOverview(now = new Date()) {
         freePercent >= SQLITE_REUSABLE_SPACE_REVIEW_PERCENT
     ) {
         attention.push(
-            `SQLite can reclaim ${(freeBytes / (1024 * 1024)).toFixed(1)} MiB (${freePercent.toFixed(1)}%); consider a planned VACUUM`
+            `SQLite can reclaim ${(freeBytes / (1024 * 1024)).toFixed(1)} MiB (${freePercent.toFixed(1)}%). Consider a planned VACUUM`
         );
     }
 

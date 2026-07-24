@@ -1,5 +1,8 @@
 import { registerBackupScheduledJobs } from "./backups.ts";
-import { registerCacheRefreshScheduledJobs } from "./cacheRefresh.ts";
+import {
+    enqueueDatabaseSummaryRefresh,
+    registerCacheRefreshScheduledJobs,
+} from "./cacheRefresh.ts";
 import { registerDockerExecutionActions } from "./dockerActions.ts";
 import { registerDockerUpdaterScheduledJobs } from "./dockerUpdater.ts";
 import { registerExecExecutionActions } from "./execJobs.ts";
@@ -41,7 +44,10 @@ function trackWorkerStop(operation: () => Promise<void>): Promise<void> {
 
 function registerScheduledActions(): void {
     registerBackupScheduledJobs();
-    registerCacheRefreshScheduledJobs({ seedStrategy: "queue" });
+    registerCacheRefreshScheduledJobs({
+        refreshDatabaseOnStartup: true,
+        seedStrategy: "queue",
+    });
     registerDockerExecutionActions();
     registerDockerUpdaterScheduledJobs();
     registerExecExecutionActions();
@@ -49,7 +55,9 @@ function registerScheduledActions(): void {
     registerLogRotationScheduledJobs();
     registerOpenClawExecutionActions();
     registerPullRequestExecutionActions();
-    registerSqliteMaintenanceScheduledJob();
+    registerSqliteMaintenanceScheduledJob({
+        enqueueDatabaseSummaryRefresh,
+    });
 }
 
 /** Starts the persistent queue scheduler and its single-concurrency executor. */

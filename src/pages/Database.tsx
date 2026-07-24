@@ -1,8 +1,10 @@
 import { useState } from "react";
 
 import { AutovacuumHealthTable } from "../components/features/database/AutovacuumHealthTable";
+import { DatabaseAttentionCard } from "../components/features/database/DatabaseAttentionCard";
 import { DatabaseOverviewCards } from "../components/features/database/DatabaseOverviewCards";
 import { DatabasesTable } from "../components/features/database/DatabaseSizesTable";
+import { postgresMaintenanceAttention } from "../components/features/database/databaseUtilities";
 import { SqliteDatabaseOverview } from "../components/features/database/SqliteDatabaseOverview";
 import { TopQueriesTable } from "../components/features/database/TopQueriesTable";
 import { Alert } from "../components/ui/Alert";
@@ -39,6 +41,7 @@ export function Database() {
 
     const selectedSource =
         source === "sqlite" && !data.sqlite ? ("postgresql" as const) : source;
+    const postgresAttention = postgresMaintenanceAttention(data.overview.maintenance);
 
     return (
         <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
@@ -78,6 +81,10 @@ export function Database() {
             ) : (
                 <>
                     <DatabaseOverviewCards overview={data.overview} />
+                    <DatabaseAttentionCard
+                        reasons={postgresAttention}
+                        source="PostgreSQL"
+                    />
 
                     <div className="border-b border-primary-700 pb-2">
                         <h2 className="text-sm font-semibold tracking-wide text-primary-300 uppercase">

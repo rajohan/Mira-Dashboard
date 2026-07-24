@@ -11,6 +11,7 @@ import {
 import os from "node:os";
 
 import { database } from "../database.ts";
+import { invalidateCacheEntry } from "../lib/cacheStore.ts";
 import type { JobResourceClass } from "../lib/jobResources.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
@@ -91,6 +92,7 @@ const MOLTBOOK_CACHE_KEYS = new Set<string>(MOLTBOOK_CACHE_KEY_LIST);
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 const DOCKER_SUMMARY_KEY = "docker.summary";
 const DATABASE_SUMMARY_KEY = "database.summary";
+const DATABASE_SUMMARY_JOB_ID = "cache.database.summary";
 
 const gitRepos = [
     {
@@ -2259,7 +2261,7 @@ const cacheRefreshScheduledJobs = [
         resourceClass: "host-heavy",
     },
     {
-        id: "cache.database.summary",
+        id: DATABASE_SUMMARY_JOB_ID,
         name: "Database summary cache",
         description: "Refresh database overview cache.",
         scheduleType: "interval",
@@ -2274,6 +2276,22 @@ export function cacheRefreshScheduledJobId(key: string): string | undefined {
     const scheduledKey = cacheRefreshScopeKey(key);
     return cacheRefreshScheduledJobs.find((job) => job.actionPayload.key === scheduledKey)
         ?.id;
+}
+
+/** Invalidates and queues the database summary after SQLite lifecycle changes. */
+export function enqueueDatabaseSummaryRefresh(): void {
+    invalidateCacheEntry(DATABASE_SUMMARY_KEY);
+    try {
+        enqueueScheduledJob(DATABASE_SUMMARY_JOB_ID, "system");
+    } catch (error) {
+        const statusCode =
+            error instanceof Error && "statusCode" in error
+                ? (error as { statusCode?: unknown }).statusCode
+                : undefined;
+        if (statusCode !== 409) {
+            throw error;
+        }
+    }
 }
 
 function getScheduledCacheKey(job: ScheduledJob): string {
@@ -2313,6 +2331,7 @@ const localCacheSeedPromises = new Map<string, Promise<void>>();
 type CacheSeedStrategy = "local" | "none" | "queue";
 
 interface CacheRefreshScheduledJobOptions {
+    refreshDatabaseOnStartup?: boolean;
     seedStrategy?: CacheSeedStrategy;
 }
 
@@ -2349,10 +2368,19 @@ export function seedMissingLocalCacheEntry(key: string): void {
     })();
 }
 
-function queueMissingCacheSeeds(seedJobs: Array<{ id: string; key: string }>): void {
+function queueMissingCacheSeeds(
+    seedJobs: Array<{ id: string; key: string }>,
+    firstKey?: string
+): void {
     const startedAt = Date.now();
-    for (const [index, seedJob] of seedJobs.entries()) {
-        if (isCacheEntryFresh(seedJob.key)) continue;
+    const missingSeeds = seedJobs.filter((seedJob) => !isCacheEntryFresh(seedJob.key));
+    const firstSeed = firstKey
+        ? missingSeeds.find((seedJob) => seedJob.key === firstKey)
+        : undefined;
+    const orderedSeeds = firstSeed
+        ? [firstSeed, ...missingSeeds.filter((seedJob) => seedJob !== firstSeed)]
+        : missingSeeds;
+    for (const [index, seedJob] of orderedSeeds.entries()) {
         const scheduledJob = getScheduledJob(seedJob.id);
         if (scheduledJob?.nextRunAt && Date.parse(scheduledJob.nextRunAt) <= startedAt) {
             continue;
@@ -2424,8 +2452,17 @@ export function registerCacheRefreshScheduledJobs(
         }
         throw error;
     }
+    if (
+        options.refreshDatabaseOnStartup &&
+        seedJobs.some((seedJob) => seedJob.key === DATABASE_SUMMARY_KEY)
+    ) {
+        invalidateCacheEntry(DATABASE_SUMMARY_KEY);
+    }
     if (options.seedStrategy === "queue") {
-        queueMissingCacheSeeds(seedJobs);
+        queueMissingCacheSeeds(
+            seedJobs,
+            options.refreshDatabaseOnStartup ? DATABASE_SUMMARY_KEY : undefined
+        );
     } else if (options.seedStrategy === "local") {
         for (const seedJob of seedJobs) {
             seedMissingLocalCacheEntry(seedJob.key);

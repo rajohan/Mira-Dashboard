@@ -65,7 +65,7 @@ const scheduledJobRuntimeState: {
 export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
 export type ScheduledJobRunStatus =
     "queued" | "running" | "success" | "failed" | "cancelled";
-export type ScheduledJobTriggerType = "manual" | "schedule" | "startup";
+export type ScheduledJobTriggerType = "manual" | "schedule" | "startup" | "system";
 export interface ScheduledJobActionContext {
     executionId: string;
     pauseWorkerClaims: () => () => void;
@@ -901,7 +901,7 @@ export function enqueueScheduledJob(
 ): ScheduledJobRun {
     const job = getScheduledJob(id);
     if (!job) throw jobStatusError("Scheduled job not found", 404);
-    if (triggerType === "startup" && !job.enabled) {
+    if (triggerType !== "manual" && !job.enabled) {
         throw jobStatusError("Scheduled job is disabled", 409);
     }
 
@@ -987,11 +987,7 @@ async function executeClaimedJobExecution(
             {}
         );
     }
-    if (
-        currentJob &&
-        !currentJob.enabled &&
-        (execution.triggerType === "schedule" || execution.triggerType === "startup")
-    ) {
+    if (currentJob && !currentJob.enabled && execution.triggerType !== "manual") {
         const finishedExecution = finishJobExecution(
             execution.id,
             workerId,

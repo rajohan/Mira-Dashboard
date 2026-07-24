@@ -117,14 +117,19 @@ describe("server start scheduler policy", () => {
         const openclawActions = await import("../src/services/openclawActions.ts");
         const pullRequests = await import("../src/services/pullRequests.ts");
         const scheduledJobs = await import("../src/services/scheduledJobs.ts");
+        const sqliteMaintenance = await import("../src/services/sqliteMaintenance.ts");
         const worker = await import("../src/services/jobWorker.ts");
+        const cacheRegistrationSpy = jest
+            .spyOn(cacheRefresh, "registerCacheRefreshScheduledJobs")
+            .mockImplementation(() => {});
+        const sqliteMaintenanceRegistrationSpy = jest
+            .spyOn(sqliteMaintenance, "registerSqliteMaintenanceScheduledJob")
+            .mockImplementation(() => {});
         const registrationSpies = [
             jest
                 .spyOn(backups, "registerBackupScheduledJobs")
                 .mockImplementation(() => {}),
-            jest
-                .spyOn(cacheRefresh, "registerCacheRefreshScheduledJobs")
-                .mockImplementation(() => {}),
+            cacheRegistrationSpy,
             jest
                 .spyOn(dockerActions, "registerDockerExecutionActions")
                 .mockImplementation(() => {}),
@@ -146,6 +151,7 @@ describe("server start scheduler policy", () => {
             jest
                 .spyOn(pullRequests, "registerPullRequestExecutionActions")
                 .mockImplementation(() => {}),
+            sqliteMaintenanceRegistrationSpy,
         ];
         const startExecutorSpy = jest
             .spyOn(scheduledJobs, "startScheduledJobExecutor")
@@ -174,6 +180,13 @@ describe("server start scheduler policy", () => {
             for (const registrationSpy of registrationSpies) {
                 expect(registrationSpy).toHaveBeenCalledTimes(1);
             }
+            expect(cacheRegistrationSpy).toHaveBeenCalledWith({
+                refreshDatabaseOnStartup: true,
+                seedStrategy: "queue",
+            });
+            expect(sqliteMaintenanceRegistrationSpy).toHaveBeenCalledWith({
+                enqueueDatabaseSummaryRefresh: expect.any(Function),
+            });
             await Bun.sleep(0);
             expect(errorSpy).toHaveBeenCalledWith(
                 "[JobWorker] Failed to roll back executor startup:",
