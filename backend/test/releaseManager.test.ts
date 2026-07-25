@@ -36,6 +36,7 @@ import {
     rollbackDashboardRelease,
 } from "../src/releaseManager.ts";
 import {
+    databaseMigrationInventorySha256,
     loadReleaseManifest,
     parseReleaseManifest,
     RELEASE_MANIFEST_FILE_NAME,
@@ -200,6 +201,7 @@ async function rewriteManifest(
         schema: {
             ...manifest.schema,
             migrations,
+            migrationInventorySha256: databaseMigrationInventorySha256(migrations),
             ...(changes.migrationRegistrySha256 && {
                 migrationRegistrySha256: changes.migrationRegistrySha256,
             }),

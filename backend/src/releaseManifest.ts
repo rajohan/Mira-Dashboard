@@ -26,7 +26,7 @@ const RELEASE_STATIC_ARTIFACTS = [
     "bun.lock",
     "package.json",
 ] as const;
-const REQUIRED_RELEASE_ARTIFACTS = [
+const FORMAT_2_REQUIRED_RELEASE_ARTIFACTS = [
     ...RELEASE_STATIC_ARTIFACTS,
     "backend/dist/build-identity.json",
     "backend/dist/databasePreflight.js",
@@ -37,6 +37,9 @@ const REQUIRED_RELEASE_ARTIFACTS = [
     "dist/build-identity.json",
     "dist/index.html",
 ] as const;
+const FORMAT_1_REQUIRED_RELEASE_ARTIFACTS = FORMAT_2_REQUIRED_RELEASE_ARTIFACTS.filter(
+    (artifactPath) => artifactPath !== "backend/dist/releaseLifecycle.js"
+);
 const MAX_BUILD_IDENTITY_BYTES = 4096;
 const RUNTIME_RELEASE_VERIFICATION_CACHE_MS = 15_000;
 const SHA_256_PATTERN = /^[\da-f]{64}$/u;
@@ -64,6 +67,7 @@ export interface DashboardReleaseManifest {
     schema: {
         maximumCompatible: number;
         migrations?: DatabaseMigrationIdentity[];
+        migrationInventorySha256?: string;
         migrationRegistrySha256: string;
         minimumCompatible: number;
         target: number;
@@ -156,6 +160,18 @@ function sha256(value: Uint8Array | string): string {
 export function databaseMigrationRegistrySha256(): string {
     const serialized = databaseMigrations
         .map((migration) => `${migration.version}\0${migration.name}\0${migration.sql}`)
+        .join("\0");
+    return sha256(serialized);
+}
+
+export function databaseMigrationInventorySha256(
+    migrations: readonly DatabaseMigrationIdentity[] = databaseMigrationIdentities()
+): string {
+    const serialized = migrations
+        .map(
+            (migration) =>
+                `${migration.version}\0${migration.name}\0${migration.checksum}`
+        )
         .join("\0");
     return sha256(serialized);
 }
@@ -445,6 +461,7 @@ export async function createReleaseManifest(
         schema: {
             maximumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
             migrations: databaseMigrationIdentities(),
+            migrationInventorySha256: databaseMigrationInventorySha256(),
             migrationRegistrySha256: databaseMigrationRegistrySha256(),
             minimumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum,
             target: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target,
@@ -502,7 +519,7 @@ function parseSchema(
         "migrationRegistrySha256",
         "minimumCompatible",
         "target",
-        ...(formatVersion === 2 ? ["migrations"] : []),
+        ...(formatVersion === 2 ? ["migrations", "migrationInventorySha256"] : []),
     ];
     if (!isPlainRecord(value) || !hasExactKeys(value, expectedKeys)) {
         throw new TypeError("Release manifest schema declaration is invalid");
@@ -528,13 +545,20 @@ function parseSchema(
         formatVersion === 2 &&
         (!migrations ||
             migrations.length !== (target as number) ||
-            migrations.some((migration, index) => migration.version !== index + 1))
+            migrations.some((migration, index) => migration.version !== index + 1) ||
+            typeof value.migrationInventorySha256 !== "string" ||
+            !SHA_256_PATTERN.test(value.migrationInventorySha256) ||
+            value.migrationInventorySha256 !==
+                databaseMigrationInventorySha256(migrations))
     ) {
         throw new TypeError("Release manifest migration inventory is invalid");
     }
     return {
         maximumCompatible: maximumCompatible as number,
         ...(migrations && { migrations }),
+        ...(formatVersion === 2 && {
+            migrationInventorySha256: value.migrationInventorySha256 as string,
+        }),
         migrationRegistrySha256: value.migrationRegistrySha256,
         minimumCompatible: minimumCompatible as number,
         target: target as number,
@@ -592,9 +616,10 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
         artifactPaths.some(
             (artifactPath_, index) => artifactPath_ !== sortedArtifactPaths[index]
         ) ||
-        REQUIRED_RELEASE_ARTIFACTS.some(
-            (requiredPath) => !artifactPaths.includes(requiredPath)
-        )
+        (value.formatVersion === 1
+            ? FORMAT_1_REQUIRED_RELEASE_ARTIFACTS
+            : FORMAT_2_REQUIRED_RELEASE_ARTIFACTS
+        ).some((requiredPath) => !artifactPaths.includes(requiredPath))
     ) {
         throw new TypeError("Release manifest artifact inventory is invalid");
     }
@@ -744,6 +769,9 @@ export async function loadRuntimeReleaseIdentity(
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum &&
             manifest.schema.maximumCompatible ===
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum &&
+            (manifest.formatVersion === 1 ||
+                manifest.schema.migrationInventorySha256 ===
+                    databaseMigrationInventorySha256()) &&
             manifest.schema.migrationRegistrySha256 === databaseMigrationRegistrySha256();
         return {
             artifactCount: manifest.artifacts.length,

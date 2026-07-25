@@ -378,6 +378,7 @@ services are stopped, their `WorkingDirectory`/`ExecStart` resolve through the
 managed `current` link, and the queue is idle:
 
 ```bash
+cd /home/ubuntu/projects/mira-dashboard-releases/releases/<full-commit-sha>
 doppler run --config prd --project rajohan -- \
   env NODE_ENV=production \
   MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
