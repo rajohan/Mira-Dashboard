@@ -2,7 +2,7 @@ import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { handleUnauthorizedSession, notifyAuthSessionRotated } from "../lib/authBoundary";
-import { authActions } from "../stores/authStore";
+import { authActions, useAuthUser } from "../stores/authStore";
 import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
 
 export type MfaMethod = "recovery" | "totp" | "webauthn";
@@ -82,6 +82,7 @@ interface FactorConfirmationResponse {
 
 export const accountSecurityKeys = {
     all: ["account-security"] as const,
+    user: (userId: number | undefined) => [...accountSecurityKeys.all, userId] as const,
 };
 
 function invalidateSecurity(
@@ -96,10 +97,11 @@ function invalidateSecurity(
 }
 
 export function useAccountSecurity(isEnabled = true) {
+    const user = useAuthUser();
     return useQuery({
-        enabled: isEnabled,
+        enabled: isEnabled && user !== undefined,
         queryFn: () => apiFetchRequired<AccountSecuritySummary>("/account/security"),
-        queryKey: accountSecurityKeys.all,
+        queryKey: accountSecurityKeys.user(user?.id),
         staleTime: 15_000,
     });
 }

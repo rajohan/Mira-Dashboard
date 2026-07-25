@@ -138,7 +138,7 @@ describe("Global security verification", () => {
             "preserve-this-code"
         );
         act(() => {
-            queryClient.setQueryData(accountSecurityKeys.all, {
+            queryClient.setQueryData(accountSecurityKeys.user(1), {
                 ...expiringSummary,
                 factors: {
                     ...expiringSummary.factors,
@@ -153,6 +153,78 @@ describe("Global security verification", () => {
         await userEvent.click(
             screen.getByRole("button", { name: "Close Verify your session" })
         );
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("refetches verification deadlines after the authenticated user changes", async () => {
+        const expiredSummary: AccountSecuritySummary = {
+            ...securitySummary,
+            factors: {
+                ...securitySummary.factors,
+                methods: ["recovery"],
+            },
+            recentVerification: {
+                mfa: false,
+                password: false,
+            },
+        };
+        const secondSecurityResponse = Promise.withResolvers<Response>();
+        let securityRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    securityRequests += 1;
+                    return securityRequests === 1
+                        ? Response.json(expiredSummary)
+                        : secondSecurityResponse.promise;
+                }
+                throw new Error(`Unexpected user-switch request: ${String(input)}`);
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        expect(
+            await screen.findByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+        await userEvent.click(
+            screen.getByRole("button", { name: "Close Verify your session" })
+        );
+        await waitFor(() => {
+            expect(document.body.textContent).not.toContain("Verify your session");
+        });
+
+        act(() => {
+            authActions.clearSession();
+        });
+        act(() => {
+            authActions.setSession({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "webauthn",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:00:00.000Z",
+                    mfaEnabled: true,
+                },
+                user: { id: 2, username: "second-user" },
+            });
+        });
+
+        await waitFor(() => {
+            expect(securityRequests).toBe(2);
+        });
+        await act(async () => {
+            secondSecurityResponse.resolve(Response.json(securitySummary));
+            await secondSecurityResponse.promise;
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        expect(
+            screen.queryByRole("heading", { name: "Verify your session" })
+        ).not.toBeInTheDocument();
         act(() => {
             queryClient.clear();
         });

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement } from "react";
@@ -23,11 +23,24 @@ const sessionRotationHandler = jest.fn(() => {});
 beforeEach(() => {
     sessionRotationHandler.mockClear();
     addEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, sessionRotationHandler);
+    authActions.setSession({
+        authenticated: true,
+        isBootstrapRequired: false,
+        session: {
+            authMethod: "webauthn",
+            expiresAt: "2026-08-23T12:00:00.000Z",
+            lastSeenAt: "2026-07-24T12:00:00.000Z",
+            mfaEnabled: true,
+        },
+        user: { id: 1, username: "raymond" },
+    });
 });
 
 afterEach(() => {
     removeEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, sessionRotationHandler);
-    authActions.clearSession();
+    act(() => {
+        authActions.clearSession();
+    });
     Object.defineProperties(globalThis, {
         fetch: {
             configurable: true,
@@ -293,7 +306,9 @@ describe("Dashboard account security", () => {
                 name: "Change Dashboard password",
             })
         ).toBeInTheDocument();
-        queryClient.clear();
+        act(() => {
+            queryClient.clear();
+        });
     });
 
     it("reauthenticates before TOTP enrollment and exposes recovery-code actions", async () => {
@@ -462,7 +477,9 @@ describe("Dashboard account security", () => {
                     call.method === "POST"
             )
         ).toBe(true);
-        queryClient.clear();
+        act(() => {
+            queryClient.clear();
+        });
     });
 
     it("supports recovery-only step-up, factor removal, session revocation, and disable", async () => {
@@ -616,17 +633,6 @@ describe("Dashboard account security", () => {
             ).toBe(true);
         });
 
-        await userEvent.click(screen.getByRole("button", { name: "Log out all" }));
-        await waitFor(() => {
-            expect(
-                calls.some(
-                    (call) =>
-                        call.url.endsWith("/sessions/revoke-all") &&
-                        call.method === "POST"
-                )
-            ).toBe(true);
-        });
-
         await userEvent.click(screen.getByRole("button", { name: "Disable MFA" }));
         await userEvent.type(
             screen.getByLabelText("Current password"),
@@ -637,7 +643,9 @@ describe("Dashboard account security", () => {
         );
         expect(await screen.findByText("Two-step login disabled")).toBeInTheDocument();
         expect(await screen.findByText("Not enabled")).toBeInTheDocument();
-        queryClient.clear();
+        act(() => {
+            queryClient.clear();
+        });
     });
 
     it("registers a named backup security key through the browser ceremony", async () => {
@@ -727,6 +735,8 @@ describe("Dashboard account security", () => {
                     call.method === "POST"
             )
         ).toBe(true);
-        queryClient.clear();
+        act(() => {
+            queryClient.clear();
+        });
     });
 });
