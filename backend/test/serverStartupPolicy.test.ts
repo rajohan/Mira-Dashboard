@@ -599,8 +599,9 @@ describe("server start scheduler policy", () => {
             stdin: "ignore",
             stdout: "ignore",
         });
+        const stderrText = new Response(child.stderr).text();
 
-        let didExit = false;
+        let hasChildExited = false;
         try {
             let isReady = false;
             for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -613,10 +614,18 @@ describe("server start scheduler policy", () => {
                         break;
                     }
                 } catch {
-                    await Bun.sleep(25);
+                    // Ignore transient connection errors while the process starts.
                 }
+                await Bun.sleep(25);
             }
-            expect(isReady).toBe(true);
+            if (!isReady) {
+                child.kill("SIGKILL");
+                await child.exited;
+                hasChildExited = true;
+                throw new Error(
+                    `Direct web process did not become healthy.\n${await stderrText}`
+                );
+            }
 
             child.kill("SIGTERM");
             const waitForExit = async () => ({
@@ -631,13 +640,28 @@ describe("server start scheduler policy", () => {
                 };
             };
             const result = await Promise.race([waitForExit(), waitForTimeout()]);
-            didExit = result.didExit;
+            if (!result.didExit) {
+                child.kill("SIGKILL");
+                await child.exited;
+                hasChildExited = true;
+                throw new Error(
+                    `Direct web process did not exit after SIGTERM.\n${await stderrText}`
+                );
+            }
+            hasChildExited = true;
+            const childStderr = await stderrText;
+            if (result.exitCode !== 0) {
+                throw new Error(
+                    `Direct web process exited with status ${result.exitCode}.\n${childStderr}`
+                );
+            }
             expect(result).toEqual({ didExit: true, exitCode: 0 });
         } finally {
-            if (!didExit) {
+            if (!hasChildExited) {
                 child.kill("SIGKILL");
                 await child.exited;
             }
+            await stderrText;
             rmSync(temporaryRoot, { force: true, recursive: true });
         }
     });

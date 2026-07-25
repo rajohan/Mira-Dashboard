@@ -154,7 +154,7 @@ export async function runBackendServer(port = resolveListenPort()): Promise<void
  * modules imported by other runtimes without claiming their process signals.
  */
 export async function startBackendServerEntrypoint({
-    exitProcess,
+    exitProcess = process.exit,
     isDirect = isDirectEntrypoint(),
     reportFailure = reportBackendServerFailure,
     runServer = runBackendServer,
@@ -175,18 +175,9 @@ export async function startBackendServerEntrypoint({
         reportFailure(error);
         exitCode = 1;
     }
-    exitProcess?.(exitCode);
+    exitProcess(exitCode);
 }
 
-const isDirect = isDirectEntrypoint();
-if (shouldStartOnImport(undefined, isDirect)) {
-    await startBackendServerEntrypoint({
-        exitProcess: isDirect
-            ? (code) => {
-                  // eslint-disable-next-line unicorn/no-process-exit -- The direct systemd process must terminate after its awaited cleanup.
-                  process.exit(code);
-              }
-            : undefined,
-        isDirect,
-    });
+if (shouldStartOnImport()) {
+    await startBackendServerEntrypoint();
 }
