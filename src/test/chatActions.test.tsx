@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, jest } from "bun:test";
-import type { SetStateAction } from "react";
+import { type SetStateAction, useState } from "react";
 
 import type {
     ChatHistoryMessage,
@@ -227,7 +227,7 @@ describe("chat actions", () => {
                 sizeBytes: 7,
             },
         ];
-        const restoreAttachments = jest.fn();
+        const restoreAttachments = jest.fn(() => true);
         let draftState = "message that must survive";
         const setDraft = jest.fn((update: SetStateAction<string>) => {
             draftState = typeof update === "function" ? update(draftState) : update;
@@ -268,6 +268,124 @@ describe("chat actions", () => {
         expect(draftState).toBe("message that must survive");
         expect(messages).toEqual([]);
         expect(restoreAttachments).toHaveBeenCalledWith(attachments, 17);
+    });
+
+    it("does not restore failed attachments into a newer draft", async () => {
+        const sendDeferred = Promise.withResolvers<{ runId?: string }>();
+        const transport = fakeTransport(jest.fn(() => sendDeferred.promise));
+        const attachments: ChatSendAttachment[] = [
+            {
+                contentBase64: "b2xkIGF0dGFjaG1lbnQ=",
+                dataUrl: "data:text/plain;base64,b2xkIGF0dGFjaG1lbnQ=",
+                file: new File(["old attachment"], "old.txt", {
+                    type: "text/plain",
+                }),
+                fileName: "old.txt",
+                id: "old-attachment",
+                kind: "text",
+                mimeType: "text/plain",
+                sizeBytes: 14,
+            },
+        ];
+        const restoreAttachments = jest.fn(() => true);
+        const { result } = renderHook(() => {
+            const [draft, setDraft] = useState("old message");
+            return {
+                ...useChatActions({
+                    activeRunCount: 0,
+                    attachments,
+                    attachmentsReference: { current: attachments },
+                    clearAttachments: jest.fn(() => 23),
+                    confirmResetSession: jest.fn(async () => true),
+                    draft,
+                    isCompacting: false,
+                    isConnected: true,
+                    isRecording: false,
+                    isTranscribing: false,
+                    restoreAttachments,
+                    runtime: fakeRuntime(),
+                    scheduleBottomFollow: jest.fn(),
+                    selectedSession: selectedSession(),
+                    selectedSessionKey: SESSION_A,
+                    selectedSessionKeyReference: { current: SESSION_A },
+                    setDraft,
+                    setIsAtBottom: jest.fn(),
+                    setMessages: jest.fn(),
+                    setSendError: jest.fn(),
+                    shouldStickToBottomReference: { current: true },
+                    transport,
+                }),
+                draft,
+                setDraft,
+            };
+        });
+
+        let sendPromise: Promise<void> | undefined;
+        act(() => {
+            sendPromise = result.current.handleSend();
+        });
+        await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(1));
+        act(() => {
+            result.current.setDraft("new message");
+        });
+
+        await act(async () => {
+            sendDeferred.reject(new Error("retry failed"));
+            await sendPromise;
+        });
+
+        expect(result.current.draft).toBe("new message");
+        expect(restoreAttachments).not.toHaveBeenCalled();
+    });
+
+    it("does not restore a failed draft after attachment state changes", async () => {
+        const sendDeferred = Promise.withResolvers<{ runId?: string }>();
+        const transport = fakeTransport(jest.fn(() => sendDeferred.promise));
+        const restoreAttachments = jest.fn(() => false);
+        const { result } = renderHook(() => {
+            const [draft, setDraft] = useState("old message");
+            return {
+                ...useChatActions({
+                    activeRunCount: 0,
+                    attachments: [],
+                    attachmentsReference: { current: [] },
+                    clearAttachments: jest.fn(() => 29),
+                    confirmResetSession: jest.fn(async () => true),
+                    draft,
+                    isCompacting: false,
+                    isConnected: true,
+                    isRecording: false,
+                    isTranscribing: false,
+                    restoreAttachments,
+                    runtime: fakeRuntime(),
+                    scheduleBottomFollow: jest.fn(),
+                    selectedSession: selectedSession(),
+                    selectedSessionKey: SESSION_A,
+                    selectedSessionKeyReference: { current: SESSION_A },
+                    setDraft,
+                    setIsAtBottom: jest.fn(),
+                    setMessages: jest.fn(),
+                    setSendError: jest.fn(),
+                    shouldStickToBottomReference: { current: true },
+                    transport,
+                }),
+                draft,
+            };
+        });
+
+        let sendPromise: Promise<void> | undefined;
+        act(() => {
+            sendPromise = result.current.handleSend();
+        });
+        await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(1));
+
+        await act(async () => {
+            sendDeferred.reject(new Error("retry failed"));
+            await sendPromise;
+        });
+
+        expect(restoreAttachments).toHaveBeenCalledWith([], 29);
+        expect(result.current.draft).toBe("");
     });
 
     it("uses the session compaction RPC and clears request state when it finishes", async () => {

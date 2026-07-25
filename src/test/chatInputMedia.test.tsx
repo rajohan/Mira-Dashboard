@@ -134,17 +134,27 @@ describe("chat input media", () => {
         });
         expect(result.current.attachments).toEqual([]);
 
+        let didRestore = false;
         act(() => {
-            result.current.restoreAttachments(attachmentSnapshot, clearedEpoch);
+            didRestore = result.current.restoreAttachments(
+                attachmentSnapshot,
+                clearedEpoch
+            );
         });
+        expect(didRestore).toBe(true);
         expect(result.current.attachments).toEqual(attachmentSnapshot);
 
         let staleEpoch = 0;
+        let didRestoreStaleSnapshot = true;
         act(() => {
             staleEpoch = result.current.clearAttachments();
             result.current.clearAttachments();
-            result.current.restoreAttachments(attachmentSnapshot, staleEpoch);
+            didRestoreStaleSnapshot = result.current.restoreAttachments(
+                attachmentSnapshot,
+                staleEpoch
+            );
         });
+        expect(didRestoreStaleSnapshot).toBe(false);
         expect(result.current.attachments).toEqual([]);
     });
 
@@ -171,6 +181,7 @@ describe("chat input media", () => {
             clearedEpoch = result.current.clearAttachments();
         });
 
+        let didRestoreSentAttachments = true;
         await act(async () => {
             const replacementSelection = result.current.handleFilesSelected(
                 fileList([
@@ -179,10 +190,14 @@ describe("chat input media", () => {
                     }),
                 ])
             );
-            result.current.restoreAttachments(sentAttachments, clearedEpoch);
+            didRestoreSentAttachments = result.current.restoreAttachments(
+                sentAttachments,
+                clearedEpoch
+            );
             await replacementSelection;
         });
 
+        expect(didRestoreSentAttachments).toBe(false);
         expect(
             result.current.attachments.map((attachment) => attachment.fileName)
         ).toEqual(["replacement.txt"]);

@@ -41,7 +41,7 @@ interface ChatActionsOptions {
     restoreAttachments?(
         attachments: ChatSendAttachment[],
         expectedAttachmentRestoreEpoch: number
-    ): void;
+    ): boolean;
     runtime: ChatRuntimeController;
     scheduleBottomFollow(): void;
     selectedSession?: Session;
@@ -266,6 +266,7 @@ export function useChatActions({
                 return dedupeMessages([...previous, userMessage]);
             });
         }
+        draftReference.current = "";
         setDraft("");
         const clearedAttachmentRestoreEpoch = clearAttachments();
         setSendError(undefined);
@@ -328,8 +329,18 @@ export function useChatActions({
                 !resetCommand &&
                 selectedSessionKeyReference.current === pendingSessionKey
             ) {
-                setDraft((current) => (current.trim() ? current : text));
-                restoreAttachments?.(currentAttachments, clearedAttachmentRestoreEpoch);
+                if (!draftReference.current.trim()) {
+                    const canRestoreAttachments = restoreAttachments
+                        ? restoreAttachments(
+                              currentAttachments,
+                              clearedAttachmentRestoreEpoch
+                          )
+                        : currentAttachments.length === 0;
+                    if (canRestoreAttachments) {
+                        draftReference.current = text;
+                        setDraft(text);
+                    }
+                }
                 setMessages((previous) =>
                     rollbackFailedOptimisticMessage(
                         previous,

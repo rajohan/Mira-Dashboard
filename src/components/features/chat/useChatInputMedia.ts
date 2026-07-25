@@ -104,21 +104,16 @@ export function useChatInputMedia({
         expectedAttachmentRestoreEpoch: number
     ) => {
         if (
-            restored.length === 0 ||
-            attachmentRestoreEpochReference.current !== expectedAttachmentRestoreEpoch
+            attachmentRestoreEpochReference.current !== expectedAttachmentRestoreEpoch ||
+            attachmentsReference.current.length > 0
         ) {
-            return;
+            return false;
         }
-        setAttachments((current) => {
-            if (
-                current.length > 0 ||
-                attachmentRestoreEpochReference.current !== expectedAttachmentRestoreEpoch
-            ) {
-                return current;
-            }
+        if (restored.length > 0) {
             attachmentsReference.current = restored;
-            return restored;
-        });
+            setAttachments(restored);
+        }
+        return true;
     };
 
     const clearAttachmentError = (source?: ChatAttachmentInputSource) => {
