@@ -137,8 +137,8 @@ export function useChatActions({
         sendEpochReference.current += 1;
         sendCountReference.current = 0;
         inFlightInputRevisionsReference.current.clear();
-        compactingSessionKeysReference.current = new Set();
-        setCompactingSessionKeys(new Set());
+        // A session-cookie rotation disconnects while a verified RPC is still pending.
+        // Let each compaction promise release its own lock when it actually settles.
         setIsSending(false);
     }, [isConnected]);
 

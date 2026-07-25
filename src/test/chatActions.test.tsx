@@ -324,6 +324,62 @@ describe("chat actions", () => {
         expect(result.current.canSend).toBe(true);
     });
 
+    it("preserves an in-flight compaction lock across a reconnect", async () => {
+        const compactDeferred = Promise.withResolvers<void>();
+        const transport = fakeTransport();
+        transport.compact = jest.fn(() => compactDeferred.promise);
+        const { result, rerender } = renderHook(
+            ({ isConnected }) =>
+                useChatActions({
+                    activeRunCount: 0,
+                    attachments: [],
+                    attachmentsReference: { current: [] },
+                    clearAttachments: jest.fn(() => 1),
+                    confirmResetSession: jest.fn(async () => true),
+                    draft: "queued message",
+                    isCompacting: false,
+                    isConnected,
+                    isRecording: false,
+                    isTranscribing: false,
+                    runtime: fakeRuntime(),
+                    scheduleBottomFollow: jest.fn(),
+                    selectedSession: selectedSession(),
+                    selectedSessionKey: SESSION_A,
+                    selectedSessionKeyReference: { current: SESSION_A },
+                    setDraft: jest.fn(),
+                    setIsAtBottom: jest.fn(),
+                    setMessages: jest.fn(),
+                    setSendError: jest.fn(),
+                    shouldStickToBottomReference: { current: true },
+                    transport,
+                }),
+            { initialProps: { isConnected: true } }
+        );
+
+        let compactPromise: Promise<void> | undefined;
+        act(() => {
+            compactPromise = result.current.compactSelectedSession();
+        });
+        await waitFor(() => expect(transport.compact).toHaveBeenCalledTimes(1));
+
+        rerender({ isConnected: false });
+        rerender({ isConnected: true });
+        expect(result.current.isCompactingSession).toBe(true);
+        expect(result.current.compactDisabled).toBe(true);
+
+        act(() => {
+            void result.current.compactSelectedSession();
+        });
+        expect(transport.compact).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            compactDeferred.resolve();
+            await compactPromise;
+        });
+        expect(result.current.isCompactingSession).toBe(false);
+        expect(result.current.compactDisabled).toBe(false);
+    });
+
     it("re-enables sending after a compaction request fails", async () => {
         const compactDeferred = Promise.withResolvers<void>();
         const transport = fakeTransport();
