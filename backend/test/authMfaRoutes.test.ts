@@ -724,6 +724,19 @@ describe("Account security routes", () => {
         expect(verified.status).toBe(200);
         currentCookie = sessionCookie(verified);
 
+        const freshSummary = routes["/api/account/security"].GET(
+            request("/api/account/security", { cookie: currentCookie }),
+            server
+        );
+        const freshSummaryBody = (await freshSummary.json()) as {
+            recentVerification: {
+                mfa: boolean;
+                mfaRemainingMs?: number;
+            };
+        };
+        expect(freshSummaryBody.recentVerification.mfa).toBe(true);
+        expect(freshSummaryBody.recentVerification.mfaRemainingMs).toBeGreaterThan(0);
+
         const registrationOptions = await routes[
             "/api/account/security/webauthn/register/options"
         ].POST(

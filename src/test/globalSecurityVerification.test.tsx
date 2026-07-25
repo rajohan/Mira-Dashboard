@@ -8,6 +8,7 @@ import {
     accountSecurityKeys,
     type AccountSecuritySummary,
 } from "../hooks/useAccountSecurity";
+import { AUTH_SESSION_ROTATED_EVENT_NAME } from "../lib/authBoundary";
 import {
     cancelSecurityVerification,
     completeSecurityVerification,
@@ -47,6 +48,7 @@ const securitySummary: AccountSecuritySummary = {
     },
     recentVerification: {
         mfa: true,
+        mfaRemainingMs: 60 * 60_000,
         mfaUntil: new Date(Date.now() + 60 * 60_000).toISOString(),
         password: false,
     },
@@ -157,6 +159,45 @@ describe("Global security verification", () => {
         });
     });
 
+    it("uses the server-relative MFA lifetime instead of the client clock", async () => {
+        const serverFreshSummary: AccountSecuritySummary = {
+            ...securitySummary,
+            recentVerification: {
+                mfa: true,
+                mfaRemainingMs: 60_000,
+                mfaUntil: "2020-01-01T00:00:00.000Z",
+                password: false,
+            },
+        };
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(serverFreshSummary);
+                }
+                throw new Error(
+                    `Unexpected server-relative deadline request: ${String(input)}`
+                );
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(
+                queryClient.getQueryData<AccountSecuritySummary>(
+                    accountSecurityKeys.session(1, PRIMARY_DASHBOARD_SESSION_ID)
+                )
+            ).toEqual(serverFreshSummary);
+        });
+        expect(
+            screen.queryByRole("heading", { name: "Verify your session" })
+        ).not.toBeInTheDocument();
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
     it("does not trust a security summary without a matching local session id", async () => {
         act(() => {
             authActions.setSession({
@@ -211,6 +252,7 @@ describe("Global security verification", () => {
             ...securitySummary,
             recentVerification: {
                 ...securitySummary.recentVerification,
+                mfaRemainingMs: 0,
                 mfaUntil: new Date(Date.now() - 1000).toISOString(),
             },
         };
@@ -234,7 +276,7 @@ describe("Global security verification", () => {
             screen.getByLabelText("Recovery code"),
             "preserve-this-code"
         );
-        act(() => {
+        await act(async () => {
             queryClient.setQueryData(
                 accountSecurityKeys.session(1, PRIMARY_DASHBOARD_SESSION_ID),
                 {
@@ -248,6 +290,7 @@ describe("Global security verification", () => {
                     },
                 }
             );
+            await new Promise((resolve) => setTimeout(resolve, 0));
         });
         expect(screen.getByLabelText("Recovery code")).toHaveValue("preserve-this-code");
         await userEvent.click(
@@ -608,6 +651,189 @@ describe("Global security verification", () => {
         });
     });
 
+    it("cancels held actions when the authenticated identity changes", async () => {
+        const secondSecuritySummary: AccountSecuritySummary = {
+            ...securitySummary,
+            sessions: [dashboardSession(SECONDARY_DASHBOARD_SESSION_ID)],
+        };
+        let securityRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    securityRequests += 1;
+                    return Response.json(
+                        securityRequests === 1 ? securitySummary : secondSecuritySummary
+                    );
+                }
+                throw new Error(
+                    `Unexpected authenticated-identity request: ${String(input)}`
+                );
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(securityRequests).toBe(1);
+        });
+        let verificationPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        act(() => {
+            verificationPromise = waitForSecurityVerificationOutcome("step_up_required");
+        });
+        expect(
+            screen.getByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+
+        act(() => {
+            authActions.setSession({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "webauthn",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:00:00.000Z",
+                    mfaEnabled: true,
+                    sessionId: SECONDARY_DASHBOARD_SESSION_ID,
+                },
+                user: { id: 2, username: "second-user" },
+            });
+        });
+
+        await expect(verificationPromise).resolves.toBe("cancelled");
+        await waitFor(() => {
+            expect(document.body.textContent).not.toContain("Verify your session");
+        });
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("cancels held actions after an unannounced same-user session change", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(securitySummary);
+                }
+                throw new Error(
+                    `Unexpected unannounced-session request: ${String(input)}`
+                );
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(
+                queryClient.getQueryData<AccountSecuritySummary>(
+                    accountSecurityKeys.session(1, PRIMARY_DASHBOARD_SESSION_ID)
+                )
+            ).toEqual(securitySummary);
+        });
+        let verificationPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        act(() => {
+            verificationPromise = waitForSecurityVerificationOutcome("step_up_required");
+        });
+        expect(
+            screen.getByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+
+        act(() => {
+            authActions.setSession({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "webauthn",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:01:00.000Z",
+                    mfaEnabled: true,
+                    sessionId: SECONDARY_DASHBOARD_SESSION_ID,
+                },
+                user: { id: 1, username: "raymond" },
+            });
+        });
+
+        await expect(verificationPromise).resolves.toBe("cancelled");
+        await waitFor(() => {
+            expect(document.body.textContent).not.toContain("Verify your session");
+        });
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("releases step-up waiters after a verified cross-tab session rotation", async () => {
+        const rotatedSecuritySummary: AccountSecuritySummary = {
+            ...securitySummary,
+            sessions: [dashboardSession(SECONDARY_DASHBOARD_SESSION_ID)],
+        };
+        const rotatedSecurityResponse = Promise.withResolvers<Response>();
+        let securityRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    securityRequests += 1;
+                    return securityRequests === 1
+                        ? Response.json(securitySummary)
+                        : rotatedSecurityResponse.promise;
+                }
+                throw new Error(
+                    `Unexpected cross-tab completion request: ${String(input)}`
+                );
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(securityRequests).toBe(1);
+        });
+        let verificationPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        act(() => {
+            verificationPromise = waitForSecurityVerificationOutcome("step_up_required");
+        });
+        expect(
+            screen.getByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+
+        act(() => {
+            dispatchEvent(new Event(AUTH_SESSION_ROTATED_EVENT_NAME));
+            authActions.setSession({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "webauthn",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:01:00.000Z",
+                    mfaEnabled: true,
+                    sessionId: SECONDARY_DASHBOARD_SESSION_ID,
+                },
+                user: { id: 1, username: "raymond" },
+            });
+        });
+
+        await waitFor(() => {
+            expect(securityRequests).toBe(2);
+        });
+        await act(async () => {
+            rotatedSecurityResponse.resolve(Response.json(rotatedSecuritySummary));
+            await rotatedSecurityResponse.promise;
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        await expect(verificationPromise).resolves.toBe("verified");
+        await waitFor(() => {
+            expect(document.body.textContent).not.toContain("Verify your session");
+        });
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
     it("does not claim an incompatible requirement during an active flow", async () => {
         act(() => {
             authActions.setSession({
@@ -904,6 +1130,7 @@ describe("Global security verification", () => {
                     expiresAt: "2026-08-24T12:00:00.000Z",
                     lastSeenAt: "2026-07-24T12:00:00.000Z",
                     mfaEnabled: false,
+                    sessionId: PRIMARY_DASHBOARD_SESSION_ID,
                 },
                 user: { id: 1, username: "raymond" },
             });

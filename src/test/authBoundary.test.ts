@@ -8,12 +8,14 @@ import {
     notifyAuthSessionRotated,
     recoverOrHandleUnauthorizedSession,
     UNAUTHORIZED_EVENT_NAME,
+    uninstallAuthSessionRotationSync,
 } from "../lib/authBoundary";
 import { authActions, authStore } from "../stores/authStore";
 
 const originalFetch = fetch;
 
 afterEach(() => {
+    uninstallAuthSessionRotationSync();
     authActions.clearSession();
     localStorage.removeItem(AUTH_SESSION_ROTATED_STORAGE_KEY);
     Object.defineProperty(globalThis, "fetch", {
@@ -52,6 +54,22 @@ describe("Dashboard authentication boundary", () => {
         });
 
         try {
+            dispatchEvent(
+                new StorageEvent("storage", {
+                    key: "unrelated-storage-key",
+                    newValue: "unrelated-value",
+                    storageArea: localStorage,
+                })
+            );
+            dispatchEvent(
+                new StorageEvent("storage", {
+                    key: AUTH_SESSION_ROTATED_STORAGE_KEY,
+                    storageArea: localStorage,
+                })
+            );
+            expect(rotationHandler).not.toHaveBeenCalled();
+            expect(fetch).not.toHaveBeenCalled();
+
             notifyAuthSessionRotated();
             expect(rotationHandler).toHaveBeenCalledTimes(1);
             expect(localStorage.getItem(AUTH_SESSION_ROTATED_STORAGE_KEY)).not.toBeNull();
@@ -95,21 +113,10 @@ describe("Dashboard authentication boundary", () => {
 
         const firstRefresh = authActions.refreshSession();
         const secondRefresh = authActions.refreshSession();
-        secondResponse.resolve(
-            Response.json({
-                authenticated: true,
-                isBootstrapRequired: false,
-                session: {
-                    authMethod: "webauthn",
-                    expiresAt: "2026-08-24T12:00:00.000Z",
-                    lastSeenAt: "2026-07-25T04:00:00.000Z",
-                    mfaEnabled: true,
-                    sessionId: "22222222222222222222222222222222",
-                },
-                user: { id: 1, username: "raymond" },
-            })
-        );
-        await secondRefresh;
+        const observedFirstRefresh = (async () => {
+            await firstRefresh;
+            return "settled" as const;
+        })();
         firstResponse.resolve(
             Response.json({
                 authenticated: true,
@@ -124,7 +131,30 @@ describe("Dashboard authentication boundary", () => {
                 user: { id: 1, username: "raymond" },
             })
         );
-        await firstRefresh;
+        await expect(
+            Promise.race([
+                observedFirstRefresh,
+                new Promise<"pending">((resolve) => {
+                    queueMicrotask(() => resolve("pending"));
+                }),
+            ])
+        ).resolves.toBe("pending");
+
+        secondResponse.resolve(
+            Response.json({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "webauthn",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-25T04:00:00.000Z",
+                    mfaEnabled: true,
+                    sessionId: "22222222222222222222222222222222",
+                },
+                user: { id: 1, username: "raymond" },
+            })
+        );
+        await Promise.all([firstRefresh, secondRefresh]);
 
         expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
     });
@@ -221,6 +251,50 @@ describe("Dashboard authentication boundary", () => {
             await expect(recovery).resolves.toBe(false);
             expect(authStore.state.isAuthenticated).toBe(false);
             expect(unauthorizedHandler).toHaveBeenCalledTimes(1);
+        } finally {
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
+
+    it("does not replay an old user's transport after an authenticated identity change", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    authenticated: true,
+                    isBootstrapRequired: false,
+                    session: {
+                        authMethod: "webauthn",
+                        expiresAt: "2026-08-24T12:00:00.000Z",
+                        lastSeenAt: "2026-07-25T04:01:00.000Z",
+                        mfaEnabled: true,
+                        sessionId: "22222222222222222222222222222222",
+                    },
+                    user: { id: 2, username: "second-user" },
+                })
+            ),
+            writable: true,
+        });
+        const unauthorizedHandler = jest.fn();
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+
+        try {
+            await expect(recoverOrHandleUnauthorizedSession()).resolves.toBe(false);
+            expect(authStore.state.isAuthenticated).toBe(true);
+            expect(authStore.state.user?.id).toBe(2);
+            expect(unauthorizedHandler).not.toHaveBeenCalled();
         } finally {
             removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
         }

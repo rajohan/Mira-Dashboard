@@ -6,7 +6,7 @@ export const AUTH_SESSION_ROTATED_STORAGE_KEY = "mira-dashboard:auth-session-rot
 
 const authBoundaryRuntimeState = {
     isSessionRotationSyncInstalled: false,
-    unauthorizedRecoveryPromise: undefined as Promise<boolean> | undefined,
+    unauthorizedRecoveryPromise: undefined as Promise<number | undefined> | undefined,
 };
 
 function dispatchAuthSessionRotated(): void {
@@ -39,6 +39,15 @@ export function installAuthSessionRotationSync(): void {
     authBoundaryRuntimeState.isSessionRotationSyncInstalled = true;
 }
 
+/** Removes cross-tab synchronization so isolated runtimes can release the listener. */
+export function uninstallAuthSessionRotationSync(): void {
+    if (!authBoundaryRuntimeState.isSessionRotationSyncInstalled) {
+        return;
+    }
+    removeEventListener("storage", onCrossTabAuthSessionRotated);
+    authBoundaryRuntimeState.isSessionRotationSyncInstalled = false;
+}
+
 /** Clears local authentication and routes the app through its login boundary. */
 export function handleUnauthorizedSession(): void {
     authActions.clearSession();
@@ -48,28 +57,38 @@ export function handleUnauthorizedSession(): void {
 /**
  * Confirms the browser's current cookie before treating a transport rejection
  * as logout. A concurrent step-up may have invalidated only the request's old
- * cookie while already installing a valid rotated cookie.
+ * cookie while already installing a valid same-user rotated cookie. A different
+ * authenticated user remains signed in, but the old user's action is not resumed.
  */
 export async function recoverOrHandleUnauthorizedSession(): Promise<boolean> {
-    if (authBoundaryRuntimeState.unauthorizedRecoveryPromise) {
-        return authBoundaryRuntimeState.unauthorizedRecoveryPromise;
-    }
-    authBoundaryRuntimeState.unauthorizedRecoveryPromise = (async () => {
-        try {
-            await authActions.refreshSession();
-            if (authStore.state.isAuthenticated) {
-                return true;
+    const expectedUserId = authStore.state.user?.id;
+    if (!authBoundaryRuntimeState.unauthorizedRecoveryPromise) {
+        authBoundaryRuntimeState.unauthorizedRecoveryPromise = (async () => {
+            try {
+                await authActions.refreshSession();
+                return authStore.state.isAuthenticated
+                    ? authStore.state.user?.id
+                    : undefined;
+            } catch {
+                return;
             }
-        } catch {
-            // The rejected transport already established that auth is unusable.
+        })();
+    }
+    const recoveryPromise = authBoundaryRuntimeState.unauthorizedRecoveryPromise;
+    try {
+        const recoveredUserId = await recoveryPromise;
+        if (expectedUserId !== undefined && recoveredUserId === expectedUserId) {
+            return true;
+        }
+        if (recoveredUserId !== undefined) {
+            return false;
         }
         handleUnauthorizedSession();
         return false;
-    })();
-    try {
-        return await authBoundaryRuntimeState.unauthorizedRecoveryPromise;
     } finally {
-        authBoundaryRuntimeState.unauthorizedRecoveryPromise = undefined;
+        if (authBoundaryRuntimeState.unauthorizedRecoveryPromise === recoveryPromise) {
+            authBoundaryRuntimeState.unauthorizedRecoveryPromise = undefined;
+        }
     }
 }
 

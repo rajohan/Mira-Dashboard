@@ -8,6 +8,7 @@ import {
     useTotpStepUp,
     useWebAuthnStepUp,
 } from "../../../hooks";
+import { AUTH_SESSION_ROTATED_EVENT_NAME } from "../../../lib/authBoundary";
 import {
     cancelSecurityVerification,
     completeSecurityVerification,
@@ -18,7 +19,7 @@ import {
     SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
 } from "../../../lib/securityVerification";
 import { router } from "../../../router";
-import { useAuthStore } from "../../../stores/authStore";
+import { authStore, useAuthStore } from "../../../stores/authStore";
 import { Alert } from "../../ui/Alert";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -26,6 +27,40 @@ import { Modal } from "../../ui/Modal";
 
 type VerificationRequest = "enroll" | "password" | "step-up" | undefined;
 type CodeMethod = "recovery" | "totp" | undefined;
+
+interface AuthIdentity {
+    sessionId: string;
+    userId: number;
+}
+
+interface VerificationBinding extends AuthIdentity {
+    canAdoptRotatedSession: boolean;
+}
+
+function currentAuthIdentity(): AuthIdentity | undefined {
+    const { isAuthenticated, sessionId, user } = authStore.state;
+    return isAuthenticated && sessionId && user
+        ? { sessionId, userId: user.id }
+        : undefined;
+}
+
+function reconcileVerificationBinding(
+    binding: VerificationBinding,
+    identity: AuthIdentity
+): VerificationBinding | undefined {
+    if (binding.userId !== identity.userId) {
+        return undefined;
+    }
+    if (binding.sessionId === identity.sessionId) {
+        return binding;
+    }
+    if (!binding.canAdoptRotatedSession) {
+        return undefined;
+    }
+    binding.sessionId = identity.sessionId;
+    binding.canAdoptRotatedSession = false;
+    return binding;
+}
 
 function requestForVerificationCode(
     code: string | undefined,
@@ -48,7 +83,7 @@ function errorMessage(error: unknown): string {
 
 /** Handles central enrollment and fresh-MFA requirements for privileged actions. */
 export function GlobalSecurityVerification() {
-    const { isAuthenticated, mfaEnabled, sessionId } = useAuthStore();
+    const { isAuthenticated, mfaEnabled, sessionId, user } = useAuthStore();
     const { data } = useAccountSecurity(isAuthenticated);
     const passwordReauth = usePasswordReauthentication();
     const totpStepUp = useTotpStepUp();
@@ -60,11 +95,13 @@ export function GlobalSecurityVerification() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState<string>();
     const requestReference = useRef<VerificationRequest>(request);
+    const verificationBindingReference = useRef<VerificationBinding | undefined>(
+        undefined
+    );
     const verificationGenerationReference = useRef(0);
     const verificationTimeoutReference = useRef<
         ReturnType<typeof setTimeout> | undefined
     >(undefined);
-    requestReference.current = request;
 
     const clearVerificationTimeout = useCallback((): void => {
         if (verificationTimeoutReference.current === undefined) {
@@ -94,6 +131,7 @@ export function GlobalSecurityVerification() {
         clearVerificationTimeout();
         verificationGenerationReference.current += 1;
         requestReference.current = undefined;
+        verificationBindingReference.current = undefined;
         setRequest(undefined);
         setCodeMethod(undefined);
         setCode("");
@@ -112,18 +150,30 @@ export function GlobalSecurityVerification() {
                 }>
             ).detail?.code;
             const nextRequest = requestForVerificationCode(code, mfaEnabled);
-            if (
-                !nextRequest ||
-                (requestReference.current && requestReference.current !== nextRequest)
-            ) {
+            const identity = currentAuthIdentity();
+            if (!nextRequest || !identity) {
+                return;
+            }
+            const activeRequest = requestReference.current;
+            if (activeRequest) {
+                const binding = verificationBindingReference.current;
+                if (
+                    activeRequest !== nextRequest ||
+                    !binding ||
+                    !reconcileVerificationBinding(binding, identity)
+                ) {
+                    return;
+                }
+                event.preventDefault();
                 return;
             }
             event.preventDefault();
-            if (requestReference.current) {
-                return;
-            }
             verificationGenerationReference.current += 1;
             requestReference.current = nextRequest;
+            verificationBindingReference.current = {
+                ...identity,
+                canAdoptRotatedSession: false,
+            };
             startVerificationTimeout(verificationGenerationReference.current);
             setRequest(nextRequest);
             setCodeMethod(undefined);
@@ -147,10 +197,34 @@ export function GlobalSecurityVerification() {
     }, [isAuthenticated, mfaEnabled, reset, startVerificationTimeout]);
 
     useEffect(() => {
-        if (!isAuthenticated && requestReference.current) {
+        function onSessionRotated(): void {
+            const binding = verificationBindingReference.current;
+            const identity = currentAuthIdentity();
+            if (
+                binding &&
+                requestReference.current &&
+                identity?.userId === binding.userId
+            ) {
+                binding.canAdoptRotatedSession = true;
+            }
+        }
+
+        addEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, onSessionRotated);
+        return () => {
+            removeEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, onSessionRotated);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!requestReference.current) {
+            return;
+        }
+        const binding = verificationBindingReference.current;
+        const identity = currentAuthIdentity();
+        if (!binding || !identity || !reconcileVerificationBinding(binding, identity)) {
             cancelSecurityVerification();
         }
-    }, [isAuthenticated]);
+    }, [isAuthenticated, sessionId, user?.id]);
 
     useEffect(() => clearVerificationTimeout, [clearVerificationTimeout]);
 
@@ -174,22 +248,44 @@ export function GlobalSecurityVerification() {
             requireStepUp();
             return;
         }
-        const expiresAt = Date.parse(data.recentVerification.mfaUntil ?? "");
-        if (!Number.isFinite(expiresAt)) {
+        const mfaUntil = Date.parse(data.recentVerification.mfaUntil ?? "");
+        const remainingMs = data.recentVerification.mfaRemainingMs;
+        if (
+            typeof remainingMs !== "number" ||
+            !Number.isFinite(mfaUntil) ||
+            !Number.isFinite(remainingMs)
+        ) {
             requireStepUp();
             return;
         }
-        const remainingMs = expiresAt - Date.now();
         if (remainingMs <= 0) {
             requireStepUp();
             return;
         }
+        const binding = verificationBindingReference.current;
+        const identity = currentAuthIdentity();
+        if (
+            binding &&
+            identity &&
+            requestReference.current === "step-up" &&
+            reconcileVerificationBinding(binding, identity)
+        ) {
+            completeSecurityVerification();
+            reset();
+            return;
+        }
         const timeout = setTimeout(requireStepUp, remainingMs + 1);
         return () => clearTimeout(timeout);
-    }, [data, isAuthenticated, sessionId]);
+    }, [data, isAuthenticated, reset, sessionId]);
 
     async function runVerification(action: () => Promise<unknown>): Promise<void> {
         const verificationGeneration = verificationGenerationReference.current;
+        const binding = verificationBindingReference.current;
+        const identity = currentAuthIdentity();
+        if (!binding || !identity || !reconcileVerificationBinding(binding, identity)) {
+            cancelSecurityVerification();
+            return;
+        }
         startVerificationTimeout(verificationGeneration);
         refreshSecurityVerificationDeadline();
         setError(undefined);
@@ -197,8 +293,17 @@ export function GlobalSecurityVerification() {
             await action();
             if (
                 verificationGenerationReference.current !== verificationGeneration ||
-                !requestReference.current
+                !requestReference.current ||
+                verificationBindingReference.current !== binding
             ) {
+                return;
+            }
+            const currentIdentity = currentAuthIdentity();
+            if (
+                !currentIdentity ||
+                !reconcileVerificationBinding(binding, currentIdentity)
+            ) {
+                cancelSecurityVerification();
                 return;
             }
             completeSecurityVerification();

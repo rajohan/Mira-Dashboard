@@ -8,7 +8,7 @@ import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
-import { authActions } from "../stores/authStore";
+import { authActions, authStore } from "../stores/authStore";
 
 /** Represents the bootstrap API response. */
 interface BootstrapResponse {
@@ -69,11 +69,12 @@ export function Login() {
     }, []);
 
     async function finishAuthentication(): Promise<void> {
-        const session = await authActions.refreshSession();
+        await authActions.refreshSession();
+        const session = authStore.state;
         await navigate({
-            to: session.authenticated && !session.session?.mfaEnabled ? "/settings" : "/",
-            ...(session.authenticated &&
-                !session.session?.mfaEnabled && {
+            to: session.isAuthenticated && !session.mfaEnabled ? "/settings" : "/",
+            ...(session.isAuthenticated &&
+                !session.mfaEnabled && {
                     search: { view: "dashboard" as const },
                 }),
         });

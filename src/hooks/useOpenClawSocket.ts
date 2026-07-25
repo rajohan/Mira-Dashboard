@@ -44,6 +44,8 @@ const OpenClawSocketContext = createContext<OpenClawSocketContextValue | undefin
 /** Provides OpenClaw socket state. */
 export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const isAuthenticated = useSelector(authStore, (state) => state.isAuthenticated);
+    const authenticatedUserId = useSelector(authStore, (state) => state.user?.id);
+    const sessionId = useSelector(authStore, (state) => state.sessionId);
     const clientReference = useRef<SocketClient | undefined>(undefined);
     const listenersReference = useRef(new Set<(data: unknown) => void>());
 
@@ -158,12 +160,16 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (isAuthenticated) {
-            connect();
+            if (clientReference.current) {
+                clientReference.current.reconnect();
+            } else {
+                connect();
+            }
         } else {
             disconnect();
             setError(undefined);
         }
-    }, [isAuthenticated]);
+    }, [authenticatedUserId, isAuthenticated, sessionId]);
 
     useEffect(() => {
         if (!isAuthenticated) {

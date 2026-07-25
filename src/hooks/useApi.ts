@@ -8,8 +8,9 @@ import { hasRecentUserActivity } from "../lib/userActivity";
 
 const API_BASE = "/api";
 
-/** Extends fetch options with security-verification replay control. */
+/** Extends fetch options with independent auth-recovery replay controls. */
 export interface ApiRequestOptions extends RequestInit {
+    canRetryAfterUnauthorizedRecovery?: boolean;
     canRetryAfterSecurityVerification?: boolean;
 }
 
@@ -41,11 +42,17 @@ export async function apiFetch<T>(
     endpoint: string,
     options?: ApiRequestOptions
 ): Promise<T | undefined> {
-    const { canRetryAfterSecurityVerification = true, ...requestOptions } = options ?? {};
+    const {
+        canRetryAfterSecurityVerification = true,
+        canRetryAfterUnauthorizedRecovery = true,
+        ...requestOptions
+    } = options ?? {};
+    const hasReplayableBody =
+        requestOptions.body === undefined || typeof requestOptions.body === "string";
     let canRetryAfterVerification =
-        canRetryAfterSecurityVerification &&
-        (requestOptions.body === undefined || typeof requestOptions.body === "string");
-    let canRetryAfterUnauthorizedRecovery = canRetryAfterVerification;
+        canRetryAfterSecurityVerification && hasReplayableBody;
+    let canRetryAfterUnauthorized =
+        canRetryAfterUnauthorizedRecovery && hasReplayableBody;
     while (true) {
         const headers = new Headers(requestOptions.headers);
         headers.set("Content-Type", "application/json");
@@ -61,8 +68,8 @@ export async function apiFetch<T>(
 
         if (response.status === 401) {
             const recovered = await recoverOrHandleUnauthorizedSession();
-            if (recovered && canRetryAfterUnauthorizedRecovery) {
-                canRetryAfterUnauthorizedRecovery = false;
+            if (recovered && canRetryAfterUnauthorized) {
+                canRetryAfterUnauthorized = false;
                 continue;
             }
             throw new UnauthorizedError();

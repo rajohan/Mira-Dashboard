@@ -79,15 +79,21 @@ Docker/exec, backups, scheduled jobs/cron, PR/deploy operations, session
 mutations, job cancellation, and other centrally classified privileged
 mutations. A user without MFA receives `mfa_enrollment_required`; a stale MFA
 session receives `step_up_required`. The frontend opens one global verification
-dialog when the server-provided verification deadline expires. If a request
-races that deadline, the shared HTTP/WebSocket clients hold the rejected action,
-complete step-up, reconnect WebSockets in every open tab with the rotated
-session cookie, and retry replay-safe requests once. One-shot request bodies,
-session-bound selectors, WebAuthn responses, and expiring TOTP enrollment codes
-fail closed instead of being replayed. Chat keeps its optimistic message during
-this flow and restores unsent composer input if delivery still fails. The
-recent-auth window is fixed rather than extended by general page activity, so an
-active or compromised browser cannot keep privileged access fresh indefinitely.
+dialog when the server-relative verification lifetime expires; the client clock
+is not an MFA authority. If a request races that deadline, the shared
+HTTP/WebSocket clients hold the rejected action, complete step-up, reconnect
+WebSockets in every open tab with the rotated session cookie, and retry
+replay-safe requests once. Held actions remain bound to their authenticated user
+and browser-session identity, except for an explicitly signaled same-user
+session rotation that is confirmed by a coherent fresh security summary.
+One-shot request bodies never replay. Session-bound selectors and WebAuthn
+responses opt out of both recovery paths. Expiring TOTP enrollment codes opt out
+of post-verification replay, but a replayable JSON request can be sent once after
+a same-user stale `401` because request policy rejected it before the handler.
+Chat keeps its optimistic message during this flow and restores unsent composer
+input if delivery still fails. The recent-auth window is fixed rather than
+extended by general page activity, so an active or compromised browser cannot
+keep privileged access fresh indefinitely.
 
 Changing the Dashboard password requires the current password plus recent MFA
 when enabled, rotates the current session, and revokes every other session.

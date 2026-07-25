@@ -711,6 +711,13 @@ describe("Mira Dashboard frontend behavior", () => {
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
             user: { id: 1, username: "raymond" },
         });
         const originalFetch = fetch;
@@ -1221,6 +1228,74 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
+    it("recovers a stale 401 independently of verification replay opt-out", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        let confirmationRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                async (
+                    input: RequestInfo | URL,
+                    init?: RequestInit
+                ): Promise<Response> => {
+                    if (String(input) === "/api/auth/session") {
+                        return Response.json({
+                            authenticated: true,
+                            isBootstrapRequired: false,
+                            session: {
+                                authMethod: "webauthn",
+                                expiresAt: "2026-08-24T12:00:00.000Z",
+                                lastSeenAt: "2026-07-25T04:01:00.000Z",
+                                mfaEnabled: true,
+                                sessionId: "22222222222222222222222222222222",
+                            },
+                            user: { id: 1, username: "raymond" },
+                        });
+                    }
+                    if (
+                        String(input) === "/api/account/security/totp/confirm" &&
+                        init?.method === "POST"
+                    ) {
+                        confirmationRequests += 1;
+                        return confirmationRequests === 1
+                            ? Response.json({ error: "Unauthorized" }, { status: 401 })
+                            : Response.json({ isOk: true });
+                    }
+                    throw new Error(
+                        `Unexpected verification-opt-out recovery request: ${String(
+                            input
+                        )}`
+                    );
+                }
+            ),
+            writable: true,
+        });
+
+        await expect(
+            apiFetch("/account/security/totp/confirm", {
+                body: JSON.stringify({
+                    code: "123456",
+                    factorId: "01900000-0000-7000-8000-000000000099",
+                }),
+                canRetryAfterSecurityVerification: false,
+                method: "POST",
+            })
+        ).resolves.toEqual({ isOk: true });
+        expect(confirmationRequests).toBe(2);
+        expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
+    });
+
     it("refreshes idle-session activity only after a real browser interaction", () => {
         expect(hasRecentUserActivity()).toBe(false);
         installUserActivityTracking();
@@ -1382,14 +1457,23 @@ describe("Mira Dashboard frontend behavior", () => {
         try {
             const verification = waitForSecurityVerification("step_up_required", 1000);
             let outcome = "pending";
-            void verification.then((verified) => {
+            const observedSettlement = (async () => {
+                const verified = await verification;
                 outcome = verified ? "verified" : "cancelled";
-            });
+                return "settled" as const;
+            })();
 
             jest.advanceTimersByTime(750);
             refreshSecurityVerificationDeadline();
             jest.advanceTimersByTime(750);
-            await Promise.resolve();
+            await expect(
+                Promise.race([
+                    observedSettlement,
+                    new Promise<"pending">((resolve) => {
+                        queueMicrotask(() => resolve("pending"));
+                    }),
+                ])
+            ).resolves.toBe("pending");
             expect(outcome).toBe("pending");
 
             jest.advanceTimersByTime(250);
@@ -2121,6 +2205,13 @@ describe("Mira Dashboard frontend behavior", () => {
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
             user: { id: 1, username: "raymond" },
         });
         const receivedMessages: unknown[] = [];
@@ -2267,7 +2358,29 @@ describe("Mira Dashboard frontend behavior", () => {
             await waitFor(() => expect(result.current.isConnected).toBe(true));
 
             act(() => {
-                rotatedSocket.message({ type: "state", gatewayConnected: false });
+                authActions.setSession({
+                    authenticated: true,
+                    isBootstrapRequired: false,
+                    session: {
+                        authMethod: "webauthn",
+                        expiresAt: "2026-08-24T12:00:00.000Z",
+                        lastSeenAt: "2026-07-25T04:01:00.000Z",
+                        mfaEnabled: true,
+                        sessionId: "22222222222222222222222222222222",
+                    },
+                    user: { id: 2, username: "second-user" },
+                });
+            });
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3));
+            const identitySocket = FakeWebSocket.instances[2]!;
+            expect(rotatedSocket.readyState).toBe(FakeWebSocket.CLOSED);
+            act(() => {
+                identitySocket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+
+            act(() => {
+                identitySocket.message({ type: "state", gatewayConnected: false });
             });
             await waitFor(() => expect(result.current.isConnected).toBe(false));
             expect(receivedMessages).toContainEqual({

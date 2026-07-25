@@ -192,6 +192,14 @@ function recentUntil(timestamp: string | undefined): string | undefined {
         : undefined;
 }
 
+function recentRemainingMs(timestamp: string | undefined): number | undefined {
+    if (!timestamp) return undefined;
+    const parsed = Date.parse(timestamp);
+    if (!Number.isFinite(parsed)) return undefined;
+    const ttlMs = recentAuthenticationTtlMs();
+    return Math.max(0, Math.min(ttlMs, parsed + ttlMs - Date.now()));
+}
+
 function securitySummary(context: SecurityRequestContext) {
     const factors = getMultiFactorSummary(context.session.id);
     const totp = (() => {
@@ -229,6 +237,7 @@ function securitySummary(context: SecurityRequestContext) {
         },
         recentVerification: {
             mfa: hasRecentMfaVerification(context.session),
+            mfaRemainingMs: recentRemainingMs(context.session.mfaVerifiedAt),
             mfaUntil: recentUntil(context.session.mfaVerifiedAt),
             password: hasRecentPasswordVerification(context.session),
             passwordUntil:

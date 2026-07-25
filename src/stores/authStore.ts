@@ -34,7 +34,7 @@ export interface SessionResponse {
 /** Represents auth actions. */
 interface AuthActions {
     initialize: () => Promise<void>;
-    refreshSession: () => Promise<SessionResponse>;
+    refreshSession: () => Promise<void>;
     setSession: (payload: SessionResponse) => void;
     clearSession: () => void;
     logout: () => Promise<void>;
@@ -54,9 +54,16 @@ export const authStore = new Store<AuthState>(initialState);
 
 const authRuntimeState: {
     initializePromise: Promise<void> | undefined;
+    latestRefresh:
+        | {
+              generation: number;
+              promise: Promise<void>;
+          }
+        | undefined;
     refreshGeneration: number;
 } = {
     initializePromise: undefined,
+    latestRefresh: undefined,
     refreshGeneration: 0,
 };
 
@@ -96,13 +103,24 @@ export const authActions: AuthActions = {
         return authRuntimeState.initializePromise;
     },
 
-    async refreshSession() {
+    refreshSession() {
         const refreshGeneration = ++authRuntimeState.refreshGeneration;
-        const session = await fetchSession();
-        if (authRuntimeState.refreshGeneration === refreshGeneration) {
-            authActions.setSession(session);
-        }
-        return session;
+        const refreshPromise = (async () => {
+            const session = await fetchSession();
+            if (authRuntimeState.refreshGeneration === refreshGeneration) {
+                authActions.setSession(session);
+                return;
+            }
+            const latestRefresh = authRuntimeState.latestRefresh;
+            if (latestRefresh && latestRefresh.generation > refreshGeneration) {
+                await latestRefresh.promise;
+            }
+        })();
+        authRuntimeState.latestRefresh = {
+            generation: refreshGeneration,
+            promise: refreshPromise,
+        };
+        return refreshPromise;
     },
 
     setSession(payload) {

@@ -47,6 +47,7 @@ export interface AccountSecuritySummary {
     };
     recentVerification: {
         mfa: boolean;
+        mfaRemainingMs?: number;
         mfaUntil?: string;
         password: boolean;
         passwordUntil?: string;
@@ -94,7 +95,9 @@ function invalidateSecurity(
         notifyAuthSessionRotated();
     }
     void queryClient.invalidateQueries({ queryKey: accountSecurityKeys.all });
-    void authActions.refreshSession();
+    void authActions.refreshSession().catch(() => {
+        // The rotated cookie remains authoritative when a best-effort refresh fails.
+    });
 }
 
 export function useAccountSecurity(isEnabled = true) {
@@ -237,6 +240,7 @@ export function useRegisterSecurityKey() {
                     response,
                 },
                 {
+                    canRetryAfterUnauthorizedRecovery: false,
                     canRetryAfterSecurityVerification: false,
                 }
             );
@@ -287,6 +291,7 @@ export function useRevokeSession() {
             apiDeleteRequired<{ isOk: boolean; loggedOut: boolean }>(
                 `/account/security/sessions/${encodeURIComponent(sessionId)}`,
                 {
+                    canRetryAfterUnauthorizedRecovery: sessionId !== currentSessionId,
                     canRetryAfterSecurityVerification: sessionId !== currentSessionId,
                 }
             ),
