@@ -5,6 +5,8 @@ import path from "node:path";
 import type { Server } from "bun";
 import { describe, expect, it, jest } from "bun:test";
 
+import * as releaseManifestModule from "../src/releaseManifest.ts";
+
 const TEST_RELEASE_COMMIT = "a".repeat(40);
 
 describe("server start scheduler policy", () => {
@@ -621,6 +623,44 @@ describe("server start scheduler policy", () => {
         }
     });
 
+    it("shares concurrent startup failures and clears the completed attempt", async () => {
+        const startupFailure = new Error("release verification failed");
+        const release =
+            Promise.withResolvers<
+                Awaited<
+                    ReturnType<typeof releaseManifestModule.getRuntimeReleaseIdentity>
+                >
+            >();
+        const releaseSpy = jest
+            .spyOn(releaseManifestModule, "getRuntimeReleaseIdentity")
+            .mockReturnValue(release.promise);
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const originalExitCode = process.exitCode;
+        const { startBackendServer, stopBackendServer } =
+            await import("../src/serverStart.ts");
+        try {
+            await stopBackendServer();
+            process.exitCode = 0;
+
+            const firstStartup = startBackendServer(0);
+            const concurrentStartup = startBackendServer(0);
+            expect(concurrentStartup).toBe(firstStartup);
+
+            release.reject(startupFailure);
+            await expect(firstStartup).rejects.toBe(startupFailure);
+            await expect(concurrentStartup).rejects.toBe(startupFailure);
+
+            const retry = startBackendServer(0);
+            expect(retry).not.toBe(firstStartup);
+            await expect(retry).rejects.toBe(startupFailure);
+        } finally {
+            await stopBackendServer();
+            releaseSpy.mockRestore();
+            errorSpy.mockRestore();
+            process.exitCode = originalExitCode;
+        }
+    });
+
     it("starts, stops, and handles web shutdown signals with isolated runtime state", async () => {
         const environmentKeys = [
             "MIRA_DASHBOARD_DB_PATH",
@@ -649,8 +689,10 @@ describe("server start scheduler policy", () => {
             const { runBackendServer, startBackendServer, stopBackendServer } =
                 await import("../src/serverStart.ts");
 
-            await startBackendServer(0);
-            await startBackendServer(0);
+            const firstStartup = startBackendServer(0);
+            const concurrentStartup = startBackendServer(0);
+            expect(concurrentStartup).toBe(firstStartup);
+            await concurrentStartup;
             await stopBackendServer();
             await stopBackendServer();
 

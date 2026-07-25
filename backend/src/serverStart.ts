@@ -11,10 +11,10 @@ import { registerPullRequestJobLifecycleHandlers } from "./services/pullRequests
 
 const serverStartState: {
     activeServer: ReturnType<typeof createServer> | undefined;
-    isStarting: boolean;
+    startupPromise: Promise<void> | undefined;
 } = {
     activeServer: undefined,
-    isStarting: false,
+    startupPromise: undefined,
 };
 
 export { runLogRotationCli } from "./services/logRotation.ts";
@@ -83,24 +83,34 @@ export function handleServerListening(releaseCommit: string): void {
 }
 
 /** Binds the HTTP server and starts runtime-only background services. */
-export async function startBackendServer(port = resolveListenPort()): Promise<void> {
-    if (serverStartState.activeServer || serverStartState.isStarting) {
-        return;
+export function startBackendServer(port = resolveListenPort()): Promise<void> {
+    if (serverStartState.activeServer) {
+        return Promise.resolve();
     }
-    serverStartState.isStarting = true;
-    try {
-        const release = await getRuntimeReleaseIdentity();
-        const releaseCommit = requireRunnableReleaseCommit(release, "Backend");
-        serverStartState.activeServer = createServer(port);
-        handleServerListening(releaseCommit);
-        serverStartState.isStarting = false;
-    } catch (error) {
-        serverStartState.isStarting = false;
-        serverStartState.activeServer = undefined;
-        console.error("[Backend] Failed to start server:", error);
-        process.exitCode = 1;
-        throw error;
+    if (serverStartState.startupPromise) {
+        return serverStartState.startupPromise;
     }
+    const startup = Promise.withResolvers<void>();
+    serverStartState.startupPromise = startup.promise;
+    void (async () => {
+        try {
+            const release = await getRuntimeReleaseIdentity();
+            const releaseCommit = requireRunnableReleaseCommit(release, "Backend");
+            serverStartState.activeServer = createServer(port);
+            handleServerListening(releaseCommit);
+            startup.resolve();
+        } catch (error) {
+            serverStartState.activeServer = undefined;
+            console.error("[Backend] Failed to start server:", error);
+            process.exitCode = 1;
+            startup.reject(error);
+        } finally {
+            if (serverStartState.startupPromise === startup.promise) {
+                serverStartState.startupPromise = undefined;
+            }
+        }
+    })();
+    return startup.promise;
 }
 
 export async function stopBackendServer(): Promise<void> {
