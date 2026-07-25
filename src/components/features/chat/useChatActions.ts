@@ -40,7 +40,7 @@ interface ChatActionsOptions {
     isTranscribing: boolean;
     restoreAttachments?(
         attachments: ChatSendAttachment[],
-        expectedMediaEpoch: number
+        expectedAttachmentRestoreEpoch: number
     ): void;
     runtime: ChatRuntimeController;
     scheduleBottomFollow(): void;
@@ -267,7 +267,7 @@ export function useChatActions({
             });
         }
         setDraft("");
-        const clearedMediaEpoch = clearAttachments();
+        const clearedAttachmentRestoreEpoch = clearAttachments();
         setSendError(undefined);
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
@@ -329,7 +329,7 @@ export function useChatActions({
                 selectedSessionKeyReference.current === pendingSessionKey
             ) {
                 setDraft((current) => (current.trim() ? current : text));
-                restoreAttachments?.(currentAttachments, clearedMediaEpoch);
+                restoreAttachments?.(currentAttachments, clearedAttachmentRestoreEpoch);
                 setMessages((previous) =>
                     rollbackFailedOptimisticMessage(
                         previous,

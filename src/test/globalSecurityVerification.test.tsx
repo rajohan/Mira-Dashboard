@@ -9,6 +9,7 @@ import {
     type AccountSecuritySummary,
 } from "../hooks/useAccountSecurity";
 import {
+    cancelSecurityVerification,
     dispatchSecurityVerificationRequired,
     type SecurityVerificationCode,
 } from "../lib/securityVerification";
@@ -193,6 +194,41 @@ describe("Global security verification", () => {
         expect(
             screen.queryByRole("heading", { name: "Protect privileged actions" })
         ).not.toBeInTheDocument();
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("closes the shared dialog when the verification flow is cancelled", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(securitySummary);
+                }
+                throw new Error(`Unexpected cancellation request: ${String(input)}`);
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/account/security",
+                expect.objectContaining({ credentials: "include" })
+            );
+        });
+        dispatchVerificationRequired("step_up_required");
+        expect(
+            screen.getByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+
+        act(() => {
+            cancelSecurityVerification();
+        });
+        await waitFor(() => {
+            expect(document.body.textContent).not.toContain("Verify your session");
+        });
         act(() => {
             queryClient.clear();
         });

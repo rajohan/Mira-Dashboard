@@ -86,6 +86,9 @@ export function waitForSecurityVerification(
             settle(false);
             return;
         }
-        timeoutReference.current = setTimeout(() => settle(false), timeoutMs);
+        timeoutReference.current = setTimeout(() => {
+            cancelSecurityVerification();
+            settle(false);
+        }, timeoutMs);
     });
 }

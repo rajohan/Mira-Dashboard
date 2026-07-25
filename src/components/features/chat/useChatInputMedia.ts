@@ -44,6 +44,7 @@ export function useChatInputMedia({
     const recordingChunksReference = useRef<Blob[]>([]);
     const attachmentsReference = useRef<ChatSendAttachment[]>([]);
     const mediaEpochReference = useRef(0);
+    const attachmentRestoreEpochReference = useRef(0);
     const pendingAttachmentSlotsReference = useRef(0);
     const recordingStartEpochReference = useRef<number | undefined>(undefined);
     const sessionKeyReference = useRef(sessionKey);
@@ -59,7 +60,8 @@ export function useChatInputMedia({
 
     const invalidateMedia = (shouldUpdateState = true): number => {
         mediaEpochReference.current += 1;
-        const mediaEpoch = mediaEpochReference.current;
+        attachmentRestoreEpochReference.current += 1;
+        const attachmentRestoreEpoch = attachmentRestoreEpochReference.current;
         pendingAttachmentSlotsReference.current = 0;
         recordingStartEpochReference.current = undefined;
         transcriptionCountReference.current = 0;
@@ -92,22 +94,25 @@ export function useChatInputMedia({
             setIsRecording(false);
             setIsTranscribing(false);
         }
-        return mediaEpoch;
+        return attachmentRestoreEpoch;
     };
 
     const clearAttachments = () => invalidateMedia();
 
     const restoreAttachments = (
         restored: ChatSendAttachment[],
-        expectedMediaEpoch: number
+        expectedAttachmentRestoreEpoch: number
     ) => {
-        if (restored.length === 0 || mediaEpochReference.current !== expectedMediaEpoch) {
+        if (
+            restored.length === 0 ||
+            attachmentRestoreEpochReference.current !== expectedAttachmentRestoreEpoch
+        ) {
             return;
         }
         setAttachments((current) => {
             if (
                 current.length > 0 ||
-                mediaEpochReference.current !== expectedMediaEpoch
+                attachmentRestoreEpochReference.current !== expectedAttachmentRestoreEpoch
             ) {
                 return current;
             }
@@ -161,6 +166,7 @@ export function useChatInputMedia({
             }
             return;
         }
+        attachmentRestoreEpochReference.current += 1;
         const operationEpoch = mediaEpochReference.current;
         const remainingSlots = Math.max(
             0,

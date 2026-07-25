@@ -1,5 +1,5 @@
 import { KeyRound, ShieldCheck, Smartphone } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
     useAccountSecurity,
@@ -12,6 +12,7 @@ import {
     cancelSecurityVerification,
     completeSecurityVerification,
     dispatchSecurityVerificationRequired,
+    SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
     SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
 } from "../../../lib/securityVerification";
 import { router } from "../../../router";
@@ -46,6 +47,15 @@ export function GlobalSecurityVerification() {
     const requestReference = useRef<VerificationRequest>(request);
     requestReference.current = request;
 
+    const reset = useCallback((): void => {
+        requestReference.current = undefined;
+        setRequest(undefined);
+        setCodeMethod(undefined);
+        setCode("");
+        setPassword("");
+        setError(undefined);
+    }, []);
+
     useEffect(() => {
         function onVerificationRequired(event: Event): void {
             event.preventDefault();
@@ -75,13 +85,15 @@ export function GlobalSecurityVerification() {
             SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
             onVerificationRequired
         );
+        addEventListener(SECURITY_VERIFICATION_CANCELLED_EVENT_NAME, reset);
         return () => {
             removeEventListener(
                 SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
                 onVerificationRequired
             );
+            removeEventListener(SECURITY_VERIFICATION_CANCELLED_EVENT_NAME, reset);
         };
-    }, [mfaEnabled]);
+    }, [mfaEnabled, reset]);
 
     useEffect(() => {
         if (!isAuthenticated || !mfaEnabled || !data) {
@@ -109,20 +121,6 @@ export function GlobalSecurityVerification() {
         const timeout = setTimeout(requireStepUp, remainingMs + 1);
         return () => clearTimeout(timeout);
     }, [data, isAuthenticated, mfaEnabled]);
-
-    function reset(): void {
-        requestReference.current = undefined;
-        setRequest(undefined);
-        setCodeMethod(undefined);
-        setCode("");
-        setPassword("");
-        setError(undefined);
-    }
-
-    function close(): void {
-        cancelSecurityVerification();
-        reset();
-    }
 
     async function runVerification(action: () => Promise<unknown>): Promise<void> {
         setError(undefined);
@@ -169,7 +167,7 @@ export function GlobalSecurityVerification() {
     return (
         <Modal
             isOpen={Boolean(request)}
-            onClose={close}
+            onClose={cancelSecurityVerification}
             size="sm"
             title={
                 request === "enroll"
@@ -188,7 +186,7 @@ export function GlobalSecurityVerification() {
                     <Button
                         className="w-full"
                         onClick={() => {
-                            close();
+                            cancelSecurityVerification();
                             void router.navigate({
                                 search: { view: "dashboard" },
                                 to: "/settings",

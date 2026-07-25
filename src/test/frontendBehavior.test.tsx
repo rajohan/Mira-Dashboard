@@ -189,6 +189,7 @@ import {
 } from "../lib/authBoundary";
 import {
     completeSecurityVerification,
+    SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
     waitForSecurityVerification,
 } from "../lib/securityVerification";
 import { createSocketClient } from "../lib/socket/socketClient";
@@ -1254,15 +1255,22 @@ describe("Mira Dashboard frontend behavior", () => {
     it("bounds a claimed verification wait when the host never settles it", async () => {
         jest.useFakeTimers();
         const verificationHandler = claimSecurityVerification;
+        const cancellationHandler = jest.fn();
         addEventListener("mira:security-verification-required", verificationHandler);
+        addEventListener(SECURITY_VERIFICATION_CANCELLED_EVENT_NAME, cancellationHandler);
         try {
             const verification = waitForSecurityVerification("step_up_required", 1000);
             jest.advanceTimersByTime(1000);
             await expect(verification).resolves.toBe(false);
+            expect(cancellationHandler).toHaveBeenCalledTimes(1);
         } finally {
             removeEventListener(
                 "mira:security-verification-required",
                 verificationHandler
+            );
+            removeEventListener(
+                SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
+                cancellationHandler
             );
             jest.useRealTimers();
         }

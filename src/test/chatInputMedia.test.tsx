@@ -110,7 +110,7 @@ describe("chat input media", () => {
         ).toHaveLength(4);
     });
 
-    it("restores only the attachment snapshot cleared in the current media epoch", async () => {
+    it("restores only the attachment snapshot cleared in the current restoration epoch", async () => {
         const { result } = renderHook(() =>
             useChatInputMedia({
                 onError: jest.fn(),
@@ -146,6 +146,46 @@ describe("chat input media", () => {
             result.current.restoreAttachments(attachmentSnapshot, staleEpoch);
         });
         expect(result.current.attachments).toEqual([]);
+    });
+
+    it("does not restore sent attachments after replacement selection starts", async () => {
+        const { result } = renderHook(() =>
+            useChatInputMedia({
+                onError: jest.fn(),
+                sessionKey: "session-a",
+                setDraft: jest.fn(),
+            })
+        );
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["sent"], "sent.txt", {
+                        type: "text/plain",
+                    }),
+                ])
+            );
+        });
+        const sentAttachments = result.current.attachments;
+        let clearedEpoch = 0;
+        act(() => {
+            clearedEpoch = result.current.clearAttachments();
+        });
+
+        await act(async () => {
+            const replacementSelection = result.current.handleFilesSelected(
+                fileList([
+                    new File(["replacement"], "replacement.txt", {
+                        type: "text/plain",
+                    }),
+                ])
+            );
+            result.current.restoreAttachments(sentAttachments, clearedEpoch);
+            await replacementSelection;
+        });
+
+        expect(
+            result.current.attachments.map((attachment) => attachment.fileName)
+        ).toEqual(["replacement.txt"]);
     });
 
     it("skips video files while preserving valid attachments", async () => {
