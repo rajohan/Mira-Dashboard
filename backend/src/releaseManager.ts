@@ -10,7 +10,8 @@ import {
     assertMiraDatabasePathSafeForEnvironment,
     getMiraDatabasePath,
 } from "./database.ts";
-import { validateDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
+import { readAppliedDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
+import type { DatabaseMigrationIdentity } from "./databaseMigrations/index.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
 import {
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
@@ -35,6 +36,7 @@ export type ReleaseLinkName = "current" | "previous";
 
 export interface ManagedDashboardRelease {
     commitSha: string;
+    directoryIdentity: string;
     manifest: DashboardReleaseManifest;
     path: string;
 }
@@ -51,10 +53,15 @@ export interface DashboardReleaseState {
 }
 
 export interface DashboardReleaseManagerOptions {
-    readLiveSchemaVersion?: (
+    readLiveSchemaState?: (
         maximumCompatibleVersion: number
-    ) => number | Promise<number>;
+    ) => DashboardLiveSchemaState | Promise<DashboardLiveSchemaState>;
     schemaCutoverMode?: "coordinated";
+}
+
+export interface DashboardLiveSchemaState {
+    migrations: DatabaseMigrationIdentity[];
+    version: number;
 }
 
 interface ReleaseLinkState {
@@ -361,9 +368,16 @@ async function loadManagedReleaseFromLayout(
     assertReleaseCommitSha(commitSha);
     const releasePath = path.join(layout.releasesPath, commitSha);
     await assertRealDirectory(releasePath);
+    const directoryBefore = await fsp.lstat(releasePath, { bigint: true });
     const manifest = await loadReleaseManifest(releasePath);
     await verifyReleaseArtifacts(releasePath, manifest);
     await verifyReleaseBuildIdentities(releasePath, manifest);
+    const directoryAfter = await fsp.lstat(releasePath, { bigint: true });
+    const directoryIdentityBefore = releaseDirectoryIdentity(directoryBefore);
+    const directoryIdentityAfter = releaseDirectoryIdentity(directoryAfter);
+    if (directoryIdentityAfter !== directoryIdentityBefore) {
+        throw new Error(`Managed release directory changed while verifying ${commitSha}`);
+    }
     if (manifest.commitSha !== commitSha) {
         throw new Error(
             `Managed release directory ${commitSha} contains manifest ${manifest.commitSha}`
@@ -371,9 +385,14 @@ async function loadManagedReleaseFromLayout(
     }
     return {
         commitSha,
+        directoryIdentity: directoryIdentityAfter,
         manifest,
         path: releasePath,
     };
+}
+
+function releaseDirectoryIdentity(stat: fs.BigIntStats): string {
+    return [stat.dev, stat.ino, stat.ctimeNs, stat.birthtimeNs].join(":");
 }
 
 export async function loadManagedRelease(
@@ -450,9 +469,18 @@ async function assertReleaseLinkSlot(
 async function replaceReleaseLink(
     layout: DashboardReleaseLayout,
     linkName: ReleaseLinkName,
-    commitSha: string
+    commitSha: string,
+    expectedRelease: ManagedDashboardRelease
 ): Promise<void> {
     await assertReleaseLinkSlot(layout, linkName);
+    const verifiedRelease = await loadManagedReleaseFromLayout(layout, commitSha);
+    if (
+        verifiedRelease.directoryIdentity !== expectedRelease.directoryIdentity ||
+        JSON.stringify(verifiedRelease.manifest) !==
+            JSON.stringify(expectedRelease.manifest)
+    ) {
+        throw new Error(`Managed release snapshot changed before linking ${commitSha}`);
+    }
     const temporaryPath = path.join(
         layout.root,
         `.${linkName}.${process.pid}.${randomUUID()}.tmp`
@@ -487,31 +515,76 @@ async function removeReleaseLink(
     await syncDirectory(layout.root);
 }
 
-async function readLiveDatabaseSchemaVersion(
+async function readLiveDatabaseSchemaState(
     maximumCompatibleVersion: number
-): Promise<number> {
+): Promise<DashboardLiveSchemaState> {
     const databasePath = getMiraDatabasePath();
     assertMiraDatabasePathSafeForEnvironment(databasePath);
     const database = new Database(databasePath, { readonly: true });
     try {
         database.run("PRAGMA busy_timeout = 5000");
-        return validateDatabaseMigrationHistory(database, maximumCompatibleVersion);
+        const migrations = readAppliedDatabaseMigrationHistory(
+            database,
+            maximumCompatibleVersion
+        );
+        return {
+            migrations,
+            version: migrations.length,
+        };
     } finally {
         database.close();
     }
 }
 
-async function resolveLiveSchemaVersion(
+function assertLiveSchemaState(value: DashboardLiveSchemaState): void {
+    if (
+        !Number.isSafeInteger(value.version) ||
+        value.version < 0 ||
+        !Array.isArray(value.migrations) ||
+        value.migrations.length !== value.version ||
+        value.migrations.some(
+            (migration, index) =>
+                migration.version !== index + 1 ||
+                !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(migration.name) ||
+                !/^[\da-f]{64}$/u.test(migration.checksum)
+        )
+    ) {
+        throw new TypeError("Live SQLite schema state is invalid");
+    }
+}
+
+async function resolveLiveSchemaState(
     options: DashboardReleaseManagerOptions,
     maximumCompatibleVersion: number
-): Promise<number> {
-    const readLiveSchemaVersion =
-        options.readLiveSchemaVersion ?? readLiveDatabaseSchemaVersion;
-    const schemaVersion = await readLiveSchemaVersion(maximumCompatibleVersion);
-    if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 0) {
-        throw new TypeError("Live SQLite schema version is invalid");
+): Promise<DashboardLiveSchemaState> {
+    const readLiveSchemaState =
+        options.readLiveSchemaState ?? readLiveDatabaseSchemaState;
+    const state = await readLiveSchemaState(maximumCompatibleVersion);
+    assertLiveSchemaState(state);
+    return state;
+}
+
+function assertReleaseMigrationHistoryCompatible(
+    release: DashboardReleaseManifest,
+    liveState: DashboardLiveSchemaState,
+    action: "Activation" | "Rollback"
+): void {
+    const expectedMigrations = release.schema.migrations;
+    if (!expectedMigrations) {
+        return;
     }
-    return schemaVersion;
+    for (const actual of liveState.migrations.slice(0, release.schema.target)) {
+        const expected = expectedMigrations[actual.version - 1];
+        if (
+            !expected ||
+            actual.name !== expected.name ||
+            actual.checksum !== expected.checksum
+        ) {
+            throw new Error(
+                `${action} release SQLite migration ${actual.version} identity does not match live history`
+            );
+        }
+    }
 }
 
 export function assertReleaseCanOpenLiveSchema(
@@ -658,32 +731,55 @@ function assertDashboardReleaseStateMatches(
 async function validateReleaseLinkState(
     layout: DashboardReleaseLayout,
     state: ReleaseLinkState
-): Promise<void> {
+): Promise<Map<string, ManagedDashboardRelease>> {
     const commits = new Set(
         [state.current, state.previous].filter(
             (commitSha): commitSha is string => typeof commitSha === "string"
         )
     );
+    const releases = new Map<string, ManagedDashboardRelease>();
     for (const commitSha of commits) {
-        await loadManagedReleaseFromLayout(layout, commitSha);
+        releases.set(commitSha, await loadManagedReleaseFromLayout(layout, commitSha));
     }
+    return releases;
 }
 
 async function applyReleaseLinkState(
     layout: DashboardReleaseLayout,
     state: ReleaseLinkState
 ): Promise<void> {
-    await validateReleaseLinkState(layout, state);
+    const releases = await validateReleaseLinkState(layout, state);
     if (state.current) {
-        await replaceReleaseLink(layout, "current", state.current);
+        await replaceReleaseLink(
+            layout,
+            "current",
+            state.current,
+            requireValidatedRelease(releases, state.current)
+        );
     } else {
         await removeReleaseLink(layout, "current");
     }
     if (state.previous) {
-        await replaceReleaseLink(layout, "previous", state.previous);
+        await replaceReleaseLink(
+            layout,
+            "previous",
+            state.previous,
+            requireValidatedRelease(releases, state.previous)
+        );
     } else {
         await removeReleaseLink(layout, "previous");
     }
+}
+
+function requireValidatedRelease(
+    releases: Map<string, ManagedDashboardRelease>,
+    commitSha: string
+): ManagedDashboardRelease {
+    const release = releases.get(commitSha);
+    if (!release) {
+        throw new Error(`Managed release validation result is missing ${commitSha}`);
+    }
+    return release;
 }
 
 async function restoreInterruptedReleaseTransition(
@@ -883,11 +979,10 @@ export async function activateDashboardRelease(
     options: DashboardReleaseManagerOptions = {}
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
-    assertHostRuntimeCompatible(candidate);
-
     return withReleaseTransitionLock(layout, "exclusive", async () => {
         await recoverInterruptedReleaseTransition(layout);
+        const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
+        assertHostRuntimeCompatible(candidate);
         const state = await readDashboardReleaseStateFromLayout(layout);
         if (state.current) {
             assertReleaseActivationCompatible(
@@ -905,12 +1000,12 @@ export async function activateDashboardRelease(
             candidate.manifest.schema.maximumCompatible,
             state.current?.manifest.schema.maximumCompatible ?? 0
         );
-        const liveSchemaVersion = await resolveLiveSchemaVersion(
+        const liveSchemaState = await resolveLiveSchemaState(
             options,
             maximumInspectableSchemaVersion
         );
         const requiresCoordinatedCutover =
-            requiresLiveSchemaCutover(candidate.manifest, liveSchemaVersion) ||
+            requiresLiveSchemaCutover(candidate.manifest, liveSchemaState.version) ||
             (state.current !== undefined &&
                 requiresCurrentSchemaCutover(candidate.manifest, state.current.manifest));
         if (!requiresCoordinatedCutover && options.schemaCutoverMode === "coordinated") {
@@ -920,8 +1015,13 @@ export async function activateDashboardRelease(
         }
         assertReleaseCanActivateLiveSchema(
             candidate.manifest,
-            liveSchemaVersion,
+            liveSchemaState.version,
             options.schemaCutoverMode
+        );
+        assertReleaseMigrationHistoryCompatible(
+            candidate.manifest,
+            liveSchemaState,
+            "Activation"
         );
         if (state.current?.commitSha === candidate.commitSha) {
             return state;
@@ -939,9 +1039,14 @@ export async function activateDashboardRelease(
         };
         return await executeReleaseTransition(layout, journal, async () => {
             if (state.current) {
-                await replaceReleaseLink(layout, "previous", state.current.commitSha);
+                await replaceReleaseLink(
+                    layout,
+                    "previous",
+                    state.current.commitSha,
+                    state.current
+                );
             }
-            await replaceReleaseLink(layout, "current", candidate.commitSha);
+            await replaceReleaseLink(layout, "current", candidate.commitSha, candidate);
         });
     });
 }
@@ -969,14 +1074,19 @@ export async function rollbackDashboardRelease(
             activeRelease.manifest.schema.maximumCompatible,
             rollbackRelease.manifest.schema.maximumCompatible
         );
-        const liveSchemaVersion = await resolveLiveSchemaVersion(
+        const liveSchemaState = await resolveLiveSchemaState(
             options,
             maximumInspectableSchemaVersion
         );
         assertReleaseRollbackCompatible(
             activeRelease.manifest,
             rollbackRelease.manifest,
-            liveSchemaVersion
+            liveSchemaState.version
+        );
+        assertReleaseMigrationHistoryCompatible(
+            rollbackRelease.manifest,
+            liveSchemaState,
+            "Rollback"
         );
 
         const before = releaseLinkStateFromDashboardState(state);
@@ -990,8 +1100,18 @@ export async function rollbackDashboardRelease(
             operation: "rollback",
         };
         return await executeReleaseTransition(layout, journal, async () => {
-            await replaceReleaseLink(layout, "current", rollbackRelease.commitSha);
-            await replaceReleaseLink(layout, "previous", activeRelease.commitSha);
+            await replaceReleaseLink(
+                layout,
+                "current",
+                rollbackRelease.commitSha,
+                rollbackRelease
+            );
+            await replaceReleaseLink(
+                layout,
+                "previous",
+                activeRelease.commitSha,
+                activeRelease
+            );
         });
     });
 }

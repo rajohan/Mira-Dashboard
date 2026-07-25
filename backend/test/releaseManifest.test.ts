@@ -12,6 +12,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "bun:test";
 
+import { databaseMigrationIdentities } from "../src/databaseMigrations/index.ts";
 import {
     createReleaseManifest,
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
@@ -21,6 +22,7 @@ import {
     loadRuntimeReleaseIdentity,
     parseReleaseManifest,
     RELEASE_MANIFEST_FILE_NAME,
+    RELEASE_MANIFEST_FORMAT_VERSION,
     requireRunnableReleaseCommit,
     verifyReleaseArtifacts,
     writeReleaseManifest,
@@ -183,9 +185,10 @@ describe("Dashboard release manifest", () => {
                 backendCommit: "aaaaaaaa",
                 frontendCommit: "aaaaaaaa",
             },
-            formatVersion: 1,
+            formatVersion: RELEASE_MANIFEST_FORMAT_VERSION,
             schema: {
                 maximumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+                migrations: databaseMigrationIdentities(),
                 minimumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum,
                 target: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target,
             },
@@ -224,6 +227,28 @@ describe("Dashboard release manifest", () => {
         expect(
             readFileSync(path.join(root, RELEASE_MANIFEST_FILE_NAME), "utf8")
         ).toEndWith("\n");
+    });
+
+    it("keeps deployed version 1 manifests readable during the format transition", async () => {
+        const root = temporaryReleaseRoot();
+        const manifest = await createReleaseManifest(manifestOptions(root));
+        const legacySchema = {
+            maximumCompatible: manifest.schema.maximumCompatible,
+            migrationRegistrySha256: manifest.schema.migrationRegistrySha256,
+            minimumCompatible: manifest.schema.minimumCompatible,
+            target: manifest.schema.target,
+        };
+
+        expect(
+            parseReleaseManifest({
+                ...manifest,
+                formatVersion: 1,
+                schema: legacySchema,
+            })
+        ).toMatchObject({
+            formatVersion: 1,
+            schema: legacySchema,
+        });
     });
 
     it("refuses to write a manifest larger than the loader accepts", async () => {
@@ -297,6 +322,15 @@ describe("Dashboard release manifest", () => {
                 },
             })
         ).toThrow("Release manifest schema range is invalid");
+        expect(() =>
+            parseReleaseManifest({
+                ...manifest,
+                schema: {
+                    ...manifest.schema,
+                    migrations: manifest.schema.migrations?.slice(0, -1),
+                },
+            })
+        ).toThrow("Release manifest migration inventory is invalid");
     });
 
     it("requires the default runtime log-rotation configuration", async () => {

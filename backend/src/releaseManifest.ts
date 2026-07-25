@@ -4,14 +4,18 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { getBackendBuildCommit } from "./buildIdentity.ts";
-import { databaseMigrations } from "./databaseMigrations/index.ts";
+import {
+    databaseMigrationIdentities,
+    type DatabaseMigrationIdentity,
+    databaseMigrations,
+} from "./databaseMigrations/index.ts";
 import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
 
 export { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 
 export const RELEASE_MANIFEST_FILE_NAME = "release-manifest.json";
-export const RELEASE_MANIFEST_FORMAT_VERSION = 1;
+export const RELEASE_MANIFEST_FORMAT_VERSION = 2;
 
 const MAX_RELEASE_MANIFEST_BYTES = 256 * 1024;
 const RELEASE_ARTIFACT_DIRECTORIES = ["dist", "backend/dist"] as const;
@@ -56,9 +60,10 @@ export interface DashboardReleaseManifest {
         backendCommit: string;
         frontendCommit: string;
     };
-    formatVersion: 1;
+    formatVersion: 1 | 2;
     schema: {
         maximumCompatible: number;
+        migrations?: DatabaseMigrationIdentity[];
         migrationRegistrySha256: string;
         minimumCompatible: number;
         target: number;
@@ -439,6 +444,7 @@ export async function createReleaseManifest(
         formatVersion: RELEASE_MANIFEST_FORMAT_VERSION,
         schema: {
             maximumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+            migrations: databaseMigrationIdentities(),
             migrationRegistrySha256: databaseMigrationRegistrySha256(),
             minimumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum,
             target: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target,
@@ -467,16 +473,38 @@ function parseArtifact(value: unknown): ReleaseManifestArtifact {
     };
 }
 
-function parseSchema(value: unknown): DashboardReleaseManifest["schema"] {
+function parseMigrationIdentity(value: unknown): DatabaseMigrationIdentity {
     if (
         !isPlainRecord(value) ||
-        !hasExactKeys(value, [
-            "maximumCompatible",
-            "migrationRegistrySha256",
-            "minimumCompatible",
-            "target",
-        ])
+        !hasExactKeys(value, ["checksum", "name", "version"]) ||
+        !Number.isSafeInteger(value.version) ||
+        (value.version as number) <= 0 ||
+        typeof value.name !== "string" ||
+        !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value.name) ||
+        typeof value.checksum !== "string" ||
+        !SHA_256_PATTERN.test(value.checksum)
     ) {
+        throw new TypeError("Release manifest migration identity is invalid");
+    }
+    return {
+        checksum: value.checksum,
+        name: value.name,
+        version: value.version as number,
+    };
+}
+
+function parseSchema(
+    value: unknown,
+    formatVersion: DashboardReleaseManifest["formatVersion"]
+): DashboardReleaseManifest["schema"] {
+    const expectedKeys = [
+        "maximumCompatible",
+        "migrationRegistrySha256",
+        "minimumCompatible",
+        "target",
+        ...(formatVersion === 2 ? ["migrations"] : []),
+    ];
+    if (!isPlainRecord(value) || !hasExactKeys(value, expectedKeys)) {
         throw new TypeError("Release manifest schema declaration is invalid");
     }
     const { maximumCompatible, minimumCompatible, target } = value;
@@ -492,8 +520,21 @@ function parseSchema(value: unknown): DashboardReleaseManifest["schema"] {
     ) {
         throw new TypeError("Release manifest schema range is invalid");
     }
+    const migrations =
+        formatVersion === 2 && Array.isArray(value.migrations)
+            ? value.migrations.map((migration) => parseMigrationIdentity(migration))
+            : undefined;
+    if (
+        formatVersion === 2 &&
+        (!migrations ||
+            migrations.length !== (target as number) ||
+            migrations.some((migration, index) => migration.version !== index + 1))
+    ) {
+        throw new TypeError("Release manifest migration inventory is invalid");
+    }
     return {
         maximumCompatible: maximumCompatible as number,
+        ...(migrations && { migrations }),
         migrationRegistrySha256: value.migrationRegistrySha256,
         minimumCompatible: minimumCompatible as number,
         target: target as number,
@@ -514,7 +555,8 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
             "formatVersion",
             "schema",
         ]) ||
-        value.formatVersion !== RELEASE_MANIFEST_FORMAT_VERSION ||
+        (value.formatVersion !== 1 &&
+            value.formatVersion !== RELEASE_MANIFEST_FORMAT_VERSION) ||
         typeof value.commitSha !== "string" ||
         typeof value.commitShort !== "string" ||
         typeof value.commitTitle !== "string" ||
@@ -568,8 +610,8 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
             backendCommit: value.components.backendCommit as string,
             frontendCommit: value.components.frontendCommit as string,
         },
-        formatVersion: RELEASE_MANIFEST_FORMAT_VERSION,
-        schema: parseSchema(value.schema),
+        formatVersion: value.formatVersion,
+        schema: parseSchema(value.schema, value.formatVersion),
     };
 }
 

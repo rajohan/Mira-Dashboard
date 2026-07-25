@@ -15,4 +15,26 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
     multiFactorAuthenticationMigration,
 ];
 
+export interface DatabaseMigrationIdentity {
+    checksum: string;
+    name: string;
+    version: number;
+}
+
+export function databaseMigrationIdentity(
+    migration: DatabaseMigration
+): DatabaseMigrationIdentity {
+    return {
+        checksum: new Bun.CryptoHasher("sha256")
+            .update(`${migration.version}\0${migration.name}\0${migration.sql}`)
+            .digest("hex"),
+        name: migration.name,
+        version: migration.version,
+    };
+}
+
+export function databaseMigrationIdentities(): DatabaseMigrationIdentity[] {
+    return databaseMigrations.map((migration) => databaseMigrationIdentity(migration));
+}
+
 export type { DatabaseMigration } from "./types.ts";
