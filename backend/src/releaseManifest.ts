@@ -676,10 +676,11 @@ export async function loadRuntimeReleaseIdentity(
     backendBuildCommit = getBackendBuildCommit()
 ): Promise<RuntimeReleaseIdentity> {
     try {
-        const manifest = await loadReleaseManifest(releaseRoot);
-        await verifyReleaseArtifacts(releaseRoot, manifest);
+        const realReleaseRoot = await fsp.realpath(releaseRoot);
+        const manifest = await loadReleaseManifest(realReleaseRoot);
+        await verifyReleaseArtifacts(realReleaseRoot, manifest);
         try {
-            await verifyReleaseBuildIdentities(releaseRoot, manifest);
+            await verifyReleaseBuildIdentities(realReleaseRoot, manifest);
         } catch {
             return {
                 artifactCount: manifest.artifacts.length,

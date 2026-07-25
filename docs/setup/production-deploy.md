@@ -284,7 +284,10 @@ release has left the rollback window. The contract migration gets a new
 forward-only version; released migration files are never edited.
 
 If an incompatible change cannot be phased, treat activation as a coordinated
-code-and-data cutover:
+code-and-data cutover. This procedure becomes executable only after the final
+deploy integration has switched both systemd units and the executor to the
+managed `current` link; incompatible cutovers are unsupported while production
+still uses the in-place checkout:
 
 1. run the candidate's production preflight, then record the release SHA,
    supported schema range, and selected verified pre-deploy/pre-migration
@@ -292,8 +295,9 @@ code-and-data cutover:
 2. stop both Dashboard units for the cutover and verify the execution queue is
    idle;
 3. activate the immutable release with the explicit
-   `--coordinated-schema-cutover` flag and migrate forward on startup;
-4. run readiness against the new release and schema;
+   `--coordinated-schema-cutover` flag;
+4. start both units through the managed `current` link, migrate forward on
+   startup, and run readiness against the new release and schema;
 5. on failure, stop both units, restore the matching snapshot, switch the
    `current` release link back, and only then restart.
 
@@ -337,17 +341,25 @@ SHA under `/home/ubuntu/projects/mira-dashboard-releases/releases/`. This is the
 production default; a deliberately configured `MIRA_DASHBOARD_RELEASES_ROOT`
 overrides it. Run lifecycle commands from a verified release with the same
 Doppler production environment as the services so schema checks always inspect
-the live Dashboard database:
+the live Dashboard database. Pass the service's stable absolute database path
+after Doppler injection; changing into an immutable release must not redirect
+SQLite state into that release:
 
 ```bash
 cd /home/ubuntu/projects/mira-dashboard-releases/current
-NODE_ENV=production doppler run --config prd --project rajohan -- \
+doppler run --config prd --project rajohan -- \
+  env NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
   bun backend/dist/releaseLifecycle.js status
-NODE_ENV=production doppler run --config prd --project rajohan -- \
+doppler run --config prd --project rajohan -- \
+  env NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
   bun backend/dist/releaseLifecycle.js rollback
 
 cd /home/ubuntu/projects/mira-dashboard-releases/releases/<full-commit-sha>
-NODE_ENV=production doppler run --config prd --project rajohan -- \
+doppler run --config prd --project rajohan -- \
+  env NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
   bun backend/dist/releaseLifecycle.js activate <full-commit-sha>
 ```
 
@@ -360,12 +372,15 @@ checks the live schema rather than assuming it was downgraded by a code-only
 rollback.
 
 Normal activation refuses a schema target outside the current release's rollback
-window. For the exceptional snapshot-backed cutover described above, run the
-candidate command only after preflight succeeds, both services are stopped, and
-the queue is idle:
+window. After the final systemd/executor cutover, the exceptional snapshot-backed
+procedure above runs the candidate command only after preflight succeeds, both
+services are stopped, their `WorkingDirectory`/`ExecStart` resolve through the
+managed `current` link, and the queue is idle:
 
 ```bash
-NODE_ENV=production doppler run --config prd --project rajohan -- \
+doppler run --config prd --project rajohan -- \
+  env NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
   bun backend/dist/releaseLifecycle.js activate <full-commit-sha> \
   --coordinated-schema-cutover
 ```
@@ -375,12 +390,15 @@ startup migration across the incompatible boundary, but it does not permit
 automatic code-only rollback afterward; restore the recorded matching snapshot
 before switching back.
 
-Every activation and rollback is serialized by an owner-PID lock and recorded
-in a durable transition journal before either link changes. A later lifecycle
-command restores the recorded pre-transition slots when it finds a journal
-whose owner process is gone. Successful transitions verify both final slots
-before removing the journal, so an interruption cannot discard the known-good
-rollback target.
+Every status read, activation, rollback, and interrupted-transition recovery is
+serialized by a kernel-owned `flock` held on an open descriptor. The kernel
+releases the lock if the lifecycle process exits, so stale PID metadata and PID
+reuse cannot block recovery. A durable transition journal is written before
+either link changes. Status takes a shared lock and remains observational; it
+fails clearly when a journal requires recovery. The next exclusive activation
+or rollback restores the recorded pre-transition slots. Successful transitions
+verify both final slots and remove only the exact journal inode they inspected,
+so an interruption cannot discard the known-good rollback target.
 
 The Dashboard executor still uses the in-place transition flow until the final
 deploy integration performs the controlled systemd cutover to these links.

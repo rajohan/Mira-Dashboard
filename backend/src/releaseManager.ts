@@ -27,9 +27,9 @@ export const MANAGED_RELEASES_DIRECTORY_NAME = "releases";
 const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const RELEASE_TRANSITION_FORMAT_VERSION = 1;
 const RELEASE_TRANSITION_JOURNAL_FILE_NAME = ".release-transition.json";
-const RELEASE_TRANSITION_LOCK_FILE_NAME = ".release-transition.lock";
+export const RELEASE_TRANSITION_LOCK_FILE_NAME = ".release-transition.lock";
 const MAX_RELEASE_TRANSITION_FILE_BYTES = 4096;
-const RELEASE_TRANSITION_LOCK_PROGRAM = "/usr/bin/flock";
+export const RELEASE_TRANSITION_LOCK_PROGRAM = "/usr/bin/flock";
 
 export type ReleaseLinkName = "current" | "previous";
 
@@ -537,6 +537,26 @@ function assertHostRuntimeCompatible(release: ManagedDashboardRelease): void {
     }
 }
 
+function requiresCurrentSchemaCutover(
+    candidate: DashboardReleaseManifest,
+    current: DashboardReleaseManifest
+): boolean {
+    return (
+        candidate.schema.target < current.schema.minimumCompatible ||
+        candidate.schema.target > current.schema.maximumCompatible
+    );
+}
+
+function requiresLiveSchemaCutover(
+    release: DashboardReleaseManifest,
+    liveSchemaVersion: number
+): boolean {
+    return (
+        liveSchemaVersion < release.schema.minimumCompatible &&
+        liveSchemaVersion < release.schema.target
+    );
+}
+
 export function assertReleaseActivationCompatible(
     candidate: DashboardReleaseManifest,
     current: DashboardReleaseManifest,
@@ -547,9 +567,7 @@ export function assertReleaseActivationCompatible(
             "Forward activation cannot lower the managed SQLite schema target"
         );
     }
-    const requiresCoordinatedCutover =
-        candidate.schema.target < current.schema.minimumCompatible ||
-        candidate.schema.target > current.schema.maximumCompatible;
+    const requiresCoordinatedCutover = requiresCurrentSchemaCutover(candidate, current);
     if (requiresCoordinatedCutover && schemaCutoverMode !== "coordinated") {
         throw new Error(
             `Current release cannot roll back after SQLite schema ${candidate.schema.target}`
@@ -596,8 +614,7 @@ function assertReleaseCanActivateLiveSchema(
 ): void {
     if (
         schemaCutoverMode === "coordinated" &&
-        liveSchemaVersion < release.schema.minimumCompatible &&
-        liveSchemaVersion < release.schema.target
+        requiresLiveSchemaCutover(release, liveSchemaVersion)
     ) {
         return;
     }
@@ -718,36 +735,82 @@ async function openReleaseTransitionLockFile(
     return file;
 }
 
+export function isReleaseTransitionLockAvailable(): boolean {
+    try {
+        fs.accessSync(RELEASE_TRANSITION_LOCK_PROGRAM, fs.constants.X_OK);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export function assertReleaseTransitionLockCommandSucceeded(
+    error: NodeJS.ErrnoException | undefined,
+    status: number | null | undefined,
+    stderr: string
+): void {
+    if (error) {
+        throw new Error(
+            error.code === "ENOENT"
+                ? `Managed release transitions require executable ${RELEASE_TRANSITION_LOCK_PROGRAM}`
+                : `Managed release transition lock failed: ${error.message}`,
+            { cause: error }
+        );
+    }
+    if (status === 0) {
+        return;
+    }
+    if (status === 75) {
+        throw new Error("Another managed release transition is in progress");
+    }
+    const diagnostic = stderr.trim();
+    throw new Error(
+        `Managed release transition lock exited ${status ?? "by signal"}${
+            diagnostic ? `: ${diagnostic.slice(0, 1000)}` : ""
+        }`
+    );
+}
+
 async function acquireReleaseTransitionLock(
-    layout: DashboardReleaseLayout
+    layout: DashboardReleaseLayout,
+    lockMode: "exclusive" | "shared"
 ): Promise<fs.promises.FileHandle> {
     const lockFile = await openReleaseTransitionLockFile(layout);
     const result = spawnSync(
         RELEASE_TRANSITION_LOCK_PROGRAM,
-        ["--exclusive", "--nonblock", "3"],
+        [
+            lockMode === "exclusive" ? "--exclusive" : "--shared",
+            "--nonblock",
+            "--conflict-exit-code",
+            "75",
+            "3",
+        ],
         {
             stdio: ["ignore", "ignore", "pipe", lockFile.fd],
         }
     );
-    if (result.error || result.status !== 0) {
+    try {
+        assertReleaseTransitionLockCommandSucceeded(
+            result.error as NodeJS.ErrnoException | undefined,
+            result.status,
+            result.stderr?.toString("utf8") ?? ""
+        );
+    } catch (error) {
         await lockFile.close();
-        if (result.error) {
-            throw result.error;
-        }
-        throw new Error("Another managed release transition is in progress");
+        throw error;
     }
     return lockFile;
 }
 
 async function withReleaseTransitionLock<T>(
     layout: DashboardReleaseLayout,
+    lockMode: "exclusive" | "shared",
     transition: () => Promise<T>
 ): Promise<T> {
-    const lockFile = await acquireReleaseTransitionLock(layout);
+    const lockFile = await acquireReleaseTransitionLock(layout, lockMode);
     let result: T | undefined;
     let transitionError: unknown;
     try {
-        await recoverInterruptedReleaseTransition(layout);
         result = await transition();
     } catch (primaryError) {
         transitionError = primaryError;
@@ -804,9 +867,14 @@ export async function readDashboardReleaseState(
     releasesRoot = resolveDashboardReleasesRoot()
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    return withReleaseTransitionLock(layout, () =>
-        readDashboardReleaseStateFromLayout(layout)
-    );
+    return withReleaseTransitionLock(layout, "shared", async () => {
+        if (await readReleaseTransitionJournal(layout)) {
+            throw new Error(
+                "Managed release status requires activate or rollback to recover an interrupted transition"
+            );
+        }
+        return readDashboardReleaseStateFromLayout(layout);
+    });
 }
 
 export async function activateDashboardRelease(
@@ -818,7 +886,8 @@ export async function activateDashboardRelease(
     const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
     assertHostRuntimeCompatible(candidate);
 
-    return withReleaseTransitionLock(layout, async () => {
+    return withReleaseTransitionLock(layout, "exclusive", async () => {
+        await recoverInterruptedReleaseTransition(layout);
         const state = await readDashboardReleaseStateFromLayout(layout);
         if (state.current) {
             assertReleaseActivationCompatible(
@@ -841,13 +910,9 @@ export async function activateDashboardRelease(
             maximumInspectableSchemaVersion
         );
         const requiresCoordinatedCutover =
-            (liveSchemaVersion < candidate.manifest.schema.minimumCompatible &&
-                liveSchemaVersion < candidate.manifest.schema.target) ||
+            requiresLiveSchemaCutover(candidate.manifest, liveSchemaVersion) ||
             (state.current !== undefined &&
-                (candidate.manifest.schema.target <
-                    state.current.manifest.schema.minimumCompatible ||
-                    candidate.manifest.schema.target >
-                        state.current.manifest.schema.maximumCompatible));
+                requiresCurrentSchemaCutover(candidate.manifest, state.current.manifest));
         if (!requiresCoordinatedCutover && options.schemaCutoverMode === "coordinated") {
             throw new Error(
                 "Coordinated schema cutover mode requires an incompatible schema boundary"
@@ -886,7 +951,8 @@ export async function rollbackDashboardRelease(
     options: DashboardReleaseManagerOptions = {}
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    return withReleaseTransitionLock(layout, async () => {
+    return withReleaseTransitionLock(layout, "exclusive", async () => {
+        await recoverInterruptedReleaseTransition(layout);
         const state = await readDashboardReleaseStateFromLayout(layout);
         if (!state.current || !state.previous) {
             throw new Error("Managed release rollback requires current and previous");

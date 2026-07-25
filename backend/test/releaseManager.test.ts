@@ -20,10 +20,14 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
 import {
     activateDashboardRelease,
+    assertReleaseTransitionLockCommandSucceeded,
     ensureDashboardReleaseLayout,
+    isReleaseTransitionLockAvailable,
     loadManagedRelease,
     managedReleasePath,
     readDashboardReleaseState,
+    RELEASE_TRANSITION_LOCK_FILE_NAME,
+    RELEASE_TRANSITION_LOCK_PROGRAM,
     resolveDashboardReleasesRoot,
     rollbackDashboardRelease,
 } from "../src/releaseManager.ts";
@@ -44,12 +48,16 @@ const SCHEMA_6_OPTIONS = {
 
 function holdTransitionLock(releasesRoot: string): number {
     const lockFileDescriptor = openSync(
-        path.join(releasesRoot, ".release-transition.lock"),
+        path.join(releasesRoot, RELEASE_TRANSITION_LOCK_FILE_NAME),
         "r+"
     );
-    const result = spawnSync("/usr/bin/flock", ["--exclusive", "--nonblock", "3"], {
-        stdio: ["ignore", "ignore", "pipe", lockFileDescriptor],
-    });
+    const result = spawnSync(
+        RELEASE_TRANSITION_LOCK_PROGRAM,
+        ["--exclusive", "--nonblock", "3"],
+        {
+            stdio: ["ignore", "ignore", "pipe", lockFileDescriptor],
+        }
+    );
     if (result.error || result.status !== 0) {
         closeSync(lockFileDescriptor);
         throw new Error("Test release transition lock did not become ready");
@@ -184,6 +192,29 @@ afterEach(() => {
 });
 
 describe("Dashboard immutable release manager", () => {
+    it("classifies transition-lock command failures explicitly", () => {
+        const missing = Object.assign(new Error("spawn failed"), { code: "ENOENT" });
+        expect(() =>
+            assertReleaseTransitionLockCommandSucceeded(missing, undefined, "")
+        ).toThrow(`require executable ${RELEASE_TRANSITION_LOCK_PROGRAM}`);
+        expect(() =>
+            assertReleaseTransitionLockCommandSucceeded(
+                new Error("permission denied"),
+                undefined,
+                ""
+            )
+        ).toThrow("lock failed: permission denied");
+        expect(() =>
+            assertReleaseTransitionLockCommandSucceeded(undefined, 75, "")
+        ).toThrow("Another managed release transition is in progress");
+        expect(() =>
+            assertReleaseTransitionLockCommandSucceeded(undefined, 2, "flock diagnostic")
+        ).toThrow("exited 2: flock diagnostic");
+        expect(() =>
+            assertReleaseTransitionLockCommandSucceeded(undefined, 0, "")
+        ).not.toThrow();
+    });
+
     it("accepts only absolute non-root layouts and full lowercase commit SHAs", () => {
         expect(() => resolveDashboardReleasesRoot("relative")).toThrow(
             "absolute non-root"
@@ -553,35 +584,47 @@ describe("Dashboard immutable release manager", () => {
         rmSync(path.join(root, "previous"));
         symlinkSync(`releases/${SECOND_COMMIT}`, path.join(root, "previous"), "dir");
 
-        const recovered = await readDashboardReleaseState(root);
+        await expect(readDashboardReleaseState(root)).rejects.toThrow(
+            "requires activate or rollback to recover"
+        );
+        expect(existsSync(path.join(root, ".release-transition.json"))).toBe(true);
+
+        const recovered = await activateDashboardRelease(
+            SECOND_COMMIT,
+            root,
+            SCHEMA_6_OPTIONS
+        );
         expect(recovered.current?.commitSha).toBe(SECOND_COMMIT);
         expect(recovered.previous?.commitSha).toBe(FIRST_COMMIT);
         expect(existsSync(path.join(root, ".release-transition.lock"))).toBe(true);
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
     });
 
-    it("serializes status and transitions with a kernel-owned lock", async () => {
-        const root = temporaryReleasesRoot();
-        await createManagedRelease(root, FIRST_COMMIT);
-        await createManagedRelease(root, SECOND_COMMIT);
-        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
-        const lockFileDescriptor = holdTransitionLock(root);
+    it.skipIf(!isReleaseTransitionLockAvailable())(
+        "serializes status and transitions with a kernel-owned lock",
+        async () => {
+            const root = temporaryReleasesRoot();
+            await createManagedRelease(root, FIRST_COMMIT);
+            await createManagedRelease(root, SECOND_COMMIT);
+            await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+            const lockFileDescriptor = holdTransitionLock(root);
 
-        try {
-            await expect(readDashboardReleaseState(root)).rejects.toThrow(
-                "Another managed release transition is in progress"
-            );
-            await expect(
-                activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
-            ).rejects.toThrow("Another managed release transition is in progress");
-            expect(readlinkSync(path.join(root, "current"))).toBe(
-                `releases/${FIRST_COMMIT}`
-            );
-            expect(existsSync(path.join(root, "previous"))).toBe(false);
-        } finally {
-            closeSync(lockFileDescriptor);
+            try {
+                await expect(readDashboardReleaseState(root)).rejects.toThrow(
+                    "Another managed release transition is in progress"
+                );
+                await expect(
+                    activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
+                ).rejects.toThrow("Another managed release transition is in progress");
+                expect(readlinkSync(path.join(root, "current"))).toBe(
+                    `releases/${FIRST_COMMIT}`
+                );
+                expect(existsSync(path.join(root, "previous"))).toBe(false);
+            } finally {
+                closeSync(lockFileDescriptor);
+            }
         }
-    });
+    );
 
     it("restores both prior slots when activation fails after changing a link", async () => {
         const root = temporaryReleasesRoot();
