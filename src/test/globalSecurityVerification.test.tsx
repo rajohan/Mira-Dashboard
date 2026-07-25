@@ -127,6 +127,85 @@ afterEach(() => {
 });
 
 describe("Global security verification", () => {
+    it("requires step-up when the server expiry is malformed", async () => {
+        const malformedSummary: AccountSecuritySummary = {
+            ...securitySummary,
+            recentVerification: {
+                mfa: true,
+                mfaUntil: "not-a-timestamp",
+                password: false,
+            },
+        };
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(malformedSummary);
+                }
+                throw new Error(`Unexpected malformed-expiry request: ${String(input)}`);
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        expect(
+            await screen.findByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+        act(() => {
+            cancelSecurityVerification();
+            queryClient.clear();
+        });
+    });
+
+    it("does not trust a security summary without a matching local session id", async () => {
+        act(() => {
+            authActions.setSession({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "webauthn",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:00:00.000Z",
+                    mfaEnabled: true,
+                },
+                user: { id: 1, username: "raymond" },
+            });
+        });
+        const expiredSummary: AccountSecuritySummary = {
+            ...securitySummary,
+            recentVerification: {
+                mfa: false,
+                password: false,
+            },
+        };
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(expiredSummary);
+                }
+                throw new Error(
+                    `Unexpected missing-session-id request: ${String(input)}`
+                );
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/account/security",
+                expect.objectContaining({ credentials: "include" })
+            );
+        });
+        expect(
+            screen.queryByRole("heading", { name: "Verify your session" })
+        ).not.toBeInTheDocument();
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
     it("opens proactively without resetting an in-progress verification", async () => {
         const expiringSummary: AccountSecuritySummary = {
             ...securitySummary,
@@ -753,6 +832,7 @@ describe("Global security verification", () => {
                                 expiresAt: "2026-08-24T12:00:00.000Z",
                                 lastSeenAt: "2026-07-24T12:00:00.000Z",
                                 mfaEnabled: true,
+                                sessionId: PRIMARY_DASHBOARD_SESSION_ID,
                             },
                             user: { id: 1, username: "raymond" },
                         });
@@ -866,6 +946,7 @@ describe("Global security verification", () => {
                                 expiresAt: "2026-08-24T12:00:00.000Z",
                                 lastSeenAt: "2026-07-24T12:00:00.000Z",
                                 mfaEnabled: false,
+                                sessionId: PRIMARY_DASHBOARD_SESSION_ID,
                             },
                             user: { id: 1, username: "raymond" },
                         });
@@ -941,6 +1022,7 @@ describe("Global security verification", () => {
                                 expiresAt: "2026-08-24T12:00:00.000Z",
                                 lastSeenAt: "2026-07-24T12:00:00.000Z",
                                 mfaEnabled: true,
+                                sessionId: PRIMARY_DASHBOARD_SESSION_ID,
                             },
                             user: { id: 1, username: "raymond" },
                         });

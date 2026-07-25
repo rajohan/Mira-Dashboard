@@ -197,7 +197,8 @@ export function useConfirmTotpEnrollment() {
         mutationFn: ({ code, factorId }: { code: string; factorId: string }) =>
             apiPostRequired<FactorConfirmationResponse>(
                 "/account/security/totp/confirm",
-                { code, factorId }
+                { code, factorId },
+                { canRetryAfterSecurityVerification: false }
             ),
         onSuccess: (response) =>
             invalidateSecurity(queryClient, response.sessionRotated === true),

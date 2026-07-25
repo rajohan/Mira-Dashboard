@@ -1,5 +1,5 @@
 import type { SocketEnvelope } from "../../types/socket";
-import { handleUnauthorizedSession } from "../authBoundary";
+import { recoverOrHandleUnauthorizedSession } from "../authBoundary";
 import {
     dispatchSecurityVerificationRequired,
     isSecurityVerificationCode,
@@ -154,6 +154,9 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         });
 
         socket.addEventListener("message", (event) => {
+            if (ws !== socket) {
+                return;
+            }
             try {
                 const data = JSON.parse(event.data) as SocketEnvelope;
 
@@ -215,12 +218,23 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             if (ws !== socket) {
                 return;
             }
+            options.onClose?.();
             if (event.code === 4401) {
                 shouldReconnect = false;
-                rejectConnectionWaiters("WebSocket authorization failed");
-                handleUnauthorizedSession();
+                void (async () => {
+                    const recovered = await recoverOrHandleUnauthorizedSession();
+                    if (ws !== socket) {
+                        return;
+                    }
+                    if (!recovered) {
+                        rejectConnectionWaiters("WebSocket authorization failed");
+                        return;
+                    }
+                    shouldReconnect = true;
+                    connect();
+                })();
+                return;
             }
-            options.onClose?.();
             if (shouldReconnect) {
                 setTimeout(() => {
                     if (shouldReconnect) {

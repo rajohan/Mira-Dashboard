@@ -1,4 +1,4 @@
-import { handleUnauthorizedSession } from "../lib/authBoundary";
+import { recoverOrHandleUnauthorizedSession } from "../lib/authBoundary";
 import {
     dispatchSecurityVerificationRequired,
     isSecurityVerificationCode,
@@ -45,6 +45,7 @@ export async function apiFetch<T>(
     let canRetryAfterVerification =
         canRetryAfterSecurityVerification &&
         (requestOptions.body === undefined || typeof requestOptions.body === "string");
+    let canRetryAfterUnauthorizedRecovery = canRetryAfterVerification;
     while (true) {
         const headers = new Headers(requestOptions.headers);
         headers.set("Content-Type", "application/json");
@@ -59,7 +60,11 @@ export async function apiFetch<T>(
         });
 
         if (response.status === 401) {
-            handleUnauthorizedSession();
+            const recovered = await recoverOrHandleUnauthorizedSession();
+            if (recovered && canRetryAfterUnauthorizedRecovery) {
+                canRetryAfterUnauthorizedRecovery = false;
+                continue;
+            }
             throw new UnauthorizedError();
         }
 

@@ -190,6 +190,7 @@ import {
 import {
     cancelSecurityVerification,
     completeSecurityVerification,
+    refreshSecurityVerificationDeadline,
     SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
     SecurityVerificationCancelledError,
     waitForSecurityVerification,
@@ -1160,6 +1161,61 @@ describe("Mira Dashboard frontend behavior", () => {
             await expect(apiFetch("/tasks")).rejects.toBeInstanceOf(UnauthorizedError);
             expect(authStore.state.isAuthenticated).toBe(false);
             expect(unauthorizedEvents).toHaveLength(1);
+            expect(fetch).toHaveBeenCalledTimes(2);
+        } finally {
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
+
+    it("retries a stale 401 against the browser's rotated session", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        let taskRequests = 0;
+        const unauthorizedHandler = jest.fn();
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/auth/session") {
+                    return Response.json({
+                        authenticated: true,
+                        isBootstrapRequired: false,
+                        session: {
+                            authMethod: "webauthn",
+                            expiresAt: "2026-08-24T12:00:00.000Z",
+                            lastSeenAt: "2026-07-25T04:01:00.000Z",
+                            mfaEnabled: true,
+                            sessionId: "22222222222222222222222222222222",
+                        },
+                        user: { id: 1, username: "raymond" },
+                    });
+                }
+                if (String(input) === "/api/tasks") {
+                    taskRequests += 1;
+                    return taskRequests === 1
+                        ? Response.json({ error: "Unauthorized" }, { status: 401 })
+                        : Response.json({ isOk: true });
+                }
+                throw new Error(`Unexpected stale-401 request: ${String(input)}`);
+            }),
+            writable: true,
+        });
+
+        try {
+            await expect(apiFetch("/tasks")).resolves.toEqual({ isOk: true });
+            expect(taskRequests).toBe(2);
+            expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
+            expect(unauthorizedHandler).not.toHaveBeenCalled();
         } finally {
             removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
         }
@@ -1314,6 +1370,35 @@ describe("Mira Dashboard frontend behavior", () => {
             removeEventListener(
                 SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
                 cancellationHandler
+            );
+            jest.useRealTimers();
+        }
+    });
+
+    it("refreshes every held request deadline when verification is submitted", async () => {
+        jest.useFakeTimers();
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        try {
+            const verification = waitForSecurityVerification("step_up_required", 1000);
+            let outcome = "pending";
+            void verification.then((verified) => {
+                outcome = verified ? "verified" : "cancelled";
+            });
+
+            jest.advanceTimersByTime(750);
+            refreshSecurityVerificationDeadline();
+            jest.advanceTimersByTime(750);
+            await Promise.resolve();
+            expect(outcome).toBe("pending");
+
+            jest.advanceTimersByTime(250);
+            await expect(verification).resolves.toBe(false);
+            expect(outcome).toBe("cancelled");
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
             );
             jest.useRealTimers();
         }
@@ -1816,7 +1901,9 @@ describe("Mira Dashboard frontend behavior", () => {
         });
         const verificationHandler = claimSecurityVerification;
         addEventListener("mira:security-verification-required", verificationHandler);
+        const onMessage = jest.fn();
         const client = createSocketClient({
+            onMessage,
             url: "ws://dashboard.test/socket",
         });
 
@@ -1842,6 +1929,12 @@ describe("Mira Dashboard frontend behavior", () => {
 
             replacementSocket.open();
             await waitFor(() => expect(replacementSocket.sent).toHaveLength(1));
+            const currentMessageCount = onMessage.mock.calls.length;
+            originalSocket.message({
+                type: "event",
+                event: "stale-after-session-rotation",
+            });
+            expect(onMessage).toHaveBeenCalledTimes(currentMessageCount);
             const retriedRequest = latestSocketRequest(replacementSocket);
             expect(retriedRequest).toMatchObject({
                 method: "privileged.reconnect",
@@ -1867,22 +1960,38 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
-    it("logs out without reconnecting after a 4401 WebSocket close", () => {
+    it("logs out without reconnecting after a confirmed 4401 WebSocket close", async () => {
         const originalWebSocket = WebSocket;
+        const originalFetch = fetch;
         FakeWebSocket.instances = [];
-        Object.defineProperty(globalThis, "WebSocket", {
-            configurable: true,
-            value: FakeWebSocket,
-            writable: true,
+        Object.defineProperties(globalThis, {
+            WebSocket: {
+                configurable: true,
+                value: FakeWebSocket,
+                writable: true,
+            },
+            fetch: {
+                configurable: true,
+                value: jest.fn(async () =>
+                    Response.json({
+                        authenticated: false,
+                        isBootstrapRequired: false,
+                        user: undefined,
+                    })
+                ),
+                writable: true,
+            },
         });
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
             user: { id: 1, username: "raymond" },
         });
+        const unauthorized = Promise.withResolvers<void>();
         const unauthorizedEvents: Event[] = [];
         const unauthorizedHandler = (event: Event) => {
             unauthorizedEvents.push(event);
+            unauthorized.resolve();
         };
         addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
         const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
@@ -1896,6 +2005,7 @@ describe("Mira Dashboard frontend behavior", () => {
             socket.open();
             socket.close(4401);
 
+            await unauthorized.promise;
             expect(authStore.state.isAuthenticated).toBe(false);
             expect(unauthorizedEvents).toHaveLength(1);
             expect(timeoutSpy).not.toHaveBeenCalledWith(expect.any(Function), 2000);
@@ -1903,10 +2013,99 @@ describe("Mira Dashboard frontend behavior", () => {
         } finally {
             timeoutSpy.mockRestore();
             removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
-            Object.defineProperty(globalThis, "WebSocket", {
+            Object.defineProperties(globalThis, {
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
+            });
+        }
+    });
+
+    it("reconnects a 4401 WebSocket when the browser has a rotated session", async () => {
+        const originalWebSocket = WebSocket;
+        const originalFetch = fetch;
+        FakeWebSocket.instances = [];
+        Object.defineProperties(globalThis, {
+            WebSocket: {
                 configurable: true,
-                value: originalWebSocket,
+                value: FakeWebSocket,
                 writable: true,
+            },
+            fetch: {
+                configurable: true,
+                value: jest.fn(async (input: RequestInfo | URL) => {
+                    if (String(input) !== "/api/auth/session") {
+                        throw new Error(
+                            `Unexpected socket recovery request: ${String(input)}`
+                        );
+                    }
+                    return Response.json({
+                        authenticated: true,
+                        isBootstrapRequired: false,
+                        session: {
+                            authMethod: "webauthn",
+                            expiresAt: "2026-08-24T12:00:00.000Z",
+                            lastSeenAt: "2026-07-25T04:01:00.000Z",
+                            mfaEnabled: true,
+                            sessionId: "22222222222222222222222222222222",
+                        },
+                        user: { id: 1, username: "raymond" },
+                    });
+                }),
+                writable: true,
+            },
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const unauthorizedHandler = jest.fn();
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        const client = createSocketClient({
+            url: "ws://dashboard.test/socket",
+        });
+
+        try {
+            client.connect();
+            const oldSocket = FakeWebSocket.instances[0]!;
+            oldSocket.open();
+            oldSocket.close(4401);
+
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+            expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
+            expect(unauthorizedHandler).not.toHaveBeenCalled();
+            const rotatedSocket = FakeWebSocket.instances[1]!;
+            rotatedSocket.open();
+            expect(client.isOpen()).toBe(true);
+        } finally {
+            client.disconnect();
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+            Object.defineProperties(globalThis, {
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
             });
         }
     });

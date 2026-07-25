@@ -3,7 +3,11 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, jest } from "bun:test";
 import type { ReactNode } from "react";
 
-import { useRevokeAllSessions, useRevokeSession } from "../hooks/useAccountSecurity";
+import {
+    useConfirmTotpEnrollment,
+    useRevokeAllSessions,
+    useRevokeSession,
+} from "../hooks/useAccountSecurity";
 import { ApiError } from "../hooks/useApi";
 import { UNAUTHORIZED_EVENT_NAME } from "../lib/authBoundary";
 import {
@@ -183,6 +187,82 @@ describe("Account security logout navigation", () => {
             expect(revokeError).toBeInstanceOf(ApiError);
             expect(revokeRequests).toBe(1);
             expect(authStore.state.isAuthenticated).toBe(true);
+        } finally {
+            view.unmount();
+            queryClient.clear();
+            removeEventListener(
+                SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+                claimAndCompleteSecurityVerification
+            );
+        }
+    });
+
+    it("does not replay an expiring TOTP enrollment code after verification", async () => {
+        let confirmationRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                async (
+                    input: RequestInfo | URL,
+                    init?: RequestInit
+                ): Promise<Response> => {
+                    if (
+                        String(input) === "/api/account/security/totp/confirm" &&
+                        init?.method === "POST"
+                    ) {
+                        confirmationRequests += 1;
+                        return confirmationRequests === 1
+                            ? Response.json(
+                                  {
+                                      code: "recent_verification_required",
+                                      error: "Recent verification is required",
+                                  },
+                                  { status: 403 }
+                              )
+                            : Response.json({
+                                  factorId: "01900000-0000-7000-8000-000000000099",
+                                  isOk: true,
+                                  sessionRotated: true,
+                              });
+                    }
+                    throw new Error(
+                        `Unexpected TOTP confirmation replay request: ${
+                            init?.method ?? "GET"
+                        } ${String(input)}`
+                    );
+                }
+            ),
+            writable: true,
+        });
+        addEventListener(
+            SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+            claimAndCompleteSecurityVerification
+        );
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                mutations: { retry: false },
+                queries: { retry: false },
+            },
+        });
+        const wrapper = ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        );
+        const view = renderHook(() => useConfirmTotpEnrollment(), { wrapper });
+
+        try {
+            let confirmationError: unknown;
+            await act(async () => {
+                try {
+                    await view.result.current.mutateAsync({
+                        code: "123456",
+                        factorId: "01900000-0000-7000-8000-000000000099",
+                    });
+                } catch (error) {
+                    confirmationError = error;
+                }
+            });
+            expect(confirmationError).toBeInstanceOf(ApiError);
+            expect(confirmationRequests).toBe(1);
         } finally {
             view.unmount();
             queryClient.clear();

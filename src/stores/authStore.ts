@@ -52,8 +52,12 @@ const initialState: AuthState = {
 /** Defines auth store. */
 export const authStore = new Store<AuthState>(initialState);
 
-const authRuntimeState: { initializePromise: Promise<void> | undefined } = {
+const authRuntimeState: {
+    initializePromise: Promise<void> | undefined;
+    refreshGeneration: number;
+} = {
     initializePromise: undefined,
+    refreshGeneration: 0,
 };
 
 /** Fetches session. */
@@ -77,10 +81,12 @@ export const authActions: AuthActions = {
                 try {
                     await authActions.refreshSession();
                 } catch {
-                    authStore.setState(() => ({
-                        ...initialState,
-                        isInitialized: true,
-                    }));
+                    if (!authStore.state.isInitialized) {
+                        authStore.setState(() => ({
+                            ...initialState,
+                            isInitialized: true,
+                        }));
+                    }
                 } finally {
                     authRuntimeState.initializePromise = undefined;
                 }
@@ -91,12 +97,16 @@ export const authActions: AuthActions = {
     },
 
     async refreshSession() {
+        const refreshGeneration = ++authRuntimeState.refreshGeneration;
         const session = await fetchSession();
-        authActions.setSession(session);
+        if (authRuntimeState.refreshGeneration === refreshGeneration) {
+            authActions.setSession(session);
+        }
         return session;
     },
 
     setSession(payload) {
+        authRuntimeState.refreshGeneration += 1;
         authStore.setState(() => ({
             user: payload.user,
             isAuthenticated: payload.authenticated,
@@ -108,6 +118,7 @@ export const authActions: AuthActions = {
     },
 
     clearSession() {
+        authRuntimeState.refreshGeneration += 1;
         authStore.setState(() => ({
             ...initialState,
             isInitialized: true,

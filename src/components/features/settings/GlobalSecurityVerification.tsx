@@ -12,6 +12,7 @@ import {
     cancelSecurityVerification,
     completeSecurityVerification,
     dispatchSecurityVerificationRequired,
+    refreshSecurityVerificationDeadline,
     SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
     SECURITY_VERIFICATION_FLOW_TIMEOUT_MS,
     SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
@@ -160,7 +161,7 @@ export function GlobalSecurityVerification() {
         const summarySessionId = data.sessions.find(
             (session) => session.isCurrent
         )?.sessionId;
-        if ((sessionId && summarySessionId !== sessionId) || !data.factors.enabledAt) {
+        if (!sessionId || summarySessionId !== sessionId || !data.factors.enabledAt) {
             return;
         }
         const requireStepUp = () => {
@@ -175,6 +176,7 @@ export function GlobalSecurityVerification() {
         }
         const expiresAt = Date.parse(data.recentVerification.mfaUntil ?? "");
         if (!Number.isFinite(expiresAt)) {
+            requireStepUp();
             return;
         }
         const remainingMs = expiresAt - Date.now();
@@ -188,6 +190,8 @@ export function GlobalSecurityVerification() {
 
     async function runVerification(action: () => Promise<unknown>): Promise<void> {
         const verificationGeneration = verificationGenerationReference.current;
+        startVerificationTimeout(verificationGeneration);
+        refreshSecurityVerificationDeadline();
         setError(undefined);
         try {
             await action();
