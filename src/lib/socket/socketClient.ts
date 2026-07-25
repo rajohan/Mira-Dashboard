@@ -89,6 +89,9 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             return Promise.resolve();
         }
         if (!ws || ws.readyState !== WebSocket.CONNECTING) {
+            connect();
+        }
+        if (!ws || ws.readyState !== WebSocket.CONNECTING) {
             return Promise.reject(new Error("WebSocket not connected"));
         }
         return new Promise((resolve, reject) => {
@@ -129,7 +132,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     };
 
     /** Performs connect. */
-    const connect = () => {
+    function connect(): void {
         if (
             ws?.readyState === WebSocket.OPEN ||
             ws?.readyState === WebSocket.CONNECTING
@@ -142,6 +145,9 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         ws = socket;
 
         socket.addEventListener("open", () => {
+            if (ws !== socket) {
+                return;
+            }
             resolveConnectionWaiters();
             options.onOpen?.();
         });
@@ -204,6 +210,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
             if (event.code === 4401) {
                 shouldReconnect = false;
+                rejectConnectionWaiters("WebSocket authorization failed");
                 handleUnauthorizedSession();
             }
             options.onClose?.();
@@ -222,7 +229,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             }
             options.onError?.();
         });
-    };
+    }
 
     /** Performs disconnect. */
     const disconnect = () => {

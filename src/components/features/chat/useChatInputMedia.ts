@@ -57,8 +57,9 @@ export function useChatInputMedia({
 
     attachmentsReference.current = attachments;
 
-    const invalidateMedia = (shouldUpdateState = true) => {
+    const invalidateMedia = (shouldUpdateState = true): number => {
         mediaEpochReference.current += 1;
+        const mediaEpoch = mediaEpochReference.current;
         pendingAttachmentSlotsReference.current = 0;
         recordingStartEpochReference.current = undefined;
         transcriptionCountReference.current = 0;
@@ -91,14 +92,25 @@ export function useChatInputMedia({
             setIsRecording(false);
             setIsTranscribing(false);
         }
+        return mediaEpoch;
     };
 
     const clearAttachments = () => invalidateMedia();
 
-    const restoreAttachments = (restored: ChatSendAttachment[]) => {
-        if (restored.length === 0) return;
+    const restoreAttachments = (
+        restored: ChatSendAttachment[],
+        expectedMediaEpoch: number
+    ) => {
+        if (restored.length === 0 || mediaEpochReference.current !== expectedMediaEpoch) {
+            return;
+        }
         setAttachments((current) => {
-            if (current.length > 0) return current;
+            if (
+                current.length > 0 ||
+                mediaEpochReference.current !== expectedMediaEpoch
+            ) {
+                return current;
+            }
             attachmentsReference.current = restored;
             return restored;
         });

@@ -2,7 +2,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, jest } from "bun:test";
 import type { SetStateAction } from "react";
 
-import type { ChatHistoryMessage } from "../components/features/chat/chatTypes";
+import type {
+    ChatHistoryMessage,
+    ChatSendAttachment,
+} from "../components/features/chat/chatTypes";
 import { createChatRuntimeState } from "../components/features/chat/domain/chatState";
 import type { ChatTransport } from "../components/features/chat/transport/chatTransport";
 import { useChatActions } from "../components/features/chat/useChatActions";
@@ -81,7 +84,7 @@ describe("chat actions", () => {
                     activeRunCount,
                     attachments: [],
                     attachmentsReference: { current: [] },
-                    clearAttachments: jest.fn(),
+                    clearAttachments: jest.fn(() => 1),
                     confirmResetSession: jest.fn(async () => true),
                     draft,
                     isCompacting,
@@ -167,7 +170,7 @@ describe("chat actions", () => {
                 activeRunCount: 1,
                 attachments: [],
                 attachmentsReference: { current: [] },
-                clearAttachments: jest.fn(),
+                clearAttachments: jest.fn(() => 1),
                 confirmResetSession: jest.fn(async () => true),
                 draft: "steer once",
                 isCompacting: false,
@@ -210,6 +213,21 @@ describe("chat actions", () => {
                 throw new Error("verification cancelled");
             })
         );
+        const attachments: ChatSendAttachment[] = [
+            {
+                contentBase64: "c2F2ZSBtZQ==",
+                dataUrl: "data:text/plain;base64,c2F2ZSBtZQ==",
+                file: new File(["save me"], "save-me.txt", {
+                    type: "text/plain",
+                }),
+                fileName: "save-me.txt",
+                id: "save-me",
+                kind: "text",
+                mimeType: "text/plain",
+                sizeBytes: 7,
+            },
+        ];
+        const restoreAttachments = jest.fn();
         let draftState = "message that must survive";
         const setDraft = jest.fn((update: SetStateAction<string>) => {
             draftState = typeof update === "function" ? update(draftState) : update;
@@ -221,15 +239,16 @@ describe("chat actions", () => {
         const { result } = renderHook(() =>
             useChatActions({
                 activeRunCount: 0,
-                attachments: [],
-                attachmentsReference: { current: [] },
-                clearAttachments: jest.fn(),
+                attachments,
+                attachmentsReference: { current: attachments },
+                clearAttachments: jest.fn(() => 17),
                 confirmResetSession: jest.fn(async () => true),
                 draft: draftState,
                 isCompacting: false,
                 isConnected: true,
                 isRecording: false,
                 isTranscribing: false,
+                restoreAttachments,
                 runtime: fakeRuntime(),
                 scheduleBottomFollow: jest.fn(),
                 selectedSession: selectedSession(),
@@ -248,6 +267,7 @@ describe("chat actions", () => {
 
         expect(draftState).toBe("message that must survive");
         expect(messages).toEqual([]);
+        expect(restoreAttachments).toHaveBeenCalledWith(attachments, 17);
     });
 
     it("uses the session compaction RPC and clears request state when it finishes", async () => {
@@ -260,7 +280,7 @@ describe("chat actions", () => {
                 activeRunCount: 0,
                 attachments: [],
                 attachmentsReference: { current: [] },
-                clearAttachments: jest.fn(),
+                clearAttachments: jest.fn(() => 1),
                 confirmResetSession: jest.fn(async () => true),
                 draft: "queued message",
                 isCompacting: false,
@@ -314,7 +334,7 @@ describe("chat actions", () => {
                 activeRunCount: 0,
                 attachments: [],
                 attachmentsReference: { current: [] },
-                clearAttachments: jest.fn(),
+                clearAttachments: jest.fn(() => 1),
                 confirmResetSession: jest.fn(async () => true),
                 draft: "send after failure",
                 isCompacting: false,
@@ -366,7 +386,7 @@ describe("chat actions", () => {
                     activeRunCount: 0,
                     attachments: [],
                     attachmentsReference: { current: [] },
-                    clearAttachments: jest.fn(),
+                    clearAttachments: jest.fn(() => 1),
                     confirmResetSession: jest.fn(async () => true),
                     draft: "queued message",
                     isCompacting: false,
@@ -430,7 +450,7 @@ describe("chat actions", () => {
                 activeRunCount: 1,
                 attachments: [],
                 attachmentsReference: { current: [] },
-                clearAttachments: jest.fn(),
+                clearAttachments: jest.fn(() => 1),
                 confirmResetSession: jest.fn(async () => true),
                 draft: "steer",
                 isCompacting: false,
@@ -468,7 +488,7 @@ describe("chat actions", () => {
                 activeRunCount: 0,
                 attachments: [],
                 attachmentsReference: { current: [] },
-                clearAttachments: jest.fn(),
+                clearAttachments: jest.fn(() => 1),
                 confirmResetSession: jest.fn(async () => true),
                 draft: "steer after reconnect",
                 isCompacting: false,
@@ -508,7 +528,7 @@ describe("chat actions", () => {
                 activeRunCount: 0,
                 attachments: [],
                 attachmentsReference: { current: [] },
-                clearAttachments: jest.fn(),
+                clearAttachments: jest.fn(() => 1),
                 confirmResetSession: jest.fn(async () => true),
                 draft: "new turn",
                 isCompacting: false,
@@ -552,7 +572,7 @@ describe("chat actions", () => {
                 activeRunCount: 0,
                 attachments: [],
                 attachmentsReference: { current: [] },
-                clearAttachments: jest.fn(),
+                clearAttachments: jest.fn(() => 1),
                 confirmResetSession: jest.fn(async () => true),
                 draft: "hello",
                 isCompacting: false,
@@ -614,7 +634,7 @@ describe("chat actions", () => {
                     activeRunCount: 0,
                     attachments: [],
                     attachmentsReference: { current: [] },
-                    clearAttachments: jest.fn(),
+                    clearAttachments: jest.fn(() => 1),
                     confirmResetSession: jest.fn(async () => true),
                     draft: "fallback id",
                     isCompacting: false,
@@ -662,7 +682,7 @@ describe("chat actions", () => {
                 activeRunCount: 0,
                 attachments: [],
                 attachmentsReference: { current: [] },
-                clearAttachments: jest.fn(),
+                clearAttachments: jest.fn(() => 1),
                 confirmResetSession,
                 draft: "/reset",
                 isCompacting: false,

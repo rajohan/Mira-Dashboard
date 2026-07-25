@@ -1,5 +1,5 @@
 import { KeyRound, ShieldCheck, Smartphone } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
     useAccountSecurity,
@@ -43,22 +43,28 @@ export function GlobalSecurityVerification() {
     const [code, setCode] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState<string>();
+    const requestReference = useRef<VerificationRequest>(request);
+    requestReference.current = request;
 
     useEffect(() => {
         function onVerificationRequired(event: Event): void {
             event.preventDefault();
+            if (requestReference.current) {
+                return;
+            }
             const code = (
                 event as CustomEvent<{
                     code?: string;
                 }>
             ).detail?.code;
-            setRequest(
+            const nextRequest =
                 code === "mfa_enrollment_required"
                     ? "enroll"
                     : code === "recent_verification_required" && !mfaEnabled
                       ? "password"
-                      : "step-up"
-            );
+                      : "step-up";
+            requestReference.current = nextRequest;
+            setRequest(nextRequest);
             setCodeMethod(undefined);
             setCode("");
             setPassword("");
@@ -82,6 +88,9 @@ export function GlobalSecurityVerification() {
             return;
         }
         const requireStepUp = () => {
+            if (requestReference.current) {
+                return;
+            }
             dispatchSecurityVerificationRequired("step_up_required");
         };
         if (!data.recentVerification.mfa) {
@@ -102,6 +111,7 @@ export function GlobalSecurityVerification() {
     }, [data, isAuthenticated, mfaEnabled]);
 
     function reset(): void {
+        requestReference.current = undefined;
         setRequest(undefined);
         setCodeMethod(undefined);
         setCode("");

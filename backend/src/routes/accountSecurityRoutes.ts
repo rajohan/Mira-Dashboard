@@ -607,6 +607,7 @@ export function createAccountSecurityRoutes(
                     factorId,
                     isOk: true,
                     recoveryCodes: confirmation.recoveryCodes,
+                    sessionRotated: confirmation.enabledMfa,
                 };
                 return confirmation.enabledMfa
                     ? upgradeAfterFirstFactor(
@@ -726,6 +727,7 @@ export function createAccountSecurityRoutes(
                     credential: registration.credential,
                     isOk: true,
                     recoveryCodes: registration.confirmation.recoveryCodes,
+                    sessionRotated: registration.confirmation.enabledMfa,
                 };
                 return registration.confirmation.enabledMfa
                     ? upgradeAfterFirstFactor(

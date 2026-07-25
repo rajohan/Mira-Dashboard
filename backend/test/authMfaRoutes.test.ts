@@ -758,8 +758,10 @@ describe("Account security routes", () => {
         expect(registered.status).toBe(200);
         const registeredBody = (await registered.json()) as {
             credential: { id: string };
+            sessionRotated: boolean;
         };
         expect(registeredBody.credential.id).toBe(longCredentialId);
+        expect(registeredBody.sessionRotated).toBe(false);
         const auditEvent = listAuditEvents(10).events.find(
             (event) =>
                 event.action === "account.security-key-added" &&

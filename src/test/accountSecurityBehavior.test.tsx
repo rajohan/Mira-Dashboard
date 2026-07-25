@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, jest } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement } from "react";
 
 import { AccountSecuritySection } from "../components/features/settings/AccountSecuritySection";
 import type { AccountSecuritySummary } from "../hooks/useAccountSecurity";
+import { AUTH_SESSION_ROTATED_EVENT_NAME } from "../lib/authBoundary";
 import { authActions } from "../stores/authStore";
 import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
 
@@ -17,8 +18,15 @@ const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
 const originalCreateObjectUrl = URL.createObjectURL;
 const originalRevokeObjectUrl = URL.revokeObjectURL;
 const webAuthnBrowser = createWebAuthnBrowserTestHarness();
+const sessionRotationHandler = jest.fn(() => {});
+
+beforeEach(() => {
+    sessionRotationHandler.mockClear();
+    addEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, sessionRotationHandler);
+});
 
 afterEach(() => {
+    removeEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, sessionRotationHandler);
     authActions.clearSession();
     Object.defineProperties(globalThis, {
         fetch: {
@@ -351,6 +359,7 @@ describe("Dashboard account security", () => {
                         factorId: "01900000-0000-7000-8000-000000000099",
                         isOk: true,
                         recoveryCodes,
+                        sessionRotated: true,
                     });
                 }
                 if (
@@ -380,6 +389,8 @@ describe("Dashboard account security", () => {
         );
         await userEvent.click(screen.getByRole("button", { name: "Verify" }));
         await screen.findByText("Password verified for sensitive changes");
+        expect(sessionRotationHandler).toHaveBeenCalledTimes(1);
+        sessionRotationHandler.mockClear();
 
         await userEvent.click(screen.getByRole("button", { name: "Add app" }));
         expect(
@@ -399,6 +410,7 @@ describe("Dashboard account security", () => {
         expect(
             await screen.findByRole("heading", { name: "Save recovery codes now" })
         ).toBeInTheDocument();
+        expect(sessionRotationHandler).toHaveBeenCalledTimes(1);
         expect(screen.getByText("alpha-bravo")).toBeInTheDocument();
         await userEvent.click(screen.getByRole("button", { name: "Copy" }));
         await waitFor(() => {
@@ -682,6 +694,7 @@ describe("Dashboard account security", () => {
                         },
                         isOk: true,
                         recoveryCodes,
+                        sessionRotated: false,
                     });
                 }
                 return;
@@ -701,6 +714,7 @@ describe("Dashboard account security", () => {
             screen.getByRole("button", { name: "Touch and register key" })
         );
         expect(await screen.findByText("Security key registered")).toBeInTheDocument();
+        expect(sessionRotationHandler).not.toHaveBeenCalled();
         expect(await screen.findByText("key-recovery-one")).toHaveClass(
             "min-w-0",
             "break-all",

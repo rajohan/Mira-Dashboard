@@ -187,7 +187,10 @@ import {
     AUTH_SESSION_ROTATED_EVENT_NAME,
     UNAUTHORIZED_EVENT_NAME,
 } from "../lib/authBoundary";
-import { completeSecurityVerification } from "../lib/securityVerification";
+import {
+    completeSecurityVerification,
+    waitForSecurityVerification,
+} from "../lib/securityVerification";
 import { createSocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import {
@@ -1248,6 +1251,23 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
+    it("bounds a claimed verification wait when the host never settles it", async () => {
+        jest.useFakeTimers();
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        try {
+            const verification = waitForSecurityVerification("step_up_required", 1000);
+            jest.advanceTimersByTime(1000);
+            await expect(verification).resolves.toBe(false);
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+            jest.useRealTimers();
+        }
+    });
+
     it("parses successful, empty, and failed API responses consistently", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1700,6 +1720,67 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(client.isOpen()).toBe(false);
             expect(events.filter((event) => event === "close")).toHaveLength(1);
         } finally {
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("reconnects before retrying a verified request when no socket is open", async () => {
+        const originalWebSocket = WebSocket;
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        const client = createSocketClient({
+            url: "ws://dashboard.test/socket",
+        });
+
+        try {
+            client.connect();
+            const originalSocket = FakeWebSocket.instances[0]!;
+            originalSocket.open();
+            const request = client.request<{ resumed: boolean }>("privileged.reconnect");
+            const blockedRequest = latestSocketRequest(originalSocket);
+            originalSocket.message({
+                type: "response",
+                id: blockedRequest.id,
+                isOk: false,
+                code: "step_up_required",
+                error: "Recent MFA verification is required",
+            });
+            originalSocket.readyState = FakeWebSocket.CLOSED;
+
+            completeSecurityVerification();
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+            const replacementSocket = FakeWebSocket.instances[1]!;
+            expect(replacementSocket.sent).toEqual([]);
+
+            replacementSocket.open();
+            await waitFor(() => expect(replacementSocket.sent).toHaveLength(1));
+            const retriedRequest = latestSocketRequest(replacementSocket);
+            expect(retriedRequest).toMatchObject({
+                method: "privileged.reconnect",
+            });
+            replacementSocket.message({
+                type: "response",
+                id: retriedRequest.id,
+                isOk: true,
+                payload: { resumed: true },
+            });
+            await expect(request).resolves.toEqual({ resumed: true });
+        } finally {
+            client.disconnect();
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
             Object.defineProperty(globalThis, "WebSocket", {
                 configurable: true,
                 value: originalWebSocket,

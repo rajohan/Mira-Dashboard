@@ -110,6 +110,44 @@ describe("chat input media", () => {
         ).toHaveLength(4);
     });
 
+    it("restores only the attachment snapshot cleared in the current media epoch", async () => {
+        const { result } = renderHook(() =>
+            useChatInputMedia({
+                onError: jest.fn(),
+                sessionKey: "session-a",
+                setDraft: jest.fn(),
+            })
+        );
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["preserve"], "preserve.txt", {
+                        type: "text/plain",
+                    }),
+                ])
+            );
+        });
+        const attachmentSnapshot = result.current.attachments;
+        let clearedEpoch = 0;
+        act(() => {
+            clearedEpoch = result.current.clearAttachments();
+        });
+        expect(result.current.attachments).toEqual([]);
+
+        act(() => {
+            result.current.restoreAttachments(attachmentSnapshot, clearedEpoch);
+        });
+        expect(result.current.attachments).toEqual(attachmentSnapshot);
+
+        let staleEpoch = 0;
+        act(() => {
+            staleEpoch = result.current.clearAttachments();
+            result.current.clearAttachments();
+            result.current.restoreAttachments(attachmentSnapshot, staleEpoch);
+        });
+        expect(result.current.attachments).toEqual([]);
+    });
+
     it("skips video files while preserving valid attachments", async () => {
         const onError = jest.fn();
         const { result } = renderHook(() =>

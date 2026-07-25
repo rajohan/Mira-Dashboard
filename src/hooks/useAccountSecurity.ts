@@ -77,6 +77,7 @@ export interface TotpEnrollment {
 interface FactorConfirmationResponse {
     isOk: boolean;
     recoveryCodes?: string[];
+    sessionRotated: boolean;
 }
 
 export const accountSecurityKeys = {
@@ -194,7 +195,8 @@ export function useConfirmTotpEnrollment() {
                 "/account/security/totp/confirm",
                 { code, factorId }
             ),
-        onSuccess: () => invalidateSecurity(queryClient, true),
+        onSuccess: (response) =>
+            invalidateSecurity(queryClient, response.sessionRotated === true),
     });
 }
 
@@ -228,7 +230,8 @@ export function useRegisterSecurityKey() {
                 response,
             });
         },
-        onSuccess: () => invalidateSecurity(queryClient, true),
+        onSuccess: (response) =>
+            invalidateSecurity(queryClient, response.sessionRotated === true),
     });
 }
 

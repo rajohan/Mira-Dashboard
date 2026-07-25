@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 
 import { GlobalSecurityVerification } from "../components/features/settings/GlobalSecurityVerification";
-import type { AccountSecuritySummary } from "../hooks/useAccountSecurity";
+import {
+    accountSecurityKeys,
+    type AccountSecuritySummary,
+} from "../hooks/useAccountSecurity";
 import {
     dispatchSecurityVerificationRequired,
     type SecurityVerificationCode,
@@ -104,12 +107,12 @@ afterEach(() => {
 });
 
 describe("Global security verification", () => {
-    it("opens proactively when the current MFA verification expires", async () => {
+    it("opens proactively without resetting an in-progress verification", async () => {
         const expiringSummary: AccountSecuritySummary = {
             ...securitySummary,
             recentVerification: {
                 ...securitySummary.recentVerification,
-                mfaUntil: new Date(Date.now() + 50).toISOString(),
+                mfaUntil: new Date(Date.now() - 1000).toISOString(),
             },
         };
         Object.defineProperty(globalThis, "fetch", {
@@ -127,6 +130,24 @@ describe("Global security verification", () => {
         expect(
             await screen.findByRole("heading", { name: "Verify your session" })
         ).toBeInTheDocument();
+        await userEvent.click(screen.getByRole("button", { name: "Use recovery code" }));
+        await userEvent.type(
+            screen.getByLabelText("Recovery code"),
+            "preserve-this-code"
+        );
+        act(() => {
+            queryClient.setQueryData(accountSecurityKeys.all, {
+                ...expiringSummary,
+                factors: {
+                    ...expiringSummary.factors,
+                    recoveryCodesRemaining: 7,
+                },
+                recentVerification: {
+                    ...expiringSummary.recentVerification,
+                },
+            });
+        });
+        expect(screen.getByLabelText("Recovery code")).toHaveValue("preserve-this-code");
         await userEvent.click(
             screen.getByRole("button", { name: "Close Verify your session" })
         );
