@@ -1315,23 +1315,28 @@ function getGatewayWs(): undefined {
 /** Performs send request async. */
 async function sendRequestAsync(
     method: string,
-    parameters: Record<string, unknown>
+    parameters: Record<string, unknown>,
+    options?: OpenClawGatewayRequestOptions
 ): Promise<unknown> {
     if (!gatewayState.client || !gatewayState.isConnected) {
         throw new Error("Gateway not connected");
     }
 
-    return requestWithReplayBoundary(gatewayState.client, method, parameters);
+    return requestWithReplayBoundary(gatewayState.client, method, parameters, options);
 }
 
 /** Performs send session message. */
 async function sendSessionMessage(sessionKey: string, message: string): Promise<void> {
-    await sendRequestAsync("chat.send", {
-        sessionKey,
-        message,
-        idempotencyKey: `tasks-notify-${Bun.randomUUIDv7()}`,
-        timeoutMs: 10_000,
-    });
+    await sendRequestAsync(
+        "chat.send",
+        {
+            sessionKey,
+            message,
+            idempotencyKey: `tasks-notify-${Bun.randomUUIDv7()}`,
+        },
+        // Limit only the Gateway acknowledgement wait; chat.send timeoutMs caps the run.
+        { timeoutMs: 10_000 }
+    );
 }
 
 /** Performs abort session run. */
