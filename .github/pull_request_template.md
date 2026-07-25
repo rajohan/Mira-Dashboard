@@ -10,10 +10,10 @@
 
 <!-- Check everything you ran. Leave unchecked with a short reason if not applicable. -->
 
-- [ ] Frontend lint: `bun run lint`
+- [ ] Frontend lint: `bun run lint:frontend`
 - [ ] Frontend build: `bun run build`
 - [ ] Frontend tests/coverage: `bun run test:coverage`
-- [ ] Backend lint: `bun run lint` from `backend/`
+- [ ] Backend lint: `bun run lint:backend`
 - [ ] Backend build: `bun run build` from `backend/`
 - [ ] Backend tests/coverage: `bun run test:coverage` from `backend/`
 - [ ] Focused regression tests: <!-- command(s) -->

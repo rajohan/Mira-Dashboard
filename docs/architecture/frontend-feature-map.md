@@ -126,7 +126,7 @@ frontend gates:
 
 ```bash
 bun test ./src/test/frontendBehavior.test.tsx --test-name-pattern "<feature>"
-bun run lint
+bun run lint:frontend
 bun run build
 bun run format:check
 git diff --check

@@ -116,7 +116,8 @@ If the browser still shows old UI, hard refresh or clear the tab cache.
 Run the same local gates before pushing another fix:
 
 ```bash
-bun run lint
+bun run lint:frontend
+bun run lint:backend
 bun run build
 bun run format:check
 git diff --check
@@ -126,7 +127,7 @@ Backend:
 
 ```bash
 cd backend
-bun run lint
+bun run lint:backend
 bun run build
 bun run test:coverage
 ```

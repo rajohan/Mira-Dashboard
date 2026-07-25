@@ -5,7 +5,8 @@
 Root/frontend:
 
 ```bash
-bun run lint
+bun run lint:frontend
+bun run lint:backend
 bun run build
 bun run test
 bun run test:coverage
@@ -16,7 +17,7 @@ Backend:
 
 ```bash
 cd backend
-bun run lint
+bun run lint:backend
 bun run build
 bun run test
 bun run test:coverage

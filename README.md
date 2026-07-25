@@ -75,7 +75,8 @@ The backend scripts use Doppler (`rajohan` / `prd`) for runtime secrets. Do not 
 From the repo root:
 
 ```bash
-bun run lint
+bun run lint:frontend
+bun run lint:backend
 bun run build
 bun run test
 bun run test:coverage
@@ -85,7 +86,7 @@ bun run format:check
 From `backend/`:
 
 ```bash
-bun run lint
+bun run lint:backend
 bun run build
 bun run test
 bun run test:coverage

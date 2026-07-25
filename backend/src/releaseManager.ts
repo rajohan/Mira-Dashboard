@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -28,6 +29,7 @@ const RELEASE_TRANSITION_FORMAT_VERSION = 1;
 const RELEASE_TRANSITION_JOURNAL_FILE_NAME = ".release-transition.json";
 const RELEASE_TRANSITION_LOCK_FILE_NAME = ".release-transition.lock";
 const MAX_RELEASE_TRANSITION_FILE_BYTES = 4096;
+const RELEASE_TRANSITION_LOCK_PROGRAM = "/usr/bin/flock";
 
 export type ReleaseLinkName = "current" | "previous";
 
@@ -67,9 +69,10 @@ interface ReleaseTransitionJournal {
     operation: "activate" | "rollback";
 }
 
-interface ReleaseTransitionLock {
-    formatVersion: 1;
-    ownerPid: number;
+interface ReleaseTransitionJournalSnapshot {
+    device: number;
+    inode: number;
+    journal: ReleaseTransitionJournal;
 }
 
 function compareStrings(left: string, right: string): number {
@@ -198,25 +201,14 @@ function parseReleaseTransitionJournal(value: unknown): ReleaseTransitionJournal
     };
 }
 
-function parseReleaseTransitionLock(value: unknown): ReleaseTransitionLock {
-    if (
-        !isPlainRecord(value) ||
-        !hasExactKeys(value, ["formatVersion", "ownerPid"]) ||
-        value.formatVersion !== RELEASE_TRANSITION_FORMAT_VERSION ||
-        !Number.isSafeInteger(value.ownerPid) ||
-        (value.ownerPid as number) <= 0
-    ) {
-        throw new TypeError("Release transition lock is invalid");
-    }
-    return {
-        formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
-        ownerPid: value.ownerPid as number,
-    };
-}
-
-async function readBoundedControlFile(
-    filePath: string
-): Promise<{ modifiedAtMs: number; serialized: string } | undefined> {
+async function readBoundedControlFile(filePath: string): Promise<
+    | {
+          device: number;
+          inode: number;
+          serialized: string;
+      }
+    | undefined
+> {
     let file: fs.promises.FileHandle;
     try {
         file = await fsp.open(
@@ -242,7 +234,8 @@ async function readBoundedControlFile(
             );
         }
         return {
-            modifiedAtMs: stat.mtimeMs,
+            device: stat.dev,
+            inode: stat.ino,
             serialized: await file.readFile("utf8"),
         };
     } finally {
@@ -252,78 +245,25 @@ async function readBoundedControlFile(
 
 async function readReleaseTransitionJournal(
     layout: DashboardReleaseLayout
-): Promise<ReleaseTransitionJournal | undefined> {
+): Promise<ReleaseTransitionJournalSnapshot | undefined> {
     const file = await readBoundedControlFile(
         path.join(layout.root, RELEASE_TRANSITION_JOURNAL_FILE_NAME)
     );
     return file
-        ? parseReleaseTransitionJournal(JSON.parse(file.serialized) as unknown)
+        ? {
+              device: file.device,
+              inode: file.inode,
+              journal: parseReleaseTransitionJournal(
+                  JSON.parse(file.serialized) as unknown
+              ),
+          }
         : undefined;
-}
-
-async function readReleaseTransitionLock(layout: DashboardReleaseLayout): Promise<
-    | (ReleaseTransitionLock & {
-          device: number;
-          inode: number;
-      })
-    | undefined
-> {
-    const lockPath = path.join(layout.root, RELEASE_TRANSITION_LOCK_FILE_NAME);
-    let stat: fs.Stats;
-    try {
-        stat = await fsp.lstat(lockPath);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-            return undefined;
-        }
-        throw error;
-    }
-    if (
-        !stat.isSymbolicLink() ||
-        stat.nlink !== 1 ||
-        stat.size === 0 ||
-        stat.size > MAX_RELEASE_TRANSITION_FILE_BYTES
-    ) {
-        throw new TypeError(
-            "Release transition lock must be an atomic bounded symbolic link"
-        );
-    }
-    const serialized = await fsp.readlink(lockPath);
-    if (Buffer.byteLength(serialized, "utf8") > MAX_RELEASE_TRANSITION_FILE_BYTES) {
-        throw new TypeError("Release transition lock is too large");
-    }
-    const verifiedStat = await fsp.lstat(lockPath);
-    if (verifiedStat.dev !== stat.dev || verifiedStat.ino !== stat.ino) {
-        throw new Error("Release transition lock changed while it was being read");
-    }
-    return {
-        ...parseReleaseTransitionLock(JSON.parse(serialized) as unknown),
-        device: stat.dev,
-        inode: stat.ino,
-    };
-}
-
-async function removeReleaseTransitionLock(
-    layout: DashboardReleaseLayout,
-    expectedLock: { device: number; inode: number }
-): Promise<void> {
-    const lockPath = path.join(layout.root, RELEASE_TRANSITION_LOCK_FILE_NAME);
-    const stat = await fsp.lstat(lockPath);
-    if (
-        !stat.isSymbolicLink() ||
-        stat.nlink !== 1 ||
-        stat.dev !== expectedLock.device ||
-        stat.ino !== expectedLock.inode
-    ) {
-        throw new Error("Managed release transition lock ownership changed");
-    }
-    await fsp.unlink(lockPath);
-    await syncDirectory(layout.root);
 }
 
 async function removeReleaseTransitionControlFile(
     layout: DashboardReleaseLayout,
-    fileName: string
+    fileName: string,
+    expected?: { device: number; inode: number }
 ): Promise<void> {
     const filePath = path.join(layout.root, fileName);
     let stat: fs.Stats;
@@ -335,10 +275,14 @@ async function removeReleaseTransitionControlFile(
         }
         throw error;
     }
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
-        throw new TypeError(
-            "Release transition control file must be a single-link regular file"
-        );
+    if (
+        !stat.isFile() ||
+        stat.isSymbolicLink() ||
+        stat.nlink !== 1 ||
+        (expected !== undefined &&
+            (stat.dev !== expected.device || stat.ino !== expected.inode))
+    ) {
+        throw new TypeError("Release transition control file identity changed");
     }
     await fsp.unlink(filePath);
     await syncDirectory(layout.root);
@@ -347,7 +291,7 @@ async function removeReleaseTransitionControlFile(
 async function writeReleaseTransitionJournal(
     layout: DashboardReleaseLayout,
     journal: ReleaseTransitionJournal
-): Promise<void> {
+): Promise<ReleaseTransitionJournalSnapshot> {
     const journalPath = path.join(layout.root, RELEASE_TRANSITION_JOURNAL_FILE_NAME);
     try {
         await fsp.lstat(journalPath);
@@ -362,51 +306,11 @@ async function writeReleaseTransitionJournal(
         `${JSON.stringify(journal)}\n`,
         0o600
     );
-}
-
-async function acquireReleaseTransitionLock(
-    layout: DashboardReleaseLayout
-): Promise<void> {
-    const lockPath = path.join(layout.root, RELEASE_TRANSITION_LOCK_FILE_NAME);
-    let isLockCreated = false;
-    try {
-        await fsp.symlink(
-            JSON.stringify({
-                formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
-                ownerPid: process.pid,
-            }),
-            lockPath,
-            "file"
-        );
-        isLockCreated = true;
-        await syncDirectory(layout.root);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-            throw new Error("Another managed release transition is in progress", {
-                cause: error,
-            });
-        }
-        if (isLockCreated) {
-            try {
-                const lock = await readReleaseTransitionLock(layout);
-                if (lock?.ownerPid === process.pid) {
-                    await removeReleaseTransitionLock(layout, lock);
-                }
-            } catch {
-                // Preserve the lock acquisition failure.
-            }
-        }
-        throw error;
+    const snapshot = await readReleaseTransitionJournal(layout);
+    if (!snapshot) {
+        throw new Error("Release transition journal disappeared after creation");
     }
-}
-
-function isProcessAlive(pid: number): boolean {
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch (error) {
-        return (error as NodeJS.ErrnoException).code !== "ESRCH";
-    }
+    return snapshot;
 }
 
 export function resolveDashboardReleasesRoot(
@@ -767,73 +671,103 @@ async function applyReleaseLinkState(
 
 async function restoreInterruptedReleaseTransition(
     layout: DashboardReleaseLayout,
-    journal: ReleaseTransitionJournal
+    snapshot: ReleaseTransitionJournalSnapshot
 ): Promise<void> {
-    await applyReleaseLinkState(layout, journal.before);
+    await applyReleaseLinkState(layout, snapshot.journal.before);
     const restored = await readDashboardReleaseStateFromLayout(layout);
-    assertDashboardReleaseStateMatches(restored, journal.before);
+    assertDashboardReleaseStateMatches(restored, snapshot.journal.before);
     await removeReleaseTransitionControlFile(
         layout,
-        RELEASE_TRANSITION_JOURNAL_FILE_NAME
+        RELEASE_TRANSITION_JOURNAL_FILE_NAME,
+        snapshot
     );
 }
 
 async function recoverInterruptedReleaseTransition(
     layout: DashboardReleaseLayout
 ): Promise<void> {
-    const lock = await readReleaseTransitionLock(layout);
-    const journal = await readReleaseTransitionJournal(layout);
-    if (!lock && !journal) {
-        return;
-    }
-    if (lock && isProcessAlive(lock.ownerPid)) {
-        throw new Error(
-            `Managed release transition is active in process ${lock.ownerPid}`
-        );
-    }
-    if (journal) {
-        await restoreInterruptedReleaseTransition(layout, journal);
-    }
-    if (lock) {
-        await removeReleaseTransitionLock(layout, lock);
+    const snapshot = await readReleaseTransitionJournal(layout);
+    if (snapshot) {
+        await restoreInterruptedReleaseTransition(layout, snapshot);
     }
 }
 
-async function releaseOwnedTransitionLock(layout: DashboardReleaseLayout): Promise<void> {
-    const lock = await readReleaseTransitionLock(layout);
-    if (!lock || lock.ownerPid !== process.pid) {
-        throw new Error("Managed release transition lock ownership changed");
+async function openReleaseTransitionLockFile(
+    layout: DashboardReleaseLayout
+): Promise<fs.promises.FileHandle> {
+    const lockPath = path.join(layout.root, RELEASE_TRANSITION_LOCK_FILE_NAME);
+    const file = await fsp.open(
+        lockPath,
+        fs.constants.O_CREAT | fs.constants.O_NOFOLLOW | fs.constants.O_RDWR,
+        0o600
+    );
+    const descriptorStat = await file.stat();
+    const pathStat = await fsp.lstat(lockPath);
+    if (
+        !descriptorStat.isFile() ||
+        descriptorStat.nlink !== 1 ||
+        !pathStat.isFile() ||
+        pathStat.isSymbolicLink() ||
+        pathStat.nlink !== 1 ||
+        descriptorStat.dev !== pathStat.dev ||
+        descriptorStat.ino !== pathStat.ino
+    ) {
+        await file.close();
+        throw new TypeError("Release transition lock must be a single-link regular file");
     }
-    await removeReleaseTransitionLock(layout, lock);
+    return file;
+}
+
+async function acquireReleaseTransitionLock(
+    layout: DashboardReleaseLayout
+): Promise<fs.promises.FileHandle> {
+    const lockFile = await openReleaseTransitionLockFile(layout);
+    const result = spawnSync(
+        RELEASE_TRANSITION_LOCK_PROGRAM,
+        ["--exclusive", "--nonblock", "3"],
+        {
+            stdio: ["ignore", "ignore", "pipe", lockFile.fd],
+        }
+    );
+    if (result.error || result.status !== 0) {
+        await lockFile.close();
+        if (result.error) {
+            throw result.error;
+        }
+        throw new Error("Another managed release transition is in progress");
+    }
+    return lockFile;
 }
 
 async function withReleaseTransitionLock<T>(
     layout: DashboardReleaseLayout,
     transition: () => Promise<T>
 ): Promise<T> {
-    await acquireReleaseTransitionLock(layout);
-    let primaryError: unknown;
-    let didTransitionFail = false;
+    const lockFile = await acquireReleaseTransitionLock(layout);
+    let result: T | undefined;
+    let transitionError: unknown;
     try {
-        return await transition();
-    } catch (error) {
-        primaryError = error;
-        didTransitionFail = true;
-        throw error;
-    } finally {
-        try {
-            await releaseOwnedTransitionLock(layout);
-        } catch (cleanupError) {
-            if (didTransitionFail) {
-                throw new AggregateError(
-                    [primaryError, cleanupError],
-                    "Managed release transition failed and its lock could not be released",
-                    { cause: primaryError }
-                );
-            }
-            throw cleanupError;
-        }
+        await recoverInterruptedReleaseTransition(layout);
+        result = await transition();
+    } catch (primaryError) {
+        transitionError = primaryError;
     }
+    try {
+        await lockFile.close();
+    } catch (cleanupError) {
+        if (transitionError !== undefined) {
+            throw new AggregateError(
+                [transitionError, cleanupError],
+                "Managed release transition failed and its lock could not be released",
+                { cause: cleanupError }
+            );
+        }
+        throw cleanupError;
+    }
+    if (transitionError !== undefined) {
+        throw transitionError;
+    }
+    return result as T;
 }
 
 async function executeReleaseTransition(
@@ -841,19 +775,20 @@ async function executeReleaseTransition(
     journal: ReleaseTransitionJournal,
     apply: () => Promise<void>
 ): Promise<DashboardReleaseState> {
-    await writeReleaseTransitionJournal(layout, journal);
+    const snapshot = await writeReleaseTransitionJournal(layout, journal);
     try {
         await apply();
         const state = await readDashboardReleaseStateFromLayout(layout);
         assertDashboardReleaseStateMatches(state, journal.after);
         await removeReleaseTransitionControlFile(
             layout,
-            RELEASE_TRANSITION_JOURNAL_FILE_NAME
+            RELEASE_TRANSITION_JOURNAL_FILE_NAME,
+            snapshot
         );
         return state;
     } catch (error) {
         try {
-            await restoreInterruptedReleaseTransition(layout, journal);
+            await restoreInterruptedReleaseTransition(layout, snapshot);
         } catch (recoveryError) {
             throw new AggregateError(
                 [error, recoveryError],
@@ -869,8 +804,9 @@ export async function readDashboardReleaseState(
     releasesRoot = resolveDashboardReleasesRoot()
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    await recoverInterruptedReleaseTransition(layout);
-    return readDashboardReleaseStateFromLayout(layout);
+    return withReleaseTransitionLock(layout, () =>
+        readDashboardReleaseStateFromLayout(layout)
+    );
 }
 
 export async function activateDashboardRelease(
@@ -879,15 +815,11 @@ export async function activateDashboardRelease(
     options: DashboardReleaseManagerOptions = {}
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    await recoverInterruptedReleaseTransition(layout);
     const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
     assertHostRuntimeCompatible(candidate);
 
     return withReleaseTransitionLock(layout, async () => {
         const state = await readDashboardReleaseStateFromLayout(layout);
-        if (state.current?.commitSha === candidate.commitSha) {
-            return state;
-        }
         if (state.current) {
             assertReleaseActivationCompatible(
                 candidate.manifest,
@@ -909,14 +841,14 @@ export async function activateDashboardRelease(
             maximumInspectableSchemaVersion
         );
         const requiresCoordinatedCutover =
+            (liveSchemaVersion < candidate.manifest.schema.minimumCompatible &&
+                liveSchemaVersion < candidate.manifest.schema.target) ||
             (state.current !== undefined &&
                 (candidate.manifest.schema.target <
                     state.current.manifest.schema.minimumCompatible ||
                     candidate.manifest.schema.target >
-                        state.current.manifest.schema.maximumCompatible)) ||
-            (liveSchemaVersion < candidate.manifest.schema.minimumCompatible &&
-                liveSchemaVersion < candidate.manifest.schema.target);
-        if (options.schemaCutoverMode === "coordinated" && !requiresCoordinatedCutover) {
+                        state.current.manifest.schema.maximumCompatible));
+        if (!requiresCoordinatedCutover && options.schemaCutoverMode === "coordinated") {
             throw new Error(
                 "Coordinated schema cutover mode requires an incompatible schema boundary"
             );
@@ -926,6 +858,9 @@ export async function activateDashboardRelease(
             liveSchemaVersion,
             options.schemaCutoverMode
         );
+        if (state.current?.commitSha === candidate.commitSha) {
+            return state;
+        }
 
         const before = releaseLinkStateFromDashboardState(state);
         const journal: ReleaseTransitionJournal = {
@@ -951,7 +886,6 @@ export async function rollbackDashboardRelease(
     options: DashboardReleaseManagerOptions = {}
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    await recoverInterruptedReleaseTransition(layout);
     return withReleaseTransitionLock(layout, async () => {
         const state = await readDashboardReleaseStateFromLayout(layout);
         if (!state.current || !state.previous) {

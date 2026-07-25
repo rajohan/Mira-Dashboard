@@ -38,7 +38,7 @@ export async function runReleaseLifecycleCommand(
         command === "activate" &&
         extra.length === 1 &&
         extra[0] === COORDINATED_SCHEMA_CUTOVER_FLAG;
-    if (extra.length > 0 && !isCoordinatedSchemaCutover) {
+    if (!isCoordinatedSchemaCutover && extra.length > 0) {
         throw new TypeError("Release lifecycle command received unexpected arguments");
     }
 

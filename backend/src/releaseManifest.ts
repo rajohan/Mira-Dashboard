@@ -186,6 +186,25 @@ function artifactPath(releaseRoot: string, relativePath: string): string {
     return path.join(releaseRoot, ...relativePath.split("/"));
 }
 
+async function assertArtifactAncestorsReal(
+    releaseRoot: string,
+    relativePath: string,
+    shouldIncludeLeaf = false
+): Promise<void> {
+    const segments = relativePath.split("/");
+    const directorySegments = shouldIncludeLeaf ? segments : segments.slice(0, -1);
+    let currentPath = releaseRoot;
+    for (const segment of directorySegments) {
+        currentPath = path.join(currentPath, segment);
+        const stat = await fsp.lstat(currentPath);
+        if (!stat.isDirectory() || stat.isSymbolicLink()) {
+            throw new TypeError(
+                `Release artifact path must not traverse symlinks: ${relativePath}`
+            );
+        }
+    }
+}
+
 async function readRegularFileNoFollow(filePath: string): Promise<Buffer> {
     const file = await fsp.open(
         filePath,
@@ -206,6 +225,7 @@ async function collectArtifactDirectory(
     releaseRoot: string,
     relativeDirectory: string
 ): Promise<string[]> {
+    await assertArtifactAncestorsReal(releaseRoot, relativeDirectory, true);
     const absoluteDirectory = artifactPath(
         releaseRoot,
         `${relativeDirectory}/placeholder`
@@ -263,6 +283,7 @@ async function releaseArtifact(
     releaseRoot: string,
     relativePath: string
 ): Promise<ReleaseManifestArtifact> {
+    await assertArtifactAncestorsReal(releaseRoot, relativePath);
     const content = await readRegularFileNoFollow(
         artifactPath(releaseRoot, relativePath)
     );
@@ -314,6 +335,7 @@ async function loadComponentBuildIdentity(
         component === "backend"
             ? "backend/dist/build-identity.json"
             : "dist/build-identity.json";
+    await assertArtifactAncestorsReal(releaseRoot, relativePath);
     const content = await readRegularFileNoFollow(
         artifactPath(releaseRoot, relativePath)
     );

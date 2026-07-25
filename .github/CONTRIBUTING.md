@@ -15,7 +15,8 @@ Thanks for helping improve Mira Dashboard.
 Run the relevant checks locally when possible:
 
 ```bash
-bun run lint
+bun run lint:frontend
+bun run lint:backend
 bun run build
 bun run test:coverage
 ```
@@ -24,7 +25,7 @@ Backend changes use the same checks from `backend/`:
 
 ```bash
 cd backend
-bun run lint
+bun run lint:backend
 bun run build
 bun run test:coverage
 ```
