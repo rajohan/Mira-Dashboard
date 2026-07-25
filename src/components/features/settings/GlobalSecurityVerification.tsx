@@ -25,6 +25,19 @@ import { Modal } from "../../ui/Modal";
 type VerificationRequest = "enroll" | "password" | "step-up" | undefined;
 type CodeMethod = "recovery" | "totp" | undefined;
 
+function requestForVerificationCode(
+    code: string | undefined,
+    isMfaEnabled: boolean
+): VerificationRequest {
+    if (code === "mfa_enrollment_required") {
+        return "enroll";
+    }
+    if (code === "recent_verification_required") {
+        return isMfaEnabled ? "step-up" : "password";
+    }
+    return code === "step_up_required" ? "step-up" : undefined;
+}
+
 function errorMessage(error: unknown): string {
     return error instanceof Error && error.message.trim()
         ? error.message
@@ -58,8 +71,7 @@ export function GlobalSecurityVerification() {
 
     useEffect(() => {
         function onVerificationRequired(event: Event): void {
-            event.preventDefault();
-            if (requestReference.current) {
+            if (!isAuthenticated) {
                 return;
             }
             const code = (
@@ -67,12 +79,17 @@ export function GlobalSecurityVerification() {
                     code?: string;
                 }>
             ).detail?.code;
-            const nextRequest =
-                code === "mfa_enrollment_required"
-                    ? "enroll"
-                    : code === "recent_verification_required" && !mfaEnabled
-                      ? "password"
-                      : "step-up";
+            const nextRequest = requestForVerificationCode(code, mfaEnabled);
+            if (
+                !nextRequest ||
+                (requestReference.current && requestReference.current !== nextRequest)
+            ) {
+                return;
+            }
+            event.preventDefault();
+            if (requestReference.current) {
+                return;
+            }
             requestReference.current = nextRequest;
             setRequest(nextRequest);
             setCodeMethod(undefined);
@@ -93,7 +110,13 @@ export function GlobalSecurityVerification() {
             );
             removeEventListener(SECURITY_VERIFICATION_CANCELLED_EVENT_NAME, reset);
         };
-    }, [mfaEnabled, reset]);
+    }, [isAuthenticated, mfaEnabled, reset]);
+
+    useEffect(() => {
+        if (!isAuthenticated && requestReference.current) {
+            cancelSecurityVerification();
+        }
+    }, [isAuthenticated]);
 
     useEffect(() => {
         if (!isAuthenticated || !data) {

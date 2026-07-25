@@ -10,9 +10,11 @@ import {
 } from "../hooks/useAccountSecurity";
 import {
     cancelSecurityVerification,
+    completeSecurityVerification,
     dispatchSecurityVerificationRequired,
     type SecurityVerificationCode,
     waitForSecurityVerification,
+    waitForSecurityVerificationOutcome,
 } from "../lib/securityVerification";
 import { authActions } from "../stores/authStore";
 import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
@@ -480,6 +482,112 @@ describe("Global security verification", () => {
             expect(document.body.textContent).not.toContain("Verify your session");
         });
         act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("cancels a claimed verification when authentication ends", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(securitySummary);
+                }
+                throw new Error(
+                    `Unexpected logout cancellation request: ${String(input)}`
+                );
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/account/security",
+                expect.objectContaining({ credentials: "include" })
+            );
+        });
+        let verificationPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        act(() => {
+            verificationPromise = waitForSecurityVerificationOutcome("step_up_required");
+        });
+        expect(
+            screen.getByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+
+        act(() => {
+            authActions.clearSession();
+        });
+
+        await expect(verificationPromise).resolves.toBe("cancelled");
+        await waitFor(() => {
+            expect(document.body.textContent).not.toContain("Verify your session");
+        });
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("does not claim an incompatible requirement during an active flow", async () => {
+        act(() => {
+            authActions.setSession({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "password",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:00:00.000Z",
+                    mfaEnabled: false,
+                    sessionId: PRIMARY_DASHBOARD_SESSION_ID,
+                },
+                user: { id: 1, username: "raymond" },
+            });
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(passwordOnlySecuritySummary);
+                }
+                throw new Error(
+                    `Unexpected incompatible verification request: ${String(input)}`
+                );
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/account/security",
+                expect.objectContaining({ credentials: "include" })
+            );
+        });
+        let passwordPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        let enrollmentPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        act(() => {
+            passwordPromise = waitForSecurityVerificationOutcome(
+                "recent_verification_required"
+            );
+            enrollmentPromise = waitForSecurityVerificationOutcome(
+                "mfa_enrollment_required"
+            );
+        });
+        expect(
+            screen.getByRole("heading", { name: "Verify current password" })
+        ).toBeInTheDocument();
+
+        act(() => {
+            completeSecurityVerification();
+        });
+
+        await expect(passwordPromise).resolves.toBe("verified");
+        await expect(enrollmentPromise).resolves.toBe("unclaimed");
+        act(() => {
+            cancelSecurityVerification();
             queryClient.clear();
         });
     });
