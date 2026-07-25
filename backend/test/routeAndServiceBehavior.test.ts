@@ -375,7 +375,7 @@ describe("backend route and service behavior", () => {
         }
         const sessionTokenParts = decodeURIComponent(encodedSessionToken).split(".", 3);
         const [sessionSelector, sessionValidator] = sessionTokenParts;
-        if (sessionTokenParts.length !== 2 || !sessionSelector || !sessionValidator) {
+        if (!sessionSelector || !sessionValidator || sessionTokenParts.length !== 2) {
             throw new Error("Expected a selector/validator session token");
         }
         expect(sessionSelector).toMatch(/^[a-f0-9]{32}$/u);
