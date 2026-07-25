@@ -120,6 +120,7 @@ export function shouldStartOnImport(
 }
 
 interface BackendServerEntrypointOptions {
+    exitProcess?: (code: number) => void;
     isDirect?: boolean;
     reportFailure?: (error: unknown) => void;
     runServer?: () => Promise<void>;
@@ -153,6 +154,7 @@ export async function runBackendServer(port = resolveListenPort()): Promise<void
  * modules imported by other runtimes without claiming their process signals.
  */
 export async function startBackendServerEntrypoint({
+    exitProcess = process.exit,
     isDirect = isDirectEntrypoint(),
     reportFailure = reportBackendServerFailure,
     runServer = runBackendServer,
@@ -166,11 +168,14 @@ export async function startBackendServerEntrypoint({
         startServer();
         return;
     }
+    let exitCode = 0;
     try {
         await runServer();
     } catch (error) {
         reportFailure(error);
+        exitCode = 1;
     }
+    exitProcess(exitCode);
 }
 
 if (shouldStartOnImport()) {

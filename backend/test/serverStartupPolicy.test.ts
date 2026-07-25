@@ -90,9 +90,11 @@ describe("server start scheduler policy", () => {
         expect(importedStarter).toHaveBeenCalledTimes(1);
 
         const directServer = Promise.withResolvers<void>();
+        const exitProcess = jest.fn(() => {});
         let isDirectStartupComplete = false;
         const runDirectStartup = async () => {
             await startBackendServerEntrypoint({
+                exitProcess,
                 isDirect: true,
                 runServer: () => directServer.promise,
             });
@@ -104,6 +106,7 @@ describe("server start scheduler policy", () => {
         directServer.resolve();
         await directStartup;
         expect(isDirectStartupComplete).toBe(true);
+        expect(exitProcess).toHaveBeenCalledWith(0);
 
         const startupError = new Error("imported startup failed");
         await expect(
@@ -120,17 +123,20 @@ describe("server start scheduler policy", () => {
     it("reports direct backend entrypoint failures", async () => {
         const originalExitCode = process.exitCode ?? 0;
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const exitProcess = jest.fn(() => {});
         const startupError = new Error("direct startup failed");
         const { startBackendServerEntrypoint } = await import("../src/serverStart.ts");
         try {
             process.exitCode = 0;
             await startBackendServerEntrypoint({
+                exitProcess,
                 isDirect: true,
                 runServer: async () => {
                     throw startupError;
                 },
             });
             expect(errorSpy).toHaveBeenCalledWith("[Backend] Failed:", startupError);
+            expect(exitProcess).toHaveBeenCalledWith(1);
             expect(process.exitCode).toBe(1);
         } finally {
             errorSpy.mockRestore();
@@ -539,6 +545,123 @@ describe("server start scheduler policy", () => {
                     process.env[key] = originalValue;
                 }
             }
+            rmSync(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
+    it("exits the direct web process after graceful shutdown when another handle remains", async () => {
+        const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-server-process-"));
+        const frontendRoot = path.join(temporaryRoot, "frontend");
+        const openclawRoot = path.join(temporaryRoot, "openclaw");
+        const preloadPath = path.join(temporaryRoot, "retained-handle.ts");
+        mkdirSync(frontendRoot, { recursive: true });
+        mkdirSync(openclawRoot, { recursive: true });
+        writeFileSync(path.join(frontendRoot, "index.html"), "<!doctype html>");
+        writeFileSync(path.join(openclawRoot, "openclaw.json"), "{}\n");
+        writeFileSync(preloadPath, "setInterval(() => {}, 1_000);\n");
+
+        const portReservation = Bun.serve({
+            fetch: () => new Response("reserved"),
+            hostname: "127.0.0.1",
+            port: 0,
+        });
+        const port = portReservation.port;
+        await portReservation.stop(true);
+
+        const child = Bun.spawn({
+            cmd: [
+                process.execPath,
+                "--preload",
+                preloadPath,
+                path.resolve(import.meta.dirname, "../src/serverStart.ts"),
+            ],
+            cwd: path.resolve(import.meta.dirname, ".."),
+            env: {
+                ...process.env,
+                MIRA_DASHBOARD_ALLOWED_ORIGINS: "",
+                MIRA_DASHBOARD_AUTOMATION_CREDENTIALS: "",
+                MIRA_DASHBOARD_DB_PATH: path.join(temporaryRoot, "dashboard.db"),
+                MIRA_DASHBOARD_DISABLE_SCHEDULER: "1",
+                MIRA_DASHBOARD_EXECUTION_ROLE: "web",
+                MIRA_DASHBOARD_FRONTEND_PATH: frontendRoot,
+                MIRA_DASHBOARD_OPENCLAW_HOME: path.join(temporaryRoot, "openclaw-client"),
+                MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY: new Uint8Array(32)
+                    .fill(9)
+                    .toBase64(),
+                MIRA_DASHBOARD_WEBAUTHN_ORIGINS: "",
+                MIRA_DASHBOARD_WEBAUTHN_RP_ID: "",
+                OPENCLAW_GATEWAY_TOKEN: "",
+                OPENCLAW_HOME: openclawRoot,
+                OPENCLAW_TOKEN: "",
+                PORT: String(port),
+            },
+            stderr: "pipe",
+            stdin: "ignore",
+            stdout: "ignore",
+        });
+        const stderrText = new Response(child.stderr).text();
+
+        let hasChildExited = false;
+        try {
+            let isReady = false;
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+                try {
+                    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+                        signal: AbortSignal.timeout(100),
+                    });
+                    if (response.ok) {
+                        isReady = true;
+                        break;
+                    }
+                } catch {
+                    // Ignore transient connection errors while the process starts.
+                }
+                await Bun.sleep(25);
+            }
+            if (!isReady) {
+                child.kill("SIGKILL");
+                await child.exited;
+                hasChildExited = true;
+                throw new Error(
+                    `Direct web process did not become healthy.\n${await stderrText}`
+                );
+            }
+
+            child.kill("SIGTERM");
+            const waitForExit = async () => ({
+                didExit: true as const,
+                exitCode: await child.exited,
+            });
+            const waitForTimeout = async () => {
+                await Bun.sleep(1500);
+                return {
+                    didExit: false as const,
+                    exitCode: undefined,
+                };
+            };
+            const result = await Promise.race([waitForExit(), waitForTimeout()]);
+            if (!result.didExit) {
+                child.kill("SIGKILL");
+                await child.exited;
+                hasChildExited = true;
+                throw new Error(
+                    `Direct web process did not exit after SIGTERM.\n${await stderrText}`
+                );
+            }
+            hasChildExited = true;
+            const childStderr = await stderrText;
+            if (result.exitCode !== 0) {
+                throw new Error(
+                    `Direct web process exited with status ${result.exitCode}.\n${childStderr}`
+                );
+            }
+            expect(result).toEqual({ didExit: true, exitCode: 0 });
+        } finally {
+            if (!hasChildExited) {
+                child.kill("SIGKILL");
+                await child.exited;
+            }
+            await stderrText;
             rmSync(temporaryRoot, { force: true, recursive: true });
         }
     });
