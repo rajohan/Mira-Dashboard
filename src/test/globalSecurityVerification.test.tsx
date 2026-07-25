@@ -12,6 +12,7 @@ import {
     cancelSecurityVerification,
     dispatchSecurityVerificationRequired,
     type SecurityVerificationCode,
+    waitForSecurityVerification,
 } from "../lib/securityVerification";
 import { authActions } from "../stores/authStore";
 import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
@@ -226,6 +227,96 @@ describe("Global security verification", () => {
         act(() => {
             cancelSecurityVerification();
         });
+        await waitFor(() => {
+            expect(document.body.textContent).not.toContain("Verify your session");
+        });
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("prevents dismissal while a recovery verification is pending", async () => {
+        const recoveryResponse = Promise.withResolvers<Response>();
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                async (
+                    input: RequestInfo | URL,
+                    init?: RequestInit
+                ): Promise<Response> => {
+                    const url = String(input);
+                    const method = init?.method ?? "GET";
+                    if (url === "/api/account/security" && method === "GET") {
+                        return Response.json(securitySummary);
+                    }
+                    if (
+                        url === "/api/account/security/step-up/recovery" &&
+                        method === "POST"
+                    ) {
+                        return recoveryResponse.promise;
+                    }
+                    if (url === "/api/auth/session" && method === "GET") {
+                        return Response.json({
+                            authenticated: true,
+                            isBootstrapRequired: false,
+                            session: {
+                                authMethod: "webauthn",
+                                expiresAt: "2026-08-24T12:00:00.000Z",
+                                lastSeenAt: "2026-07-24T12:00:00.000Z",
+                                mfaEnabled: true,
+                            },
+                            user: { id: 1, username: "raymond" },
+                        });
+                    }
+                    throw new Error(
+                        `Unexpected pending verification request: ${method} ${url}`
+                    );
+                }
+            ),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalled();
+        });
+        let verificationPromise: Promise<boolean> | undefined;
+        act(() => {
+            verificationPromise = waitForSecurityVerification("step_up_required");
+        });
+        await userEvent.click(screen.getByRole("button", { name: "Use recovery code" }));
+        await userEvent.type(screen.getByLabelText("Recovery code"), "single-use-code");
+        await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", {
+                    name: "Close Verify your session",
+                })
+            ).toBeDisabled();
+        });
+        await userEvent.click(
+            screen.getByRole("button", {
+                name: "Close Verify your session",
+            })
+        );
+        await userEvent.keyboard("{Escape}");
+        const backdrop = [...document.querySelectorAll<HTMLElement>("div")].find(
+            (element) => element.classList.contains("bg-black/50")
+        );
+        if (!backdrop) {
+            throw new Error("Expected the verification modal backdrop");
+        }
+        await userEvent.click(backdrop);
+        expect(
+            screen.getByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+
+        await act(async () => {
+            recoveryResponse.resolve(Response.json({ isOk: true }));
+            await verificationPromise;
+        });
+        expect(await verificationPromise).toBe(true);
         await waitFor(() => {
             expect(document.body.textContent).not.toContain("Verify your session");
         });

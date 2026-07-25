@@ -8,6 +8,7 @@ import { Button } from "./Button";
 /** Provides props for modal. */
 interface ModalProperties {
     isOpen: boolean;
+    isDismissDisabled?: boolean;
     onClose: () => void;
     title?: string;
     children: ReactNode;
@@ -26,13 +27,20 @@ const SIZE_CLASSES = {
 /** Renders the modal UI. */
 export function Modal({
     isOpen,
+    isDismissDisabled = false,
     onClose,
     title,
     children,
     size = "md",
 }: ModalProperties) {
+    const handleClose = () => {
+        if (!isDismissDisabled) {
+            onClose();
+        }
+    };
+
     return (
-        <Dialog open={isOpen} onClose={onClose} className="relative z-50">
+        <Dialog open={isOpen} onClose={handleClose} className="relative z-50">
             <DialogBackdrop
                 className="fixed inset-0 bg-black/50 transition-opacity data-closed:opacity-0 data-enter:opacity-100"
                 transition
@@ -58,7 +66,8 @@ export function Modal({
                                 variant="ghost"
                                 size="sm"
                                 aria-label={`Close ${title}`}
-                                onClick={onClose}
+                                disabled={isDismissDisabled}
+                                onClick={handleClose}
                                 className="text-primary-400 hover:text-primary-200"
                             >
                                 <X size={20} />

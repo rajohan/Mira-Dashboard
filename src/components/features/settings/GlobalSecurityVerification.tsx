@@ -167,6 +167,7 @@ export function GlobalSecurityVerification() {
     return (
         <Modal
             isOpen={Boolean(request)}
+            isDismissDisabled={isPending}
             onClose={cancelSecurityVerification}
             size="sm"
             title={
