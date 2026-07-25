@@ -476,6 +476,52 @@ describe("gateway behavior", () => {
         socket.close();
     });
 
+    it("keeps session-message transport timeouts out of chat run parameters", async () => {
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        const root = createTemporaryRoot("mira-gateway-session-message-timeout-");
+        const openclawHome = path.join(root, "openclaw");
+        const dashboardHome = path.join(root, "dashboard-openclaw");
+        mkdirSync(openclawHome, { recursive: true });
+        mkdirSync(dashboardHome, { recursive: true });
+        process.env.OPENCLAW_HOME = openclawHome;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardHome;
+
+        const gatewayModule = await import("../src/gateway.ts");
+        const gateway = gatewayModule.default;
+        gateway.shutdown();
+        cleanupCallbacks.push(
+            gatewayModule.setGatewayRootsForTests({
+                dashboardOpenClawHome: dashboardHome,
+                openClawHome: openclawHome,
+            }),
+            gatewayModule.setGatewayClientConstructorForTests(FakeOpenClawGatewayClient),
+            () => gateway.shutdown()
+        );
+
+        gateway.init("session-message-timeout-token");
+        const client = fakeClients.at(-1);
+        client?.options.onHelloOk?.({ type: "hello-ok" });
+        await waitFor(() => gateway.isConnected());
+
+        await gateway.sendSessionMessage("main", "Task assigned: #377");
+
+        const chatSendRequest = client?.requests.find(
+            ({ method, parameters }) =>
+                method === "chat.send" && parameters.message === "Task assigned: #377"
+        );
+        expect(chatSendRequest).toMatchObject({
+            method: "chat.send",
+            options: { timeoutMs: 10_000 },
+            parameters: {
+                idempotencyKey: expect.stringMatching(/^tasks-notify-/u),
+                message: "Task assigned: #377",
+                sessionKey: "main",
+            },
+        });
+        expect(chatSendRequest?.parameters).not.toHaveProperty("timeoutMs");
+    });
+
     it("rehydrates run associations before reconnect events resume", async () => {
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
