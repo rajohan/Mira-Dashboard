@@ -26,8 +26,9 @@ export function AppHeader({
     const { isConnected } = useOpenClawSocket();
     const { data: health, isError: isBackendError } = useHealth();
 
-    const isBackendConnected = !isBackendError && health?.status === "isOk";
-    const backendCommit = health?.backendCommit || "unknown";
+    const isBackendConnected = !isBackendError && health !== undefined;
+    const isWorkerReady = isBackendConnected && health?.checks.worker.ready === true;
+    const backendCommit = health?.releaseDetails.backendCommit || "unknown";
     const frontendCommit = typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "dev";
     const hasVersionMismatch =
         backendCommit !== "unknown" &&
@@ -94,6 +95,18 @@ export function AppHeader({
                         >
                             <span className="font-medium">BE</span>
                             <span>{isBackendConnected ? "●" : "○"}</span>
+                        </span>
+                        <span
+                            className={[
+                                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1",
+                                isWorkerReady
+                                    ? "border-green-500/40 bg-green-500/10 text-green-300"
+                                    : "border-red-500/40 bg-red-500/10 text-red-300",
+                            ].join(" ")}
+                            title={isWorkerReady ? "Worker online" : "Worker offline"}
+                        >
+                            <span className="font-medium">WK</span>
+                            <span>{isWorkerReady ? "●" : "○"}</span>
                         </span>
                     </div>
                     <Button

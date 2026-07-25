@@ -6,7 +6,7 @@ Docker image update behavior, see [Docker updater](docker-updater.md).
 ## Check Dashboard Health
 
 ```bash
-curl http://127.0.0.1:3100/api/health
+curl --fail http://127.0.0.1:3100/api/health/ready
 systemctl --user status mira-dashboard.service --no-pager
 systemctl --user status mira-dashboard-worker.service --no-pager
 journalctl --user -u mira-dashboard.service -n 120 --no-pager
@@ -16,12 +16,7 @@ journalctl --user -u mira-dashboard-worker.service -n 120 --no-pager
 Expected health:
 
 ```json
-{
-    "status": "isOk",
-    "gatewayConnected": true,
-    "sessionCount": 9,
-    "backendCommit": "abc1234"
-}
+{ "status": "isReady", "checks": { "worker": { "ready": true } } }
 ```
 
 ## Restart Dashboard
@@ -29,12 +24,12 @@ Expected health:
 ```bash
 systemctl --user restart mira-dashboard.service
 systemctl --user status mira-dashboard.service --no-pager
-curl http://127.0.0.1:3100/api/health
+curl --fail http://127.0.0.1:3100/api/health/ready
 ```
 
 ## Dashboard Shows WebSocket Disconnected
 
-1. Check `/api/health`.
+1. Check `/api/health/live` and `/api/health/ready`.
 2. Check OpenClaw Gateway:
 
 ```bash
@@ -236,7 +231,7 @@ install -m 0600 "$backup_path" "$db_path"
 test "$(sqlite3 -readonly "$db_path" "PRAGMA quick_check;")" = "ok"
 systemctl --user start mira-dashboard.service
 systemctl --user start mira-dashboard-worker.service
-curl --fail --show-error --silent http://127.0.0.1:3100/api/health
+curl --fail --show-error --silent http://127.0.0.1:3100/api/health/ready
 printf '\nRecovery files retained at %s\n' "$recovery_dir"
 ```
 

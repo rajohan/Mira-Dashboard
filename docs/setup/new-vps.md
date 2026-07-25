@@ -184,7 +184,7 @@ Expected after setup:
 ## Verify Runtime
 
 ```bash
-curl http://127.0.0.1:3100/api/health
+curl --fail http://127.0.0.1:3100/api/health/ready
 systemctl --user status mira-dashboard.service --no-pager
 journalctl --user -u mira-dashboard.service -n 100 --no-pager
 journalctl --user -u mira-dashboard-worker.service -n 100 --no-pager
@@ -193,17 +193,11 @@ journalctl --user -u mira-dashboard-worker.service -n 100 --no-pager
 Healthy response shape:
 
 ```json
-{
-    "status": "isOk",
-    "gatewayConnected": true,
-    "sessionCount": 9,
-    "backendCommit": "abc1234",
-    "workerOnline": true
-}
+{ "status": "isReady", "checks": { "worker": { "ready": true } } }
 ```
 
-If `gatewayConnected` is false, check the Gateway token, OpenClaw Gateway
-service, and `/api/auth/bootstrap` state before debugging the frontend.
-If `workerOnline` is false, inspect both Dashboard and
-`mira-dashboard-worker.service`; the worker heartbeat may be stale or queue
-telemetry may be unavailable.
+The authenticated Dashboard header shows `WS`, `BE`, and `WK` separately. If
+`WS` is offline, check the Gateway token, OpenClaw Gateway service, and
+`/api/auth/bootstrap` state before debugging the frontend. If `WK` is offline,
+inspect both Dashboard and `mira-dashboard-worker.service`; the worker heartbeat
+may be stale or queue telemetry may be unavailable.

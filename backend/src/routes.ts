@@ -1,6 +1,5 @@
-import path from "node:path";
-
 import gateway from "./gateway.ts";
+import { diagnosticsSnapshot, livenessSnapshot, readinessSnapshot } from "./health.ts";
 import { json } from "./http.ts";
 import { withRequestPolicy } from "./requestPolicy.ts";
 import { accountSecurityRoutes } from "./routes/accountSecurityRoutes.ts";
@@ -32,44 +31,17 @@ import { sttRoutes } from "./routes/sttRoutes.ts";
 import { taskRoutes } from "./routes/taskRoutes.ts";
 import { terminalRoutes } from "./routes/terminalRoutes.ts";
 import { ttsRoutes } from "./routes/ttsRoutes.ts";
-import { getJobExecutionSummary } from "./services/jobExecutionQueue.ts";
-
-const BACKEND_COMMIT = (() => {
-    try {
-        return (
-            Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], {
-                cwd: path.join(import.meta.dirname, ".."),
-                stderr: "ignore",
-            })
-                .stdout?.toString()
-                ?.trim() || "unknown"
-        );
-    } catch {
-        return "unknown";
-    }
-})();
-
-function backendCommit(): string {
-    return BACKEND_COMMIT;
+function live() {
+    return json(livenessSnapshot());
 }
 
-function isWorkerOnline(): boolean {
-    try {
-        return getJobExecutionSummary().workerOnline;
-    } catch (error) {
-        console.warn("[Health] Failed to read job worker telemetry:", error);
-        return false;
-    }
+async function ready() {
+    const snapshot = await readinessSnapshot();
+    return json(snapshot, { status: snapshot.status === "isReady" ? 200 : 503 });
 }
 
-function health() {
-    return json({
-        status: "isOk",
-        gatewayConnected: gateway.isConnected(),
-        sessionCount: gateway.getSessions().length,
-        backendCommit: backendCommit() || "unknown",
-        workerOnline: isWorkerOnline(),
-    });
+async function diagnostics() {
+    return json(await diagnosticsSnapshot());
 }
 
 function sessions() {
@@ -77,11 +49,14 @@ function sessions() {
 }
 
 const routeTable = {
-    "/health": {
-        GET: health,
+    "/api/health/diagnostics": {
+        GET: diagnostics,
     },
-    "/api/health": {
-        GET: health,
+    "/api/health/live": {
+        GET: live,
+    },
+    "/api/health/ready": {
+        GET: ready,
     },
     "/api/sessions": {
         GET: sessions,

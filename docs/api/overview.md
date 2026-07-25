@@ -49,7 +49,8 @@ or another authentication mechanism.
 
 Public routes:
 
-- `GET /api/health`
+- `GET /api/health/live`
+- `GET /api/health/ready`
 - `GET /api/auth/bootstrap`
 - `GET /api/auth/session`
 - `POST /api/auth/register-first-user`

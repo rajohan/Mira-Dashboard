@@ -47,7 +47,7 @@ body:
               1. Pull latest main
               2. Build frontend/backend
               3. Restart service
-              4. Verify /api/health
+              4. Verify /api/health/ready
       validations:
           required: true
     - type: checkboxes

@@ -324,10 +324,12 @@ describe("Bun-native dashboard backend", () => {
     });
 
     it("reports health and auth bootstrap state", async () => {
-        const health = await api<{ status: string; sessionCount: number }>("/api/health");
-        expect(health.status).toBe(200);
-        expect(health.body.status).toBe("isOk");
-        expect(health.body.sessionCount).toBe(0);
+        const live = await api<{ status: string; uptimeSeconds: number }>(
+            "/api/health/live"
+        );
+        expect(live.status).toBe(200);
+        expect(live.body.status).toBe("isOk");
+        expect(live.body.uptimeSeconds).toBeGreaterThanOrEqual(0);
 
         const bootstrap = await api<{
             hasGatewayToken: boolean;

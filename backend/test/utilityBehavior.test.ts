@@ -714,7 +714,7 @@ describe("backend service utilities", () => {
         );
     });
 
-    it("keeps health available when worker telemetry cannot be read", async () => {
+    it("fails readiness when worker telemetry cannot be read", async () => {
         const summarySpy = jest
             .spyOn(jobExecutionQueueModule, "getJobExecutionSummary")
             .mockImplementation(() => {
@@ -724,14 +724,16 @@ describe("backend service utilities", () => {
         try {
             const response = await callTestRoute(
                 appRoutes,
-                "/api/health",
+                "/api/health/ready",
                 serverWithAddress("127.0.0.1")
             );
 
-            expect(response.status).toBe(200);
+            expect(response.status).toBe(503);
             await expect(response.json()).resolves.toMatchObject({
-                status: "isOk",
-                workerOnline: false,
+                checks: {
+                    worker: { ready: false },
+                },
+                status: "notReady",
             });
             expect(warnSpy).toHaveBeenCalledWith(
                 "[Health] Failed to read job worker telemetry:",
@@ -788,7 +790,7 @@ describe("backend service utilities", () => {
                 string,
                 (request: Request, server: Server<unknown>) => Response
             > = {
-                "/api/health": () => new Response("ok"),
+                "/api/health/live": () => new Response("ok"),
                 "/api/private": () => new Response("private"),
                 "/api/auth/login": () => new Response("login"),
                 "/syntax": () => {
@@ -806,7 +808,7 @@ describe("backend service utilities", () => {
             const routes = withRequestPolicy(routeEntries);
             const server = serverWithAddress("203.0.113.10");
 
-            const health = await callTestRoute(routes, "/api/health", server);
+            const health = await callTestRoute(routes, "/api/health/live", server);
             expect(health.status).toBe(200);
             expect(health.headers.get("ratelimit-policy")).toBe("600;w=60");
             expect(health.headers.get("x-request-id")).toMatch(
@@ -827,7 +829,7 @@ describe("backend service utilities", () => {
 
             const secureOrigin = withRequestSecurity(
                 // eslint-disable-next-line unicorn/prefer-https -- Simulates TLS termination at a trusted proxy.
-                new Request("http://dashboard.example/api/health", {
+                new Request("http://dashboard.example/api/health/live", {
                     headers: { "x-forwarded-proto": "https" },
                 }),
                 new Response(),
@@ -837,7 +839,7 @@ describe("backend service utilities", () => {
                 "connect-src 'self' wss://dashboard.example"
             );
             const directSecureOrigin = withRequestSecurity(
-                new Request("https://dashboard.example/api/health"),
+                new Request("https://dashboard.example/api/health/live"),
                 new Response(),
                 serverWithAddress("203.0.113.10")
             );
@@ -847,7 +849,7 @@ describe("backend service utilities", () => {
 
             const sameOriginMutation = await callTestRoute(
                 routes,
-                "/api/health",
+                "/api/health/live",
                 server,
                 {
                     headers: {
@@ -889,7 +891,7 @@ describe("backend service utilities", () => {
 
             const crossOriginMutation = await callTestRoute(
                 routes,
-                "/api/health",
+                "/api/health/live",
                 server,
                 {
                     headers: {
@@ -917,7 +919,7 @@ describe("backend service utilities", () => {
 
             const missingOriginCrossSiteMutation = await callTestRoute(
                 routes,
-                "/api/health",
+                "/api/health/live",
                 server,
                 {
                     headers: { "sec-fetch-site": "same-site" },

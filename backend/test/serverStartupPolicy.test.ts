@@ -606,9 +606,12 @@ describe("server start scheduler policy", () => {
             let isReady = false;
             for (let attempt = 0; attempt < 100; attempt += 1) {
                 try {
-                    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
-                        signal: AbortSignal.timeout(100),
-                    });
+                    const response = await fetch(
+                        `http://127.0.0.1:${port}/api/health/live`,
+                        {
+                            signal: AbortSignal.timeout(100),
+                        }
+                    );
                     if (response.ok) {
                         isReady = true;
                         break;

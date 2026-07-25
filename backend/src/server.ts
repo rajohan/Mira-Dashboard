@@ -12,6 +12,7 @@ import {
 } from "./auth.ts";
 import { validateAutomationCredentials } from "./automationAuth.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
+import { resolveFrontendPath } from "./frontendAssets.ts";
 import gateway from "./gateway.ts";
 import { isAllowedDashboardOrigin, sessionIdFromCookie } from "./http.ts";
 import { requiresRecentMfaForGatewayMethod } from "./requestPolicy.ts";
@@ -73,13 +74,6 @@ function sendSocketAuthenticationError(
 
 function hasHiddenStaticSegment(relativePath: string): boolean {
     return relativePath.split(path.sep).some((segment) => segment.startsWith("."));
-}
-
-function resolveFrontendPath(): string {
-    return (
-        process.env.MIRA_DASHBOARD_FRONTEND_PATH ||
-        path.join(import.meta.dirname, "..", "..", "dist")
-    );
 }
 
 export function resolveListenPort(value = process.env.PORT): number {

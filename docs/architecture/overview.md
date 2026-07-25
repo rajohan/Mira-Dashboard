@@ -96,7 +96,8 @@ Key files:
 
 All `/api/*` routes are authenticated except:
 
-- `/api/health`
+- `/api/health/live`
+- `/api/health/ready`
 - the exact bootstrap, session-state, login-factor, and logout endpoints under
   `/api/auth/*`.
 

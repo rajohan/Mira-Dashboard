@@ -752,12 +752,23 @@ describe("Mira Dashboard frontend behavior", () => {
         ) => {
             const url = String(input);
             apiCalls.push(`${init?.method ?? "GET"} ${url}`);
-            if (url === "/api/health") {
+            if (url === "/api/health/diagnostics") {
                 return Response.json({
-                    backendCommit: "backend-sha",
-                    gatewayConnected: true,
+                    checks: {
+                        release: {
+                            backendCommit: "backend-sha",
+                            frontendCommit: "frontend-sha",
+                            ready: true,
+                        },
+                        worker: { ready: true },
+                    },
+                    dependencies: { gatewayConnected: true },
+                    releaseDetails: {
+                        backendCommit: "backend-sha",
+                        frontendCommit: "frontend-sha",
+                    },
                     sessionCount: 1,
-                    status: "isOk",
+                    status: "isReady",
                 });
             }
             if (url === "/api/cache/system.host") {
@@ -883,6 +894,8 @@ describe("Mira Dashboard frontend behavior", () => {
             });
 
             expect(screen.getByTitle("Backend connected")).toBeInTheDocument();
+            expect(screen.getByTitle("Worker online")).toBeInTheDocument();
+            expect(screen.getByText("WK")).toBeInTheDocument();
             expect(screen.getByText("v2026.6.9")).toBeInTheDocument();
             await userEvent.click(screen.getByLabelText("Open navigation menu"));
             expect(
@@ -1522,7 +1535,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 const url = String(input);
                 const method = init?.method ?? "GET";
 
-                if (url === "/api/health" && method === "GET") {
+                if (url === "/api/health/live" && method === "GET") {
                     return Response.json({ status: "isOk" });
                 }
 
@@ -1547,14 +1560,14 @@ describe("Mira Dashboard frontend behavior", () => {
             writable: true,
         });
 
-        await expect(apiFetch("/health")).resolves.toEqual({ status: "isOk" });
+        await expect(apiFetch("/health/live")).resolves.toEqual({ status: "isOk" });
         await expect(apiFetch("/restart", { method: "POST" })).resolves.toBeUndefined();
         await expect(
             apiFetch("/tasks", { body: JSON.stringify({}), method: "POST" })
         ).rejects.toThrow("title is required");
         await expect(apiFetch("/broken")).rejects.toThrow("Unknown error");
         const healthRequest = fetchMock.mock.calls.find(
-            ([input]) => input === "/api/health"
+            ([input]) => input === "/api/health/live"
         );
         expect(healthRequest?.[1]).toEqual(
             expect.objectContaining({ credentials: "include" })
@@ -3224,12 +3237,23 @@ describe("Mira Dashboard frontend behavior", () => {
                 const url = String(input);
                 const method = init?.method ?? "GET";
 
-                if (url === "/api/health" && method === "GET") {
+                if (url === "/api/health/diagnostics" && method === "GET") {
                     return Response.json({
-                        status: "isOk",
-                        gatewayConnected: true,
+                        checks: {
+                            release: {
+                                backendCommit: "abc123",
+                                frontendCommit: "abc123",
+                                ready: true,
+                            },
+                            worker: { ready: true },
+                        },
+                        dependencies: { gatewayConnected: true },
+                        releaseDetails: {
+                            backendCommit: "abc123",
+                            frontendCommit: "abc123",
+                        },
                         sessionCount: 2,
-                        backendCommit: "abc123",
+                        status: "isReady",
                     });
                 }
 
@@ -3289,7 +3313,7 @@ describe("Mira Dashboard frontend behavior", () => {
         });
 
         const health = renderHookWithQueryClient(() => useHealth());
-        await waitFor(() => expect(health.result.current.data?.status).toBe("isOk"));
+        await waitFor(() => expect(health.result.current.data?.status).toBe("isReady"));
 
         const metrics = renderHookWithQueryClient(() => useMetrics());
         await waitFor(() => expect(metrics.result.current.data?.tokens.total).toBe(42));

@@ -508,7 +508,7 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("fails closed on checksum drift and unknown migration versions", () => {
+    it("fails closed on drift and permits only explicitly compatible future migrations", () => {
         const root = temporaryRoot("mira-db-migrations-drift-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
@@ -536,7 +536,16 @@ describe("Dashboard SQLite lifecycle", () => {
                 )
                 .run("2026-07-23T00:00:00.000Z");
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
-                "unknown SQLite migration version 7"
+                "incompatible SQLite migration version 7"
+            );
+            database
+                .prepare(
+                    "UPDATE schema_migrations SET name = ?, checksum = ? WHERE version = 7"
+                )
+                .run("future-additive", "a".repeat(64));
+            expect(validateDatabaseMigrationHistory(database, 7)).toBe(7);
+            expect(() => validateDatabaseMigrationHistory(database, 6)).toThrow(
+                "incompatible SQLite migration version 7"
             );
 
             database.prepare("DELETE FROM schema_migrations WHERE version = 7").run();

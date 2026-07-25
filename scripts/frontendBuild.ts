@@ -29,7 +29,7 @@ const productionDevtoolsPlugin: Bun.BunPlugin = {
 function getAppCommit(): string {
     try {
         const result = Bun.spawnSync({
-            cmd: ["git", "rev-parse", "--short", "HEAD"],
+            cmd: ["git", "rev-parse", "--short=8", "HEAD"],
             stderr: "ignore",
             stdin: "ignore",
             stdout: "pipe",

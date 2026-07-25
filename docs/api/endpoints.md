@@ -5,11 +5,12 @@ route files under `backend/src/routes/` for exact validation details.
 
 ## Health
 
-| Method | Path            | Purpose                               |
-| ------ | --------------- | ------------------------------------- |
-| `GET`  | `/health`       | Public health and worker check.       |
-| `GET`  | `/api/health`   | Public API health and worker check.   |
-| `GET`  | `/api/sessions` | Legacy/session snapshot from Gateway. |
+| Method | Path                      | Purpose                                                |
+| ------ | ------------------------- | ------------------------------------------------------ |
+| `GET`  | `/api/health/live`        | Public web-process liveness.                           |
+| `GET`  | `/api/health/ready`       | Public activation readiness; `503` when not ready.     |
+| `GET`  | `/api/health/diagnostics` | Authenticated readiness details and dependency status. |
+| `GET`  | `/api/sessions`           | Legacy/session snapshot from Gateway.                  |
 
 ## Auth
 

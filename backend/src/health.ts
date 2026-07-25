@@ -1,0 +1,146 @@
+import { database } from "./database.ts";
+import { validateDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
+import {
+    DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
+    isDatabaseSchemaCompatible,
+} from "./databaseSchemaCompatibility.ts";
+import { isFrontendIndexReady } from "./frontendAssets.ts";
+import gateway from "./gateway.ts";
+import {
+    getRuntimeReleaseIdentity,
+    type RuntimeReleaseIdentity,
+} from "./releaseManifest.ts";
+import { getJobExecutionSummary } from "./services/jobExecutionQueue.ts";
+
+interface DatabaseReadiness {
+    currentSchemaVersion?: number;
+    maximumCompatibleSchemaVersion: number;
+    minimumCompatibleSchemaVersion: number;
+    ready: boolean;
+    targetSchemaVersion: number;
+}
+
+export interface ReadinessSignals {
+    database: DatabaseReadiness;
+    frontendReady: boolean;
+    gatewayConnected: boolean;
+    release: RuntimeReleaseIdentity;
+    sessionCount: number;
+    workerReady: boolean;
+}
+
+export interface DashboardReadinessSnapshot {
+    checks: {
+        database: DatabaseReadiness;
+        frontend: { ready: boolean };
+        release: {
+            backendCommit: string;
+            frontendCommit: string;
+            issue?: RuntimeReleaseIdentity["issue"];
+            manifestFormatVersion?: number;
+            ready: boolean;
+            source: RuntimeReleaseIdentity["source"];
+        };
+        worker: { ready: boolean };
+    };
+    dependencies: {
+        gatewayConnected: boolean;
+    };
+    status: "isReady" | "notReady";
+}
+
+function databaseReadiness(): DatabaseReadiness {
+    try {
+        database.query("SELECT 1").get();
+        const currentSchemaVersion = validateDatabaseMigrationHistory(database);
+        return {
+            currentSchemaVersion,
+            maximumCompatibleSchemaVersion:
+                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+            minimumCompatibleSchemaVersion:
+                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum,
+            ready: isDatabaseSchemaCompatible(currentSchemaVersion),
+            targetSchemaVersion: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target,
+        };
+    } catch {
+        return {
+            maximumCompatibleSchemaVersion:
+                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+            minimumCompatibleSchemaVersion:
+                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum,
+            ready: false,
+            targetSchemaVersion: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target,
+        };
+    }
+}
+
+function isWorkerReady(): boolean {
+    try {
+        return getJobExecutionSummary().workerOnline;
+    } catch (error) {
+        console.warn("[Health] Failed to read job worker telemetry:", error);
+        return false;
+    }
+}
+
+export async function collectReadinessSignals(): Promise<ReadinessSignals> {
+    return {
+        database: databaseReadiness(),
+        frontendReady: isFrontendIndexReady(),
+        gatewayConnected: gateway.isConnected(),
+        release: await getRuntimeReleaseIdentity(),
+        sessionCount: gateway.getSessions().length,
+        workerReady: isWorkerReady(),
+    };
+}
+
+export function evaluateReadiness(signals: ReadinessSignals): DashboardReadinessSnapshot {
+    const ready =
+        signals.database.ready &&
+        signals.frontendReady &&
+        signals.release.ready &&
+        signals.workerReady;
+    return {
+        checks: {
+            database: signals.database,
+            frontend: { ready: signals.frontendReady },
+            release: {
+                backendCommit: signals.release.backendCommit,
+                frontendCommit: signals.release.frontendCommit,
+                ...(signals.release.issue && { issue: signals.release.issue }),
+                ...(signals.release.manifestFormatVersion !== undefined && {
+                    manifestFormatVersion: signals.release.manifestFormatVersion,
+                }),
+                ready: signals.release.ready,
+                source: signals.release.source,
+            },
+            worker: { ready: signals.workerReady },
+        },
+        dependencies: {
+            // Gateway availability is diagnostic. A Gateway outage cannot be
+            // repaired by rolling Dashboard code back.
+            gatewayConnected: signals.gatewayConnected,
+        },
+        status: ready ? "isReady" : "notReady",
+    };
+}
+
+export function livenessSnapshot() {
+    return {
+        status: "isOk" as const,
+        uptimeSeconds: Math.floor(process.uptime()),
+    };
+}
+
+export async function readinessSnapshot(): Promise<DashboardReadinessSnapshot> {
+    return evaluateReadiness(await collectReadinessSignals());
+}
+
+export async function diagnosticsSnapshot() {
+    const signals = await collectReadinessSignals();
+    return {
+        ...evaluateReadiness(signals),
+        releaseDetails: signals.release,
+        sessionCount: signals.sessionCount,
+    };
+}

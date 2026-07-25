@@ -4,6 +4,7 @@ import {
     type DatabaseMigration,
     databaseMigrations,
 } from "./databaseMigrations/index.ts";
+import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 import {
     createVerifiedSqliteBackup,
     pruneSqliteBackups,
@@ -76,20 +77,37 @@ function appliedMigrationRows(database: Database): AppliedMigrationRow[] {
         .all() as AppliedMigrationRow[];
 }
 
-export function validateDatabaseMigrationHistory(database: Database): number {
+export function validateDatabaseMigrationHistory(
+    database: Database,
+    maximumCompatibleVersion: number = DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum
+): number {
     assertMigrationRegistry();
+    if (
+        !Number.isSafeInteger(maximumCompatibleVersion) ||
+        maximumCompatibleVersion < databaseMigrations.length
+    ) {
+        throw new TypeError("Invalid maximum compatible SQLite schema version");
+    }
     const appliedRows = appliedMigrationRows(database);
     for (const [index, row] of appliedRows.entries()) {
-        const expected = databaseMigrations[index];
-        if (!expected) {
+        const expectedVersion = index + 1;
+        if (row.version !== expectedVersion) {
             throw new Error(
-                `Database contains unknown SQLite migration version ${row.version}`
+                `SQLite migration history is not contiguous at version ${expectedVersion}`
             );
         }
-        if (row.version !== expected.version) {
-            throw new Error(
-                `SQLite migration history is not contiguous at version ${expected.version}`
-            );
+        const expected = databaseMigrations[index];
+        if (!expected) {
+            if (
+                row.version > maximumCompatibleVersion ||
+                !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.name) ||
+                !/^[\da-f]{64}$/u.test(row.checksum)
+            ) {
+                throw new Error(
+                    `Database contains incompatible SQLite migration version ${row.version}`
+                );
+            }
+            continue;
         }
         if (row.name !== expected.name) {
             throw new Error(
@@ -153,7 +171,7 @@ function applyPendingDatabaseMigrations(
     createBackup?: () => SqliteBackupResult | undefined
 ): DatabaseMigrationResult {
     const appliedCountBeforeLock = validateDatabaseMigrationHistory(database);
-    if (appliedCountBeforeLock === databaseMigrations.length) {
+    if (appliedCountBeforeLock >= databaseMigrations.length) {
         return { applied: [] };
     }
 
@@ -162,7 +180,7 @@ function applyPendingDatabaseMigrations(
     database.run("BEGIN IMMEDIATE");
     try {
         const appliedCount = validateDatabaseMigrationHistory(database);
-        if (appliedCount === databaseMigrations.length) {
+        if (appliedCount >= databaseMigrations.length) {
             database.run("COMMIT");
             return { applied };
         }

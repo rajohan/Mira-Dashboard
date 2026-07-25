@@ -4,15 +4,30 @@ import { apiFetchRequired } from "./useApi";
 
 /** Represents the health API response. */
 export interface HealthResponse {
-    status: string;
-    gatewayConnected: boolean;
+    checks: {
+        release: {
+            backendCommit: string;
+            frontendCommit: string;
+            ready: boolean;
+        };
+        worker: {
+            ready: boolean;
+        };
+    };
+    dependencies: {
+        gatewayConnected: boolean;
+    };
+    releaseDetails: {
+        backendCommit: string;
+        frontendCommit: string;
+    };
     sessionCount: number;
-    backendCommit?: string;
+    status: "isReady" | "notReady";
 }
 
 /** Fetches health. */
 function fetchHealth() {
-    return apiFetchRequired<HealthResponse>("/health");
+    return apiFetchRequired<HealthResponse>("/health/diagnostics");
 }
 
 /** Provides health. */

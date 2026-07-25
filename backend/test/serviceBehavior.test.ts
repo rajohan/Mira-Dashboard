@@ -1971,8 +1971,8 @@ printf 'scheduled\n'
                 `mira-dashboard-deploy-${job.id}`
             );
             const restartCommand = await Bun.file(systemdLog).text();
-            expect(restartCommand).toContain("/api/health");
-            expect(restartCommand).toContain('"workerOnline":true');
+            expect(restartCommand).toContain("/api/health/ready");
+            expect(restartCommand).not.toContain('"workerOnline":true');
             expect(restartCommand).not.toContain("/api/job-executions");
             expect(existsSync(path.join(fakeRoot, "node_modules"))).toBe(false);
             expect(existsSync(path.join(fakeRoot, "backend", "node_modules"))).toBe(
