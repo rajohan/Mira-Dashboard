@@ -342,10 +342,18 @@ bun backend/dist/releaseLifecycle.js rollback
 
 `current` and `previous` are relative links inside the release root. Link
 replacement uses same-directory temporary symlinks, atomic rename, and a
-directory fsync. Activation verifies every artifact, the exact manifest/directory
-SHA, the host Bun version, and the previous release's SQLite rollback window.
-Rollback switches `current` first so an interruption favors the verified
-known-good release, then records the failed release as `previous`.
+directory fsync. Activation verifies every artifact, both component build
+identities, the exact manifest/directory SHA, the host Bun version, the actual
+live SQLite schema, and the previous release's rollback window. Rollback also
+checks the live schema rather than assuming it was downgraded by a code-only
+rollback.
+
+Every activation and rollback is serialized by an owner-PID lock and recorded
+in a durable transition journal before either link changes. A later lifecycle
+command restores the recorded pre-transition slots when it finds a journal
+whose owner process is gone. Successful transitions verify both final slots
+before removing the journal, so an interruption cannot discard the known-good
+rollback target.
 
 The Dashboard executor still uses the in-place transition flow until the final
 deploy integration performs the controlled systemd cutover to these links.

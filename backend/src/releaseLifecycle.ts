@@ -1,4 +1,7 @@
-import type { DashboardReleaseState } from "./releaseManager.ts";
+import type {
+    DashboardReleaseManagerOptions,
+    DashboardReleaseState,
+} from "./releaseManager.ts";
 import {
     activateDashboardRelease,
     readDashboardReleaseState,
@@ -25,7 +28,8 @@ function releaseSummary(state: DashboardReleaseState) {
 
 export async function runReleaseLifecycleCommand(
     arguments_: string[],
-    releasesRoot = resolveDashboardReleasesRoot()
+    releasesRoot = resolveDashboardReleasesRoot(),
+    options: DashboardReleaseManagerOptions = {}
 ) {
     const [command, commitSha, ...extra] = arguments_;
     if (extra.length > 0) {
@@ -38,14 +42,14 @@ export async function runReleaseLifecycleCommand(
             if (!commitSha) {
                 throw new TypeError("Release lifecycle activate requires a commit SHA");
             }
-            state = await activateDashboardRelease(commitSha, releasesRoot);
+            state = await activateDashboardRelease(commitSha, releasesRoot, options);
             break;
         }
         case "rollback": {
             if (commitSha) {
                 throw new TypeError("Release lifecycle rollback takes no commit SHA");
             }
-            state = await rollbackDashboardRelease(releasesRoot);
+            state = await rollbackDashboardRelease(releasesRoot, options);
             break;
         }
         case "status": {

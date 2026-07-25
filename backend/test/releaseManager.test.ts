@@ -4,6 +4,7 @@ import {
     mkdtempSync,
     readdirSync,
     readlinkSync,
+    renameSync,
     rmSync,
     symlinkSync,
     writeFileSync,
@@ -33,6 +34,10 @@ import {
 const temporaryRoots: string[] = [];
 const FIRST_COMMIT = "a".repeat(40);
 const SECOND_COMMIT = "b".repeat(40);
+const THIRD_COMMIT = "c".repeat(40);
+const SCHEMA_6_OPTIONS = {
+    readLiveSchemaVersion: () => 6,
+};
 
 function temporaryReleasesRoot(): string {
     const root = mkdtempSync(path.join(tmpdir(), "mira-releases-"));
@@ -111,6 +116,7 @@ async function rewriteManifest(
     releasePath: string,
     changes: {
         bunVersion?: string;
+        commitSha?: string;
         migrationRegistrySha256?: string;
         schemaMaximum?: number;
         schemaMinimum?: number;
@@ -118,9 +124,17 @@ async function rewriteManifest(
     }
 ): Promise<void> {
     const manifest = await loadReleaseManifest(releasePath);
+    const commitSha = changes.commitSha ?? manifest.commitSha;
+    const commitShort = commitSha.slice(0, 8);
     const rewritten = parseReleaseManifest({
         ...manifest,
         ...(changes.bunVersion && { bunVersion: changes.bunVersion }),
+        commitSha,
+        commitShort,
+        components: {
+            backendCommit: commitShort,
+            frontendCommit: commitShort,
+        },
         schema: {
             ...manifest.schema,
             ...(changes.migrationRegistrySha256 && {
@@ -169,12 +183,20 @@ describe("Dashboard immutable release manager", () => {
         await createManagedRelease(root, FIRST_COMMIT);
         await createManagedRelease(root, SECOND_COMMIT);
 
-        const first = await activateDashboardRelease(FIRST_COMMIT, root);
+        const first = await activateDashboardRelease(
+            FIRST_COMMIT,
+            root,
+            SCHEMA_6_OPTIONS
+        );
         expect(first.current?.commitSha).toBe(FIRST_COMMIT);
         expect(first.previous).toBeUndefined();
         expect(readlinkSync(path.join(root, "current"))).toBe(`releases/${FIRST_COMMIT}`);
 
-        const second = await activateDashboardRelease(SECOND_COMMIT, root);
+        const second = await activateDashboardRelease(
+            SECOND_COMMIT,
+            root,
+            SCHEMA_6_OPTIONS
+        );
         expect(second.current?.commitSha).toBe(SECOND_COMMIT);
         expect(second.previous?.commitSha).toBe(FIRST_COMMIT);
         expect(readlinkSync(path.join(root, "current"))).toBe(
@@ -184,7 +206,7 @@ describe("Dashboard immutable release manager", () => {
             `releases/${FIRST_COMMIT}`
         );
 
-        const rolledBack = await rollbackDashboardRelease(root);
+        const rolledBack = await rollbackDashboardRelease(root, SCHEMA_6_OPTIONS);
         expect(rolledBack.current?.commitSha).toBe(FIRST_COMMIT);
         expect(rolledBack.previous?.commitSha).toBe(SECOND_COMMIT);
         expect(
@@ -212,9 +234,21 @@ describe("Dashboard immutable release manager", () => {
             "Usage: releaseLifecycle.js"
         );
 
-        await runReleaseLifecycleCommand(["activate", FIRST_COMMIT], root);
-        await runReleaseLifecycleCommand(["activate", SECOND_COMMIT], root);
-        const rolledBack = await runReleaseLifecycleCommand(["rollback"], root);
+        await runReleaseLifecycleCommand(
+            ["activate", FIRST_COMMIT],
+            root,
+            SCHEMA_6_OPTIONS
+        );
+        await runReleaseLifecycleCommand(
+            ["activate", SECOND_COMMIT],
+            root,
+            SCHEMA_6_OPTIONS
+        );
+        const rolledBack = await runReleaseLifecycleCommand(
+            ["rollback"],
+            root,
+            SCHEMA_6_OPTIONS
+        );
         expect(rolledBack).toMatchObject({
             current: { commitSha: FIRST_COMMIT },
             previous: { commitSha: SECOND_COMMIT },
@@ -255,6 +289,18 @@ describe("Dashboard immutable release manager", () => {
         writeFileSync(path.join(releasePath, "dist", "index.html"), "tampered\n");
         await expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
             "Release artifact verification failed"
+        );
+    });
+
+    it("revalidates component build identities when loading a managed release", async () => {
+        const root = temporaryReleasesRoot();
+        const originalPath = await createManagedRelease(root, FIRST_COMMIT);
+        const relabeledPath = managedReleasePath(root, SECOND_COMMIT);
+        renameSync(originalPath, relabeledPath);
+        await rewriteManifest(relabeledPath, { commitSha: SECOND_COMMIT });
+
+        await expect(loadManagedRelease(root, SECOND_COMMIT)).rejects.toThrow(
+            "backend build identity does not match the release manifest"
         );
     });
 
@@ -310,11 +356,11 @@ describe("Dashboard immutable release manager", () => {
             schemaMinimum: 6,
             schemaTarget: 7,
         });
-        await activateDashboardRelease(FIRST_COMMIT, root);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
 
-        await expect(activateDashboardRelease(SECOND_COMMIT, root)).rejects.toThrow(
-            "cannot roll back after SQLite schema 7"
-        );
+        await expect(
+            activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
+        ).rejects.toThrow("cannot roll back after SQLite schema 7");
         expect(readlinkSync(path.join(root, "current"))).toBe(`releases/${FIRST_COMMIT}`);
         expect(existsSync(path.join(root, "previous"))).toBe(false);
     });
@@ -326,25 +372,95 @@ describe("Dashboard immutable release manager", () => {
         await rewriteManifest(rewrittenPath, {
             migrationRegistrySha256: "d".repeat(64),
         });
-        await activateDashboardRelease(FIRST_COMMIT, registryRoot);
+        await activateDashboardRelease(FIRST_COMMIT, registryRoot, SCHEMA_6_OPTIONS);
         await expect(
-            activateDashboardRelease(SECOND_COMMIT, registryRoot)
+            activateDashboardRelease(SECOND_COMMIT, registryRoot, SCHEMA_6_OPTIONS)
         ).rejects.toThrow("migration registry changed");
 
         const runtimeRoot = temporaryReleasesRoot();
         await createManagedRelease(runtimeRoot, FIRST_COMMIT, FIRST_COMMIT, "0.0.0");
-        await expect(activateDashboardRelease(FIRST_COMMIT, runtimeRoot)).rejects.toThrow(
-            "requires Bun 0.0.0"
+        await expect(
+            activateDashboardRelease(FIRST_COMMIT, runtimeRoot, SCHEMA_6_OPTIONS)
+        ).rejects.toThrow("requires Bun 0.0.0");
+    });
+
+    it("checks the effective live schema after a code-only rollback", async () => {
+        const root = temporaryReleasesRoot();
+        const rollbackPath = await createManagedRelease(root, FIRST_COMMIT);
+        const migratedPath = await createManagedRelease(root, SECOND_COMMIT);
+        await createManagedRelease(root, THIRD_COMMIT);
+        await rewriteManifest(rollbackPath, {
+            schemaMaximum: 7,
+        });
+        await rewriteManifest(migratedPath, {
+            migrationRegistrySha256: "d".repeat(64),
+            schemaMaximum: 7,
+            schemaMinimum: 6,
+            schemaTarget: 7,
+        });
+
+        let liveSchemaVersion = 6;
+        const options = {
+            readLiveSchemaVersion: () => liveSchemaVersion,
+        };
+        await activateDashboardRelease(FIRST_COMMIT, root, options);
+        await activateDashboardRelease(SECOND_COMMIT, root, options);
+        liveSchemaVersion = 7;
+        await rollbackDashboardRelease(root, options);
+
+        await expect(
+            activateDashboardRelease(THIRD_COMMIT, root, options)
+        ).rejects.toThrow("Activation release cannot open live SQLite schema 7");
+        const state = await readDashboardReleaseState(root);
+        expect(state.current?.commitSha).toBe(FIRST_COMMIT);
+        expect(state.previous?.commitSha).toBe(SECOND_COMMIT);
+    });
+
+    it("recovers the prior slots from an interrupted activation journal", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await createManagedRelease(root, THIRD_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
+
+        const journal = {
+            after: {
+                current: THIRD_COMMIT,
+                previous: SECOND_COMMIT,
+            },
+            before: {
+                current: SECOND_COMMIT,
+                previous: FIRST_COMMIT,
+            },
+            formatVersion: 1,
+            operation: "activate",
+        };
+        writeFileSync(
+            path.join(root, ".release-transition.lock"),
+            `${JSON.stringify({ formatVersion: 1, ownerPid: 999_999_999 })}\n`
         );
+        writeFileSync(
+            path.join(root, ".release-transition.json"),
+            `${JSON.stringify(journal)}\n`
+        );
+        rmSync(path.join(root, "previous"));
+        symlinkSync(`releases/${SECOND_COMMIT}`, path.join(root, "previous"), "dir");
+
+        const recovered = await readDashboardReleaseState(root);
+        expect(recovered.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(recovered.previous?.commitSha).toBe(FIRST_COMMIT);
+        expect(existsSync(path.join(root, ".release-transition.lock"))).toBe(false);
+        expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
     });
 
     it("requires two distinct releases before rollback", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);
-        await activateDashboardRelease(FIRST_COMMIT, root);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
         symlinkSync(`releases/${FIRST_COMMIT}`, path.join(root, "previous"), "dir");
 
-        await expect(rollbackDashboardRelease(root)).rejects.toThrow(
+        await expect(rollbackDashboardRelease(root, SCHEMA_6_OPTIONS)).rejects.toThrow(
             "requires two distinct releases"
         );
     });

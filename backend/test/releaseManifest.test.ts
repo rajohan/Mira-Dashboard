@@ -453,9 +453,9 @@ describe("Dashboard release manifest", () => {
         await expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
-            issue: "manifest-code-mismatch",
+            issue: "manifest-invalid",
             ready: false,
-            source: "manifest",
+            source: "unknown",
         });
     });
 

@@ -338,6 +338,38 @@ async function loadComponentBuildIdentity(
     };
 }
 
+function assertComponentBuildIdentities(
+    builds: ComponentBuildIdentity[],
+    commitSha: string,
+    bunVersion: string,
+    expectedIdentity: "release manifest" | "release source"
+): void {
+    for (const build of builds) {
+        if (build.commitSha !== commitSha || build.bunVersion !== bunVersion) {
+            throw new Error(
+                `${build.component} build identity does not match the ${expectedIdentity}`
+            );
+        }
+    }
+}
+
+export async function verifyReleaseBuildIdentities(
+    releaseRoot: string,
+    manifest: DashboardReleaseManifest
+): Promise<void> {
+    const realReleaseRoot = await fsp.realpath(releaseRoot);
+    const builds = await Promise.all([
+        loadComponentBuildIdentity(realReleaseRoot, "backend"),
+        loadComponentBuildIdentity(realReleaseRoot, "frontend"),
+    ]);
+    assertComponentBuildIdentities(
+        builds,
+        manifest.commitSha,
+        manifest.bunVersion,
+        "release manifest"
+    );
+}
+
 export async function createReleaseManifest(
     options: CreateReleaseManifestOptions
 ): Promise<DashboardReleaseManifest> {
@@ -354,13 +386,12 @@ export async function createReleaseManifest(
         loadComponentBuildIdentity(releaseRoot, "backend"),
         loadComponentBuildIdentity(releaseRoot, "frontend"),
     ]);
-    for (const build of [backendBuild, frontendBuild]) {
-        if (build.commitSha !== commitSha || build.bunVersion !== bunVersion) {
-            throw new Error(
-                `${build.component} build identity does not match the release source`
-            );
-        }
-    }
+    assertComponentBuildIdentities(
+        [backendBuild, frontendBuild],
+        commitSha,
+        bunVersion,
+        "release source"
+    );
 
     const artifactPaths = await listReleaseArtifactPaths(releaseRoot);
     const artifacts: ReleaseManifestArtifact[] = [];
@@ -621,6 +652,7 @@ export async function loadRuntimeReleaseIdentity(
     try {
         const manifest = await loadReleaseManifest(releaseRoot);
         await verifyReleaseArtifacts(releaseRoot, manifest);
+        await verifyReleaseBuildIdentities(releaseRoot, manifest);
         const isManifestMatchesCode =
             manifest.commitSha === backendBuildCommit &&
             manifest.bunVersion === Bun.version &&
