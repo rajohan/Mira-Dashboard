@@ -152,6 +152,7 @@ export function Chat() {
         isRecording,
         isTranscribing,
         removeAttachment,
+        restoreAttachments,
         voiceFileInputReference,
     } = inputMedia;
     const composerAttachmentError =
@@ -480,6 +481,7 @@ export function Chat() {
         isConnected,
         isRecording,
         isTranscribing,
+        restoreAttachments,
         runtime,
         scheduleBottomFollow,
         selectedSession,

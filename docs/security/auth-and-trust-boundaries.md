@@ -79,7 +79,13 @@ Docker/exec, backups, scheduled jobs/cron, PR/deploy operations, session
 mutations, job cancellation, and other centrally classified privileged
 mutations. A user without MFA receives `mfa_enrollment_required`; a stale MFA
 session receives `step_up_required`. The frontend opens one global verification
-dialog and requires the original action to be retried after successful step-up.
+dialog when the server-provided verification deadline expires. If a request
+races that deadline, the shared HTTP/WebSocket clients hold the rejected action,
+complete step-up, reconnect WebSockets with the rotated session cookie, and
+retry the exact request once. Chat keeps its optimistic message during this
+flow and restores unsent composer input if delivery still fails. The recent-auth
+window is fixed rather than extended by general page activity, so an active or
+compromised browser cannot keep privileged access fresh indefinitely.
 
 Changing the Dashboard password requires the current password plus recent MFA
 when enabled, rotates the current session, and revokes every other session.

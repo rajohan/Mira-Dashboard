@@ -8,6 +8,12 @@ import {
     useTotpStepUp,
     useWebAuthnStepUp,
 } from "../../../hooks";
+import {
+    cancelSecurityVerification,
+    completeSecurityVerification,
+    dispatchSecurityVerificationRequired,
+    SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+} from "../../../lib/securityVerification";
 import { router } from "../../../router";
 import { useAuthStore } from "../../../stores/authStore";
 import { Alert } from "../../ui/Alert";
@@ -37,10 +43,10 @@ export function GlobalSecurityVerification() {
     const [code, setCode] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState<string>();
-    const [isComplete, setIsComplete] = useState(false);
 
     useEffect(() => {
         function onVerificationRequired(event: Event): void {
+            event.preventDefault();
             const code = (
                 event as CustomEvent<{
                     code?: string;
@@ -57,32 +63,63 @@ export function GlobalSecurityVerification() {
             setCode("");
             setPassword("");
             setError(undefined);
-            setIsComplete(false);
         }
 
-        addEventListener("mira:security-verification-required", onVerificationRequired);
+        addEventListener(
+            SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+            onVerificationRequired
+        );
         return () => {
             removeEventListener(
-                "mira:security-verification-required",
+                SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
                 onVerificationRequired
             );
         };
     }, [mfaEnabled]);
 
-    function close(): void {
+    useEffect(() => {
+        if (!isAuthenticated || !mfaEnabled || !data) {
+            return;
+        }
+        const requireStepUp = () => {
+            dispatchSecurityVerificationRequired("step_up_required");
+        };
+        if (!data.recentVerification.mfa) {
+            requireStepUp();
+            return;
+        }
+        const expiresAt = Date.parse(data.recentVerification.mfaUntil ?? "");
+        if (!Number.isFinite(expiresAt)) {
+            return;
+        }
+        const remainingMs = expiresAt - Date.now();
+        if (remainingMs <= 0) {
+            requireStepUp();
+            return;
+        }
+        const timeout = setTimeout(requireStepUp, remainingMs + 1);
+        return () => clearTimeout(timeout);
+    }, [data, isAuthenticated, mfaEnabled]);
+
+    function reset(): void {
         setRequest(undefined);
         setCodeMethod(undefined);
         setCode("");
         setPassword("");
         setError(undefined);
-        setIsComplete(false);
+    }
+
+    function close(): void {
+        cancelSecurityVerification();
+        reset();
     }
 
     async function runVerification(action: () => Promise<unknown>): Promise<void> {
         setError(undefined);
         try {
             await action();
-            setIsComplete(true);
+            completeSecurityVerification();
+            reset();
         } catch (error_) {
             setError(errorMessage(error_));
         }
@@ -129,7 +166,7 @@ export function GlobalSecurityVerification() {
                     ? "Protect privileged actions"
                     : request === "password"
                       ? "Verify current password"
-                      : "Verify this privileged action"
+                      : "Verify your session"
             }
         >
             {request === "enroll" ? (
@@ -150,15 +187,6 @@ export function GlobalSecurityVerification() {
                     >
                         <ShieldCheck className="size-4" />
                         Open Dashboard security settings
-                    </Button>
-                </div>
-            ) : isComplete ? (
-                <div className="space-y-4">
-                    <Alert variant="success">
-                        Verification complete. Retry the privileged action.
-                    </Alert>
-                    <Button className="w-full" onClick={close}>
-                        Done
                     </Button>
                 </div>
             ) : request === "password" ? (

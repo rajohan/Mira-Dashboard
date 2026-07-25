@@ -38,6 +38,7 @@ interface ChatActionsOptions {
     isConnected: boolean;
     isRecording: boolean;
     isTranscribing: boolean;
+    restoreAttachments?(attachments: ChatSendAttachment[]): void;
     runtime: ChatRuntimeController;
     scheduleBottomFollow(): void;
     selectedSession?: Session;
@@ -82,6 +83,7 @@ export function useChatActions({
     isConnected,
     isRecording,
     isTranscribing,
+    restoreAttachments,
     runtime,
     scheduleBottomFollow,
     selectedSession,
@@ -323,6 +325,8 @@ export function useChatActions({
                 !resetCommand &&
                 selectedSessionKeyReference.current === pendingSessionKey
             ) {
+                setDraft((current) => (current.trim() ? current : text));
+                restoreAttachments?.(currentAttachments);
                 setMessages((previous) =>
                     rollbackFailedOptimisticMessage(
                         previous,

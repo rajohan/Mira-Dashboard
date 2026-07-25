@@ -2,6 +2,7 @@ import { handleUnauthorizedSession } from "../lib/authBoundary";
 import {
     dispatchSecurityVerificationRequired,
     isSecurityVerificationCode,
+    waitForSecurityVerification,
 } from "../lib/securityVerification";
 import { hasRecentUserActivity } from "../lib/userActivity";
 
@@ -33,57 +34,69 @@ export async function apiFetch<T>(
     endpoint: string,
     options?: RequestInit
 ): Promise<T | undefined> {
-    const headers = new Headers(options?.headers);
-    headers.set("Content-Type", "application/json");
-    if (hasRecentUserActivity()) {
-        headers.set("X-Mira-User-Activity", "1");
-    }
-
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-        ...options,
-        headers,
-        credentials: "include",
-    });
-
-    if (response.status === 401) {
-        handleUnauthorizedSession();
-        throw new UnauthorizedError();
-    }
-
-    if (!response.ok) {
-        let error: { code?: string; error?: string };
-        try {
-            error = (await response.json()) as {
-                code?: string;
-                error?: string;
-            };
-        } catch {
-            error = { error: "Unknown error" };
+    let canRetryAfterVerification = true;
+    while (true) {
+        const headers = new Headers(options?.headers);
+        headers.set("Content-Type", "application/json");
+        if (hasRecentUserActivity()) {
+            headers.set("X-Mira-User-Activity", "1");
         }
-        if (isSecurityVerificationCode(error.code)) {
-            dispatchSecurityVerificationRequired(error.code);
+
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            ...options,
+            headers,
+            credentials: "include",
+        });
+
+        if (response.status === 401) {
+            handleUnauthorizedSession();
+            throw new UnauthorizedError();
         }
-        throw new ApiError(
-            error.error || `HTTP ${response.status}`,
-            response.status,
-            error.code
-        );
-    }
 
-    if (response.status === 204) {
-        return undefined;
-    }
+        if (!response.ok) {
+            let error: { code?: string; error?: string };
+            try {
+                error = (await response.json()) as {
+                    code?: string;
+                    error?: string;
+                };
+            } catch {
+                error = { error: "Unknown error" };
+            }
+            if (isSecurityVerificationCode(error.code)) {
+                if (
+                    canRetryAfterVerification &&
+                    (await waitForSecurityVerification(error.code))
+                ) {
+                    canRetryAfterVerification = false;
+                    continue;
+                }
+                if (!canRetryAfterVerification) {
+                    dispatchSecurityVerificationRequired(error.code);
+                }
+            }
+            throw new ApiError(
+                error.error || `HTTP ${response.status}`,
+                response.status,
+                error.code
+            );
+        }
 
-    if (typeof response.text !== "function") {
-        return response.json() as Promise<T>;
-    }
+        if (response.status === 204) {
+            return undefined;
+        }
 
-    const text = await response.text();
-    if (!text.trim()) {
-        return undefined;
-    }
+        if (typeof response.text !== "function") {
+            return response.json() as Promise<T>;
+        }
 
-    return JSON.parse(text) as T;
+        const text = await response.text();
+        if (!text.trim()) {
+            return undefined;
+        }
+
+        return JSON.parse(text) as T;
+    }
 }
 
 /** Ensures API calls that require a JSON body fail clearly on empty responses. */

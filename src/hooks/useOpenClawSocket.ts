@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { replaceSessionsFromWebSocket } from "../collections/sessions";
+import { AUTH_SESSION_ROTATED_EVENT_NAME } from "../lib/authBoundary";
 import {
     createSocketClient,
     type SocketClient,
@@ -162,6 +163,22 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             disconnect();
             setError(undefined);
         }
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return;
+        }
+        const reconnectWithRotatedSession = () => {
+            clientReference.current?.reconnect();
+        };
+        addEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, reconnectWithRotatedSession);
+        return () => {
+            removeEventListener(
+                AUTH_SESSION_ROTATED_EVENT_NAME,
+                reconnectWithRotatedSession
+            );
+        };
     }, [isAuthenticated]);
 
     useEffect(() => {

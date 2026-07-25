@@ -183,7 +183,11 @@ import {
     useTerminalJob,
 } from "../hooks/useTerminal";
 import { useWeather } from "../hooks/useWeather";
-import { UNAUTHORIZED_EVENT_NAME } from "../lib/authBoundary";
+import {
+    AUTH_SESSION_ROTATED_EVENT_NAME,
+    UNAUTHORIZED_EVENT_NAME,
+} from "../lib/authBoundary";
+import { completeSecurityVerification } from "../lib/securityVerification";
 import { createSocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import {
@@ -599,13 +603,22 @@ class FakeWebSocket {
 
 function latestSocketRequest(socket: FakeWebSocket): {
     id: string;
+    method?: string;
     timeoutMs?: number;
 } {
     const serializedRequest = socket.sent.at(-1);
     if (!serializedRequest) {
         throw new Error("Expected a WebSocket request");
     }
-    return JSON.parse(serializedRequest) as { id: string; timeoutMs?: number };
+    return JSON.parse(serializedRequest) as {
+        id: string;
+        method?: string;
+        timeoutMs?: number;
+    };
+}
+
+function claimSecurityVerification(event: Event): void {
+    event.preventDefault();
 }
 
 describe("Mira Dashboard frontend behavior", () => {
@@ -1198,6 +1211,43 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
+    it("retries an API action once after the shared verification flow completes", async () => {
+        let requestCount = 0;
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () => {
+                requestCount += 1;
+                return requestCount === 1
+                    ? Response.json(
+                          {
+                              code: "step_up_required",
+                              error: "Recent MFA verification is required",
+                          },
+                          { status: 403 }
+                      )
+                    : Response.json({ isOk: true });
+            }),
+            writable: true,
+        });
+
+        try {
+            const request = apiFetch<{ isOk: boolean }>("/privileged", {
+                method: "POST",
+            });
+            await waitFor(() => expect(requestCount).toBe(1));
+            completeSecurityVerification();
+            await expect(request).resolves.toEqual({ isOk: true });
+            expect(requestCount).toBe(2);
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+        }
+    });
+
     it("parses successful, empty, and failed API responses consistently", async () => {
         const fetchMock = jest.fn(
             async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1455,6 +1505,45 @@ describe("Mira Dashboard frontend behavior", () => {
                 removeEventListener(
                     "mira:security-verification-required",
                     verificationHandler
+                );
+            }
+
+            const resumableVerificationHandler = claimSecurityVerification;
+            addEventListener(
+                "mira:security-verification-required",
+                resumableVerificationHandler
+            );
+            try {
+                const resumablePromise = client.request<{ resumed: boolean }>(
+                    "privileged.resumable"
+                );
+                const blockedRequest = latestSocketRequest(socket);
+                socket.message({
+                    type: "response",
+                    id: blockedRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                completeSecurityVerification();
+                await waitFor(() =>
+                    expect(latestSocketRequest(socket).id).not.toBe(blockedRequest.id)
+                );
+                const retriedRequest = latestSocketRequest(socket);
+                expect(retriedRequest).toMatchObject({
+                    method: "privileged.resumable",
+                });
+                socket.message({
+                    type: "response",
+                    id: retriedRequest.id,
+                    isOk: true,
+                    payload: { resumed: true },
+                });
+                await expect(resumablePromise).resolves.toEqual({ resumed: true });
+            } finally {
+                removeEventListener(
+                    "mira:security-verification-required",
+                    resumableVerificationHandler
                 );
             }
 
@@ -1809,7 +1898,18 @@ describe("Mira Dashboard frontend behavior", () => {
             await expect(request).resolves.toEqual({ pong: true });
 
             act(() => {
-                socket.message({ type: "state", gatewayConnected: false });
+                dispatchEvent(new Event(AUTH_SESSION_ROTATED_EVENT_NAME));
+            });
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+            const rotatedSocket = FakeWebSocket.instances[1]!;
+            expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+            act(() => {
+                rotatedSocket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+
+            act(() => {
+                rotatedSocket.message({ type: "state", gatewayConnected: false });
             });
             await waitFor(() => expect(result.current.isConnected).toBe(false));
             expect(receivedMessages).toContainEqual({

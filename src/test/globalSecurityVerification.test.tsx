@@ -24,7 +24,8 @@ const securitySummary: AccountSecuritySummary = {
         webAuthnCredentials: [],
     },
     recentVerification: {
-        mfa: false,
+        mfa: true,
+        mfaUntil: new Date(Date.now() + 60 * 60_000).toISOString(),
         password: false,
     },
     recommendation: {
@@ -103,6 +104,37 @@ afterEach(() => {
 });
 
 describe("Global security verification", () => {
+    it("opens proactively when the current MFA verification expires", async () => {
+        const expiringSummary: AccountSecuritySummary = {
+            ...securitySummary,
+            recentVerification: {
+                ...securitySummary.recentVerification,
+                mfaUntil: new Date(Date.now() + 50).toISOString(),
+            },
+        };
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(expiringSummary);
+                }
+                throw new Error(`Unexpected proactive request: ${String(input)}`);
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        expect(
+            await screen.findByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+        await userEvent.click(
+            screen.getByRole("button", { name: "Close Verify your session" })
+        );
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
     it("directs enrollment-required actions to Dashboard security settings", async () => {
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
@@ -146,16 +178,18 @@ describe("Global security verification", () => {
     });
 
     it("offers password reauthentication when MFA is not enabled", async () => {
-        authActions.setSession({
-            authenticated: true,
-            isBootstrapRequired: false,
-            session: {
-                authMethod: "password",
-                expiresAt: "2026-08-24T12:00:00.000Z",
-                lastSeenAt: "2026-07-24T12:00:00.000Z",
-                mfaEnabled: false,
-            },
-            user: { id: 1, username: "raymond" },
+        act(() => {
+            authActions.setSession({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "password",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:00:00.000Z",
+                    mfaEnabled: false,
+                },
+                user: { id: 1, username: "raymond" },
+            });
         });
         const passwordCalls: Array<{
             body: unknown;
@@ -220,11 +254,16 @@ describe("Global security verification", () => {
             screen.getByLabelText("Current password"),
             "current-password"
         );
-        await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+        await act(async () => {
+            screen.getByRole("button", { name: "Verify" }).click();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
 
-        expect(
-            await screen.findByText("Verification complete. Retry the privileged action.")
-        ).toBeInTheDocument();
+        await waitFor(() =>
+            expect(
+                screen.queryByRole("heading", { name: "Verify current password" })
+            ).not.toBeInTheDocument()
+        );
         expect(passwordCalls).toContainEqual({
             body: { password: "current-password" },
             method: "POST",
@@ -333,10 +372,9 @@ describe("Global security verification", () => {
         await userEvent.clear(screen.getByLabelText("Recovery code"));
         await userEvent.type(screen.getByLabelText("Recovery code"), "valid-recovery");
         await userEvent.click(screen.getByRole("button", { name: "Verify" }));
-        expect(
-            await screen.findByText("Verification complete. Retry the privileged action.")
-        ).toBeInTheDocument();
-        await userEvent.click(screen.getByRole("button", { name: "Done" }));
+        await waitFor(() =>
+            expect(document.body.textContent).not.toContain("Verify your session")
+        );
 
         dispatchVerificationRequired("recent_verification_required");
         await userEvent.click(
@@ -347,10 +385,9 @@ describe("Global security verification", () => {
             screen.getByRole("button", { name: "Choose another method" })
         );
         await userEvent.click(screen.getByRole("button", { name: "Use security key" }));
-        expect(
-            await screen.findByText("Verification complete. Retry the privileged action.")
-        ).toBeInTheDocument();
-        await userEvent.click(screen.getByRole("button", { name: "Done" }));
+        await waitFor(() =>
+            expect(document.body.textContent).not.toContain("Verify your session")
+        );
 
         dispatchVerificationRequired("step_up_required");
         await userEvent.click(
@@ -358,9 +395,9 @@ describe("Global security verification", () => {
         );
         await userEvent.type(screen.getByLabelText("6-digit code"), "123456");
         await userEvent.click(screen.getByRole("button", { name: "Verify" }));
-        expect(
-            await screen.findByText("Verification complete. Retry the privileged action.")
-        ).toBeInTheDocument();
+        await waitFor(() =>
+            expect(document.body.textContent).not.toContain("Verify your session")
+        );
         expect(
             calls.some(
                 (call) =>

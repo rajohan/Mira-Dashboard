@@ -1,7 +1,7 @@
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { handleUnauthorizedSession } from "../lib/authBoundary";
+import { handleUnauthorizedSession, notifyAuthSessionRotated } from "../lib/authBoundary";
 import { authActions } from "../stores/authStore";
 import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
 
@@ -83,8 +83,14 @@ export const accountSecurityKeys = {
     all: ["account-security"] as const,
 };
 
-function invalidateSecurity(queryClient: ReturnType<typeof useQueryClient>) {
-    queryClient.invalidateQueries({ queryKey: accountSecurityKeys.all });
+function invalidateSecurity(
+    queryClient: ReturnType<typeof useQueryClient>,
+    didRotateSession = false
+): void {
+    if (didRotateSession) {
+        notifyAuthSessionRotated();
+    }
+    void queryClient.invalidateQueries({ queryKey: accountSecurityKeys.all });
     void authActions.refreshSession();
 }
 
@@ -104,7 +110,7 @@ export function usePasswordReauthentication() {
             apiPostRequired<{ isOk: boolean }>("/account/security/reauth/password", {
                 password,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -125,7 +131,7 @@ export function useChangePassword() {
                 currentPassword,
                 newPassword,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -136,7 +142,7 @@ export function useTotpStepUp() {
             apiPostRequired<{ isOk: boolean }>("/account/security/step-up/totp", {
                 code,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -147,7 +153,7 @@ export function useRecoveryStepUp() {
             apiPostRequired<{ isOk: boolean }>("/account/security/step-up/recovery", {
                 code,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -166,7 +172,7 @@ export function useWebAuthnStepUp() {
                 { response }
             );
         },
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -188,7 +194,7 @@ export function useConfirmTotpEnrollment() {
                 "/account/security/totp/confirm",
                 { code, factorId }
             ),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -222,7 +228,7 @@ export function useRegisterSecurityKey() {
                 response,
             });
         },
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -255,7 +261,7 @@ export function useDisableMfa() {
             apiPostRequired<{ isOk: boolean }>("/account/security/mfa/disable", {
                 password,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 

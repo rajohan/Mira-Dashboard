@@ -204,6 +204,52 @@ describe("chat actions", () => {
         });
     });
 
+    it("restores the composer draft when delivery does not complete", async () => {
+        const transport = fakeTransport(
+            jest.fn(async () => {
+                throw new Error("verification cancelled");
+            })
+        );
+        let draftState = "message that must survive";
+        const setDraft = jest.fn((update: SetStateAction<string>) => {
+            draftState = typeof update === "function" ? update(draftState) : update;
+        });
+        let messages: ChatHistoryMessage[] = [];
+        const setMessages = jest.fn((update: SetStateAction<ChatHistoryMessage[]>) => {
+            messages = typeof update === "function" ? update(messages) : update;
+        });
+        const { result } = renderHook(() =>
+            useChatActions({
+                activeRunCount: 0,
+                attachments: [],
+                attachmentsReference: { current: [] },
+                clearAttachments: jest.fn(),
+                confirmResetSession: jest.fn(async () => true),
+                draft: draftState,
+                isCompacting: false,
+                isConnected: true,
+                isRecording: false,
+                isTranscribing: false,
+                runtime: fakeRuntime(),
+                scheduleBottomFollow: jest.fn(),
+                selectedSession: selectedSession(),
+                selectedSessionKey: SESSION_A,
+                selectedSessionKeyReference: { current: SESSION_A },
+                setDraft,
+                setIsAtBottom: jest.fn(),
+                setMessages,
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                transport,
+            })
+        );
+
+        await act(async () => result.current.handleSend());
+
+        expect(draftState).toBe("message that must survive");
+        expect(messages).toEqual([]);
+    });
+
     it("uses the session compaction RPC and clears request state when it finishes", async () => {
         const compactDeferred = Promise.withResolvers<void>();
         const transport = fakeTransport();

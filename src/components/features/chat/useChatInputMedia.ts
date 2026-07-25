@@ -95,6 +95,15 @@ export function useChatInputMedia({
 
     const clearAttachments = () => invalidateMedia();
 
+    const restoreAttachments = (restored: ChatSendAttachment[]) => {
+        if (restored.length === 0) return;
+        setAttachments((current) => {
+            if (current.length > 0) return current;
+            attachmentsReference.current = restored;
+            return restored;
+        });
+    };
+
     const clearAttachmentError = (source?: ChatAttachmentInputSource) => {
         setAttachmentError((current) =>
             !source || current?.source === source ? undefined : current
@@ -439,6 +448,7 @@ export function useChatInputMedia({
         isRecording,
         isTranscribing,
         removeAttachment,
+        restoreAttachments,
         voiceFileInputReference,
     };
 }

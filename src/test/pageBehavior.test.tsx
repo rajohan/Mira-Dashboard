@@ -3403,7 +3403,7 @@ describe("Mira Dashboard pages", () => {
         await flushQueuedTimers();
 
         await waitFor(() => {
-            expect(screen.queryByText("failed.txt")).not.toBeInTheDocument();
+            expect(screen.getByText("failed.txt")).toBeInTheDocument();
             expect(screen.getByText("Failed to send message")).toBeInTheDocument();
         });
         await act(async () => {
