@@ -28,7 +28,6 @@ const RELEASE_TRANSITION_FORMAT_VERSION = 1;
 const RELEASE_TRANSITION_JOURNAL_FILE_NAME = ".release-transition.json";
 const RELEASE_TRANSITION_LOCK_FILE_NAME = ".release-transition.lock";
 const MAX_RELEASE_TRANSITION_FILE_BYTES = 4096;
-const TRANSITION_LOCK_INITIALIZATION_GRACE_MS = 5000;
 
 export type ReleaseLinkName = "current" | "previous";
 
@@ -53,6 +52,7 @@ export interface DashboardReleaseManagerOptions {
     readLiveSchemaVersion?: (
         maximumCompatibleVersion: number
     ) => number | Promise<number>;
+    schemaCutoverMode?: "coordinated";
 }
 
 interface ReleaseLinkState {
@@ -261,19 +261,64 @@ async function readReleaseTransitionJournal(
         : undefined;
 }
 
-async function readReleaseTransitionLock(
-    layout: DashboardReleaseLayout
-): Promise<(ReleaseTransitionLock & { modifiedAtMs: number }) | undefined> {
-    const file = await readBoundedControlFile(
-        path.join(layout.root, RELEASE_TRANSITION_LOCK_FILE_NAME)
-    );
-    if (!file) {
-        return undefined;
+async function readReleaseTransitionLock(layout: DashboardReleaseLayout): Promise<
+    | (ReleaseTransitionLock & {
+          device: number;
+          inode: number;
+      })
+    | undefined
+> {
+    const lockPath = path.join(layout.root, RELEASE_TRANSITION_LOCK_FILE_NAME);
+    let stat: fs.Stats;
+    try {
+        stat = await fsp.lstat(lockPath);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return undefined;
+        }
+        throw error;
+    }
+    if (
+        !stat.isSymbolicLink() ||
+        stat.nlink !== 1 ||
+        stat.size === 0 ||
+        stat.size > MAX_RELEASE_TRANSITION_FILE_BYTES
+    ) {
+        throw new TypeError(
+            "Release transition lock must be an atomic bounded symbolic link"
+        );
+    }
+    const serialized = await fsp.readlink(lockPath);
+    if (Buffer.byteLength(serialized, "utf8") > MAX_RELEASE_TRANSITION_FILE_BYTES) {
+        throw new TypeError("Release transition lock is too large");
+    }
+    const verifiedStat = await fsp.lstat(lockPath);
+    if (verifiedStat.dev !== stat.dev || verifiedStat.ino !== stat.ino) {
+        throw new Error("Release transition lock changed while it was being read");
     }
     return {
-        ...parseReleaseTransitionLock(JSON.parse(file.serialized) as unknown),
-        modifiedAtMs: file.modifiedAtMs,
+        ...parseReleaseTransitionLock(JSON.parse(serialized) as unknown),
+        device: stat.dev,
+        inode: stat.ino,
     };
+}
+
+async function removeReleaseTransitionLock(
+    layout: DashboardReleaseLayout,
+    expectedLock: { device: number; inode: number }
+): Promise<void> {
+    const lockPath = path.join(layout.root, RELEASE_TRANSITION_LOCK_FILE_NAME);
+    const stat = await fsp.lstat(lockPath);
+    if (
+        !stat.isSymbolicLink() ||
+        stat.nlink !== 1 ||
+        stat.dev !== expectedLock.device ||
+        stat.ino !== expectedLock.inode
+    ) {
+        throw new Error("Managed release transition lock ownership changed");
+    }
+    await fsp.unlink(lockPath);
+    await syncDirectory(layout.root);
 }
 
 async function removeReleaseTransitionControlFile(
@@ -323,28 +368,17 @@ async function acquireReleaseTransitionLock(
     layout: DashboardReleaseLayout
 ): Promise<void> {
     const lockPath = path.join(layout.root, RELEASE_TRANSITION_LOCK_FILE_NAME);
-    let file: fs.promises.FileHandle | undefined;
     let isLockCreated = false;
     try {
-        file = await fsp.open(
-            lockPath,
-            fs.constants.O_WRONLY |
-                fs.constants.O_CREAT |
-                fs.constants.O_EXCL |
-                fs.constants.O_NOFOLLOW,
-            0o600
-        );
-        isLockCreated = true;
-        await file.writeFile(
-            `${JSON.stringify({
+        await fsp.symlink(
+            JSON.stringify({
                 formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
                 ownerPid: process.pid,
-            })}\n`,
-            "utf8"
+            }),
+            lockPath,
+            "file"
         );
-        await file.sync();
-        await file.close();
-        file = undefined;
+        isLockCreated = true;
         await syncDirectory(layout.root);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "EEXIST") {
@@ -352,19 +386,17 @@ async function acquireReleaseTransitionLock(
                 cause: error,
             });
         }
-        await file?.close();
-        file = undefined;
         if (isLockCreated) {
             try {
-                await fsp.unlink(lockPath);
-                await syncDirectory(layout.root);
+                const lock = await readReleaseTransitionLock(layout);
+                if (lock?.ownerPid === process.pid) {
+                    await removeReleaseTransitionLock(layout, lock);
+                }
             } catch {
                 // Preserve the lock acquisition failure.
             }
         }
         throw error;
-    } finally {
-        await file?.close();
     }
 }
 
@@ -603,17 +635,18 @@ function assertHostRuntimeCompatible(release: ManagedDashboardRelease): void {
 
 export function assertReleaseActivationCompatible(
     candidate: DashboardReleaseManifest,
-    current: DashboardReleaseManifest
+    current: DashboardReleaseManifest,
+    schemaCutoverMode?: DashboardReleaseManagerOptions["schemaCutoverMode"]
 ): void {
     if (candidate.schema.target < current.schema.target) {
         throw new Error(
             "Forward activation cannot lower the managed SQLite schema target"
         );
     }
-    if (
+    const requiresCoordinatedCutover =
         candidate.schema.target < current.schema.minimumCompatible ||
-        candidate.schema.target > current.schema.maximumCompatible
-    ) {
+        candidate.schema.target > current.schema.maximumCompatible;
+    if (requiresCoordinatedCutover && schemaCutoverMode !== "coordinated") {
         throw new Error(
             `Current release cannot roll back after SQLite schema ${candidate.schema.target}`
         );
@@ -631,14 +664,15 @@ export function assertReleaseActivationCompatible(
 
 export function assertReleaseRollbackCompatible(
     active: DashboardReleaseManifest,
-    rollback: DashboardReleaseManifest
+    rollback: DashboardReleaseManifest,
+    liveSchemaVersion: number
 ): void {
     if (
-        active.schema.target < rollback.schema.minimumCompatible ||
-        active.schema.target > rollback.schema.maximumCompatible
+        liveSchemaVersion < rollback.schema.minimumCompatible ||
+        liveSchemaVersion > rollback.schema.maximumCompatible
     ) {
         throw new Error(
-            `Rollback release cannot open SQLite schema ${active.schema.target}`
+            `Rollback release cannot open SQLite schema ${liveSchemaVersion}`
         );
     }
     if (
@@ -649,6 +683,21 @@ export function assertReleaseRollbackCompatible(
             "Rollback release has a different migration registry for the live SQLite schema"
         );
     }
+}
+
+function assertReleaseCanActivateLiveSchema(
+    release: DashboardReleaseManifest,
+    liveSchemaVersion: number,
+    schemaCutoverMode?: DashboardReleaseManagerOptions["schemaCutoverMode"]
+): void {
+    if (
+        schemaCutoverMode === "coordinated" &&
+        liveSchemaVersion < release.schema.minimumCompatible &&
+        liveSchemaVersion < release.schema.target
+    ) {
+        return;
+    }
+    assertReleaseCanOpenLiveSchema(release, liveSchemaVersion, "Activation");
 }
 
 async function readDashboardReleaseStateFromLayout(
@@ -732,28 +781,7 @@ async function restoreInterruptedReleaseTransition(
 async function recoverInterruptedReleaseTransition(
     layout: DashboardReleaseLayout
 ): Promise<void> {
-    let lock: Awaited<ReturnType<typeof readReleaseTransitionLock>>;
-    try {
-        lock = await readReleaseTransitionLock(layout);
-    } catch (error) {
-        const journal = await readReleaseTransitionJournal(layout);
-        if (journal) {
-            throw error;
-        }
-        const lockPath = path.join(layout.root, RELEASE_TRANSITION_LOCK_FILE_NAME);
-        const stat = await fsp.lstat(lockPath);
-        if (Date.now() - stat.mtimeMs < TRANSITION_LOCK_INITIALIZATION_GRACE_MS) {
-            throw new Error("Managed release transition lock is still initializing", {
-                cause: error,
-            });
-        }
-        await removeReleaseTransitionControlFile(
-            layout,
-            RELEASE_TRANSITION_LOCK_FILE_NAME
-        );
-        return;
-    }
-
+    const lock = await readReleaseTransitionLock(layout);
     const journal = await readReleaseTransitionJournal(layout);
     if (!lock && !journal) {
         return;
@@ -767,10 +795,7 @@ async function recoverInterruptedReleaseTransition(
         await restoreInterruptedReleaseTransition(layout, journal);
     }
     if (lock) {
-        await removeReleaseTransitionControlFile(
-            layout,
-            RELEASE_TRANSITION_LOCK_FILE_NAME
-        );
+        await removeReleaseTransitionLock(layout, lock);
     }
 }
 
@@ -779,7 +804,36 @@ async function releaseOwnedTransitionLock(layout: DashboardReleaseLayout): Promi
     if (!lock || lock.ownerPid !== process.pid) {
         throw new Error("Managed release transition lock ownership changed");
     }
-    await removeReleaseTransitionControlFile(layout, RELEASE_TRANSITION_LOCK_FILE_NAME);
+    await removeReleaseTransitionLock(layout, lock);
+}
+
+async function withReleaseTransitionLock<T>(
+    layout: DashboardReleaseLayout,
+    transition: () => Promise<T>
+): Promise<T> {
+    await acquireReleaseTransitionLock(layout);
+    let primaryError: unknown;
+    let didTransitionFail = false;
+    try {
+        return await transition();
+    } catch (error) {
+        primaryError = error;
+        didTransitionFail = true;
+        throw error;
+    } finally {
+        try {
+            await releaseOwnedTransitionLock(layout);
+        } catch (cleanupError) {
+            if (didTransitionFail) {
+                throw new AggregateError(
+                    [primaryError, cleanupError],
+                    "Managed release transition failed and its lock could not be released",
+                    { cause: primaryError }
+                );
+            }
+            throw cleanupError;
+        }
+    }
 }
 
 async function executeReleaseTransition(
@@ -829,14 +883,21 @@ export async function activateDashboardRelease(
     const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
     assertHostRuntimeCompatible(candidate);
 
-    await acquireReleaseTransitionLock(layout);
-    try {
+    return withReleaseTransitionLock(layout, async () => {
         const state = await readDashboardReleaseStateFromLayout(layout);
         if (state.current?.commitSha === candidate.commitSha) {
             return state;
         }
         if (state.current) {
-            assertReleaseActivationCompatible(candidate.manifest, state.current.manifest);
+            assertReleaseActivationCompatible(
+                candidate.manifest,
+                state.current.manifest,
+                options.schemaCutoverMode
+            );
+        } else if (options.schemaCutoverMode === "coordinated") {
+            throw new Error(
+                "Coordinated schema cutover mode requires an active current release"
+            );
         }
         const maximumInspectableSchemaVersion = Math.max(
             DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
@@ -847,10 +908,23 @@ export async function activateDashboardRelease(
             options,
             maximumInspectableSchemaVersion
         );
-        assertReleaseCanOpenLiveSchema(
+        const requiresCoordinatedCutover =
+            (state.current !== undefined &&
+                (candidate.manifest.schema.target <
+                    state.current.manifest.schema.minimumCompatible ||
+                    candidate.manifest.schema.target >
+                        state.current.manifest.schema.maximumCompatible)) ||
+            (liveSchemaVersion < candidate.manifest.schema.minimumCompatible &&
+                liveSchemaVersion < candidate.manifest.schema.target);
+        if (options.schemaCutoverMode === "coordinated" && !requiresCoordinatedCutover) {
+            throw new Error(
+                "Coordinated schema cutover mode requires an incompatible schema boundary"
+            );
+        }
+        assertReleaseCanActivateLiveSchema(
             candidate.manifest,
             liveSchemaVersion,
-            "Activation"
+            options.schemaCutoverMode
         );
 
         const before = releaseLinkStateFromDashboardState(state);
@@ -869,9 +943,7 @@ export async function activateDashboardRelease(
             }
             await replaceReleaseLink(layout, "current", candidate.commitSha);
         });
-    } finally {
-        await releaseOwnedTransitionLock(layout);
-    }
+    });
 }
 
 export async function rollbackDashboardRelease(
@@ -880,8 +952,7 @@ export async function rollbackDashboardRelease(
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
     await recoverInterruptedReleaseTransition(layout);
-    await acquireReleaseTransitionLock(layout);
-    try {
+    return withReleaseTransitionLock(layout, async () => {
         const state = await readDashboardReleaseStateFromLayout(layout);
         if (!state.current || !state.previous) {
             throw new Error("Managed release rollback requires current and previous");
@@ -893,7 +964,6 @@ export async function rollbackDashboardRelease(
         const activeRelease = state.current;
         const rollbackRelease = state.previous;
         assertHostRuntimeCompatible(rollbackRelease);
-        assertReleaseRollbackCompatible(activeRelease.manifest, rollbackRelease.manifest);
         const maximumInspectableSchemaVersion = Math.max(
             DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
             activeRelease.manifest.schema.maximumCompatible,
@@ -903,10 +973,10 @@ export async function rollbackDashboardRelease(
             options,
             maximumInspectableSchemaVersion
         );
-        assertReleaseCanOpenLiveSchema(
+        assertReleaseRollbackCompatible(
+            activeRelease.manifest,
             rollbackRelease.manifest,
-            liveSchemaVersion,
-            "Rollback"
+            liveSchemaVersion
         );
 
         const before = releaseLinkStateFromDashboardState(state);
@@ -923,7 +993,5 @@ export async function rollbackDashboardRelease(
             await replaceReleaseLink(layout, "current", rollbackRelease.commitSha);
             await replaceReleaseLink(layout, "previous", activeRelease.commitSha);
         });
-    } finally {
-        await releaseOwnedTransitionLock(layout);
-    }
+    });
 }

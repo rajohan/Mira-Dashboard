@@ -453,9 +453,9 @@ describe("Dashboard release manifest", () => {
         await expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
-            issue: "manifest-invalid",
+            issue: "build-identity-invalid",
             ready: false,
-            source: "unknown",
+            source: "manifest",
         });
     });
 

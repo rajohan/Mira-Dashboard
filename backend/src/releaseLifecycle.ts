@@ -9,6 +9,8 @@ import {
     rollbackDashboardRelease,
 } from "./releaseManager.ts";
 
+const COORDINATED_SCHEMA_CUTOVER_FLAG = "--coordinated-schema-cutover";
+
 function releaseSummary(state: DashboardReleaseState) {
     const summarize = (release: DashboardReleaseState["current"]) =>
         release
@@ -32,7 +34,11 @@ export async function runReleaseLifecycleCommand(
     options: DashboardReleaseManagerOptions = {}
 ) {
     const [command, commitSha, ...extra] = arguments_;
-    if (extra.length > 0) {
+    const isCoordinatedSchemaCutover =
+        command === "activate" &&
+        extra.length === 1 &&
+        extra[0] === COORDINATED_SCHEMA_CUTOVER_FLAG;
+    if (extra.length > 0 && !isCoordinatedSchemaCutover) {
         throw new TypeError("Release lifecycle command received unexpected arguments");
     }
 
@@ -42,18 +48,23 @@ export async function runReleaseLifecycleCommand(
             if (!commitSha) {
                 throw new TypeError("Release lifecycle activate requires a commit SHA");
             }
-            state = await activateDashboardRelease(commitSha, releasesRoot, options);
+            state = await activateDashboardRelease(commitSha, releasesRoot, {
+                ...options,
+                ...(isCoordinatedSchemaCutover && {
+                    schemaCutoverMode: "coordinated" as const,
+                }),
+            });
             break;
         }
         case "rollback": {
-            if (commitSha) {
+            if (commitSha !== undefined) {
                 throw new TypeError("Release lifecycle rollback takes no commit SHA");
             }
             state = await rollbackDashboardRelease(releasesRoot, options);
             break;
         }
         case "status": {
-            if (commitSha) {
+            if (commitSha !== undefined) {
                 throw new TypeError("Release lifecycle status takes no commit SHA");
             }
             state = await readDashboardReleaseState(releasesRoot);
@@ -61,7 +72,7 @@ export async function runReleaseLifecycleCommand(
         }
         default: {
             throw new TypeError(
-                "Usage: releaseLifecycle.js <status|activate COMMIT_SHA|rollback>"
+                "Usage: releaseLifecycle.js <status|activate COMMIT_SHA [--coordinated-schema-cutover]|rollback>"
             );
         }
     }

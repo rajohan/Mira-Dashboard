@@ -286,11 +286,13 @@ forward-only version; released migration files are never edited.
 If an incompatible change cannot be phased, treat activation as a coordinated
 code-and-data cutover:
 
-1. record the release SHA, supported schema range, and selected verified
-   pre-deploy/pre-migration snapshot in the release manifest;
+1. run the candidate's production preflight, then record the release SHA,
+   supported schema range, and selected verified pre-deploy/pre-migration
+   snapshot in the deployment record;
 2. stop both Dashboard units for the cutover and verify the execution queue is
    idle;
-3. activate the immutable release and migrate forward;
+3. activate the immutable release with the explicit
+   `--coordinated-schema-cutover` flag and migrate forward on startup;
 4. run readiness against the new release and schema;
 5. on failure, stop both units, restore the matching snapshot, switch the
    `current` release link back, and only then restart.
@@ -331,13 +333,22 @@ explicit code constant. Adding a future migration without reviewing that range
 fails the release contract.
 
 The release lifecycle layer validates immutable directories named by full Git
-SHA under `/home/ubuntu/projects/mira-dashboard-releases/releases/`. It exposes
-only three commands:
+SHA under `/home/ubuntu/projects/mira-dashboard-releases/releases/`. This is the
+production default; a deliberately configured `MIRA_DASHBOARD_RELEASES_ROOT`
+overrides it. Run lifecycle commands from a verified release with the same
+Doppler production environment as the services so schema checks always inspect
+the live Dashboard database:
 
 ```bash
-bun backend/dist/releaseLifecycle.js status
-bun backend/dist/releaseLifecycle.js activate <full-commit-sha>
-bun backend/dist/releaseLifecycle.js rollback
+cd /home/ubuntu/projects/mira-dashboard-releases/current
+NODE_ENV=production doppler run --config prd --project rajohan -- \
+  bun backend/dist/releaseLifecycle.js status
+NODE_ENV=production doppler run --config prd --project rajohan -- \
+  bun backend/dist/releaseLifecycle.js rollback
+
+cd /home/ubuntu/projects/mira-dashboard-releases/releases/<full-commit-sha>
+NODE_ENV=production doppler run --config prd --project rajohan -- \
+  bun backend/dist/releaseLifecycle.js activate <full-commit-sha>
 ```
 
 `current` and `previous` are relative links inside the release root. Link
@@ -347,6 +358,22 @@ identities, the exact manifest/directory SHA, the host Bun version, the actual
 live SQLite schema, and the previous release's rollback window. Rollback also
 checks the live schema rather than assuming it was downgraded by a code-only
 rollback.
+
+Normal activation refuses a schema target outside the current release's rollback
+window. For the exceptional snapshot-backed cutover described above, run the
+candidate command only after preflight succeeds, both services are stopped, and
+the queue is idle:
+
+```bash
+NODE_ENV=production doppler run --config prd --project rajohan -- \
+  bun backend/dist/releaseLifecycle.js activate <full-commit-sha> \
+  --coordinated-schema-cutover
+```
+
+The flag is rejected for ordinary compatible releases. It permits the candidate
+startup migration across the incompatible boundary, but it does not permit
+automatic code-only rollback afterward; restore the recorded matching snapshot
+before switching back.
 
 Every activation and rollback is serialized by an owner-PID lock and recorded
 in a durable transition journal before either link changes. A later lifecycle

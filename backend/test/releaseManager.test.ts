@@ -39,6 +39,17 @@ const SCHEMA_6_OPTIONS = {
     readLiveSchemaVersion: () => 6,
 };
 
+function createTransitionLock(releasesRoot: string, ownerPid: number): void {
+    symlinkSync(
+        JSON.stringify({
+            formatVersion: 1,
+            ownerPid,
+        }),
+        path.join(releasesRoot, ".release-transition.lock"),
+        "file"
+    );
+}
+
 function temporaryReleasesRoot(): string {
     const root = mkdtempSync(path.join(tmpdir(), "mira-releases-"));
     temporaryRoots.push(root);
@@ -270,6 +281,12 @@ describe("Dashboard immutable release manager", () => {
         await expect(
             runReleaseLifecycleCommand(["rollback", FIRST_COMMIT], root)
         ).rejects.toThrow("takes no commit SHA");
+        await expect(runReleaseLifecycleCommand(["rollback", ""], root)).rejects.toThrow(
+            "takes no commit SHA"
+        );
+        await expect(runReleaseLifecycleCommand(["status", ""], root)).rejects.toThrow(
+            "takes no commit SHA"
+        );
     });
 
     it("rejects directories whose manifest identity or artifacts do not match", async () => {
@@ -416,6 +433,71 @@ describe("Dashboard immutable release manager", () => {
         expect(state.previous?.commitSha).toBe(SECOND_COMMIT);
     });
 
+    it("requires an explicit coordinated mode for incompatible schema cutovers", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
+        await rewriteManifest(candidatePath, {
+            migrationRegistrySha256: "d".repeat(64),
+            schemaMaximum: 7,
+            schemaMinimum: 7,
+            schemaTarget: 7,
+        });
+
+        let liveSchemaVersion = 6;
+        const options = {
+            readLiveSchemaVersion: () => liveSchemaVersion,
+        };
+        await activateDashboardRelease(FIRST_COMMIT, root, options);
+        await expect(
+            activateDashboardRelease(SECOND_COMMIT, root, options)
+        ).rejects.toThrow("cannot roll back after SQLite schema 7");
+
+        await runReleaseLifecycleCommand(
+            ["activate", SECOND_COMMIT, "--coordinated-schema-cutover"],
+            root,
+            options
+        );
+        liveSchemaVersion = 7;
+        await expect(rollbackDashboardRelease(root, options)).rejects.toThrow(
+            "Rollback release cannot open SQLite schema 7"
+        );
+        expect(readlinkSync(path.join(root, "current"))).toBe(
+            `releases/${SECOND_COMMIT}`
+        );
+    });
+
+    it("bases repeated code rollback compatibility on the live schema", async () => {
+        const root = temporaryReleasesRoot();
+        const compatibleOldPath = await createManagedRelease(root, FIRST_COMMIT);
+        const migratedPath = await createManagedRelease(root, SECOND_COMMIT);
+        await rewriteManifest(compatibleOldPath, {
+            schemaMaximum: 7,
+        });
+        await rewriteManifest(migratedPath, {
+            migrationRegistrySha256: "d".repeat(64),
+            schemaMaximum: 7,
+            schemaMinimum: 7,
+            schemaTarget: 7,
+        });
+
+        let liveSchemaVersion = 6;
+        const options = {
+            readLiveSchemaVersion: () => liveSchemaVersion,
+        };
+        await activateDashboardRelease(FIRST_COMMIT, root, options);
+        await activateDashboardRelease(SECOND_COMMIT, root, {
+            ...options,
+            schemaCutoverMode: "coordinated",
+        });
+        liveSchemaVersion = 7;
+
+        const oldCode = await rollbackDashboardRelease(root, options);
+        expect(oldCode.current?.commitSha).toBe(FIRST_COMMIT);
+        const migratedCode = await rollbackDashboardRelease(root, options);
+        expect(migratedCode.current?.commitSha).toBe(SECOND_COMMIT);
+    });
+
     it("recovers the prior slots from an interrupted activation journal", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);
@@ -436,10 +518,7 @@ describe("Dashboard immutable release manager", () => {
             formatVersion: 1,
             operation: "activate",
         };
-        writeFileSync(
-            path.join(root, ".release-transition.lock"),
-            `${JSON.stringify({ formatVersion: 1, ownerPid: 999_999_999 })}\n`
-        );
+        createTransitionLock(root, 999_999_999);
         writeFileSync(
             path.join(root, ".release-transition.json"),
             `${JSON.stringify(journal)}\n`
@@ -452,6 +531,78 @@ describe("Dashboard immutable release manager", () => {
         expect(recovered.previous?.commitSha).toBe(FIRST_COMMIT);
         expect(existsSync(path.join(root, ".release-transition.lock"))).toBe(false);
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
+    });
+
+    it("rejects a concurrent transition owned by a live process", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        createTransitionLock(root, process.pid);
+
+        await expect(
+            activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
+        ).rejects.toThrow(`active in process ${process.pid}`);
+        expect(readlinkSync(path.join(root, "current"))).toBe(`releases/${FIRST_COMMIT}`);
+        expect(existsSync(path.join(root, "previous"))).toBe(false);
+        rmSync(path.join(root, ".release-transition.lock"));
+    });
+
+    it("restores both prior slots when activation fails after changing a link", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        const candidatePath = await createManagedRelease(root, THIRD_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
+
+        await expect(
+            activateDashboardRelease(THIRD_COMMIT, root, {
+                readLiveSchemaVersion: () => {
+                    rmSync(candidatePath, { force: true, recursive: true });
+                    return 6;
+                },
+            })
+        ).rejects.toThrow();
+
+        const state = await readDashboardReleaseState(root);
+        expect(state.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(state.previous?.commitSha).toBe(FIRST_COMMIT);
+        expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
+        expect(() => readlinkSync(path.join(root, ".release-transition.lock"))).toThrow();
+    });
+
+    it("preserves transition and cleanup errors when lock ownership changes", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        const candidatePath = await createManagedRelease(root, THIRD_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
+
+        let failure: unknown;
+        try {
+            await activateDashboardRelease(THIRD_COMMIT, root, {
+                readLiveSchemaVersion: () => {
+                    rmSync(candidatePath, { force: true, recursive: true });
+                    rmSync(path.join(root, ".release-transition.lock"));
+                    createTransitionLock(root, 999_999_999);
+                    return 6;
+                },
+            });
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).toBeInstanceOf(AggregateError);
+        const errors = (failure as AggregateError).errors as Error[];
+        expect(errors).toHaveLength(2);
+        expect(errors[0]?.message).toContain("ENOENT");
+        expect(errors[1]?.message).toContain("lock ownership changed");
+        rmSync(path.join(root, ".release-transition.lock"));
+        const state = await readDashboardReleaseState(root);
+        expect(state.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(state.previous?.commitSha).toBe(FIRST_COMMIT);
     });
 
     it("requires two distinct releases before rollback", async () => {

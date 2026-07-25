@@ -70,7 +70,11 @@ export interface RuntimeReleaseIdentity {
     backendCommit: string;
     commitSha?: string;
     frontendCommit: string;
-    issue?: "manifest-code-mismatch" | "manifest-invalid" | "manifest-missing";
+    issue?:
+        | "build-identity-invalid"
+        | "manifest-code-mismatch"
+        | "manifest-invalid"
+        | "manifest-missing";
     manifestFormatVersion?: number;
     ready: boolean;
     schema?: DashboardReleaseManifest["schema"];
@@ -652,7 +656,21 @@ export async function loadRuntimeReleaseIdentity(
     try {
         const manifest = await loadReleaseManifest(releaseRoot);
         await verifyReleaseArtifacts(releaseRoot, manifest);
-        await verifyReleaseBuildIdentities(releaseRoot, manifest);
+        try {
+            await verifyReleaseBuildIdentities(releaseRoot, manifest);
+        } catch {
+            return {
+                artifactCount: manifest.artifacts.length,
+                backendCommit: manifest.components.backendCommit,
+                commitSha: manifest.commitSha,
+                frontendCommit: manifest.components.frontendCommit,
+                issue: "build-identity-invalid",
+                manifestFormatVersion: manifest.formatVersion,
+                ready: false,
+                schema: manifest.schema,
+                source: "manifest",
+            };
+        }
         const isManifestMatchesCode =
             manifest.commitSha === backendBuildCommit &&
             manifest.bunVersion === Bun.version &&
