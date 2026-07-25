@@ -17,11 +17,16 @@ interface AuthSessionRotationSignal {
     toSessionId?: string;
 }
 
+interface AuthSessionRefreshResult {
+    didRefresh: boolean;
+    identity?: AuthSessionIdentity;
+}
+
 const authBoundaryRuntimeState = {
     isSessionRotationSyncInstalled: false,
     sessionRotationSignal: undefined as AuthSessionRotationSignal | undefined,
     unauthorizedRecoveryPromise: undefined as
-        Promise<AuthSessionIdentity | undefined> | undefined,
+        Promise<AuthSessionRefreshResult> | undefined,
 };
 
 function currentAuthIdentity(): AuthSessionIdentity | undefined {
@@ -94,6 +99,7 @@ export function uninstallAuthSessionRotationSync(): void {
         authBoundaryRuntimeState.isSessionRotationSyncInstalled = false;
     }
     authBoundaryRuntimeState.sessionRotationSignal = undefined;
+    authBoundaryRuntimeState.unauthorizedRecoveryPromise = undefined;
 }
 
 /**
@@ -142,15 +148,21 @@ export async function recoverOrHandleUnauthorizedSession(): Promise<boolean> {
         authBoundaryRuntimeState.unauthorizedRecoveryPromise = (async () => {
             try {
                 await authActions.refreshSession();
-                return currentAuthIdentity();
+                return {
+                    didRefresh: true,
+                    identity: currentAuthIdentity(),
+                };
             } catch {
-                return;
+                return { didRefresh: false };
             }
         })();
     }
     const recoveryPromise = authBoundaryRuntimeState.unauthorizedRecoveryPromise;
     try {
-        const recoveredIdentity = await recoveryPromise;
+        const { didRefresh, identity: recoveredIdentity } = await recoveryPromise;
+        if (!didRefresh) {
+            return false;
+        }
         if (expectedIdentity && recoveredIdentity) {
             if (isSameAuthIdentity(expectedIdentity, recoveredIdentity)) {
                 return true;

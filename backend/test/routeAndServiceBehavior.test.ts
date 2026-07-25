@@ -373,10 +373,9 @@ describe("backend route and service behavior", () => {
         if (!encodedSessionToken) {
             throw new Error("Expected a Dashboard session cookie");
         }
-        const [sessionSelector, sessionValidator] = decodeURIComponent(
-            encodedSessionToken
-        ).split(".", 2);
-        if (!sessionSelector || !sessionValidator) {
+        const sessionTokenParts = decodeURIComponent(encodedSessionToken).split(".", 3);
+        const [sessionSelector, sessionValidator] = sessionTokenParts;
+        if (sessionTokenParts.length !== 2 || !sessionSelector || !sessionValidator) {
             throw new Error("Expected a selector/validator session token");
         }
         expect(sessionSelector).toMatch(/^[a-f0-9]{32}$/u);

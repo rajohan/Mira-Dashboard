@@ -19,7 +19,7 @@ import {
     SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
 } from "../../../lib/securityVerification";
 import { router } from "../../../router";
-import { authStore, useAuthStore } from "../../../stores/authStore";
+import { authActions, authStore, useAuthStore } from "../../../stores/authStore";
 import { Alert } from "../../ui/Alert";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
@@ -291,6 +291,14 @@ export function GlobalSecurityVerification() {
         setError(undefined);
         try {
             await action();
+            if (
+                verificationGenerationReference.current !== verificationGeneration ||
+                !requestReference.current ||
+                verificationBindingReference.current !== binding
+            ) {
+                return;
+            }
+            await authActions.refreshSession();
             if (
                 verificationGenerationReference.current !== verificationGeneration ||
                 !requestReference.current ||

@@ -337,6 +337,41 @@ describe("Dashboard authentication boundary", () => {
         }
     });
 
+    it("preserves a valid session after a transient recovery refresh failure", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () => {
+                throw new TypeError("Temporary network failure");
+            }),
+            writable: true,
+        });
+        const unauthorizedHandler = jest.fn();
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+
+        try {
+            await expect(recoverOrHandleUnauthorizedSession()).resolves.toBe(false);
+            expect(fetch).toHaveBeenCalledTimes(1);
+            expect(authStore.state.isAuthenticated).toBe(true);
+            expect(authStore.state.sessionId).toBe("11111111111111111111111111111111");
+            expect(authStore.state.user?.id).toBe(1);
+            expect(unauthorizedHandler).not.toHaveBeenCalled();
+        } finally {
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
+
     it("expires an unclaimed session-rotation signal", () => {
         authActions.setSession({
             authenticated: true,

@@ -1167,9 +1167,20 @@ describe("Mira Dashboard frontend behavior", () => {
         addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
-            value: jest.fn(async () =>
-                Response.json({ error: "Unauthorized" }, { status: 401 })
-            ),
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/tasks") {
+                    return Response.json({ error: "Unauthorized" }, { status: 401 });
+                }
+                if (String(input) === "/api/auth/session") {
+                    return Response.json({
+                        authenticated: false,
+                        isBootstrapRequired: false,
+                    });
+                }
+                throw new Error(
+                    `Unexpected authorization-boundary request: ${String(input)}`
+                );
+            }),
             writable: true,
         });
 
@@ -1361,7 +1372,7 @@ describe("Mira Dashboard frontend behavior", () => {
 
     it("retries an API action once after the shared verification flow completes", async () => {
         let requestCount = 0;
-        const verificationHandler = claimSecurityVerification;
+        const verificationHandler = jest.fn(claimSecurityVerification);
         addEventListener("mira:security-verification-required", verificationHandler);
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
@@ -1384,7 +1395,10 @@ describe("Mira Dashboard frontend behavior", () => {
             const request = apiFetch<{ isOk: boolean }>("/privileged", {
                 method: "POST",
             });
-            await waitFor(() => expect(requestCount).toBe(1));
+            await waitFor(() => {
+                expect(verificationHandler).toHaveBeenCalledTimes(1);
+            });
+            expect(requestCount).toBe(1);
             completeSecurityVerification();
             await expect(request).resolves.toEqual({ isOk: true });
             expect(requestCount).toBe(2);
@@ -1398,7 +1412,7 @@ describe("Mira Dashboard frontend behavior", () => {
 
     it("does not replay a one-shot request body after verification", async () => {
         let requestCount = 0;
-        const verificationHandler = claimSecurityVerification;
+        const verificationHandler = jest.fn(claimSecurityVerification);
         addEventListener("mira:security-verification-required", verificationHandler);
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
@@ -1423,7 +1437,10 @@ describe("Mira Dashboard frontend behavior", () => {
                 method: "POST",
             });
             const rejection = expect(request).rejects.toBeInstanceOf(ApiError);
-            await waitFor(() => expect(requestCount).toBe(1));
+            await waitFor(() => {
+                expect(verificationHandler).toHaveBeenCalledTimes(1);
+            });
+            expect(requestCount).toBe(1);
             completeSecurityVerification();
             await rejection;
             expect(requestCount).toBe(1);

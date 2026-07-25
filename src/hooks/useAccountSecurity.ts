@@ -177,7 +177,11 @@ export function useWebAuthnStepUp() {
             });
             return apiPostRequired<{ isOk: boolean }>(
                 "/account/security/step-up/webauthn/verify",
-                { response }
+                { response },
+                {
+                    canRetryAfterUnauthorizedRecovery: false,
+                    canRetryAfterSecurityVerification: false,
+                }
             );
         },
         onSuccess: () => invalidateSecurity(queryClient, true),

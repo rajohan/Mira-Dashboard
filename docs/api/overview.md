@@ -67,9 +67,11 @@ session routes. They manage MFA, passwords, recovery codes, and browser
 sessions and never inherit public auth-route treatment.
 
 Sessions expire after 30 days absolutely and after 30 minutes of inactivity by
-default. Password and second-factor failures additionally use persistent
-account-scoped throttling. Privileged browser actions require a second-factor
-verification within the configured recent-auth window.
+default; `MIRA_DASHBOARD_SESSION_IDLE_MINUTES` configures the idle lifetime.
+Password and second-factor failures additionally use persistent account-scoped
+throttling. Privileged browser actions require a second-factor verification
+within the recent-auth window configured by
+`MIRA_DASHBOARD_RECENT_AUTH_MINUTES` (10 minutes by default).
 
 Unsafe browser mutations must come from an allowed exact `Origin` and may not
 carry `Sec-Fetch-Site: same-site` or `cross-site`. Same-origin Dashboard calls
@@ -96,7 +98,7 @@ Common statuses:
 | ------ | ------------------------------------------------------------------------- |
 | `200`  | Read/update/action succeeded.                                             |
 | `201`  | Resource created.                                                         |
-| `202`  | Password accepted; a second login factor is still required.              |
+| `202`  | Password accepted; a second login factor is still required.               |
 | `400`  | Invalid request JSON, params, or body.                                    |
 | `401`  | Missing/invalid authentication or invalid Gateway token during bootstrap. |
 | `403`  | Origin, scope, path, or proxy policy rejection.                           |

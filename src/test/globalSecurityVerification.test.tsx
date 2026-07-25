@@ -20,7 +20,7 @@ import {
     waitForSecurityVerification,
     waitForSecurityVerificationOutcome,
 } from "../lib/securityVerification";
-import { authActions } from "../stores/authStore";
+import { authActions, authStore } from "../stores/authStore";
 import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
 
 const originalFetch = fetch;
@@ -1033,6 +1033,82 @@ describe("Global security verification", () => {
         });
     });
 
+    it("refreshes auth identity before releasing a successful step-up", async () => {
+        const firstSessionResponse = Promise.withResolvers<Response>();
+        let recoveryRequests = 0;
+        let sessionRequests = 0;
+        const secondUserSession = () =>
+            Response.json({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "webauthn",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:01:00.000Z",
+                    mfaEnabled: true,
+                    sessionId: SECONDARY_DASHBOARD_SESSION_ID,
+                },
+                user: { id: 2, username: "second-user" },
+            });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                async (
+                    input: RequestInfo | URL,
+                    init?: RequestInit
+                ): Promise<Response> => {
+                    const url = String(input);
+                    const method = init?.method ?? "GET";
+                    if (url === "/api/account/security" && method === "GET") {
+                        return Response.json(securitySummary);
+                    }
+                    if (
+                        url === "/api/account/security/step-up/recovery" &&
+                        method === "POST"
+                    ) {
+                        recoveryRequests += 1;
+                        return Response.json({ isOk: true });
+                    }
+                    if (url === "/api/auth/session" && method === "GET") {
+                        sessionRequests += 1;
+                        if (sessionRequests === 1) {
+                            return firstSessionResponse.promise;
+                        }
+                        firstSessionResponse.resolve(secondUserSession());
+                        return secondUserSession();
+                    }
+                    throw new Error(
+                        `Unexpected identity-refresh request: ${method} ${url}`
+                    );
+                }
+            ),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalled();
+        });
+        let verificationPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        act(() => {
+            verificationPromise = waitForSecurityVerificationOutcome("step_up_required");
+        });
+        await userEvent.click(screen.getByRole("button", { name: "Use recovery code" }));
+        await userEvent.type(screen.getByLabelText("Recovery code"), "single-use-code");
+        await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+        await expect(verificationPromise).resolves.toBe("cancelled");
+        expect(recoveryRequests).toBe(1);
+        expect(sessionRequests).toBe(2);
+        expect(authStore.state.isAuthenticated).toBe(true);
+        expect(authStore.state.user?.id).toBe(2);
+        expect(authStore.state.sessionId).toBe(SECONDARY_DASHBOARD_SESSION_ID);
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
     it("prevents dismissal while a recovery verification is pending", async () => {
         const recoveryResponse = Promise.withResolvers<Response>();
         Object.defineProperty(globalThis, "fetch", {
@@ -1218,6 +1294,98 @@ describe("Global security verification", () => {
             method: "POST",
             url: "/api/account/security/reauth/password",
         });
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("does not replay a session-bound WebAuthn assertion after a 401", async () => {
+        webAuthnBrowser.install();
+        let authSessionRequests = 0;
+        let verifyRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                async (
+                    input: RequestInfo | URL,
+                    init?: RequestInit
+                ): Promise<Response> => {
+                    const url = String(input);
+                    const method = init?.method ?? "GET";
+                    if (url === "/api/account/security" && method === "GET") {
+                        return Response.json(securitySummary);
+                    }
+                    if (
+                        url === "/api/account/security/step-up/webauthn/options" &&
+                        method === "POST"
+                    ) {
+                        return Response.json({
+                            options: {
+                                allowCredentials: [
+                                    {
+                                        id: "AQID",
+                                        transports: ["usb"],
+                                        type: "public-key",
+                                    },
+                                ],
+                                challenge: "AA",
+                                rpId: "dashboard.example.com",
+                                timeout: 60_000,
+                                userVerification: "required",
+                            },
+                        });
+                    }
+                    if (
+                        url === "/api/account/security/step-up/webauthn/verify" &&
+                        method === "POST"
+                    ) {
+                        verifyRequests += 1;
+                        return Response.json(
+                            { error: "Session changed" },
+                            { status: 401 }
+                        );
+                    }
+                    if (url === "/api/auth/session" && method === "GET") {
+                        authSessionRequests += 1;
+                        return Response.json({
+                            authenticated: true,
+                            isBootstrapRequired: false,
+                            session: {
+                                authMethod: "webauthn",
+                                expiresAt: "2026-08-24T12:00:00.000Z",
+                                lastSeenAt: "2026-07-24T12:00:00.000Z",
+                                mfaEnabled: true,
+                                sessionId: PRIMARY_DASHBOARD_SESSION_ID,
+                            },
+                            user: { id: 1, username: "raymond" },
+                        });
+                    }
+                    throw new Error(
+                        `Unexpected WebAuthn replay request: ${method} ${url}`
+                    );
+                }
+            ),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalled();
+        });
+        let verificationPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        act(() => {
+            verificationPromise = waitForSecurityVerificationOutcome("step_up_required");
+        });
+        await userEvent.click(screen.getByRole("button", { name: "Use security key" }));
+
+        expect(await screen.findByText("Unauthorized")).toBeInTheDocument();
+        expect(verifyRequests).toBe(1);
+        expect(authSessionRequests).toBe(1);
+        act(() => {
+            cancelSecurityVerification();
+        });
+        await expect(verificationPromise).resolves.toBe("cancelled");
         act(() => {
             queryClient.clear();
         });
