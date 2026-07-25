@@ -1254,6 +1254,45 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
+    it("does not replay a one-shot request body after verification", async () => {
+        let requestCount = 0;
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () => {
+                requestCount += 1;
+                return requestCount === 1
+                    ? Response.json(
+                          {
+                              code: "step_up_required",
+                              error: "Recent MFA verification is required",
+                          },
+                          { status: 403 }
+                      )
+                    : Response.json({ isOk: true });
+            }),
+            writable: true,
+        });
+
+        try {
+            const request = apiFetch<{ isOk: boolean }>("/privileged-stream", {
+                body: new ReadableStream<Uint8Array>(),
+                method: "POST",
+            });
+            const rejection = expect(request).rejects.toBeInstanceOf(ApiError);
+            await waitFor(() => expect(requestCount).toBe(1));
+            completeSecurityVerification();
+            await rejection;
+            expect(requestCount).toBe(1);
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+        }
+    });
+
     it("bounds a claimed verification wait when the host never settles it", async () => {
         jest.useFakeTimers();
         const verificationHandler = claimSecurityVerification;
@@ -1264,6 +1303,8 @@ describe("Mira Dashboard frontend behavior", () => {
             const verification = waitForSecurityVerification("step_up_required", 1000);
             jest.advanceTimersByTime(1000);
             await expect(verification).resolves.toBe(false);
+            expect(cancellationHandler).not.toHaveBeenCalled();
+            cancelSecurityVerification();
             expect(cancellationHandler).toHaveBeenCalledTimes(1);
         } finally {
             removeEventListener(

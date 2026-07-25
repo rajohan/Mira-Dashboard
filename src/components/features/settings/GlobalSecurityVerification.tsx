@@ -13,6 +13,7 @@ import {
     completeSecurityVerification,
     dispatchSecurityVerificationRequired,
     SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
+    SECURITY_VERIFICATION_FLOW_TIMEOUT_MS,
     SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
 } from "../../../lib/securityVerification";
 import { router } from "../../../router";
@@ -59,9 +60,37 @@ export function GlobalSecurityVerification() {
     const [error, setError] = useState<string>();
     const requestReference = useRef<VerificationRequest>(request);
     const verificationGenerationReference = useRef(0);
+    const verificationTimeoutReference = useRef<
+        ReturnType<typeof setTimeout> | undefined
+    >(undefined);
     requestReference.current = request;
 
+    const clearVerificationTimeout = useCallback((): void => {
+        if (verificationTimeoutReference.current === undefined) {
+            return;
+        }
+        clearTimeout(verificationTimeoutReference.current);
+        verificationTimeoutReference.current = undefined;
+    }, []);
+
+    const startVerificationTimeout = useCallback(
+        (verificationGeneration: number): void => {
+            clearVerificationTimeout();
+            verificationTimeoutReference.current = setTimeout(() => {
+                verificationTimeoutReference.current = undefined;
+                if (
+                    verificationGenerationReference.current === verificationGeneration &&
+                    requestReference.current
+                ) {
+                    cancelSecurityVerification();
+                }
+            }, SECURITY_VERIFICATION_FLOW_TIMEOUT_MS);
+        },
+        [clearVerificationTimeout]
+    );
+
     const reset = useCallback((): void => {
+        clearVerificationTimeout();
         verificationGenerationReference.current += 1;
         requestReference.current = undefined;
         setRequest(undefined);
@@ -69,7 +98,7 @@ export function GlobalSecurityVerification() {
         setCode("");
         setPassword("");
         setError(undefined);
-    }, []);
+    }, [clearVerificationTimeout]);
 
     useEffect(() => {
         function onVerificationRequired(event: Event): void {
@@ -94,6 +123,7 @@ export function GlobalSecurityVerification() {
             }
             verificationGenerationReference.current += 1;
             requestReference.current = nextRequest;
+            startVerificationTimeout(verificationGenerationReference.current);
             setRequest(nextRequest);
             setCodeMethod(undefined);
             setCode("");
@@ -113,13 +143,15 @@ export function GlobalSecurityVerification() {
             );
             removeEventListener(SECURITY_VERIFICATION_CANCELLED_EVENT_NAME, reset);
         };
-    }, [isAuthenticated, mfaEnabled, reset]);
+    }, [isAuthenticated, mfaEnabled, reset, startVerificationTimeout]);
 
     useEffect(() => {
         if (!isAuthenticated && requestReference.current) {
             cancelSecurityVerification();
         }
     }, [isAuthenticated]);
+
+    useEffect(() => clearVerificationTimeout, [clearVerificationTimeout]);
 
     useEffect(() => {
         if (!isAuthenticated || !data) {

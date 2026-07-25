@@ -8,13 +8,13 @@ export const SECURITY_VERIFICATION_COMPLETED_EVENT_NAME =
     "mira:security-verification-completed";
 export const SECURITY_VERIFICATION_CANCELLED_EVENT_NAME =
     "mira:security-verification-cancelled";
+export const SECURITY_VERIFICATION_FLOW_TIMEOUT_MS = 10 * 60_000;
 
 const SECURITY_VERIFICATION_CODES = new Set<SecurityVerificationCode>([
     "mfa_enrollment_required",
     "recent_verification_required",
     "step_up_required",
 ]);
-const DEFAULT_SECURITY_VERIFICATION_WAIT_MS = 10 * 60_000;
 
 /** Identifies an explicit dismissal of a claimed shared verification flow. */
 export class SecurityVerificationCancelledError extends Error {
@@ -67,7 +67,7 @@ export function cancelSecurityVerification(): void {
  */
 export function waitForSecurityVerificationOutcome(
     code: SecurityVerificationCode,
-    timeoutMs = DEFAULT_SECURITY_VERIFICATION_WAIT_MS
+    timeoutMs = SECURITY_VERIFICATION_FLOW_TIMEOUT_MS
 ): Promise<SecurityVerificationOutcome> {
     return new Promise((resolve) => {
         let isSettled = false;
@@ -98,16 +98,13 @@ export function waitForSecurityVerificationOutcome(
             settle("unclaimed");
             return;
         }
-        timeoutReference.current = setTimeout(() => {
-            cancelSecurityVerification();
-            settle("cancelled");
-        }, timeoutMs);
+        timeoutReference.current = setTimeout(() => settle("cancelled"), timeoutMs);
     });
 }
 
 export async function waitForSecurityVerification(
     code: SecurityVerificationCode,
-    timeoutMs = DEFAULT_SECURITY_VERIFICATION_WAIT_MS
+    timeoutMs = SECURITY_VERIFICATION_FLOW_TIMEOUT_MS
 ): Promise<boolean> {
     return (await waitForSecurityVerificationOutcome(code, timeoutMs)) === "verified";
 }

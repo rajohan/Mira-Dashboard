@@ -11,7 +11,7 @@ import {
     completeSecurityVerification,
     SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
 } from "../lib/securityVerification";
-import { authActions } from "../stores/authStore";
+import { authActions, authStore } from "../stores/authStore";
 import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
 
 const originalFetch = fetch;
@@ -23,6 +23,7 @@ const originalCreateObjectUrl = URL.createObjectURL;
 const originalRevokeObjectUrl = URL.revokeObjectURL;
 const webAuthnBrowser = createWebAuthnBrowserTestHarness();
 const sessionRotationHandler = jest.fn(() => {});
+const CURRENT_SESSION_ID = "0123456789abcdef0123456789abcdef";
 
 function claimAndCompleteSecurityVerification(event: Event): void {
     event.preventDefault();
@@ -40,6 +41,7 @@ beforeEach(() => {
             expiresAt: "2026-08-23T12:00:00.000Z",
             lastSeenAt: "2026-07-24T12:00:00.000Z",
             mfaEnabled: true,
+            sessionId: CURRENT_SESSION_ID,
         },
         user: { id: 1, username: "raymond" },
     });
@@ -132,7 +134,7 @@ function summary({
                 expiresAt: "2026-08-23T12:00:00.000Z",
                 isCurrent: true,
                 lastSeenAt: "2026-07-24T12:00:00.000Z",
-                sessionId: "0123456789abcdef0123456789abcdef",
+                sessionId: CURRENT_SESSION_ID,
                 userAgent: "Current test browser",
             },
             {
@@ -184,6 +186,7 @@ function installAccountFetch(
                         expiresAt: "2026-08-23T12:00:00.000Z",
                         lastSeenAt: "2026-07-24T12:00:00.000Z",
                         mfaEnabled: Boolean(securitySummary().factors.enabledAt),
+                        sessionId: CURRENT_SESSION_ID,
                     },
                     user: { id: 1, username: "raymond" },
                 });
@@ -560,12 +563,6 @@ describe("Dashboard account security", () => {
                 ) {
                     return Response.json({ isOk: true, revoked: 1 });
                 }
-                if (
-                    url === "/api/account/security/sessions/revoke-all" &&
-                    method === "POST"
-                ) {
-                    return Response.json({ isOk: true, revoked: 2 });
-                }
                 if (url === "/api/account/security/mfa/disable" && method === "POST") {
                     expect(body).toEqual({ password: "current-password" });
                     securitySummary = summary({
@@ -652,6 +649,39 @@ describe("Dashboard account security", () => {
         );
         expect(await screen.findByText("Two-step login disabled")).toBeInTheDocument();
         expect(await screen.findByText("Not enabled")).toBeInTheDocument();
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("logs out all sessions from the account-security interface", async () => {
+        const { calls } = installAccountFetch(
+            () => summary(),
+            (url, method) => {
+                if (
+                    url === "/api/account/security/sessions/revoke-all" &&
+                    method === "POST"
+                ) {
+                    return Response.json({ isOk: true, revoked: 2 });
+                }
+                return;
+            }
+        );
+
+        const { queryClient } = renderAccountSecurity();
+        await screen.findByText("Primary YubiKey");
+        await userEvent.click(screen.getByRole("button", { name: "Log out all" }));
+
+        await waitFor(() => {
+            expect(
+                calls.some(
+                    (call) =>
+                        call.url === "/api/account/security/sessions/revoke-all" &&
+                        call.method === "POST"
+                )
+            ).toBe(true);
+            expect(authStore.state.isAuthenticated).toBe(false);
+        });
         act(() => {
             queryClient.clear();
         });

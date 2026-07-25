@@ -42,7 +42,9 @@ export async function apiFetch<T>(
     options?: ApiRequestOptions
 ): Promise<T | undefined> {
     const { canRetryAfterSecurityVerification = true, ...requestOptions } = options ?? {};
-    let canRetryAfterVerification = canRetryAfterSecurityVerification;
+    let canRetryAfterVerification =
+        canRetryAfterSecurityVerification &&
+        (requestOptions.body === undefined || typeof requestOptions.body === "string");
     while (true) {
         const headers = new Headers(requestOptions.headers);
         headers.set("Content-Type", "application/json");

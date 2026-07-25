@@ -218,6 +218,7 @@ export function useChatActions({
         }
 
         const inputRevision = inputRevisionReference.current.revision;
+        const clearedInputRevision = inputRevision + 1;
         const sendEpoch = beginSend(inputRevision);
         if (text.startsWith("/")) {
             try {
@@ -337,7 +338,12 @@ export function useChatActions({
                 !resetCommand &&
                 selectedSessionKeyReference.current === pendingSessionKey
             ) {
-                if (!draftReference.current.trim()) {
+                const currentInputRevision = inputRevisionReference.current.revision;
+                if (
+                    !draftReference.current.trim() &&
+                    (currentInputRevision === inputRevision ||
+                        currentInputRevision === clearedInputRevision)
+                ) {
                     const canRestoreAttachments = restoreAttachments
                         ? restoreAttachments(
                               currentAttachments,

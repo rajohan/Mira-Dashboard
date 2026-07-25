@@ -395,6 +395,63 @@ describe("chat actions", () => {
         expect(restoreAttachments).not.toHaveBeenCalled();
     });
 
+    it("does not restore a failed draft after a transient composer edit", async () => {
+        const sendDeferred = Promise.withResolvers<{ runId?: string }>();
+        const transport = fakeTransport(jest.fn(() => sendDeferred.promise));
+        const restoreAttachments = jest.fn(() => true);
+        const { result } = renderHook(() => {
+            const [draft, setDraft] = useState("old message");
+            return {
+                ...useChatActions({
+                    activeRunCount: 0,
+                    attachments: [],
+                    attachmentsReference: { current: [] },
+                    clearAttachments: jest.fn(() => 41),
+                    confirmResetSession: jest.fn(async () => true),
+                    draft,
+                    isCompacting: false,
+                    isConnected: true,
+                    isRecording: false,
+                    isTranscribing: false,
+                    restoreAttachments,
+                    runtime: fakeRuntime(),
+                    scheduleBottomFollow: jest.fn(),
+                    selectedSession: selectedSession(),
+                    selectedSessionKey: SESSION_A,
+                    selectedSessionKeyReference: { current: SESSION_A },
+                    setDraft,
+                    setIsAtBottom: jest.fn(),
+                    setMessages: jest.fn(),
+                    setSendError: jest.fn(),
+                    shouldStickToBottomReference: { current: true },
+                    transport,
+                }),
+                draft,
+                setDraft,
+            };
+        });
+
+        let sendPromise: Promise<void> | undefined;
+        act(() => {
+            sendPromise = result.current.handleSend();
+        });
+        await waitFor(() => expect(transport.send).toHaveBeenCalledTimes(1));
+        act(() => {
+            result.current.setDraft("temporary replacement");
+        });
+        act(() => {
+            result.current.setDraft("");
+        });
+
+        await act(async () => {
+            sendDeferred.reject(new Error("retry failed"));
+            await sendPromise;
+        });
+
+        expect(result.current.draft).toBe("");
+        expect(restoreAttachments).not.toHaveBeenCalled();
+    });
+
     it("does not restore a failed draft after attachment state changes", async () => {
         const sendDeferred = Promise.withResolvers<{ runId?: string }>();
         const transport = fakeTransport(jest.fn(() => sendDeferred.promise));
