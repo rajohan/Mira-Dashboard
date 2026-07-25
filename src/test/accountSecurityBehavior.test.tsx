@@ -7,6 +7,10 @@ import { createElement } from "react";
 import { AccountSecuritySection } from "../components/features/settings/AccountSecuritySection";
 import type { AccountSecuritySummary } from "../hooks/useAccountSecurity";
 import { AUTH_SESSION_ROTATED_EVENT_NAME } from "../lib/authBoundary";
+import {
+    completeSecurityVerification,
+    SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+} from "../lib/securityVerification";
 import { authActions } from "../stores/authStore";
 import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
 
@@ -19,6 +23,11 @@ const originalCreateObjectUrl = URL.createObjectURL;
 const originalRevokeObjectUrl = URL.revokeObjectURL;
 const webAuthnBrowser = createWebAuthnBrowserTestHarness();
 const sessionRotationHandler = jest.fn(() => {});
+
+function claimAndCompleteSecurityVerification(event: Event): void {
+    event.preventDefault();
+    queueMicrotask(completeSecurityVerification);
+}
 
 beforeEach(() => {
     sessionRotationHandler.mockClear();
@@ -738,5 +747,102 @@ describe("Dashboard account security", () => {
         act(() => {
             queryClient.clear();
         });
+    });
+
+    it("does not replay a session-bound security-key registration response", async () => {
+        webAuthnBrowser.install();
+        let verificationRequests = 0;
+        addEventListener(
+            SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+            claimAndCompleteSecurityVerification
+        );
+        const { calls } = installAccountFetch(
+            () => summary(),
+            (url, method) => {
+                if (
+                    url === "/api/account/security/webauthn/register/options" &&
+                    method === "POST"
+                ) {
+                    return Response.json({
+                        options: {
+                            attestation: "none",
+                            authenticatorSelection: {
+                                authenticatorAttachment: "cross-platform",
+                                residentKey: "discouraged",
+                                userVerification: "required",
+                            },
+                            challenge: "AA",
+                            pubKeyCredParams: [{ alg: -7, type: "public-key" }],
+                            rp: {
+                                id: "dashboard.example.com",
+                                name: "Mira Dashboard",
+                            },
+                            timeout: 60_000,
+                            user: {
+                                displayName: "raymond",
+                                id: "AA",
+                                name: "raymond",
+                            },
+                        },
+                    });
+                }
+                if (
+                    url === "/api/account/security/webauthn/register/verify" &&
+                    method === "POST"
+                ) {
+                    verificationRequests += 1;
+                    return verificationRequests === 1
+                        ? Response.json(
+                              {
+                                  code: "recent_verification_required",
+                                  error: "Recent verification is required",
+                              },
+                              { status: 403 }
+                          )
+                        : Response.json({
+                              credential: {
+                                  backedUp: false,
+                                  createdAt: "2026-07-24T12:00:00.000Z",
+                                  deviceType: "singleDevice",
+                                  id: "credential-browser",
+                                  label: "Backup YubiKey",
+                              },
+                              isOk: true,
+                              sessionRotated: false,
+                          });
+                }
+                return;
+            }
+        );
+        const { queryClient } = renderAccountSecurity();
+
+        try {
+            await screen.findByText("Primary YubiKey");
+            await userEvent.click(screen.getByRole("button", { name: "Add key" }));
+            await userEvent.click(
+                screen.getByRole("button", { name: "Touch and register key" })
+            );
+
+            expect(
+                await screen.findByText("Recent verification is required")
+            ).toBeInTheDocument();
+            expect(verificationRequests).toBe(1);
+            expect(
+                calls.filter(
+                    (call) =>
+                        call.url === "/api/account/security/webauthn/register/verify" &&
+                        call.method === "POST"
+                )
+            ).toHaveLength(1);
+            expect(screen.queryByText("Security key registered")).not.toBeInTheDocument();
+        } finally {
+            act(() => {
+                queryClient.clear();
+            });
+            removeEventListener(
+                SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+                claimAndCompleteSecurityVerification
+            );
+        }
     });
 });

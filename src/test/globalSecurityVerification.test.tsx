@@ -592,6 +592,138 @@ describe("Global security verification", () => {
         });
     });
 
+    it("ignores a late mutation completion from a cancelled auth generation", async () => {
+        const recoveryResponse = Promise.withResolvers<Response>();
+        const secondarySecuritySummary = {
+            ...securitySummary,
+            sessions: [dashboardSession(SECONDARY_DASHBOARD_SESSION_ID)],
+        };
+        let securityRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                async (
+                    input: RequestInfo | URL,
+                    init?: RequestInit
+                ): Promise<Response> => {
+                    const url = String(input);
+                    const method = init?.method ?? "GET";
+                    if (url === "/api/account/security" && method === "GET") {
+                        securityRequests += 1;
+                        return Response.json(
+                            securityRequests === 1
+                                ? securitySummary
+                                : secondarySecuritySummary
+                        );
+                    }
+                    if (
+                        url === "/api/account/security/step-up/recovery" &&
+                        method === "POST"
+                    ) {
+                        return recoveryResponse.promise;
+                    }
+                    if (url === "/api/auth/session" && method === "GET") {
+                        return Response.json({
+                            authenticated: true,
+                            isBootstrapRequired: false,
+                            session: {
+                                authMethod: "webauthn",
+                                expiresAt: "2026-08-24T12:00:00.000Z",
+                                lastSeenAt: "2026-07-24T12:00:00.000Z",
+                                mfaEnabled: true,
+                                sessionId: SECONDARY_DASHBOARD_SESSION_ID,
+                            },
+                            user: { id: 1, username: "raymond" },
+                        });
+                    }
+                    throw new Error(
+                        `Unexpected stale-generation request: ${method} ${url}`
+                    );
+                }
+            ),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(securityRequests).toBe(1);
+        });
+        let cancelledPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        act(() => {
+            cancelledPromise = waitForSecurityVerificationOutcome("step_up_required");
+        });
+        await userEvent.click(screen.getByRole("button", { name: "Use recovery code" }));
+        await userEvent.type(screen.getByLabelText("Recovery code"), "old-session-code");
+        await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", {
+                    name: "Close Verify your session",
+                })
+            ).toBeDisabled();
+        });
+
+        act(() => {
+            authActions.clearSession();
+        });
+        await expect(cancelledPromise).resolves.toBe("cancelled");
+        act(() => {
+            authActions.setSession({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "webauthn",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:00:00.000Z",
+                    mfaEnabled: true,
+                    sessionId: SECONDARY_DASHBOARD_SESSION_ID,
+                },
+                user: { id: 1, username: "raymond" },
+            });
+        });
+        await waitFor(() => {
+            expect(securityRequests).toBe(2);
+        });
+
+        let nextPromise:
+            ReturnType<typeof waitForSecurityVerificationOutcome> | undefined;
+        let nextOutcome = "pending";
+        act(() => {
+            nextPromise = waitForSecurityVerificationOutcome("step_up_required");
+            void nextPromise.then((outcome) => {
+                nextOutcome = outcome;
+            });
+        });
+        expect(
+            screen.getByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+
+        await act(async () => {
+            recoveryResponse.resolve(Response.json({ isOk: true }));
+            await recoveryResponse.promise;
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/auth/session",
+                expect.objectContaining({ credentials: "include" })
+            );
+        });
+
+        expect(nextOutcome).toBe("pending");
+        expect(
+            screen.getByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+        act(() => {
+            cancelSecurityVerification();
+        });
+        await expect(nextPromise).resolves.toBe("cancelled");
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
     it("prevents dismissal while a recovery verification is pending", async () => {
         const recoveryResponse = Promise.withResolvers<Response>();
         Object.defineProperty(globalThis, "fetch", {

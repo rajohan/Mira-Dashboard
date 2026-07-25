@@ -58,9 +58,11 @@ export function GlobalSecurityVerification() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState<string>();
     const requestReference = useRef<VerificationRequest>(request);
+    const verificationGenerationReference = useRef(0);
     requestReference.current = request;
 
     const reset = useCallback((): void => {
+        verificationGenerationReference.current += 1;
         requestReference.current = undefined;
         setRequest(undefined);
         setCodeMethod(undefined);
@@ -90,6 +92,7 @@ export function GlobalSecurityVerification() {
             if (requestReference.current) {
                 return;
             }
+            verificationGenerationReference.current += 1;
             requestReference.current = nextRequest;
             setRequest(nextRequest);
             setCodeMethod(undefined);
@@ -152,22 +155,29 @@ export function GlobalSecurityVerification() {
     }, [data, isAuthenticated, sessionId]);
 
     async function runVerification(action: () => Promise<unknown>): Promise<void> {
+        const verificationGeneration = verificationGenerationReference.current;
         setError(undefined);
         try {
             await action();
+            if (
+                verificationGenerationReference.current !== verificationGeneration ||
+                !requestReference.current
+            ) {
+                return;
+            }
             completeSecurityVerification();
             reset();
         } catch (error_) {
+            if (verificationGenerationReference.current !== verificationGeneration) {
+                return;
+            }
             setError(errorMessage(error_));
         }
     }
 
     async function verifyPassword(): Promise<void> {
         if (!password) return;
-        await runVerification(async () => {
-            await passwordReauth.mutateAsync(password);
-            setPassword("");
-        });
+        await runVerification(() => passwordReauth.mutateAsync(password));
     }
 
     async function verifyCode(): Promise<void> {
@@ -178,7 +188,6 @@ export function GlobalSecurityVerification() {
             } else {
                 await recoveryStepUp.mutateAsync(code.trim());
             }
-            setCode("");
         });
     }
 

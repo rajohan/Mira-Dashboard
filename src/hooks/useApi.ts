@@ -8,6 +8,13 @@ import { hasRecentUserActivity } from "../lib/userActivity";
 
 const API_BASE = "/api";
 
+/** Extends fetch options with security-verification replay control. */
+export interface ApiRequestOptions extends RequestInit {
+    canRetryAfterSecurityVerification?: boolean;
+}
+
+type ApiMethodOptions = Omit<ApiRequestOptions, "body" | "method">;
+
 /** Represents a structured non-success API response. */
 export class ApiError extends Error {
     readonly status: number;
@@ -32,18 +39,19 @@ export class UnauthorizedError extends ApiError {
 /** Performs API fetch. */
 export async function apiFetch<T>(
     endpoint: string,
-    options?: RequestInit
+    options?: ApiRequestOptions
 ): Promise<T | undefined> {
-    let canRetryAfterVerification = true;
+    const { canRetryAfterSecurityVerification = true, ...requestOptions } = options ?? {};
+    let canRetryAfterVerification = canRetryAfterSecurityVerification;
     while (true) {
-        const headers = new Headers(options?.headers);
+        const headers = new Headers(requestOptions.headers);
         headers.set("Content-Type", "application/json");
         if (hasRecentUserActivity()) {
             headers.set("X-Mira-User-Activity", "1");
         }
 
         const response = await fetch(`${API_BASE}${endpoint}`, {
-            ...options,
+            ...requestOptions,
             headers,
             credentials: "include",
         });
@@ -111,56 +119,89 @@ export function requireApiResponse<T>(value: T | undefined): T {
 /** Fetches an API response that must include a JSON body. */
 export async function apiFetchRequired<T>(
     endpoint: string,
-    options?: RequestInit
+    options?: ApiRequestOptions
 ): Promise<T> {
     return requireApiResponse(await apiFetch<T>(endpoint, options));
 }
 
 /** Posts to an API endpoint that must include a JSON body response. */
-export async function apiPostRequired<T>(endpoint: string, body?: unknown): Promise<T> {
-    return requireApiResponse(await apiPost<T>(endpoint, body));
+export async function apiPostRequired<T>(
+    endpoint: string,
+    body?: unknown,
+    options?: ApiMethodOptions
+): Promise<T> {
+    return requireApiResponse(await apiPost<T>(endpoint, body, options));
 }
 
 /** Sends a PUT request to an API endpoint that must include a JSON body response. */
-export async function apiPutRequired<T>(endpoint: string, body: unknown): Promise<T> {
-    return requireApiResponse(await apiPut<T>(endpoint, body));
+export async function apiPutRequired<T>(
+    endpoint: string,
+    body: unknown,
+    options?: ApiMethodOptions
+): Promise<T> {
+    return requireApiResponse(await apiPut<T>(endpoint, body, options));
 }
 
 /** Sends a PATCH request to an API endpoint that must include a JSON body response. */
-export async function apiPatchRequired<T>(endpoint: string, body: unknown): Promise<T> {
-    return requireApiResponse(await apiPatch<T>(endpoint, body));
+export async function apiPatchRequired<T>(
+    endpoint: string,
+    body: unknown,
+    options?: ApiMethodOptions
+): Promise<T> {
+    return requireApiResponse(await apiPatch<T>(endpoint, body, options));
 }
 
 /** Sends a DELETE request to an API endpoint that must include a JSON body response. */
-export async function apiDeleteRequired<T>(endpoint: string): Promise<T> {
-    return requireApiResponse(await apiDelete<T>(endpoint));
+export async function apiDeleteRequired<T>(
+    endpoint: string,
+    options?: ApiMethodOptions
+): Promise<T> {
+    return requireApiResponse(await apiDelete<T>(endpoint, options));
 }
 
 /** Performs API post. */
-export function apiPost<T>(endpoint: string, body?: unknown): Promise<T | undefined> {
+export function apiPost<T>(
+    endpoint: string,
+    body?: unknown,
+    options?: ApiMethodOptions
+): Promise<T | undefined> {
     return apiFetch<T>(endpoint, {
+        ...options,
         method: "POST",
         body: body === undefined ? undefined : JSON.stringify(body),
     });
 }
 
 /** Performs API put. */
-export function apiPut<T>(endpoint: string, body: unknown): Promise<T | undefined> {
+export function apiPut<T>(
+    endpoint: string,
+    body: unknown,
+    options?: ApiMethodOptions
+): Promise<T | undefined> {
     return apiFetch<T>(endpoint, {
+        ...options,
         method: "PUT",
         body: JSON.stringify(body),
     });
 }
 
 /** Performs API patch. */
-export function apiPatch<T>(endpoint: string, body: unknown): Promise<T | undefined> {
+export function apiPatch<T>(
+    endpoint: string,
+    body: unknown,
+    options?: ApiMethodOptions
+): Promise<T | undefined> {
     return apiFetch<T>(endpoint, {
+        ...options,
         method: "PATCH",
         body: JSON.stringify(body),
     });
 }
 
 /** Performs API delete. */
-export function apiDelete<T>(endpoint: string): Promise<T | undefined> {
-    return apiFetch<T>(endpoint, { method: "DELETE" });
+export function apiDelete<T>(
+    endpoint: string,
+    options?: ApiMethodOptions
+): Promise<T | undefined> {
+    return apiFetch<T>(endpoint, { ...options, method: "DELETE" });
 }

@@ -4,10 +4,20 @@ import { afterEach, describe, expect, it, jest } from "bun:test";
 import type { ReactNode } from "react";
 
 import { useRevokeAllSessions, useRevokeSession } from "../hooks/useAccountSecurity";
+import { ApiError } from "../hooks/useApi";
 import { UNAUTHORIZED_EVENT_NAME } from "../lib/authBoundary";
+import {
+    completeSecurityVerification,
+    SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+} from "../lib/securityVerification";
 import { authActions, authStore } from "../stores/authStore";
 
 const originalFetch = fetch;
+
+function claimAndCompleteSecurityVerification(event: Event): void {
+    event.preventDefault();
+    queueMicrotask(completeSecurityVerification);
+}
 
 afterEach(() => {
     authActions.clearSession();
@@ -96,6 +106,90 @@ describe("Account security logout navigation", () => {
             view.unmount();
             queryClient.clear();
             removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
+
+    it("does not replay a current-session selector after step-up rotates it", async () => {
+        const currentSessionId = "0123456789abcdef0123456789abcdef";
+        let revokeRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                async (
+                    input: RequestInfo | URL,
+                    init?: RequestInit
+                ): Promise<Response> => {
+                    if (
+                        String(input) ===
+                            `/api/account/security/sessions/${currentSessionId}` &&
+                        init?.method === "DELETE"
+                    ) {
+                        revokeRequests += 1;
+                        return revokeRequests === 1
+                            ? Response.json(
+                                  {
+                                      code: "recent_verification_required",
+                                      error: "Recent verification is required",
+                                  },
+                                  { status: 403 }
+                              )
+                            : Response.json({ isOk: true, loggedOut: true });
+                    }
+                    throw new Error(
+                        `Unexpected current-session replay request: ${
+                            init?.method ?? "GET"
+                        } ${String(input)}`
+                    );
+                }
+            ),
+            writable: true,
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-24T12:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: currentSessionId,
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        addEventListener(
+            SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+            claimAndCompleteSecurityVerification
+        );
+        const queryClient = new QueryClient({
+            defaultOptions: {
+                mutations: { retry: false },
+                queries: { retry: false },
+            },
+        });
+        const wrapper = ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        );
+        const view = renderHook(() => useRevokeSession(), { wrapper });
+
+        try {
+            let revokeError: unknown;
+            await act(async () => {
+                try {
+                    await view.result.current.mutateAsync(currentSessionId);
+                } catch (error) {
+                    revokeError = error;
+                }
+            });
+            expect(revokeError).toBeInstanceOf(ApiError);
+            expect(revokeRequests).toBe(1);
+            expect(authStore.state.isAuthenticated).toBe(true);
+        } finally {
+            view.unmount();
+            queryClient.clear();
+            removeEventListener(
+                SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+                claimAndCompleteSecurityVerification
+            );
         }
     });
 });

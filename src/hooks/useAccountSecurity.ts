@@ -229,10 +229,16 @@ export function useRegisterSecurityKey() {
                 FactorConfirmationResponse & {
                     credential: WebAuthnCredential;
                 }
-            >("/account/security/webauthn/register/verify", {
-                label,
-                response,
-            });
+            >(
+                "/account/security/webauthn/register/verify",
+                {
+                    label,
+                    response,
+                },
+                {
+                    canRetryAfterSecurityVerification: false,
+                }
+            );
         },
         onSuccess: (response) =>
             invalidateSecurity(queryClient, response.sessionRotated === true),
@@ -274,10 +280,14 @@ export function useDisableMfa() {
 
 export function useRevokeSession() {
     const queryClient = useQueryClient();
+    const currentSessionId = useAuthSessionId();
     return useMutation({
         mutationFn: (sessionId: string) =>
             apiDeleteRequired<{ isOk: boolean; loggedOut: boolean }>(
-                `/account/security/sessions/${encodeURIComponent(sessionId)}`
+                `/account/security/sessions/${encodeURIComponent(sessionId)}`,
+                {
+                    canRetryAfterSecurityVerification: sessionId !== currentSessionId,
+                }
             ),
         onSuccess: (response) => {
             if (response.loggedOut) {
