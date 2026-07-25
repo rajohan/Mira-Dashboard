@@ -1,4 +1,5 @@
 import { getPersistedGatewayToken } from "./auth.ts";
+import { getBackendBuildCommit } from "./buildIdentity.ts";
 import gateway from "./gateway.ts";
 import { createServer, resolveListenPort } from "./server.ts";
 import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
@@ -57,7 +58,7 @@ export function handleServerListening(): void {
         }
 
         if (shouldStartScheduledJobs()) {
-            startDashboardJobWorker();
+            startDashboardJobWorker(getBackendBuildCommit());
         }
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);

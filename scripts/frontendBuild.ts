@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import tailwindPlugin from "bun-plugin-tailwind";
@@ -29,7 +29,7 @@ const productionDevtoolsPlugin: Bun.BunPlugin = {
 function getAppCommit(): string {
     try {
         const result = Bun.spawnSync({
-            cmd: ["git", "rev-parse", "--short=8", "HEAD"],
+            cmd: ["git", "rev-parse", "HEAD"],
             stderr: "ignore",
             stdin: "ignore",
             stdout: "pipe",
@@ -39,7 +39,8 @@ function getAppCommit(): string {
             return "unknown";
         }
 
-        return new TextDecoder().decode(result.stdout).trim() || "unknown";
+        const commit = new TextDecoder().decode(result.stdout).trim();
+        return /^[\da-f]{40}$/u.test(commit) ? commit : "unknown";
     } catch {
         return "unknown";
     }
@@ -51,13 +52,19 @@ export async function buildFrontend({
 }: FrontendBuildOptions): Promise<void> {
     const resolvedOutdir = path.resolve(outdir);
     const isProduction = mode === "production";
+    const commitSha = getAppCommit();
+    if (isProduction && commitSha === "unknown") {
+        throw new Error("Production frontend build requires a full Git commit identity");
+    }
 
     await rm(resolvedOutdir, { force: true, recursive: true });
     await mkdir(resolvedOutdir, { recursive: true });
 
     const result = await Bun.build({
         define: {
-            __APP_COMMIT__: JSON.stringify(getAppCommit()),
+            __APP_COMMIT__: JSON.stringify(
+                commitSha === "unknown" ? commitSha : commitSha.slice(0, 8)
+            ),
             "process.env.PUBLIC_DASHBOARD_WS_PORT": "undefined",
             "process.env.NODE_ENV": JSON.stringify(mode),
         },
@@ -83,4 +90,18 @@ export async function buildFrontend({
     if (!result.success) {
         throw new AggregateError(result.logs, "Frontend build failed");
     }
+
+    await writeFile(
+        path.join(resolvedOutdir, "build-identity.json"),
+        `${JSON.stringify(
+            {
+                bunVersion: Bun.version,
+                commitSha,
+                component: "frontend",
+                formatVersion: 1,
+            },
+            undefined,
+            2
+        )}\n`
+    );
 }

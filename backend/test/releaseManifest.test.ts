@@ -26,6 +26,28 @@ import {
 const temporaryRoots: string[] = [];
 const TEST_COMMIT = "a".repeat(40);
 const TEST_BUILT_AT = new Date("2026-07-25T15:00:00.000Z");
+const TEST_BUN_VERSION = "1.3.14";
+
+function writeTestBuildIdentities(root: string, commitSha = TEST_COMMIT): void {
+    writeFileSync(
+        path.join(root, "dist", "build-identity.json"),
+        `${JSON.stringify({
+            bunVersion: TEST_BUN_VERSION,
+            commitSha,
+            component: "frontend",
+            formatVersion: 1,
+        })}\n`
+    );
+    writeFileSync(
+        path.join(root, "backend", "dist", "build-identity.json"),
+        `${JSON.stringify({
+            bunVersion: TEST_BUN_VERSION,
+            commitSha,
+            component: "backend",
+            formatVersion: 1,
+        })}\n`
+    );
+}
 
 function temporaryReleaseRoot(): string {
     const root = mkdtempSync(path.join(tmpdir(), "mira-release-manifest-"));
@@ -38,8 +60,13 @@ function temporaryReleaseRoot(): string {
     writeFileSync(path.join(root, "backend", "bun.lock"), "backend-lock\n");
     writeFileSync(path.join(root, "dist", "index.html"), "<main>release</main>\n");
     writeFileSync(path.join(root, "dist", "assets", "app.js"), "export {};\n");
+    writeTestBuildIdentities(root);
     writeFileSync(
         path.join(root, "backend", "dist", "databasePreflight.js"),
+        "export {};\n"
+    );
+    writeFileSync(
+        path.join(root, "backend", "dist", "resetDashboardPassword.js"),
         "export {};\n"
     );
     writeFileSync(path.join(root, "backend", "dist", "serverStart.js"), "export {};\n");
@@ -50,14 +77,14 @@ function temporaryReleaseRoot(): string {
 function manifestOptions(releaseRoot: string) {
     return {
         builtAt: TEST_BUILT_AT,
-        bunVersion: "1.3.14",
+        bunVersion: TEST_BUN_VERSION,
         commitSha: TEST_COMMIT,
         commitTitle: "Test atomic release",
         releaseRoot,
     };
 }
 
-function runGit(releaseRoot: string, arguments_: string[]): void {
+function runGit(releaseRoot: string, arguments_: string[]): string {
     const result = Bun.spawnSync({
         cmd: [
             "git",
@@ -76,6 +103,7 @@ function runGit(releaseRoot: string, arguments_: string[]): void {
     if (result.exitCode !== 0) {
         throw new Error(new TextDecoder().decode(result.stderr));
     }
+    return new TextDecoder().decode(result.stdout).trim();
 }
 
 afterEach(() => {
@@ -93,7 +121,7 @@ describe("Dashboard release manifest", () => {
 
         expect(manifest).toMatchObject({
             builtAt: TEST_BUILT_AT.toISOString(),
-            bunVersion: "1.3.14",
+            bunVersion: TEST_BUN_VERSION,
             commitSha: TEST_COMMIT,
             commitShort: "aaaaaaaa",
             commitTitle: "Test atomic release",
@@ -110,12 +138,15 @@ describe("Dashboard release manifest", () => {
         });
         expect(manifest.artifacts.map((artifact) => artifact.path)).toEqual([
             "backend/bun.lock",
+            "backend/dist/build-identity.json",
             "backend/dist/databasePreflight.js",
+            "backend/dist/resetDashboardPassword.js",
             "backend/dist/serverStart.js",
             "backend/dist/workerStart.js",
             "backend/package.json",
             "bun.lock",
             "dist/assets/app.js",
+            "dist/build-identity.json",
             "dist/index.html",
             "package.json",
         ]);
@@ -191,20 +222,28 @@ describe("Dashboard release manifest", () => {
         ).toThrow("Release manifest schema range is invalid");
     });
 
-    it("requires every process entrypoint and the frontend index", async () => {
-        const root = temporaryReleaseRoot();
-        rmSync(path.join(root, "backend", "dist", "workerStart.js"));
+    it("requires every runtime and recovery entrypoint", async () => {
+        for (const entrypoint of ["resetDashboardPassword.js", "workerStart.js"]) {
+            const root = temporaryReleaseRoot();
+            rmSync(path.join(root, "backend", "dist", entrypoint));
 
-        await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
-            "Release manifest artifact inventory is invalid"
-        );
+            await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
+                "Release manifest artifact inventory is invalid"
+            );
+        }
     });
 
     it("derives identity only from a clean Git release source", async () => {
         const root = temporaryReleaseRoot();
+        writeFileSync(
+            path.join(root, ".gitignore"),
+            "/backend/dist/\n/dist/\n/release-manifest.json\n"
+        );
         runGit(root, ["init", "--initial-branch=main"]);
         runGit(root, ["add", "."]);
         runGit(root, ["commit", "-m", "Test release source"]);
+        const commitSha = runGit(root, ["rev-parse", "HEAD"]);
+        writeTestBuildIdentities(root, commitSha);
 
         await expect(createReleaseManifest({ releaseRoot: root })).resolves.toMatchObject(
             {
@@ -218,16 +257,46 @@ describe("Dashboard release manifest", () => {
         );
     });
 
+    it("refuses to stamp stale frontend or backend build outputs", async () => {
+        for (const component of ["frontend", "backend"] as const) {
+            const root = temporaryReleaseRoot();
+            const identityPath =
+                component === "frontend"
+                    ? path.join(root, "dist", "build-identity.json")
+                    : path.join(root, "backend", "dist", "build-identity.json");
+            writeFileSync(
+                identityPath,
+                `${JSON.stringify({
+                    bunVersion: TEST_BUN_VERSION,
+                    commitSha: "b".repeat(40),
+                    component,
+                    formatVersion: 1,
+                })}\n`
+            );
+
+            await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
+                `${component} build identity does not match the release source`
+            );
+        }
+    });
+
     it("requires the deployed manifest to match the running code in production", async () => {
         const root = temporaryReleaseRoot();
         const manifest = await writeReleaseManifest(manifestOptions(root));
 
         await expect(
-            loadRuntimeReleaseIdentity(root, "production")
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             backendCommit: "aaaaaaaa",
             frontendCommit: "aaaaaaaa",
             ready: true,
+            source: "manifest",
+        });
+        await expect(
+            loadRuntimeReleaseIdentity(root, "production", "b".repeat(40))
+        ).resolves.toMatchObject({
+            issue: "manifest-code-mismatch",
+            ready: false,
             source: "manifest",
         });
 
@@ -246,7 +315,7 @@ describe("Dashboard release manifest", () => {
             )}\n`
         );
         await expect(
-            loadRuntimeReleaseIdentity(root, "production")
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-code-mismatch",
             ready: false,
@@ -270,7 +339,7 @@ describe("Dashboard release manifest", () => {
         );
 
         await expect(
-            loadRuntimeReleaseIdentity(root, "production")
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-code-mismatch",
             ready: false,
@@ -284,7 +353,7 @@ describe("Dashboard release manifest", () => {
         writeFileSync(path.join(root, "backend", "dist", "serverStart.js"), "drift\n");
 
         await expect(
-            loadRuntimeReleaseIdentity(root, "production")
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-invalid",
             ready: false,
@@ -296,14 +365,14 @@ describe("Dashboard release manifest", () => {
         await writeReleaseManifest(manifestOptions(root));
 
         await expect(
-            getRuntimeReleaseIdentity(root, "production")
+            getRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             ready: true,
             source: "manifest",
         });
         writeFileSync(path.join(root, "dist", "assets", "app.js"), "drift\n");
         await expect(
-            getRuntimeReleaseIdentity(root, "production")
+            getRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-invalid",
             ready: false,
@@ -314,7 +383,7 @@ describe("Dashboard release manifest", () => {
         const root = temporaryReleaseRoot();
 
         await expect(
-            loadRuntimeReleaseIdentity(root, "production")
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-missing",
             ready: false,

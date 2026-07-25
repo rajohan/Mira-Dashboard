@@ -304,11 +304,16 @@ Manifest format version 1 records:
 
 - the full and eight-character Git commit plus commit title and build time;
 - the Bun version used for the build;
-- matching frontend/backend commit identities;
+- matching frontend/backend commit identities emitted inside both build trees;
 - the target, minimum-compatible, and maximum-compatible SQLite schema;
 - a checksum of the immutable migration registry;
 - the SHA-256 and byte length of every frontend/backend build artifact plus
   both package manifests and Bun lockfiles.
+
+The backend bundle also embeds its full build commit. Runtime readiness requires
+that embedded commit, both build-identity files, and the release manifest to
+agree. Running `release:manifest` against ignored output left behind by another
+checkout therefore fails instead of relabeling stale code.
 
 Manifest creation and verification reject absolute/traversal paths, symlinks,
 hard-linked files, special files, unsorted/duplicate inventories, checksum

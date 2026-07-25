@@ -394,6 +394,49 @@ describe("server start scheduler policy", () => {
         }
     });
 
+    it("starts the combined worker with the embedded backend release identity", async () => {
+        const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
+        const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+        const originalExecutionRole = process.env.MIRA_DASHBOARD_EXECUTION_ROLE;
+        process.env.OPENCLAW_GATEWAY_TOKEN = "test-token";
+        delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+        process.env.MIRA_DASHBOARD_EXECUTION_ROLE = "combined";
+        const buildIdentity = await import("../src/buildIdentity.ts");
+        const gatewayModule = await import("../src/gateway.ts");
+        const jobWorker = await import("../src/services/jobWorker.ts");
+        const serverStartModule = await import("../src/serverStart.ts");
+        const initSpy = jest
+            .spyOn(gatewayModule.default, "init")
+            .mockImplementation(() => {});
+        const startWorkerSpy = jest
+            .spyOn(jobWorker, "startDashboardJobWorker")
+            .mockImplementation(() => {});
+        try {
+            serverStartModule.handleServerListening();
+            expect(startWorkerSpy).toHaveBeenCalledWith(
+                buildIdentity.getBackendBuildCommit()
+            );
+        } finally {
+            initSpy.mockRestore();
+            startWorkerSpy.mockRestore();
+            if (originalGatewayToken === undefined) {
+                delete process.env.OPENCLAW_GATEWAY_TOKEN;
+            } else {
+                process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
+            }
+            if (originalSchedulerDisabled === undefined) {
+                delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+            } else {
+                process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = originalSchedulerDisabled;
+            }
+            if (originalExecutionRole === undefined) {
+                delete process.env.MIRA_DASHBOARD_EXECUTION_ROLE;
+            } else {
+                process.env.MIRA_DASHBOARD_EXECUTION_ROLE = originalExecutionRole;
+            }
+        }
+    });
+
     it("warns but keeps startup alive when no gateway token is configured", async () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
         const originalLegacyToken = process.env.OPENCLAW_TOKEN;

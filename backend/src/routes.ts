@@ -44,11 +44,25 @@ async function diagnostics() {
     return json(await diagnosticsSnapshot());
 }
 
+function retiredHealth() {
+    return json(
+        {
+            error: "Gone",
+            replacements: ["/api/health/live", "/api/health/ready"],
+        },
+        { status: 410 }
+    );
+}
+
 function sessions() {
     return json(gateway.getSessions());
 }
 
 const routeTable = {
+    "/health": {
+        GET: retiredHealth,
+        HEAD: retiredHealth,
+    },
     "/api/health/diagnostics": {
         GET: diagnostics,
     },

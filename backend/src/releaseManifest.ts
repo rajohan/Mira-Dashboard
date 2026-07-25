@@ -3,6 +3,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { getBackendBuildCommit } from "./buildIdentity.ts";
 import { databaseMigrations } from "./databaseMigrations/index.ts";
 import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
@@ -22,11 +23,15 @@ const RELEASE_STATIC_ARTIFACTS = [
 ] as const;
 const REQUIRED_RELEASE_ARTIFACTS = [
     ...RELEASE_STATIC_ARTIFACTS,
+    "backend/dist/build-identity.json",
     "backend/dist/databasePreflight.js",
+    "backend/dist/resetDashboardPassword.js",
     "backend/dist/serverStart.js",
     "backend/dist/workerStart.js",
+    "dist/build-identity.json",
     "dist/index.html",
 ] as const;
+const MAX_BUILD_IDENTITY_BYTES = 4096;
 const SHA_256_PATTERN = /^[\da-f]{64}$/u;
 const COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 
@@ -74,6 +79,13 @@ interface CreateReleaseManifestOptions {
     commitSha?: string;
     commitTitle?: string;
     releaseRoot: string;
+}
+
+interface ComponentBuildIdentity {
+    bunVersion: string;
+    commitSha: string;
+    component: "backend" | "frontend";
+    formatVersion: 1;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -257,6 +269,42 @@ function assertCommitIdentity(commitSha: string, commitTitle: string): void {
     }
 }
 
+async function loadComponentBuildIdentity(
+    releaseRoot: string,
+    component: ComponentBuildIdentity["component"]
+): Promise<ComponentBuildIdentity> {
+    const relativePath =
+        component === "backend"
+            ? "backend/dist/build-identity.json"
+            : "dist/build-identity.json";
+    const content = await readRegularFileNoFollow(
+        artifactPath(releaseRoot, relativePath)
+    );
+    if (content.byteLength === 0 || content.byteLength > MAX_BUILD_IDENTITY_BYTES) {
+        throw new TypeError(`${component} build identity must be a bounded file`);
+    }
+    const value = JSON.parse(content.toString("utf8")) as unknown;
+    if (
+        !isPlainRecord(value) ||
+        !hasExactKeys(value, ["bunVersion", "commitSha", "component", "formatVersion"]) ||
+        value.component !== component ||
+        value.formatVersion !== 1 ||
+        typeof value.commitSha !== "string" ||
+        !COMMIT_SHA_PATTERN.test(value.commitSha) ||
+        typeof value.bunVersion !== "string" ||
+        !value.bunVersion ||
+        value.bunVersion.length > 64
+    ) {
+        throw new TypeError(`${component} build identity is invalid`);
+    }
+    return {
+        bunVersion: value.bunVersion,
+        commitSha: value.commitSha,
+        component,
+        formatVersion: 1,
+    };
+}
+
 export async function createReleaseManifest(
     options: CreateReleaseManifestOptions
 ): Promise<DashboardReleaseManifest> {
@@ -268,6 +316,18 @@ export async function createReleaseManifest(
     const commitTitle =
         options.commitTitle ?? gitOutput(releaseRoot, ["log", "-1", "--pretty=%s"]);
     assertCommitIdentity(commitSha, commitTitle);
+    const bunVersion = options.bunVersion ?? Bun.version;
+    const [backendBuild, frontendBuild] = await Promise.all([
+        loadComponentBuildIdentity(releaseRoot, "backend"),
+        loadComponentBuildIdentity(releaseRoot, "frontend"),
+    ]);
+    for (const build of [backendBuild, frontendBuild]) {
+        if (build.commitSha !== commitSha || build.bunVersion !== bunVersion) {
+            throw new Error(
+                `${build.component} build identity does not match the release source`
+            );
+        }
+    }
 
     const artifactPaths = await listReleaseArtifactPaths(releaseRoot);
     const artifacts: ReleaseManifestArtifact[] = [];
@@ -278,7 +338,7 @@ export async function createReleaseManifest(
     const manifest: DashboardReleaseManifest = {
         artifacts,
         builtAt: (options.builtAt ?? new Date()).toISOString(),
-        bunVersion: options.bunVersion ?? Bun.version,
+        bunVersion,
         commitSha,
         commitShort,
         commitTitle,
@@ -518,12 +578,14 @@ function fallbackGitCommit(releaseRoot: string): string {
 
 export async function loadRuntimeReleaseIdentity(
     releaseRoot = PROCESS_RELEASE_ROOT,
-    environment = process.env.NODE_ENV
+    environment = process.env.NODE_ENV,
+    backendBuildCommit = getBackendBuildCommit()
 ): Promise<RuntimeReleaseIdentity> {
     try {
         const manifest = await loadReleaseManifest(releaseRoot);
         await verifyReleaseArtifacts(releaseRoot, manifest);
         const isManifestMatchesCode =
+            manifest.commitSha === backendBuildCommit &&
             manifest.bunVersion === Bun.version &&
             manifest.schema.target === DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target &&
             manifest.schema.minimumCompatible ===
@@ -564,7 +626,8 @@ export async function loadRuntimeReleaseIdentity(
 
 export function getRuntimeReleaseIdentity(
     releaseRoot = PROCESS_RELEASE_ROOT,
-    environment = process.env.NODE_ENV
+    environment = process.env.NODE_ENV,
+    backendBuildCommit = getBackendBuildCommit()
 ): Promise<RuntimeReleaseIdentity> {
-    return loadRuntimeReleaseIdentity(releaseRoot, environment);
+    return loadRuntimeReleaseIdentity(releaseRoot, environment, backendBuildCommit);
 }

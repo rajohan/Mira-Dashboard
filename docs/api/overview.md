@@ -62,6 +62,9 @@ Public routes:
 - `POST /api/auth/login/webauthn/verify`
 - `POST /api/auth/logout`
 
+The retired top-level `GET|HEAD /health` path returns `410 Gone` instead of
+falling through to the SPA shell. This makes stale monitors fail visibly.
+
 The WebSocket endpoint `/ws` is also authenticated and origin-checked.
 
 Account-security endpoints under `/api/account/security/*` are protected
