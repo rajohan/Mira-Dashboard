@@ -34,6 +34,7 @@ const executorTickMs = 1000;
 const executorHeartbeatMs = 1000;
 const executorCapacity = 1;
 const interruptedHandlerGraceMs = 30_000;
+const RELEASE_COMMIT_PATTERN = /^(?:[\da-f]{8,40}|development)$/u;
 const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
 const interruptedHandlerSettled = new WeakMap<
     ScheduledJobInterruptionError,
@@ -59,7 +60,7 @@ const scheduledJobRuntimeState: {
     isSchedulerTickRunning: false,
     isExecutorClaimingPaused: false,
     isExecutorTickRunning: false,
-    workerId: `dashboard-worker:${process.pid}:${Bun.randomUUIDv7()}`,
+    workerId: "",
 };
 
 export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
@@ -1302,8 +1303,16 @@ export function startScheduledJobScheduler(): void {
     scheduleTick();
 }
 
-export function startScheduledJobExecutor(): void {
+function workerIdForRelease(releaseCommit: string): string {
+    if (!RELEASE_COMMIT_PATTERN.test(releaseCommit)) {
+        throw new Error("Job worker release commit must be an 8-40 character SHA");
+    }
+    return `dashboard-worker:${releaseCommit}:${process.pid}:${Bun.randomUUIDv7()}`;
+}
+
+export function startScheduledJobExecutor(releaseCommit = "development"): void {
     if (scheduledJobRuntimeState.executor) return;
+    scheduledJobRuntimeState.workerId = workerIdForRelease(releaseCommit);
     resetExecutorClaimPause();
     const timestamp = nowIso();
     const recoveredLegacyRuns = recoverOrphanedScheduledJobRuns(timestamp);

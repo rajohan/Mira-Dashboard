@@ -31,7 +31,10 @@ Environment token precedence is:
 | `MIRA_DASHBOARD_OPENCLAW_HOME` | Optional | `~/.openclaw`                                     | Dashboard-specific fallback OpenClaw home. Most file/config/media routes use this only when `OPENCLAW_HOME` is absent. |
 | `WORKSPACE_ROOT`               | Optional | OpenClaw workspace                                | Root exposed by `/api/files`. Must be absolute and normalized if set.                                                  |
 | `MIRA_DASHBOARD_LOGS_ROOT`     | Optional | system log root default                           | Root used by log stream services.                                                                                      |
-| `MIRA_LOG_ROTATION_CONFIG`     | Optional | `backend/config/log-rotation.json`                | Log rotation config path.                                                                                              |
+
+`MIRA_DASHBOARD_FRONTEND_PATH` is a development/test escape hatch. Production
+serves the active release's checksummed `dist/`; any configured value that does
+not resolve exactly to that directory is rejected.
 
 ## Network, Auth, And Browser Access
 

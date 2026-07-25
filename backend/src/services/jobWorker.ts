@@ -61,12 +61,12 @@ function registerScheduledActions(): void {
 }
 
 /** Starts the persistent queue scheduler and its single-concurrency executor. */
-export function startDashboardJobWorker(): void {
+export function startDashboardJobWorker(releaseCommit = "development"): void {
     if (workerState.isStarted || workerState.pendingStop) return;
     workerState.isStarted = true;
     try {
         registerScheduledActions();
-        startScheduledJobExecutor();
+        startScheduledJobExecutor(releaseCommit);
         startScheduledJobScheduler();
     } catch (error) {
         stopScheduledJobScheduler();

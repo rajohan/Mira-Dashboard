@@ -1,9 +1,13 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Server } from "bun";
 import { describe, expect, it, jest } from "bun:test";
+
+import * as releaseManifestModule from "../src/releaseManifest.ts";
+
+const TEST_RELEASE_COMMIT = "a".repeat(40);
 
 describe("server start scheduler policy", () => {
     it("starts scheduled jobs unless explicitly disabled", async () => {
@@ -30,6 +34,43 @@ describe("server start scheduler policy", () => {
                 MIRA_DASHBOARD_EXECUTION_ROLE: "combined",
             })
         ).toBe(true);
+    });
+
+    it("keeps production frontend assets inside the checksummed release", async () => {
+        const { resolveFrontendPath } = await import("../src/frontendAssets.ts");
+        const releaseRoot = "/opt/mira-dashboard/releases/test-release";
+        const releaseFrontend = path.join(releaseRoot, "dist");
+
+        expect(resolveFrontendPath({ NODE_ENV: "production" }, releaseRoot)).toBe(
+            releaseFrontend
+        );
+        expect(
+            resolveFrontendPath(
+                {
+                    MIRA_DASHBOARD_FRONTEND_PATH: releaseFrontend,
+                    NODE_ENV: "production",
+                },
+                releaseRoot
+            )
+        ).toBe(releaseFrontend);
+        expect(() =>
+            resolveFrontendPath(
+                {
+                    MIRA_DASHBOARD_FRONTEND_PATH: "/tmp/unverified-frontend",
+                    NODE_ENV: "production",
+                },
+                releaseRoot
+            )
+        ).toThrow("cannot override the checksummed release frontend");
+        expect(
+            resolveFrontendPath(
+                {
+                    MIRA_DASHBOARD_FRONTEND_PATH: "/tmp/development-frontend",
+                    NODE_ENV: "development",
+                },
+                releaseRoot
+            )
+        ).toBe("/tmp/development-frontend");
     });
 
     it("resolves backend startup entrypoint and gateway token decisions without starting services", async () => {
@@ -187,12 +228,90 @@ describe("server start scheduler policy", () => {
             await expect(workerStart.runDashboardWorker()).rejects.toThrow(
                 "worker startup failed"
             );
+            expect(startSpy).toHaveBeenCalledWith(
+                expect.stringMatching(/^[\da-f]{8,40}$/u)
+            );
             expect(stopSpy).toHaveBeenCalledTimes(1);
             expect(process.listenerCount("SIGINT")).toBe(sigintListeners);
             expect(process.listenerCount("SIGTERM")).toBe(sigtermListeners);
         } finally {
             startSpy.mockRestore();
             stopSpy.mockRestore();
+        }
+    });
+
+    it("verifies the production worker release before opening SQLite", async () => {
+        const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-worker-release-"));
+        const databasePath = path.join(temporaryRoot, "dashboard.db");
+        const child = Bun.spawn({
+            cmd: [
+                process.execPath,
+                path.resolve(import.meta.dirname, "../src/workerStart.ts"),
+            ],
+            cwd: path.resolve(import.meta.dirname, ".."),
+            env: {
+                ...process.env,
+                MIRA_DASHBOARD_DB_PATH: databasePath,
+                MIRA_DASHBOARD_RELEASE_ROOT: temporaryRoot,
+                NODE_ENV: "production",
+            },
+            stderr: "pipe",
+            stdin: "ignore",
+            stdout: "ignore",
+        });
+
+        try {
+            const [exitCode, stderr] = await Promise.all([
+                child.exited,
+                new Response(child.stderr).text(),
+            ]);
+
+            expect(exitCode).toBe(1);
+            expect(stderr).toContain(
+                "Worker release identity is not ready (manifest-missing)"
+            );
+            expect(existsSync(databasePath)).toBe(false);
+        } finally {
+            child.kill();
+            rmSync(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
+    it("verifies the production backend release before opening SQLite", async () => {
+        const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-backend-release-"));
+        const databasePath = path.join(temporaryRoot, "dashboard.db");
+        const child = Bun.spawn({
+            cmd: [
+                process.execPath,
+                path.resolve(import.meta.dirname, "../src/serverStart.ts"),
+            ],
+            cwd: path.resolve(import.meta.dirname, ".."),
+            env: {
+                ...process.env,
+                MIRA_DASHBOARD_DB_PATH: databasePath,
+                MIRA_DASHBOARD_RELEASE_ROOT: temporaryRoot,
+                NODE_ENV: "production",
+                PORT: "0",
+            },
+            stderr: "pipe",
+            stdin: "ignore",
+            stdout: "ignore",
+        });
+
+        try {
+            const [exitCode, stderr] = await Promise.all([
+                child.exited,
+                new Response(child.stderr).text(),
+            ]);
+
+            expect(exitCode).toBe(1);
+            expect(stderr).toContain(
+                "Backend release identity is not ready (manifest-missing)"
+            );
+            expect(existsSync(databasePath)).toBe(false);
+        } finally {
+            child.kill();
+            rmSync(temporaryRoot, { force: true, recursive: true });
         }
     });
 
@@ -331,7 +450,7 @@ describe("server start scheduler policy", () => {
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
             process.env.OPENCLAW_GATEWAY_TOKEN = " test-token ";
-            serverStartModule.handleServerListening();
+            serverStartModule.handleServerListening(TEST_RELEASE_COMMIT);
             expect(initSpy).toHaveBeenCalledWith("test-token");
             await new Promise((resolve) => setTimeout(resolve, 20));
         } finally {
@@ -351,6 +470,46 @@ describe("server start scheduler policy", () => {
             database
                 .prepare("DELETE FROM cache_entries WHERE key = 'quotas.summary'")
                 .run();
+        }
+    });
+
+    it("starts the combined worker with the verified release identity", async () => {
+        const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
+        const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+        const originalExecutionRole = process.env.MIRA_DASHBOARD_EXECUTION_ROLE;
+        process.env.OPENCLAW_GATEWAY_TOKEN = "test-token";
+        delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+        process.env.MIRA_DASHBOARD_EXECUTION_ROLE = "combined";
+        const gatewayModule = await import("../src/gateway.ts");
+        const jobWorker = await import("../src/services/jobWorker.ts");
+        const serverStartModule = await import("../src/serverStart.ts");
+        const initSpy = jest
+            .spyOn(gatewayModule.default, "init")
+            .mockImplementation(() => {});
+        const startWorkerSpy = jest
+            .spyOn(jobWorker, "startDashboardJobWorker")
+            .mockImplementation(() => {});
+        try {
+            serverStartModule.handleServerListening(TEST_RELEASE_COMMIT);
+            expect(startWorkerSpy).toHaveBeenCalledWith(TEST_RELEASE_COMMIT);
+        } finally {
+            initSpy.mockRestore();
+            startWorkerSpy.mockRestore();
+            if (originalGatewayToken === undefined) {
+                delete process.env.OPENCLAW_GATEWAY_TOKEN;
+            } else {
+                process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
+            }
+            if (originalSchedulerDisabled === undefined) {
+                delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+            } else {
+                process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = originalSchedulerDisabled;
+            }
+            if (originalExecutionRole === undefined) {
+                delete process.env.MIRA_DASHBOARD_EXECUTION_ROLE;
+            } else {
+                process.env.MIRA_DASHBOARD_EXECUTION_ROLE = originalExecutionRole;
+            }
         }
     });
 
@@ -379,7 +538,7 @@ describe("server start scheduler policy", () => {
         const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
-            serverStartModule.handleServerListening();
+            serverStartModule.handleServerListening(TEST_RELEASE_COMMIT);
             expect(initSpy).not.toHaveBeenCalled();
             expect(warnSpy).toHaveBeenCalledWith(
                 "[Backend] No gateway token configured yet; waiting for bootstrap registration"
@@ -439,9 +598,9 @@ describe("server start scheduler policy", () => {
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
         try {
-            expect(() => serverStartModule.handleServerListening()).toThrow(
-                "gateway boot failed"
-            );
+            expect(() =>
+                serverStartModule.handleServerListening(TEST_RELEASE_COMMIT)
+            ).toThrow("gateway boot failed");
             expect(shutdownSpy).not.toHaveBeenCalled();
             expect(errorSpy).toHaveBeenCalledWith(
                 "[Backend] Failed to start background services:",
@@ -461,6 +620,44 @@ describe("server start scheduler policy", () => {
             } else {
                 process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = originalSchedulerDisabled;
             }
+        }
+    });
+
+    it("shares concurrent startup failures and clears the completed attempt", async () => {
+        const startupFailure = new Error("release verification failed");
+        const release =
+            Promise.withResolvers<
+                Awaited<
+                    ReturnType<typeof releaseManifestModule.getRuntimeReleaseIdentity>
+                >
+            >();
+        const releaseSpy = jest
+            .spyOn(releaseManifestModule, "getRuntimeReleaseIdentity")
+            .mockReturnValue(release.promise);
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const originalExitCode = process.exitCode;
+        const { startBackendServer, stopBackendServer } =
+            await import("../src/serverStart.ts");
+        try {
+            await stopBackendServer();
+            process.exitCode = 0;
+
+            const firstStartup = startBackendServer(0);
+            const concurrentStartup = startBackendServer(0);
+            expect(concurrentStartup).toBe(firstStartup);
+
+            release.reject(startupFailure);
+            await expect(firstStartup).rejects.toBe(startupFailure);
+            await expect(concurrentStartup).rejects.toBe(startupFailure);
+
+            const retry = startBackendServer(0);
+            expect(retry).not.toBe(firstStartup);
+            await expect(retry).rejects.toBe(startupFailure);
+        } finally {
+            await stopBackendServer();
+            releaseSpy.mockRestore();
+            errorSpy.mockRestore();
+            process.exitCode = originalExitCode;
         }
     });
 
@@ -492,8 +689,10 @@ describe("server start scheduler policy", () => {
             const { runBackendServer, startBackendServer, stopBackendServer } =
                 await import("../src/serverStart.ts");
 
-            startBackendServer(0);
-            startBackendServer(0);
+            const firstStartup = startBackendServer(0);
+            const concurrentStartup = startBackendServer(0);
+            expect(concurrentStartup).toBe(firstStartup);
+            await concurrentStartup;
             await stopBackendServer();
             await stopBackendServer();
 
@@ -606,9 +805,12 @@ describe("server start scheduler policy", () => {
             let isReady = false;
             for (let attempt = 0; attempt < 100; attempt += 1) {
                 try {
-                    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
-                        signal: AbortSignal.timeout(100),
-                    });
+                    const response = await fetch(
+                        `http://127.0.0.1:${port}/api/health/live`,
+                        {
+                            signal: AbortSignal.timeout(100),
+                        }
+                    );
                     if (response.ok) {
                         isReady = true;
                         break;

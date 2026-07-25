@@ -26,8 +26,30 @@ export function AppHeader({
     const { isConnected } = useOpenClawSocket();
     const { data: health, isError: isBackendError } = useHealth();
 
-    const isBackendConnected = !isBackendError && health?.status === "isOk";
-    const backendCommit = health?.backendCommit || "unknown";
+    const isBackendConnected = !isBackendError && health !== undefined;
+    const workerState = isBackendConnected
+        ? health.checks.worker.ready
+            ? "ready"
+            : "offline"
+        : "unknown";
+    const workerStatus = {
+        offline: {
+            className: "border-red-500/40 bg-red-500/10 text-red-300",
+            label: "Worker offline",
+            symbol: "○",
+        },
+        ready: {
+            className: "border-green-500/40 bg-green-500/10 text-green-300",
+            label: "Worker online",
+            symbol: "●",
+        },
+        unknown: {
+            className: "border-primary-600 bg-primary-800 text-primary-300",
+            label: "Worker status unavailable",
+            symbol: "?",
+        },
+    }[workerState];
+    const backendCommit = health?.releaseDetails.backendCommit || "unknown";
     const frontendCommit = typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "dev";
     const hasVersionMismatch =
         backendCommit !== "unknown" &&
@@ -94,6 +116,16 @@ export function AppHeader({
                         >
                             <span className="font-medium">BE</span>
                             <span>{isBackendConnected ? "●" : "○"}</span>
+                        </span>
+                        <span
+                            className={[
+                                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1",
+                                workerStatus.className,
+                            ].join(" ")}
+                            title={workerStatus.label}
+                        >
+                            <span className="font-medium">WK</span>
+                            <span>{workerStatus.symbol}</span>
                         </span>
                     </div>
                     <Button

@@ -5,7 +5,8 @@ Use this page when the symptom is unclear. Prefer narrow checks before restarts.
 ## Quick Triage
 
 ```bash
-curl http://127.0.0.1:3100/api/health
+curl --fail http://127.0.0.1:3100/api/health/live
+curl --fail http://127.0.0.1:3100/api/health/ready
 systemctl --user status mira-dashboard.service --no-pager
 journalctl --user -u mira-dashboard.service -n 160 --no-pager
 git -C /home/ubuntu/projects/mira-dashboard status --short --branch
@@ -102,9 +103,10 @@ layout unless a deliberate migration requires otherwise.
 
 ```bash
 cd /home/ubuntu/projects/mira-dashboard
-bun run build
+/usr/local/bin/doppler run --config prd --project rajohan -- \
+  bun run deploy:prepare
 systemctl --user restart mira-dashboard.service
-curl http://127.0.0.1:3100/api/health
+curl --fail http://127.0.0.1:3100/api/health/ready
 ```
 
 If the browser still shows old UI, hard refresh or clear the tab cache.

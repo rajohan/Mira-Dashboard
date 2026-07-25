@@ -52,10 +52,11 @@ cd ..
   bun run deploy:prepare
 ```
 
-`deploy:prepare` builds the frontend and backend, then runs `db:preflight`
-before service restart. Keep ordinary `build` commands side-effect free; use
-this combined command for every supported manual or Dashboard-driven deploy so
-the database safety gate cannot be skipped accidentally.
+`deploy:prepare` builds the frontend and backend, runs `db:preflight`, and
+writes the checksummed release manifest before service restart. Keep ordinary
+`build` commands side-effect free; use this combined command for every
+supported manual or Dashboard-driven deploy so the database and release gates
+cannot be skipped accidentally.
 
 ## Install Or Refresh Units
 
@@ -103,7 +104,17 @@ journalctl --user -u mira-dashboard-worker.service -n 120 --no-pager
 ## Smoke Test
 
 ```bash
-curl http://127.0.0.1:3100/api/health
+wait_for_dashboard_ready() {
+  for attempt in {1..20}; do
+    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+      http://127.0.0.1:3100/api/health/ready >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+wait_for_dashboard_ready
 curl http://127.0.0.1:3100/api/auth/bootstrap
 ```
 
@@ -133,10 +144,10 @@ callers before restarting into this version:
    `/home/ubuntu/projects/mira-dashboard/scripts/miraDashboardApi.ts`.
 3. Migrate and smoke-test every caller against the currently running
    scoped-credential-compatible release:
-   - heartbeat: `cache:read`, `reports:write`;
-   - task tracking: `agents:write`, `tasks:read`, and `tasks:write`;
-   - daily summary: `cache:read`, `reports:write`;
-   - daily brief: `cache:read`, `reports:write`, `tasks:read`.
+    - heartbeat: `cache:read`, `reports:write`;
+    - task tracking: `agents:write`, `tasks:read`, and `tasks:write`;
+    - daily summary: `cache:read`, `reports:write`;
+    - daily brief: `cache:read`, `reports:write`, `tasks:read`.
 4. Confirm allowed and intentionally denied calls have the expected automation
    actor and scope in `/api/audit-events`.
 5. Deploy this release, restart the web unit, verify every scoped caller again,
@@ -172,28 +183,53 @@ cd /home/ubuntu/projects/mira-dashboard
 git log --oneline -n 10
 git switch main
 git reset --hard <known-good-sha>
-bun run build
-(cd backend && bun run build)
+if ! bun -e 'const packageJson = await Bun.file("package.json").json(); process.exit(typeof packageJson.scripts?.["deploy:prepare"] === "string" ? 0 : 1)'; then
+  echo "Rollback target predates the supported deploy contract" >&2
+  exit 1
+fi
+bun install --frozen-lockfile
+(cd backend && bun install --frozen-lockfile)
+if test -f scripts/writeReleaseManifest.ts; then
+  release_health_path=/api/health/ready
+else
+  # One-time bootstrap rollback to the pre-manifest release.
+  release_health_path=/api/health
+fi
+/usr/local/bin/doppler run --config prd --project rajohan -- \
+  bun run deploy:prepare
 install -m 0644 systemd/mira-dashboard.service \
   /home/ubuntu/.config/systemd/user/mira-dashboard.service
-if test -f backend/dist/workerStart.js; then
-  install -m 0644 systemd/mira-dashboard-worker.service \
-    /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
-  systemctl --user daemon-reload
-  systemctl --user restart mira-dashboard.service
-  systemctl --user restart mira-dashboard-worker.service
-else
-  systemctl --user disable --now mira-dashboard-worker.service
-  systemctl --user daemon-reload
-  systemctl --user restart mira-dashboard.service
-fi
-curl http://127.0.0.1:3100/api/health
+install -m 0644 systemd/mira-dashboard-worker.service \
+  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
+systemctl --user daemon-reload
+systemctl --user restart mira-dashboard.service
+systemctl --user restart mira-dashboard-worker.service
+wait_for_dashboard_ready() {
+  for attempt in {1..20}; do
+    if test "$release_health_path" = "/api/health"; then
+      if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+        "http://127.0.0.1:3100${release_health_path}" |
+        grep -Fq '"workerOnline":true'; then
+        return 0
+      fi
+    elif curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+      "http://127.0.0.1:3100${release_health_path}" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+wait_for_dashboard_ready
 ```
 
-If the known-good target predates `workerStart.js`, the branch above stops the
-worker before starting that version and reinstalls the checked-out legacy
-combined web unit. Do not repeatedly restart a worker unit whose target
-entrypoint does not exist.
+The conditional health target exists only for the first rollback across the
+manifest-contract cutover. Manifest-aware releases always regenerate their
+ignored manifest through `deploy:prepare` and verify `/api/health/ready`.
+
+Rollback targets older than the split-worker/database-preflight contract are
+deliberately unsupported. This private single-operator service keeps a supported
+known-good release instead of retaining an untested legacy activation path.
 
 Do not use `git reset --hard` casually in normal work. It is a rollback
 procedure for production incidents after an explicit decision.
@@ -265,24 +301,68 @@ manager must therefore read the release/schema compatibility declaration before
 offering or automatically performing rollback; it must never start an
 incompatible older release against a newer live database.
 
+## Release Manifest Contract
+
+`bun run deploy:prepare` builds frontend and backend, completes the verified
+SQLite preflight, and writes an ignored `release-manifest.json` in the release
+root. The manifest is the release identity source when `NODE_ENV=production`;
+Git is only a development/test fallback.
+
+Manifest format version 1 records:
+
+- the full and eight-character Git commit plus commit title and build time;
+- the Bun version used for the build;
+- matching frontend/backend commit identities emitted inside both build trees;
+- the target, minimum-compatible, and maximum-compatible SQLite schema;
+- a checksum of the immutable migration registry;
+- the SHA-256 and byte length of every frontend/backend build artifact plus
+  both package manifests, Bun lockfiles, and the default runtime log-rotation
+  configuration.
+
+The backend bundle also embeds its full build commit. Runtime readiness requires
+that embedded commit, both build-identity files, and the release manifest to
+agree. Running `release:manifest` against ignored output left behind by another
+checkout therefore fails instead of relabeling stale code.
+
+Manifest creation and verification reject absolute/traversal paths, symlinks,
+hard-linked files, special files, unsorted/duplicate inventories, checksum
+drift, and undeclared runtime artifacts. The schema compatibility range is an
+explicit code constant. Adding a future migration without reviewing that range
+fails the release contract.
+
+The current in-place executor generates this manifest as a transition step. The
+immutable release manager must verify it before activation and compare the live
+schema with the previous release's declared range before offering code-only
+rollback.
+
 ## Health Signals
 
-Healthy `/api/health`:
+Deployment health is split by purpose:
 
-```json
-{
-    "status": "isOk",
-    "gatewayConnected": true,
-    "sessionCount": 9,
-    "backendCommit": "abc1234",
-    "workerOnline": true
-}
-```
+- `GET /api/health/live` proves that the web process can answer requests.
+- `GET /api/health/ready` requires a valid release identity,
+  current/accessible SQLite schema, built frontend, and a fresh worker heartbeat
+  from the exact manifest commit.
+  Concurrent probes share one artifact scan, and a completed result is reused
+  for at most 15 seconds before the checksummed inventory is verified again.
+  This readiness route returns HTTP 503 with `status: "notReady"` when an
+  internal activation check fails.
+- `GET /api/health/diagnostics` returns the readiness breakdown plus session
+  count and requires an authenticated Dashboard session.
+- `GET /api/health` is a temporary compatibility adapter for the pre-readiness
+  deploy executor. It returns 503 unless the full readiness contract passes and
+  retains `workerOnline` only until the atomic executor cutover is complete.
+
+Gateway connectivity is reported as an external dependency but deliberately
+does not fail release readiness: rolling Dashboard code back cannot repair an
+OpenClaw Gateway outage. Production activation and automatic rollback must use
+`/api/health/ready`.
 
 Important failures:
 
-- `gatewayConnected: false`: check OpenClaw Gateway service and Gateway token.
-- `workerOnline: false`: the worker heartbeat is stale or queue telemetry is
+- `dependencies.gatewayConnected: false` in authenticated diagnostics: check
+  OpenClaw Gateway service and Gateway token.
+- `checks.worker.ready: false`: the worker heartbeat is stale or queue telemetry is
   unavailable; check both Dashboard and worker service logs.
 - HTTP `503 Frontend Not Built`: build root frontend with `bun run build`.
 - `Unauthorized` on API routes: auth/session or cookie issue.

@@ -1,4 +1,8 @@
 import { validateAuthenticationConfig, validateStoredSecretConfig } from "./auth.ts";
+import {
+    getRuntimeReleaseIdentity,
+    requireRunnableReleaseCommit,
+} from "./releaseManifest.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
 
 const WORKER_KEEP_ALIVE_INTERVAL_MS = 60_000;
@@ -15,6 +19,8 @@ export function createWorkerKeepAliveHandle(): NodeJS.Timeout {
 }
 
 export async function runDashboardWorker(): Promise<void> {
+    const release = await getRuntimeReleaseIdentity();
+    const releaseCommit = requireRunnableReleaseCommit(release, "Worker");
     validateAuthenticationConfig();
     validateStoredSecretConfig();
     const shutdown = Promise.withResolvers<NodeJS.Signals>();
@@ -23,7 +29,7 @@ export async function runDashboardWorker(): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-        startDashboardJobWorker();
+        startDashboardJobWorker(releaseCommit);
         await shutdown.promise;
     } finally {
         process.removeListener("SIGINT", stop);

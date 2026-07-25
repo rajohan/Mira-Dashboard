@@ -1,5 +1,9 @@
 import { getPersistedGatewayToken } from "./auth.ts";
 import gateway from "./gateway.ts";
+import {
+    getRuntimeReleaseIdentity,
+    requireRunnableReleaseCommit,
+} from "./releaseManifest.ts";
 import { createServer, resolveListenPort } from "./server.ts";
 import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
@@ -7,10 +11,10 @@ import { registerPullRequestJobLifecycleHandlers } from "./services/pullRequests
 
 const serverStartState: {
     activeServer: ReturnType<typeof createServer> | undefined;
-    isStarting: boolean;
+    startupPromise: Promise<void> | undefined;
 } = {
     activeServer: undefined,
-    isStarting: false,
+    startupPromise: undefined,
 };
 
 export { runLogRotationCli } from "./services/logRotation.ts";
@@ -42,7 +46,7 @@ export function resolveGatewayToken(
 }
 
 /** Starts Gateway and notification monitors after the HTTP server is listening. */
-export function handleServerListening(): void {
+export function handleServerListening(releaseCommit: string): void {
     let isGatewayStarted = false;
     try {
         registerPullRequestJobLifecycleHandlers();
@@ -57,7 +61,7 @@ export function handleServerListening(): void {
         }
 
         if (shouldStartScheduledJobs()) {
-            startDashboardJobWorker();
+            startDashboardJobWorker(releaseCommit);
         }
     } catch (error) {
         console.error("[Backend] Failed to start background services:", error);
@@ -79,22 +83,34 @@ export function handleServerListening(): void {
 }
 
 /** Binds the HTTP server and starts runtime-only background services. */
-export function startBackendServer(port = resolveListenPort()): void {
-    if (serverStartState.activeServer || serverStartState.isStarting) {
-        return;
+export function startBackendServer(port = resolveListenPort()): Promise<void> {
+    if (serverStartState.activeServer) {
+        return Promise.resolve();
     }
-    serverStartState.isStarting = true;
-    try {
-        serverStartState.activeServer = createServer(port);
-        handleServerListening();
-        serverStartState.isStarting = false;
-    } catch (error) {
-        serverStartState.isStarting = false;
-        serverStartState.activeServer = undefined;
-        console.error("[Backend] Failed to start server:", error);
-        process.exitCode = 1;
-        throw error;
+    if (serverStartState.startupPromise) {
+        return serverStartState.startupPromise;
     }
+    const startup = Promise.withResolvers<void>();
+    serverStartState.startupPromise = startup.promise;
+    void (async () => {
+        try {
+            const release = await getRuntimeReleaseIdentity();
+            const releaseCommit = requireRunnableReleaseCommit(release, "Backend");
+            serverStartState.activeServer = createServer(port);
+            handleServerListening(releaseCommit);
+            startup.resolve();
+        } catch (error) {
+            serverStartState.activeServer = undefined;
+            console.error("[Backend] Failed to start server:", error);
+            process.exitCode = 1;
+            startup.reject(error);
+        } finally {
+            if (serverStartState.startupPromise === startup.promise) {
+                serverStartState.startupPromise = undefined;
+            }
+        }
+    })();
+    return startup.promise;
 }
 
 export async function stopBackendServer(): Promise<void> {
@@ -124,7 +140,7 @@ interface BackendServerEntrypointOptions {
     isDirect?: boolean;
     reportFailure?: (error: unknown) => void;
     runServer?: () => Promise<void>;
-    startServer?: () => void;
+    startServer?: () => Promise<void> | void;
     startOnImport?: string;
 }
 
@@ -140,7 +156,7 @@ export async function runBackendServer(port = resolveListenPort()): Promise<void
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-        startBackendServer(port);
+        await startBackendServer(port);
         await shutdown.promise;
     } finally {
         process.removeListener("SIGINT", stop);
@@ -165,7 +181,7 @@ export async function startBackendServerEntrypoint({
         return;
     }
     if (!isDirect) {
-        startServer();
+        await startServer();
         return;
     }
     let exitCode = 0;

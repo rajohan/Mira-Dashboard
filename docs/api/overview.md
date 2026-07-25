@@ -49,7 +49,9 @@ or another authentication mechanism.
 
 Public routes:
 
-- `GET /api/health`
+- `GET|HEAD /api/health/live`
+- `GET|HEAD /api/health/ready` — returns `503` whenever any required
+  activation-readiness check fails
 - `GET /api/auth/bootstrap`
 - `GET /api/auth/session`
 - `POST /api/auth/register-first-user`
@@ -59,6 +61,9 @@ Public routes:
 - `POST /api/auth/login/webauthn/options`
 - `POST /api/auth/login/webauthn/verify`
 - `POST /api/auth/logout`
+
+The retired top-level `GET|HEAD /health` path returns `410 Gone` instead of
+falling through to the SPA shell. This makes stale monitors fail visibly.
 
 The WebSocket endpoint `/ws` is also authenticated and origin-checked.
 

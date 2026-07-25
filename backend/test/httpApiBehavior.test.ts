@@ -310,15 +310,45 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("reports health and auth bootstrap state without production data", async () => {
-        const health = await api<{
+        const live = await api<{ status: string; uptimeSeconds: number }>(
+            "/api/health/live"
+        );
+        expect(live.status).toBe(200);
+        expect(live.body.status).toBe("isOk");
+        expect(live.body.uptimeSeconds).toBeGreaterThanOrEqual(0);
+
+        const liveHead = await api<undefined>("/api/health/live", {
+            method: "HEAD",
+        });
+        expect(liveHead).toEqual({ body: undefined, status: 200 });
+
+        const ready = await api<{ status: string }>("/api/health/ready");
+        expect(ready.status).toBe(503);
+        expect(ready.body.status).toBe("notReady");
+        const readyHead = await api<undefined>("/api/health/ready", {
+            method: "HEAD",
+        });
+        expect(readyHead).toEqual({ body: undefined, status: 503 });
+
+        const legacyReady = await api<{
             status: string;
-            sessionCount: number;
             workerOnline: boolean;
         }>("/api/health");
-        expect(health.status).toBe(200);
-        expect(health.body.status).toBe("isOk");
-        expect(health.body.sessionCount).toBe(0);
-        expect(health.body.workerOnline).toBe(false);
+        expect(legacyReady).toEqual({
+            body: {
+                status: "notReady",
+                workerOnline: false,
+            },
+            status: 503,
+        });
+        const legacyReadyHead = await api<undefined>("/api/health", {
+            method: "HEAD",
+        });
+        expect(legacyReadyHead).toEqual({ body: undefined, status: 503 });
+
+        const diagnostics = await api<{ error: string }>("/api/health/diagnostics");
+        expect(diagnostics.status).toBe(401);
+        expect(diagnostics.body).toEqual({ error: "Unauthorized" });
 
         const bootstrap = await api<{
             isBootstrapRequired: boolean;

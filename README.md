@@ -103,22 +103,25 @@ Production preparation is deliberately separate from ordinary builds:
   bun run deploy:prepare
 ```
 
-This builds both applications and runs the restore-verified SQLite preflight.
-Use it before a production restart; plain `build` remains safe for CI and local
-verification.
+This builds both applications, runs the restore-verified SQLite preflight, and
+writes the checksummed release manifest used by production readiness and
+activation. Use it before a production restart; plain `build` remains safe for
+CI and local verification.
 
 ## Runtime notes
 
 - Backend default port: `3100`.
 - Frontend dev port: `5173`.
-- Health endpoints: `/health` and `/api/health`.
+- Health endpoints: public `/api/health/live`, public `/api/health/ready`, and
+  authenticated `/api/health/diagnostics`.
 - Dashboard SQLite uses WAL, numbered checksum-validated migrations,
   restrictive storage modes, deploy/maintenance snapshots, and automated
   restore checks.
 - Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
 - Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
 - Auth is enforced by the backend request policy for every API route except
-  `GET|HEAD /api/health`, `GET|HEAD /api/auth/bootstrap`,
+  `GET|HEAD /api/health/live`, `GET|HEAD /api/health/ready`,
+  `GET|HEAD /api/auth/bootstrap`,
   `POST /api/auth/register-first-user`, `POST /api/auth/login`,
   `POST /api/auth/login/totp`, `POST /api/auth/login/recovery`,
   `POST /api/auth/login/webauthn/options`,

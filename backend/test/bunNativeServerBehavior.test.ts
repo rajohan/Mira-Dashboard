@@ -324,10 +324,16 @@ describe("Bun-native dashboard backend", () => {
     });
 
     it("reports health and auth bootstrap state", async () => {
-        const health = await api<{ status: string; sessionCount: number }>("/api/health");
-        expect(health.status).toBe(200);
-        expect(health.body.status).toBe("isOk");
-        expect(health.body.sessionCount).toBe(0);
+        const live = await api<{ status: string; uptimeSeconds: number }>(
+            "/api/health/live"
+        );
+        expect(live.status).toBe(200);
+        expect(live.body.status).toBe("isOk");
+        expect(live.body.uptimeSeconds).toBeGreaterThanOrEqual(0);
+        const liveHead = await api<undefined>("/api/health/live", {
+            method: "HEAD",
+        });
+        expect(liveHead).toEqual({ body: undefined, status: 200 });
 
         const bootstrap = await api<{
             hasGatewayToken: boolean;
@@ -507,6 +513,17 @@ describe("Bun-native dashboard backend", () => {
     });
 
     it("serves the app shell and hashed static assets", async () => {
+        const retiredHealth = await fetch(`${state.baseUrl}/health`);
+        expect(retiredHealth.status).toBe(410);
+        await expect(retiredHealth.json()).resolves.toEqual({
+            error: "Gone",
+            replacements: ["/api/health/live", "/api/health/ready"],
+        });
+        const retiredHealthHead = await fetch(`${state.baseUrl}/health`, {
+            method: "HEAD",
+        });
+        expect(retiredHealthHead.status).toBe(410);
+
         const appRoute = await fetch(`${state.baseUrl}/tasks`);
         expect(appRoute.status).toBe(200);
         expect(appRoute.headers.get("content-type")).toContain("text/html");

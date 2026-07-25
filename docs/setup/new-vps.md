@@ -45,20 +45,32 @@ bun install --frozen-lockfile
 
 ## Build Frontend And Backend
 
-From the repo root:
+Build the frontend from the repository root:
 
 ```bash
+cd /home/ubuntu/projects/mira-dashboard
 bun run build
 ```
 
-From `backend/`:
+Build the backend from its own package directory:
 
 ```bash
+cd /home/ubuntu/projects/mira-dashboard/backend
 bun run build
 ```
 
-The frontend build writes to `dist/`. The backend build writes to
-`backend/dist/`.
+Return to the repository root and create the checksummed runtime manifest:
+
+```bash
+cd /home/ubuntu/projects/mira-dashboard
+bun run release:manifest
+```
+
+The frontend build writes to `dist/`, the backend build writes to
+`backend/dist/`, and `release:manifest` binds both outputs to the checked-out
+commit. A fresh host may not have a Dashboard database yet, so this first build
+uses `release:manifest` directly instead of the normal database-aware
+`deploy:prepare`; first startup creates and migrates the database.
 
 ## Configure Secrets
 
@@ -184,7 +196,7 @@ Expected after setup:
 ## Verify Runtime
 
 ```bash
-curl http://127.0.0.1:3100/api/health
+curl --fail http://127.0.0.1:3100/api/health/ready
 systemctl --user status mira-dashboard.service --no-pager
 journalctl --user -u mira-dashboard.service -n 100 --no-pager
 journalctl --user -u mira-dashboard-worker.service -n 100 --no-pager
@@ -194,16 +206,32 @@ Healthy response shape:
 
 ```json
 {
-    "status": "isOk",
-    "gatewayConnected": true,
-    "sessionCount": 9,
-    "backendCommit": "abc1234",
-    "workerOnline": true
+    "checks": {
+        "database": {
+            "currentSchemaVersion": 6,
+            "maximumCompatibleSchemaVersion": 6,
+            "minimumCompatibleSchemaVersion": 6,
+            "ready": true,
+            "targetSchemaVersion": 6
+        },
+        "frontend": { "ready": true },
+        "release": {
+            "backendCommit": "12345678",
+            "frontendCommit": "12345678",
+            "manifestFormatVersion": 1,
+            "ready": true,
+            "source": "manifest"
+        },
+        "worker": { "ready": true }
+    },
+    "dependencies": { "gatewayConnected": true },
+    "status": "isReady"
 }
 ```
 
-If `gatewayConnected` is false, check the Gateway token, OpenClaw Gateway
-service, and `/api/auth/bootstrap` state before debugging the frontend.
-If `workerOnline` is false, inspect both Dashboard and
-`mira-dashboard-worker.service`; the worker heartbeat may be stale or queue
-telemetry may be unavailable.
+The authenticated Dashboard header shows `WS`, `BE`, and `WK` separately. If
+`WS` is offline, check the Gateway token, OpenClaw Gateway service, and
+`/api/auth/bootstrap` state before debugging the frontend. If `WK` is offline,
+inspect both Dashboard and `mira-dashboard-worker.service`; the worker heartbeat
+may be stale, belong to another release commit, or queue telemetry may be
+unavailable.

@@ -47,21 +47,18 @@ Dashboard user:
 Invalid Gateway auth returns `401`. Rollback failures return `500` because the
 server may need manual inspection.
 
-## Gateway Health
+## Gateway And Runtime Health
 
-`GET /api/health` reports:
+`GET /api/health/live` is a public process-liveness probe.
+`GET /api/health/ready` is the public deployment gate for the release manifest,
+SQLite schema, built frontend, and persistent worker. The authenticated
+`GET /api/health/diagnostics` response adds the Gateway dependency, session
+count, and release details used by the Dashboard header.
 
-| Field              | Meaning                                                            |
-| ------------------ | ------------------------------------------------------------------ |
-| `status`           | Backend health state.                                              |
-| `gatewayConnected` | Whether the backend Gateway client is authenticated and connected. |
-| `sessionCount`     | Gateway session count known to Dashboard.                          |
-| `backendCommit`    | Git commit served by the backend when available.                   |
-| `workerOnline`     | Whether the persistent job worker has a fresh heartbeat.           |
-
-If queue telemetry cannot be read, health remains available and reports
-`workerOnline:false`. Treat that degraded value as either an offline worker or
-unavailable queue telemetry, and inspect both backend and worker logs.
+Gateway connectivity is deliberately diagnostic rather than a release-readiness
+gate: rolling Dashboard code back cannot repair an OpenClaw outage. If worker
+telemetry cannot be read, readiness returns `503` and the header reports
+`WK ○`; inspect both backend and worker logs.
 
 If `gatewayConnected:false`, check:
 
@@ -609,7 +606,8 @@ When changing chat event handling, test these cases:
 ## Local Debug Commands
 
 ```bash
-curl http://127.0.0.1:3100/api/health
+curl --fail http://127.0.0.1:3100/api/health/live
+curl --fail http://127.0.0.1:3100/api/health/ready
 systemctl --user status mira-dashboard.service --no-pager
 systemctl --user status openclaw-gateway.service --no-pager
 journalctl --user -u mira-dashboard.service -n 160 --no-pager

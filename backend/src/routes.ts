@@ -1,6 +1,5 @@
-import path from "node:path";
-
 import gateway from "./gateway.ts";
+import { diagnosticsSnapshot, livenessSnapshot, readinessSnapshot } from "./health.ts";
 import { json } from "./http.ts";
 import { withRequestPolicy } from "./requestPolicy.ts";
 import { accountSecurityRoutes } from "./routes/accountSecurityRoutes.ts";
@@ -32,44 +31,39 @@ import { sttRoutes } from "./routes/sttRoutes.ts";
 import { taskRoutes } from "./routes/taskRoutes.ts";
 import { terminalRoutes } from "./routes/terminalRoutes.ts";
 import { ttsRoutes } from "./routes/ttsRoutes.ts";
-import { getJobExecutionSummary } from "./services/jobExecutionQueue.ts";
-
-const BACKEND_COMMIT = (() => {
-    try {
-        return (
-            Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], {
-                cwd: path.join(import.meta.dirname, ".."),
-                stderr: "ignore",
-            })
-                .stdout?.toString()
-                ?.trim() || "unknown"
-        );
-    } catch {
-        return "unknown";
-    }
-})();
-
-function backendCommit(): string {
-    return BACKEND_COMMIT;
+function live() {
+    return json(livenessSnapshot());
 }
 
-function isWorkerOnline(): boolean {
-    try {
-        return getJobExecutionSummary().workerOnline;
-    } catch (error) {
-        console.warn("[Health] Failed to read job worker telemetry:", error);
-        return false;
-    }
+async function ready() {
+    const snapshot = await readinessSnapshot();
+    return json(snapshot, { status: snapshot.status === "isReady" ? 200 : 503 });
 }
 
-function health() {
-    return json({
-        status: "isOk",
-        gatewayConnected: gateway.isConnected(),
-        sessionCount: gateway.getSessions().length,
-        backendCommit: backendCommit() || "unknown",
-        workerOnline: isWorkerOnline(),
-    });
+async function legacyReady() {
+    const snapshot = await readinessSnapshot();
+    const isReady = snapshot.status === "isReady";
+    return json(
+        {
+            status: isReady ? "isOk" : "notReady",
+            workerOnline: snapshot.checks.worker.ready,
+        },
+        { status: isReady ? 200 : 503 }
+    );
+}
+
+async function diagnostics() {
+    return json(await diagnosticsSnapshot());
+}
+
+function retiredHealth() {
+    return json(
+        {
+            error: "Gone",
+            replacements: ["/api/health/live", "/api/health/ready"],
+        },
+        { status: 410 }
+    );
 }
 
 function sessions() {
@@ -78,10 +72,25 @@ function sessions() {
 
 const routeTable = {
     "/health": {
-        GET: health,
+        GET: retiredHealth,
+        HEAD: retiredHealth,
     },
+    "/api/health/diagnostics": {
+        GET: diagnostics,
+    },
+    // Transitional compatibility for the in-flight pre-readiness deploy
+    // executor. Remove after the atomic release executor has completed cutover.
     "/api/health": {
-        GET: health,
+        GET: legacyReady,
+        HEAD: legacyReady,
+    },
+    "/api/health/live": {
+        GET: live,
+        HEAD: live,
+    },
+    "/api/health/ready": {
+        GET: ready,
+        HEAD: ready,
     },
     "/api/sessions": {
         GET: sessions,
