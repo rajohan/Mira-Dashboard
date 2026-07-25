@@ -54,9 +54,11 @@ const routeTable = {
     },
     "/api/health/live": {
         GET: live,
+        HEAD: live,
     },
     "/api/health/ready": {
         GET: ready,
+        HEAD: ready,
     },
     "/api/sessions": {
         GET: sessions,

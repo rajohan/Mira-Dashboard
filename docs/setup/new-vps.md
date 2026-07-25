@@ -221,4 +221,5 @@ The authenticated Dashboard header shows `WS`, `BE`, and `WK` separately. If
 `WS` is offline, check the Gateway token, OpenClaw Gateway service, and
 `/api/auth/bootstrap` state before debugging the frontend. If `WK` is offline,
 inspect both Dashboard and `mira-dashboard-worker.service`; the worker heartbeat
-may be stale or queue telemetry may be unavailable.
+may be stale, belong to another release commit, or queue telemetry may be
+unavailable.

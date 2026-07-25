@@ -317,9 +317,18 @@ describe("Mira Dashboard backend integration", () => {
         expect(live.body.status).toBe("isOk");
         expect(live.body.uptimeSeconds).toBeGreaterThanOrEqual(0);
 
+        const liveHead = await api<undefined>("/api/health/live", {
+            method: "HEAD",
+        });
+        expect(liveHead).toEqual({ body: undefined, status: 200 });
+
         const ready = await api<{ status: string }>("/api/health/ready");
         expect(ready.status).toBe(503);
         expect(ready.body.status).toBe("notReady");
+        const readyHead = await api<undefined>("/api/health/ready", {
+            method: "HEAD",
+        });
+        expect(readyHead).toEqual({ body: undefined, status: 503 });
 
         const diagnostics = await api<{ error: string }>("/api/health/diagnostics");
         expect(diagnostics.status).toBe(401);

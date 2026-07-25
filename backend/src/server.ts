@@ -112,6 +112,7 @@ export function createServer(port = resolveListenPort()): Server<DashboardSocket
     validateAutomationCredentials();
     validateTotpStorageConfig();
     validateWebAuthnConfig();
+    resolveFrontendPath();
     const websocket = {
         close(ws: ServerWebSocket<DashboardSocketData>) {
             for (const handler of ws.data.closeHandlers) {

@@ -1,4 +1,5 @@
 import { validateAuthenticationConfig, validateStoredSecretConfig } from "./auth.ts";
+import { getRuntimeReleaseIdentity } from "./releaseManifest.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
 
 const WORKER_KEEP_ALIVE_INTERVAL_MS = 60_000;
@@ -17,13 +18,23 @@ export function createWorkerKeepAliveHandle(): NodeJS.Timeout {
 export async function runDashboardWorker(): Promise<void> {
     validateAuthenticationConfig();
     validateStoredSecretConfig();
+    const release = await getRuntimeReleaseIdentity();
+    if (process.env.NODE_ENV === "production" && !release.ready) {
+        throw new Error(
+            `Worker release identity is not ready (${release.issue ?? release.source})`
+        );
+    }
+    const releaseCommit = release.commitSha ?? release.backendCommit;
+    if (!/^[\da-f]{8,40}$/u.test(releaseCommit)) {
+        throw new Error("Worker release identity does not contain a valid commit");
+    }
     const shutdown = Promise.withResolvers<NodeJS.Signals>();
     const stop = (signal: NodeJS.Signals) => shutdown.resolve(signal);
     const keepAlive = createWorkerKeepAliveHandle();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-        startDashboardJobWorker();
+        startDashboardJobWorker(releaseCommit);
         await shutdown.promise;
     } finally {
         process.removeListener("SIGINT", stop);

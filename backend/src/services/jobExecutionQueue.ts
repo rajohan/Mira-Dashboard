@@ -14,6 +14,8 @@ import {
 
 const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_EXECUTION_LIST_LIMIT = 200;
+const WORKER_READINESS_MAX_AGE_MS = 3000;
+const RELEASE_COMMIT_PATTERN = /^[\da-f]{8,40}$/u;
 
 export type JobExecutionStatus =
     "queued" | "running" | "success" | "failed" | "cancelled";
@@ -458,6 +460,26 @@ export function getJobExecutionSummary(timestamp = Date.now()): JobExecutionSumm
         workerLastHeartbeatAt: fromSqlNullable(worker.last_heartbeat_at),
         workerOnline: worker.count > 0,
     };
+}
+
+export function isJobWorkerReleaseReady(
+    releaseCommit: string,
+    timestamp = Date.now()
+): boolean {
+    if (!RELEASE_COMMIT_PATTERN.test(releaseCommit)) {
+        return false;
+    }
+    const freshAfter = new Date(timestamp - WORKER_READINESS_MAX_AGE_MS).toISOString();
+    const row = database
+        .prepare(
+            `SELECT 1
+             FROM job_workers
+             WHERE heartbeat_at >= ?
+               AND id LIKE ?
+             LIMIT 1`
+        )
+        .get(freshAfter, `dashboard-worker:${releaseCommit}:%`);
+    return row !== null && row !== undefined;
 }
 
 export function registerJobWorker(

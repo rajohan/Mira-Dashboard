@@ -10,7 +10,10 @@ import {
     getRuntimeReleaseIdentity,
     type RuntimeReleaseIdentity,
 } from "./releaseManifest.ts";
-import { getJobExecutionSummary } from "./services/jobExecutionQueue.ts";
+import {
+    getJobExecutionSummary,
+    isJobWorkerReleaseReady,
+} from "./services/jobExecutionQueue.ts";
 
 interface DatabaseReadiness {
     currentSchemaVersion?: number;
@@ -75,8 +78,11 @@ function databaseReadiness(): DatabaseReadiness {
     }
 }
 
-function isWorkerReady(): boolean {
+function isWorkerReady(release: RuntimeReleaseIdentity): boolean {
     try {
+        if (release.source === "manifest" && release.commitSha) {
+            return isJobWorkerReleaseReady(release.commitSha);
+        }
         return getJobExecutionSummary().workerOnline;
     } catch (error) {
         console.warn("[Health] Failed to read job worker telemetry:", error);
@@ -85,13 +91,14 @@ function isWorkerReady(): boolean {
 }
 
 export async function collectReadinessSignals(): Promise<ReadinessSignals> {
+    const release = await getRuntimeReleaseIdentity();
     return {
         database: databaseReadiness(),
         frontendReady: isFrontendIndexReady(),
         gatewayConnected: gateway.isConnected(),
-        release: await getRuntimeReleaseIdentity(),
+        release,
         sessionCount: gateway.getSessions().length,
-        workerReady: isWorkerReady(),
+        workerReady: isWorkerReady(release),
     };
 }
 

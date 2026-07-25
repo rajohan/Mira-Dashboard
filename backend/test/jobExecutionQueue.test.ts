@@ -15,6 +15,7 @@ import {
     getJobExecution,
     getJobExecutionSummary,
     insertJobExecution,
+    isJobWorkerReleaseReady,
     protectRunningJobExecutionFromCancellation,
     recoverExpiredJobExecutions,
     registerJobWorker,
@@ -160,6 +161,35 @@ describe("persistent job execution queue", () => {
         });
         expect(didHeartbeatJobWorker(workerId, "2026-07-22T10:01:00.000Z")).toBe(true);
         unregisterJobWorker(workerId);
+    });
+
+    it("requires a fresh heartbeat from the requested worker release", () => {
+        const releaseCommit = "a".repeat(40);
+        const workerId = `dashboard-worker:${releaseCommit}:123:${Bun.randomUUIDv7()}`;
+        registerJobWorker(workerId, 1, "2026-07-22T10:00:00.000Z");
+        try {
+            expect(
+                isJobWorkerReleaseReady(
+                    releaseCommit,
+                    Date.parse("2026-07-22T10:00:02.000Z")
+                )
+            ).toBe(true);
+            expect(
+                isJobWorkerReleaseReady(
+                    releaseCommit,
+                    Date.parse("2026-07-22T10:00:04.000Z")
+                )
+            ).toBe(false);
+            expect(
+                isJobWorkerReleaseReady(
+                    "b".repeat(40),
+                    Date.parse("2026-07-22T10:00:02.000Z")
+                )
+            ).toBe(false);
+            expect(isJobWorkerReleaseReady("not-a-commit")).toBe(false);
+        } finally {
+            unregisterJobWorker(workerId);
+        }
     });
 
     it("wraps worker children in class-specific systemd scopes", () => {

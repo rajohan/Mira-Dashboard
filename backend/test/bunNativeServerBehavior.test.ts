@@ -330,6 +330,10 @@ describe("Bun-native dashboard backend", () => {
         expect(live.status).toBe(200);
         expect(live.body.status).toBe("isOk");
         expect(live.body.uptimeSeconds).toBeGreaterThanOrEqual(0);
+        const liveHead = await api<undefined>("/api/health/live", {
+            method: "HEAD",
+        });
+        expect(liveHead).toEqual({ body: undefined, status: 200 });
 
         const bootstrap = await api<{
             hasGatewayToken: boolean;

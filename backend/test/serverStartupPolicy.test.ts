@@ -32,6 +32,43 @@ describe("server start scheduler policy", () => {
         ).toBe(true);
     });
 
+    it("keeps production frontend assets inside the checksummed release", async () => {
+        const { resolveFrontendPath } = await import("../src/frontendAssets.ts");
+        const releaseRoot = "/opt/mira-dashboard/releases/test-release";
+        const releaseFrontend = path.join(releaseRoot, "dist");
+
+        expect(resolveFrontendPath({ NODE_ENV: "production" }, releaseRoot)).toBe(
+            releaseFrontend
+        );
+        expect(
+            resolveFrontendPath(
+                {
+                    MIRA_DASHBOARD_FRONTEND_PATH: releaseFrontend,
+                    NODE_ENV: "production",
+                },
+                releaseRoot
+            )
+        ).toBe(releaseFrontend);
+        expect(() =>
+            resolveFrontendPath(
+                {
+                    MIRA_DASHBOARD_FRONTEND_PATH: "/tmp/unverified-frontend",
+                    NODE_ENV: "production",
+                },
+                releaseRoot
+            )
+        ).toThrow("cannot override the checksummed release frontend");
+        expect(
+            resolveFrontendPath(
+                {
+                    MIRA_DASHBOARD_FRONTEND_PATH: "/tmp/development-frontend",
+                    NODE_ENV: "development",
+                },
+                releaseRoot
+            )
+        ).toBe("/tmp/development-frontend");
+    });
+
     it("resolves backend startup entrypoint and gateway token decisions without starting services", async () => {
         const {
             isDirectEntrypoint,
@@ -186,6 +223,9 @@ describe("server start scheduler policy", () => {
         try {
             await expect(workerStart.runDashboardWorker()).rejects.toThrow(
                 "worker startup failed"
+            );
+            expect(startSpy).toHaveBeenCalledWith(
+                expect.stringMatching(/^[\da-f]{8,40}$/u)
             );
             expect(stopSpy).toHaveBeenCalledTimes(1);
             expect(process.listenerCount("SIGINT")).toBe(sigintListeners);

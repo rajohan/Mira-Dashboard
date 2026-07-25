@@ -183,6 +183,12 @@ cd /home/ubuntu/projects/mira-dashboard
 git log --oneline -n 10
 git switch main
 git reset --hard <known-good-sha>
+if test -f scripts/writeReleaseManifest.ts; then
+  release_health_path=/api/health/ready
+else
+  # One-time bootstrap rollback to the pre-manifest release.
+  release_health_path=/api/health
+fi
 /usr/local/bin/doppler run --config prd --project rajohan -- \
   bun run deploy:prepare
 install -m 0644 systemd/mira-dashboard.service \
@@ -201,7 +207,7 @@ fi
 wait_for_dashboard_ready() {
   for attempt in {1..20}; do
     if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
-      http://127.0.0.1:3100/api/health/ready >/dev/null; then
+      "http://127.0.0.1:3100${release_health_path}" >/dev/null; then
       return 0
     fi
     sleep 1
@@ -210,6 +216,10 @@ wait_for_dashboard_ready() {
 }
 wait_for_dashboard_ready
 ```
+
+The conditional health target exists only for the first rollback across the
+manifest-contract cutover. Manifest-aware releases always regenerate their
+ignored manifest through `deploy:prepare` and verify `/api/health/ready`.
 
 If the known-good target predates `workerStart.js`, the branch above stops the
 worker before starting that version and reinstalls the checked-out legacy
@@ -320,7 +330,8 @@ Deployment health is split by purpose:
 
 - `GET /api/health/live` proves that the web process can answer requests.
 - `GET /api/health/ready` requires a valid release identity,
-  current/accessible SQLite schema, built frontend, and online worker.
+  current/accessible SQLite schema, built frontend, and a fresh worker heartbeat
+  from the exact manifest commit.
   This readiness route returns HTTP 503 with `status: "notReady"` when an
   internal activation check fails.
 - `GET /api/health/diagnostics` returns the readiness breakdown plus session
