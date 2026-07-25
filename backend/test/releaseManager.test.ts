@@ -1,0 +1,351 @@
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readdirSync,
+    readlinkSync,
+    rmSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it } from "bun:test";
+
+import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
+import {
+    activateDashboardRelease,
+    ensureDashboardReleaseLayout,
+    loadManagedRelease,
+    managedReleasePath,
+    readDashboardReleaseState,
+    resolveDashboardReleasesRoot,
+    rollbackDashboardRelease,
+} from "../src/releaseManager.ts";
+import {
+    loadReleaseManifest,
+    parseReleaseManifest,
+    RELEASE_MANIFEST_FILE_NAME,
+    writeReleaseManifest,
+} from "../src/releaseManifest.ts";
+
+const temporaryRoots: string[] = [];
+const FIRST_COMMIT = "a".repeat(40);
+const SECOND_COMMIT = "b".repeat(40);
+
+function temporaryReleasesRoot(): string {
+    const root = mkdtempSync(path.join(tmpdir(), "mira-releases-"));
+    temporaryRoots.push(root);
+    return root;
+}
+
+async function createManagedRelease(
+    releasesRoot: string,
+    directoryCommit: string,
+    manifestCommit = directoryCommit,
+    bunVersion = Bun.version
+): Promise<string> {
+    await ensureDashboardReleaseLayout(releasesRoot);
+    const releasePath = managedReleasePath(releasesRoot, directoryCommit);
+    mkdirSync(path.join(releasePath, "backend", "config"), { recursive: true });
+    mkdirSync(path.join(releasePath, "backend", "dist"), { recursive: true });
+    mkdirSync(path.join(releasePath, "dist", "assets"), { recursive: true });
+    writeFileSync(path.join(releasePath, "package.json"), "{}\n");
+    writeFileSync(path.join(releasePath, "bun.lock"), "root-lock\n");
+    writeFileSync(path.join(releasePath, "backend", "package.json"), "{}\n");
+    writeFileSync(path.join(releasePath, "backend", "bun.lock"), "backend-lock\n");
+    writeFileSync(
+        path.join(releasePath, "backend", "config", "log-rotation.json"),
+        '{"jobs":[]}\n'
+    );
+    writeFileSync(
+        path.join(releasePath, "dist", "index.html"),
+        `<main>${directoryCommit}</main>\n`
+    );
+    writeFileSync(
+        path.join(releasePath, "dist", "assets", "app.js"),
+        `export const release = "${directoryCommit}";\n`
+    );
+    writeFileSync(
+        path.join(releasePath, "dist", "build-identity.json"),
+        `${JSON.stringify({
+            bunVersion,
+            commitSha: manifestCommit,
+            component: "frontend",
+            formatVersion: 1,
+        })}\n`
+    );
+    writeFileSync(
+        path.join(releasePath, "backend", "dist", "build-identity.json"),
+        `${JSON.stringify({
+            bunVersion,
+            commitSha: manifestCommit,
+            component: "backend",
+            formatVersion: 1,
+        })}\n`
+    );
+    for (const entrypoint of [
+        "databasePreflight",
+        "releaseLifecycle",
+        "resetDashboardPassword",
+        "serverStart",
+        "workerStart",
+    ]) {
+        writeFileSync(
+            path.join(releasePath, "backend", "dist", `${entrypoint}.js`),
+            `export const release = "${directoryCommit}";\n`
+        );
+    }
+    await writeReleaseManifest({
+        builtAt: new Date("2026-07-25T17:00:00.000Z"),
+        bunVersion,
+        commitSha: manifestCommit,
+        commitTitle: `Release ${manifestCommit.slice(0, 8)}`,
+        releaseRoot: releasePath,
+    });
+    return releasePath;
+}
+
+async function rewriteManifest(
+    releasePath: string,
+    changes: {
+        bunVersion?: string;
+        migrationRegistrySha256?: string;
+        schemaMaximum?: number;
+        schemaMinimum?: number;
+        schemaTarget?: number;
+    }
+): Promise<void> {
+    const manifest = await loadReleaseManifest(releasePath);
+    const rewritten = parseReleaseManifest({
+        ...manifest,
+        ...(changes.bunVersion && { bunVersion: changes.bunVersion }),
+        schema: {
+            ...manifest.schema,
+            ...(changes.migrationRegistrySha256 && {
+                migrationRegistrySha256: changes.migrationRegistrySha256,
+            }),
+            ...(changes.schemaMaximum !== undefined && {
+                maximumCompatible: changes.schemaMaximum,
+            }),
+            ...(changes.schemaMinimum !== undefined && {
+                minimumCompatible: changes.schemaMinimum,
+            }),
+            ...(changes.schemaTarget !== undefined && {
+                target: changes.schemaTarget,
+            }),
+        },
+    });
+    writeFileSync(
+        path.join(releasePath, RELEASE_MANIFEST_FILE_NAME),
+        `${JSON.stringify(rewritten, undefined, 2)}\n`
+    );
+}
+
+afterEach(() => {
+    const roots = [...temporaryRoots];
+    temporaryRoots.length = 0;
+    for (const root of roots) {
+        rmSync(root, { force: true, recursive: true });
+    }
+});
+
+describe("Dashboard immutable release manager", () => {
+    it("accepts only absolute non-root layouts and full lowercase commit SHAs", () => {
+        expect(() => resolveDashboardReleasesRoot("relative")).toThrow(
+            "absolute non-root"
+        );
+        expect(() =>
+            resolveDashboardReleasesRoot(path.parse(process.cwd()).root)
+        ).toThrow("absolute non-root");
+        expect(() => managedReleasePath("/tmp/dashboard-releases", "abc")).toThrow(
+            "full lowercase Git SHA"
+        );
+    });
+
+    it("activates and rolls back verified releases through relative atomic links", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+
+        const first = await activateDashboardRelease(FIRST_COMMIT, root);
+        expect(first.current?.commitSha).toBe(FIRST_COMMIT);
+        expect(first.previous).toBeUndefined();
+        expect(readlinkSync(path.join(root, "current"))).toBe(`releases/${FIRST_COMMIT}`);
+
+        const second = await activateDashboardRelease(SECOND_COMMIT, root);
+        expect(second.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(second.previous?.commitSha).toBe(FIRST_COMMIT);
+        expect(readlinkSync(path.join(root, "current"))).toBe(
+            `releases/${SECOND_COMMIT}`
+        );
+        expect(readlinkSync(path.join(root, "previous"))).toBe(
+            `releases/${FIRST_COMMIT}`
+        );
+
+        const rolledBack = await rollbackDashboardRelease(root);
+        expect(rolledBack.current?.commitSha).toBe(FIRST_COMMIT);
+        expect(rolledBack.previous?.commitSha).toBe(SECOND_COMMIT);
+        expect(
+            readdirSync(root).filter((entry) => entry.startsWith(".current."))
+        ).toEqual([]);
+        expect(
+            readdirSync(root).filter((entry) => entry.startsWith(".previous."))
+        ).toEqual([]);
+    });
+
+    it("exposes bounded lifecycle command summaries without artifact contents", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+
+        await expect(runReleaseLifecycleCommand(["status"], root)).resolves.toEqual({
+            current: undefined,
+            previous: undefined,
+            root,
+        });
+        await expect(runReleaseLifecycleCommand(["activate"], root)).rejects.toThrow(
+            "requires a commit SHA"
+        );
+        await expect(runReleaseLifecycleCommand([], root)).rejects.toThrow(
+            "Usage: releaseLifecycle.js"
+        );
+
+        await runReleaseLifecycleCommand(["activate", FIRST_COMMIT], root);
+        await runReleaseLifecycleCommand(["activate", SECOND_COMMIT], root);
+        const rolledBack = await runReleaseLifecycleCommand(["rollback"], root);
+        expect(rolledBack).toMatchObject({
+            current: { commitSha: FIRST_COMMIT },
+            previous: { commitSha: SECOND_COMMIT },
+        });
+
+        const status = await runReleaseLifecycleCommand(["status"], root);
+        expect(status).toMatchObject({
+            current: {
+                commitSha: FIRST_COMMIT,
+                commitTitle: "Release aaaaaaaa",
+            },
+            previous: {
+                commitSha: SECOND_COMMIT,
+                commitTitle: "Release bbbbbbbb",
+            },
+            root,
+        });
+        expect(status.current).not.toHaveProperty("manifest");
+        await expect(
+            runReleaseLifecycleCommand(["rollback", FIRST_COMMIT], root)
+        ).rejects.toThrow("takes no commit SHA");
+    });
+
+    it("rejects directories whose manifest identity or artifacts do not match", async () => {
+        const root = temporaryReleasesRoot();
+        const mismatchedPath = await createManagedRelease(
+            root,
+            FIRST_COMMIT,
+            SECOND_COMMIT
+        );
+
+        await expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
+            "contains manifest"
+        );
+
+        rmSync(mismatchedPath, { force: true, recursive: true });
+        const releasePath = await createManagedRelease(root, FIRST_COMMIT);
+        writeFileSync(path.join(releasePath, "dist", "index.html"), "tampered\n");
+        await expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
+            "Release artifact verification failed"
+        );
+    });
+
+    it("rejects symlinked release directories and non-symlink state slots", async () => {
+        const root = temporaryReleasesRoot();
+        const outside = mkdtempSync(path.join(tmpdir(), "mira-release-outside-"));
+        temporaryRoots.push(outside);
+        const layout = await ensureDashboardReleaseLayout(root);
+        symlinkSync(outside, path.join(layout.releasesPath, FIRST_COMMIT), "dir");
+
+        await expect(loadManagedRelease(root, FIRST_COMMIT)).rejects.toThrow(
+            "must be a real directory"
+        );
+
+        rmSync(path.join(layout.releasesPath, FIRST_COMMIT), { force: true });
+        await createManagedRelease(root, FIRST_COMMIT);
+        writeFileSync(path.join(root, "current"), FIRST_COMMIT);
+        await expect(readDashboardReleaseState(root)).rejects.toThrow(
+            "current slot must be a symlink"
+        );
+    });
+
+    it("rejects managed links whose relative target escapes the release directory", async () => {
+        const root = temporaryReleasesRoot();
+        await ensureDashboardReleaseLayout(root);
+        symlinkSync("releases/../outside", path.join(root, "current"), "dir");
+
+        await expect(readDashboardReleaseState(root)).rejects.toThrow(
+            "link target is invalid"
+        );
+    });
+
+    it("rejects a symlinked layout root before creating release directories", async () => {
+        const parent = temporaryReleasesRoot();
+        const outside = mkdtempSync(path.join(tmpdir(), "mira-layout-outside-"));
+        temporaryRoots.push(outside);
+        const linkedRoot = path.join(parent, "linked-root");
+        symlinkSync(outside, linkedRoot, "dir");
+
+        await expect(ensureDashboardReleaseLayout(linkedRoot)).rejects.toThrow(
+            "must be a real directory"
+        );
+        expect(existsSync(path.join(outside, "releases"))).toBe(false);
+    });
+
+    it("blocks activation when the previous release cannot read the next schema", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
+        await rewriteManifest(candidatePath, {
+            migrationRegistrySha256: "c".repeat(64),
+            schemaMaximum: 7,
+            schemaMinimum: 6,
+            schemaTarget: 7,
+        });
+        await activateDashboardRelease(FIRST_COMMIT, root);
+
+        await expect(activateDashboardRelease(SECOND_COMMIT, root)).rejects.toThrow(
+            "cannot roll back after SQLite schema 7"
+        );
+        expect(readlinkSync(path.join(root, "current"))).toBe(`releases/${FIRST_COMMIT}`);
+        expect(existsSync(path.join(root, "previous"))).toBe(false);
+    });
+
+    it("blocks same-schema migration rewrites and mismatched Bun runtimes", async () => {
+        const registryRoot = temporaryReleasesRoot();
+        await createManagedRelease(registryRoot, FIRST_COMMIT);
+        const rewrittenPath = await createManagedRelease(registryRoot, SECOND_COMMIT);
+        await rewriteManifest(rewrittenPath, {
+            migrationRegistrySha256: "d".repeat(64),
+        });
+        await activateDashboardRelease(FIRST_COMMIT, registryRoot);
+        await expect(
+            activateDashboardRelease(SECOND_COMMIT, registryRoot)
+        ).rejects.toThrow("migration registry changed");
+
+        const runtimeRoot = temporaryReleasesRoot();
+        await createManagedRelease(runtimeRoot, FIRST_COMMIT, FIRST_COMMIT, "0.0.0");
+        await expect(activateDashboardRelease(FIRST_COMMIT, runtimeRoot)).rejects.toThrow(
+            "requires Bun 0.0.0"
+        );
+    });
+
+    it("requires two distinct releases before rollback", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root);
+        symlinkSync(`releases/${FIRST_COMMIT}`, path.join(root, "previous"), "dir");
+
+        await expect(rollbackDashboardRelease(root)).rejects.toThrow(
+            "requires two distinct releases"
+        );
+    });
+});

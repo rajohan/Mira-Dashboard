@@ -26,6 +26,7 @@ const REQUIRED_RELEASE_ARTIFACTS = [
     ...RELEASE_STATIC_ARTIFACTS,
     "backend/dist/build-identity.json",
     "backend/dist/databasePreflight.js",
+    "backend/dist/releaseLifecycle.js",
     "backend/dist/resetDashboardPassword.js",
     "backend/dist/serverStart.js",
     "backend/dist/workerStart.js",

@@ -330,10 +330,25 @@ drift, and undeclared runtime artifacts. The schema compatibility range is an
 explicit code constant. Adding a future migration without reviewing that range
 fails the release contract.
 
-The current in-place executor generates this manifest as a transition step. The
-immutable release manager must verify it before activation and compare the live
-schema with the previous release's declared range before offering code-only
-rollback.
+The release lifecycle layer validates immutable directories named by full Git
+SHA under `/home/ubuntu/projects/mira-dashboard-releases/releases/`. It exposes
+only three commands:
+
+```bash
+bun backend/dist/releaseLifecycle.js status
+bun backend/dist/releaseLifecycle.js activate <full-commit-sha>
+bun backend/dist/releaseLifecycle.js rollback
+```
+
+`current` and `previous` are relative links inside the release root. Link
+replacement uses same-directory temporary symlinks, atomic rename, and a
+directory fsync. Activation verifies every artifact, the exact manifest/directory
+SHA, the host Bun version, and the previous release's SQLite rollback window.
+Rollback switches `current` first so an interruption favors the verified
+known-good release, then records the failed release as `previous`.
+
+The Dashboard executor still uses the in-place transition flow until the final
+deploy integration performs the controlled systemd cutover to these links.
 
 ## Health Signals
 

@@ -74,6 +74,10 @@ function temporaryReleaseRoot(): string {
         "export {};\n"
     );
     writeFileSync(
+        path.join(root, "backend", "dist", "releaseLifecycle.js"),
+        "export {};\n"
+    );
+    writeFileSync(
         path.join(root, "backend", "dist", "resetDashboardPassword.js"),
         "export {};\n"
     );
@@ -191,6 +195,7 @@ describe("Dashboard release manifest", () => {
             "backend/config/log-rotation.json",
             "backend/dist/build-identity.json",
             "backend/dist/databasePreflight.js",
+            "backend/dist/releaseLifecycle.js",
             "backend/dist/resetDashboardPassword.js",
             "backend/dist/serverStart.js",
             "backend/dist/workerStart.js",
