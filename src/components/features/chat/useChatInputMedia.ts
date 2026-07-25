@@ -310,6 +310,7 @@ export function useChatInputMedia({
         if (!file) {
             return;
         }
+        attachmentRestoreEpochReference.current += 1;
         const operationEpoch = mediaEpochReference.current;
         try {
             if (file.size > MAX_ATTACHMENT_BYTES) {
@@ -354,6 +355,7 @@ export function useChatInputMedia({
         if (recordingStartEpochReference.current !== undefined) {
             return;
         }
+        attachmentRestoreEpochReference.current += 1;
         const mediaDevices = navigator.mediaDevices as MediaDevices | undefined;
         const canRecord =
             Boolean(mediaDevices) &&

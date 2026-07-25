@@ -1,5 +1,6 @@
 export type SecurityVerificationCode =
     "mfa_enrollment_required" | "recent_verification_required" | "step_up_required";
+export type SecurityVerificationOutcome = "cancelled" | "unclaimed" | "verified";
 
 export const SECURITY_VERIFICATION_REQUIRED_EVENT_NAME =
     "mira:security-verification-required";
@@ -14,6 +15,17 @@ const SECURITY_VERIFICATION_CODES = new Set<SecurityVerificationCode>([
     "step_up_required",
 ]);
 const DEFAULT_SECURITY_VERIFICATION_WAIT_MS = 10 * 60_000;
+
+/** Identifies an explicit dismissal of a claimed shared verification flow. */
+export class SecurityVerificationCancelledError extends Error {
+    readonly code: SecurityVerificationCode;
+
+    constructor(code: SecurityVerificationCode) {
+        super("Security verification cancelled");
+        this.name = "SecurityVerificationCancelledError";
+        this.code = code;
+    }
+}
 
 export function isSecurityVerificationCode(
     value: unknown
@@ -53,16 +65,16 @@ export function cancelSecurityVerification(): void {
  * Opens the shared verification flow and waits only when a mounted UI claims it.
  * Callers can then retry the exact request that the server rejected before mutation.
  */
-export function waitForSecurityVerification(
+export function waitForSecurityVerificationOutcome(
     code: SecurityVerificationCode,
     timeoutMs = DEFAULT_SECURITY_VERIFICATION_WAIT_MS
-): Promise<boolean> {
+): Promise<SecurityVerificationOutcome> {
     return new Promise((resolve) => {
         let isSettled = false;
         const timeoutReference: {
             current?: ReturnType<typeof setTimeout>;
         } = {};
-        const settle = (wasVerified: boolean) => {
+        const settle = (outcome: SecurityVerificationOutcome) => {
             if (isSettled) return;
             isSettled = true;
             if (timeoutReference.current !== undefined) {
@@ -70,10 +82,10 @@ export function waitForSecurityVerification(
             }
             removeEventListener(SECURITY_VERIFICATION_COMPLETED_EVENT_NAME, onCompleted);
             removeEventListener(SECURITY_VERIFICATION_CANCELLED_EVENT_NAME, onCancelled);
-            resolve(wasVerified);
+            resolve(outcome);
         };
-        const onCompleted = () => settle(true);
-        const onCancelled = () => settle(false);
+        const onCompleted = () => settle("verified");
+        const onCancelled = () => settle("cancelled");
 
         addEventListener(SECURITY_VERIFICATION_COMPLETED_EVENT_NAME, onCompleted, {
             once: true,
@@ -83,12 +95,19 @@ export function waitForSecurityVerification(
         });
 
         if (!wasSecurityVerificationClaimed(code)) {
-            settle(false);
+            settle("unclaimed");
             return;
         }
         timeoutReference.current = setTimeout(() => {
             cancelSecurityVerification();
-            settle(false);
+            settle("cancelled");
         }, timeoutMs);
     });
+}
+
+export async function waitForSecurityVerification(
+    code: SecurityVerificationCode,
+    timeoutMs = DEFAULT_SECURITY_VERIFICATION_WAIT_MS
+): Promise<boolean> {
+    return (await waitForSecurityVerificationOutcome(code, timeoutMs)) === "verified";
 }

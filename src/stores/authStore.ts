@@ -13,6 +13,7 @@ interface AuthState {
     isInitialized: boolean;
     isBootstrapRequired: boolean;
     mfaEnabled: boolean;
+    sessionId: string | undefined;
 }
 
 /** Represents the session API response. */
@@ -25,6 +26,7 @@ export interface SessionResponse {
         lastSeenAt: string;
         mfaEnabled: boolean;
         mfaVerifiedAt?: string;
+        sessionId?: string;
     };
     user: AuthUser | undefined;
 }
@@ -44,6 +46,7 @@ const initialState: AuthState = {
     isInitialized: false,
     isBootstrapRequired: false,
     mfaEnabled: false,
+    sessionId: undefined,
 };
 
 /** Defines auth store. */
@@ -100,6 +103,7 @@ export const authActions: AuthActions = {
             isInitialized: true,
             isBootstrapRequired: payload.isBootstrapRequired,
             mfaEnabled: payload.session?.mfaEnabled ?? false,
+            sessionId: payload.session?.sessionId,
         }));
     },
 
@@ -135,4 +139,9 @@ export function useAuthStore(): AuthState & AuthActions {
 /** Provides auth user. */
 export function useAuthUser(): AuthUser | undefined {
     return useSelector(authStore, (state) => state.user);
+}
+
+/** Provides the opaque identity of the active browser session. */
+export function useAuthSessionId(): string | undefined {
+    return useSelector(authStore, (state) => state.sessionId);
 }

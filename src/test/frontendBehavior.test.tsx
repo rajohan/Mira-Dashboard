@@ -188,8 +188,10 @@ import {
     UNAUTHORIZED_EVENT_NAME,
 } from "../lib/authBoundary";
 import {
+    cancelSecurityVerification,
     completeSecurityVerification,
     SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
+    SecurityVerificationCancelledError,
     waitForSecurityVerification,
 } from "../lib/securityVerification";
 import { createSocketClient } from "../lib/socket/socketClient";
@@ -1533,6 +1535,33 @@ describe("Mira Dashboard frontend behavior", () => {
                 removeEventListener(
                     "mira:security-verification-required",
                     verificationHandler
+                );
+            }
+
+            const cancelledVerificationHandler = claimSecurityVerification;
+            addEventListener(
+                "mira:security-verification-required",
+                cancelledVerificationHandler
+            );
+            try {
+                const cancelledPromise = client.request("privileged.cancelled");
+                const cancelledRequest = latestSocketRequest(socket);
+                socket.message({
+                    type: "response",
+                    id: cancelledRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                cancelSecurityVerification();
+                await expect(cancelledPromise).rejects.toBeInstanceOf(
+                    SecurityVerificationCancelledError
+                );
+                expect(latestSocketRequest(socket)).toEqual(cancelledRequest);
+            } finally {
+                removeEventListener(
+                    "mira:security-verification-required",
+                    cancelledVerificationHandler
                 );
             }
 

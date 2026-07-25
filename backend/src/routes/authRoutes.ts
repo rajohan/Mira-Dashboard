@@ -247,6 +247,7 @@ export function createAuthRoutes(
                             lastSeenAt: session.lastSeenAt,
                             mfaEnabled: session.mfaEnabled,
                             mfaVerifiedAt: session.mfaVerifiedAt,
+                            sessionId: session.sessionId,
                         },
                     }),
                     user,

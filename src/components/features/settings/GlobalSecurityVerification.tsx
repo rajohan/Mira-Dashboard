@@ -33,7 +33,7 @@ function errorMessage(error: unknown): string {
 
 /** Handles central enrollment and fresh-MFA requirements for privileged actions. */
 export function GlobalSecurityVerification() {
-    const { isAuthenticated, mfaEnabled } = useAuthStore();
+    const { isAuthenticated, mfaEnabled, sessionId } = useAuthStore();
     const { data } = useAccountSecurity(isAuthenticated);
     const passwordReauth = usePasswordReauthentication();
     const totpStepUp = useTotpStepUp();
@@ -96,7 +96,13 @@ export function GlobalSecurityVerification() {
     }, [mfaEnabled, reset]);
 
     useEffect(() => {
-        if (!isAuthenticated || !mfaEnabled || !data) {
+        if (!isAuthenticated || !data) {
+            return;
+        }
+        const summarySessionId = data.sessions.find(
+            (session) => session.isCurrent
+        )?.sessionId;
+        if ((sessionId && summarySessionId !== sessionId) || !data.factors.enabledAt) {
             return;
         }
         const requireStepUp = () => {
@@ -120,7 +126,7 @@ export function GlobalSecurityVerification() {
         }
         const timeout = setTimeout(requireStepUp, remainingMs + 1);
         return () => clearTimeout(timeout);
-    }, [data, isAuthenticated, mfaEnabled]);
+    }, [data, isAuthenticated, sessionId]);
 
     async function runVerification(action: () => Promise<unknown>): Promise<void> {
         setError(undefined);

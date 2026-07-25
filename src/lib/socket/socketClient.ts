@@ -3,7 +3,8 @@ import { handleUnauthorizedSession } from "../authBoundary";
 import {
     dispatchSecurityVerificationRequired,
     isSecurityVerificationCode,
-    waitForSecurityVerification,
+    SecurityVerificationCancelledError,
+    waitForSecurityVerificationOutcome,
 } from "../securityVerification";
 import { hasRecentUserActivity } from "../userActivity";
 
@@ -168,12 +169,18 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                                 pending.retryAfterVerification
                             ) {
                                 void (async () => {
-                                    if (
-                                        !(await waitForSecurityVerification(
+                                    const verificationOutcome =
+                                        await waitForSecurityVerificationOutcome(
                                             verificationCode
-                                        ))
-                                    ) {
-                                        pending.reject(data.error);
+                                        );
+                                    if (verificationOutcome !== "verified") {
+                                        pending.reject(
+                                            verificationOutcome === "cancelled"
+                                                ? new SecurityVerificationCancelledError(
+                                                      verificationCode
+                                                  )
+                                                : data.error
+                                        );
                                         return;
                                     }
                                     try {

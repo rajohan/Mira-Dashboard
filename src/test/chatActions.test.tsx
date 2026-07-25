@@ -10,6 +10,7 @@ import { createChatRuntimeState } from "../components/features/chat/domain/chatS
 import type { ChatTransport } from "../components/features/chat/transport/chatTransport";
 import { useChatActions } from "../components/features/chat/useChatActions";
 import type { ChatRuntimeController } from "../components/features/chat/useChatRuntime";
+import { SecurityVerificationCancelledError } from "../lib/securityVerification";
 import type { Session } from "../types/session";
 
 const SESSION_A = "agent:main:main";
@@ -268,6 +269,62 @@ describe("chat actions", () => {
         expect(draftState).toBe("message that must survive");
         expect(messages).toEqual([]);
         expect(restoreAttachments).toHaveBeenCalledWith(attachments, 17);
+    });
+
+    it("aborts delivery when preliminary diagnostics verification is cancelled", async () => {
+        const verificationCancellation = new SecurityVerificationCancelledError(
+            "step_up_required"
+        );
+        const transport = fakeTransport();
+        transport.patchSession = jest.fn(async () => {
+            throw verificationCancellation;
+        });
+        const runtime = fakeRuntime();
+        let messages: ChatHistoryMessage[] = [];
+        const setMessages = jest.fn((update: SetStateAction<ChatHistoryMessage[]>) => {
+            messages = typeof update === "function" ? update(messages) : update;
+        });
+        const { result } = renderHook(() => {
+            const [draft, setDraft] = useState(
+                "message that must not reopen verification"
+            );
+            const actions = useChatActions({
+                activeRunCount: 0,
+                attachments: [],
+                attachmentsReference: { current: [] },
+                clearAttachments: jest.fn(() => 31),
+                confirmResetSession: jest.fn(async () => true),
+                draft,
+                isCompacting: false,
+                isConnected: true,
+                isRecording: false,
+                isTranscribing: false,
+                restoreAttachments: jest.fn(() => true),
+                runtime,
+                scheduleBottomFollow: jest.fn(),
+                selectedSession: {
+                    ...selectedSession(),
+                    verboseLevel: "compact",
+                },
+                selectedSessionKey: SESSION_A,
+                selectedSessionKeyReference: { current: SESSION_A },
+                setDraft,
+                setIsAtBottom: jest.fn(),
+                setMessages,
+                setSendError: jest.fn(),
+                shouldStickToBottomReference: { current: true },
+                transport,
+            });
+            return { ...actions, draft };
+        });
+
+        await act(async () => result.current.handleSend());
+
+        expect(transport.patchSession).toHaveBeenCalledTimes(1);
+        expect(transport.send).not.toHaveBeenCalled();
+        expect(result.current.draft).toBe("message that must not reopen verification");
+        expect(messages).toEqual([]);
+        expect(runtime.failRun).toHaveBeenCalledTimes(1);
     });
 
     it("does not restore failed attachments into a newer draft", async () => {

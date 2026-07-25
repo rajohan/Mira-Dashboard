@@ -7,6 +7,7 @@ import {
     useState,
 } from "react";
 
+import { SecurityVerificationCancelledError } from "../../../lib/securityVerification";
 import type { Session } from "../../../types/session";
 import { currentIsoString } from "../../../utils/date";
 import { isResetSlashCommand, isSessionActive } from "./chatPageUtilities";
@@ -286,7 +287,10 @@ export function useChatActions({
                     await transport.patchSession(pendingSessionKey, {
                         verboseLevel: "full",
                     });
-                } catch {
+                } catch (error) {
+                    if (error instanceof SecurityVerificationCancelledError) {
+                        throw error;
+                    }
                     // Diagnostics are best effort and must not block delivery.
                 }
             }
@@ -323,7 +327,11 @@ export function useChatActions({
                 runtime.failRun(pendingSessionKey, idempotencyKey);
             }
             if (selectedSessionKeyReference.current === pendingSessionKey) {
-                setSendError(chatErrorMessage(error, "Failed to send message"));
+                setSendError(
+                    error instanceof SecurityVerificationCancelledError
+                        ? undefined
+                        : chatErrorMessage(error, "Failed to send message")
+                );
             }
             if (
                 !resetCommand &&

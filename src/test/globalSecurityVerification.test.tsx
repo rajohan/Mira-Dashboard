@@ -19,6 +19,21 @@ import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
 
 const originalFetch = fetch;
 const webAuthnBrowser = createWebAuthnBrowserTestHarness();
+const PRIMARY_DASHBOARD_SESSION_ID = "11111111111111111111111111111111";
+const SECONDARY_DASHBOARD_SESSION_ID = "22222222222222222222222222222222";
+
+function dashboardSession(sessionId: string): AccountSecuritySummary["sessions"][number] {
+    return {
+        authMethod: "webauthn",
+        authenticatedAt: "2026-07-24T12:00:00.000Z",
+        createdAt: "2026-07-24T12:00:00.000Z",
+        expiresAt: "2026-08-24T12:00:00.000Z",
+        isCurrent: true,
+        lastSeenAt: "2026-07-24T12:00:00.000Z",
+        mfaVerifiedAt: "2026-07-24T12:00:00.000Z",
+        sessionId,
+    };
+}
 
 const securitySummary: AccountSecuritySummary = {
     factors: {
@@ -37,7 +52,7 @@ const securitySummary: AccountSecuritySummary = {
         minimumSecurityKeys: 2,
         needsBackupSecurityKey: true,
     },
-    sessions: [],
+    sessions: [dashboardSession(PRIMARY_DASHBOARD_SESSION_ID)],
     totp: { available: true },
     webAuthn: {
         available: true,
@@ -89,6 +104,7 @@ beforeEach(() => {
             expiresAt: "2026-08-24T12:00:00.000Z",
             lastSeenAt: "2026-07-24T12:00:00.000Z",
             mfaEnabled: true,
+            sessionId: PRIMARY_DASHBOARD_SESSION_ID,
         },
         user: { id: 1, username: "raymond" },
     });
@@ -138,16 +154,19 @@ describe("Global security verification", () => {
             "preserve-this-code"
         );
         act(() => {
-            queryClient.setQueryData(accountSecurityKeys.user(1), {
-                ...expiringSummary,
-                factors: {
-                    ...expiringSummary.factors,
-                    recoveryCodesRemaining: 7,
-                },
-                recentVerification: {
-                    ...expiringSummary.recentVerification,
-                },
-            });
+            queryClient.setQueryData(
+                accountSecurityKeys.session(1, PRIMARY_DASHBOARD_SESSION_ID),
+                {
+                    ...expiringSummary,
+                    factors: {
+                        ...expiringSummary.factors,
+                        recoveryCodesRemaining: 7,
+                    },
+                    recentVerification: {
+                        ...expiringSummary.recentVerification,
+                    },
+                }
+            );
         });
         expect(screen.getByLabelText("Recovery code")).toHaveValue("preserve-this-code");
         await userEvent.click(
@@ -171,6 +190,10 @@ describe("Global security verification", () => {
             },
         };
         const secondSecurityResponse = Promise.withResolvers<Response>();
+        const secondSecuritySummary = {
+            ...securitySummary,
+            sessions: [dashboardSession(SECONDARY_DASHBOARD_SESSION_ID)],
+        };
         let securityRequests = 0;
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
@@ -209,6 +232,7 @@ describe("Global security verification", () => {
                     expiresAt: "2026-08-24T12:00:00.000Z",
                     lastSeenAt: "2026-07-24T12:00:00.000Z",
                     mfaEnabled: true,
+                    sessionId: SECONDARY_DASHBOARD_SESSION_ID,
                 },
                 user: { id: 2, username: "second-user" },
             });
@@ -218,13 +242,166 @@ describe("Global security verification", () => {
             expect(securityRequests).toBe(2);
         });
         await act(async () => {
-            secondSecurityResponse.resolve(Response.json(securitySummary));
+            secondSecurityResponse.resolve(Response.json(secondSecuritySummary));
             await secondSecurityResponse.promise;
             await new Promise((resolve) => setTimeout(resolve, 0));
         });
         expect(
             screen.queryByRole("heading", { name: "Verify your session" })
         ).not.toBeInTheDocument();
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("refetches verification deadlines when the same user starts a new session", async () => {
+        const expiredSummary: AccountSecuritySummary = {
+            ...securitySummary,
+            factors: {
+                ...securitySummary.factors,
+                methods: ["recovery"],
+            },
+            recentVerification: {
+                mfa: false,
+                password: false,
+            },
+        };
+        const secondSecuritySummary = {
+            ...securitySummary,
+            sessions: [dashboardSession(SECONDARY_DASHBOARD_SESSION_ID)],
+        };
+        let securityRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    securityRequests += 1;
+                    return Response.json(
+                        securityRequests === 1 ? expiredSummary : secondSecuritySummary
+                    );
+                }
+                throw new Error(`Unexpected same-user session request: ${String(input)}`);
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        expect(
+            await screen.findByRole("heading", { name: "Verify your session" })
+        ).toBeInTheDocument();
+        await userEvent.click(
+            screen.getByRole("button", { name: "Close Verify your session" })
+        );
+        await waitFor(() => {
+            expect(document.body.textContent).not.toContain("Verify your session");
+        });
+
+        act(() => {
+            authActions.clearSession();
+        });
+        act(() => {
+            authActions.setSession({
+                authenticated: true,
+                isBootstrapRequired: false,
+                session: {
+                    authMethod: "webauthn",
+                    expiresAt: "2026-08-24T12:00:00.000Z",
+                    lastSeenAt: "2026-07-24T12:00:00.000Z",
+                    mfaEnabled: true,
+                    sessionId: SECONDARY_DASHBOARD_SESSION_ID,
+                },
+                user: { id: 1, username: "raymond" },
+            });
+        });
+
+        await waitFor(() => {
+            expect(securityRequests).toBe(2);
+        });
+        expect(
+            screen.queryByRole("heading", { name: "Verify your session" })
+        ).not.toBeInTheDocument();
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("ignores a security summary from a different auth session", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(securitySummary);
+                }
+                throw new Error(`Unexpected auth-snapshot request: ${String(input)}`);
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/account/security",
+                expect.objectContaining({ credentials: "include" })
+            );
+        });
+        act(() => {
+            queryClient.setQueryData(
+                accountSecurityKeys.session(1, PRIMARY_DASHBOARD_SESSION_ID),
+                {
+                    ...securitySummary,
+                    recentVerification: {
+                        mfa: false,
+                        password: false,
+                    },
+                    sessions: [dashboardSession(SECONDARY_DASHBOARD_SESSION_ID)],
+                }
+            );
+        });
+
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        expect(document.body.textContent).not.toContain("Verify your session");
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("uses the coherent security summary when MFA is disabled", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/account/security") {
+                    return Response.json(securitySummary);
+                }
+                throw new Error(
+                    `Unexpected disabled-MFA snapshot request: ${String(input)}`
+                );
+            }),
+            writable: true,
+        });
+
+        const { queryClient } = renderVerification();
+        await waitFor(() => {
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/account/security",
+                expect.objectContaining({ credentials: "include" })
+            );
+        });
+        act(() => {
+            queryClient.setQueryData(
+                accountSecurityKeys.session(1, PRIMARY_DASHBOARD_SESSION_ID),
+                {
+                    ...passwordOnlySecuritySummary,
+                    sessions: [dashboardSession(PRIMARY_DASHBOARD_SESSION_ID)],
+                }
+            );
+        });
+
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        expect(document.body.textContent).not.toContain("Verify your session");
         act(() => {
             queryClient.clear();
         });

@@ -383,6 +383,9 @@ describe("backend route and service behavior", () => {
         await expect(session.json()).resolves.toMatchObject({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                sessionId: expect.stringMatching(/^[a-f0-9]{32}$/u),
+            },
         });
 
         const anonymousSession = await authRoutes["/api/auth/session"].GET(
