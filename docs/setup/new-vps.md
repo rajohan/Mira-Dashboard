@@ -45,22 +45,24 @@ bun install --frozen-lockfile
 
 ## Build Frontend And Backend
 
-From the repo root:
+Build the frontend from the repository root:
 
 ```bash
+cd /home/ubuntu/projects/mira-dashboard
 bun run build
 ```
 
-From `backend/`:
+Build the backend from its own package directory:
 
 ```bash
+cd /home/ubuntu/projects/mira-dashboard/backend
 bun run build
 ```
 
 Return to the repository root and create the checksummed runtime manifest:
 
 ```bash
-cd ..
+cd /home/ubuntu/projects/mira-dashboard
 bun run release:manifest
 ```
 
