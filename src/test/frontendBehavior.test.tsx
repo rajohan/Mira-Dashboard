@@ -6325,6 +6325,43 @@ describe("Mira Dashboard frontend behavior", () => {
         );
     });
 
+    it("keeps the task-card assignee aligned to the card edge for short titles", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: createApi([
+                task({
+                    number: 1,
+                    title: "Short",
+                    labels: [{ name: "in-progress" }],
+                }),
+            ]),
+            writable: true,
+        });
+
+        renderWithQueryClient(createElement(Tasks));
+
+        const taskButton = await screen.findByRole("button", {
+            name: "Open task #1: Short",
+        });
+        expect(taskButton).toHaveClass("peer", "w-full", "pl-3");
+        expect(taskButton).not.toHaveClass(
+            "ml-3",
+            "focus:ring-2",
+            "focus:ring-accent-400"
+        );
+
+        const cardFocusRing = taskButton.nextElementSibling;
+        expect(cardFocusRing).toHaveAttribute("aria-hidden", "true");
+        expect(cardFocusRing).toHaveClass(
+            "pointer-events-none",
+            "absolute",
+            "inset-0",
+            "rounded-lg",
+            "peer-focus-visible:ring-2",
+            "peer-focus-visible:ring-accent-400"
+        );
+    });
+
     it("keeps progress update delete confirmation disabled while deletion is pending", async () => {
         const tasks = [
             task({

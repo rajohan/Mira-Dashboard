@@ -83,7 +83,7 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProperties) {
             <button
                 type="button"
                 aria-label={`Open task #${task.number}: ${task.title}`}
-                className="ml-3 block min-w-0 cursor-pointer rounded text-left focus:ring-2 focus:ring-accent-400 focus:outline-none"
+                className="peer block w-full min-w-0 cursor-pointer rounded pl-3 text-left focus:outline-none"
                 onClick={onClick}
             >
                 <span className="mb-1.5 flex min-w-0 flex-wrap items-center gap-2">
@@ -144,6 +144,10 @@ export function TaskCard({ task, isDragging, onClick }: TaskCardProperties) {
                     )}
                 </span>
             </button>
+            <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-lg peer-focus-visible:ring-2 peer-focus-visible:ring-accent-400"
+            />
         </div>
     );
 }
