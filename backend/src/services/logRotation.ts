@@ -108,10 +108,6 @@ function caughtMessage(error: unknown): string {
 }
 
 function defaultConfigPath(): string {
-    const configured = process.env.MIRA_LOG_ROTATION_CONFIG;
-    if (configured?.trim()) {
-        return configured;
-    }
     if (fsSyncExists(CWD_CONFIG_PATH)) {
         return CWD_CONFIG_PATH;
     }
@@ -2035,17 +2031,9 @@ function buildElevatedLogRotationCliArguments(
 }
 
 function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
-    const allowed = [
-        "PATH",
-        "HOME",
-        "LANG",
-        "NODE_ENV",
-        "TZ",
-        "MIRA_DASHBOARD_DB_PATH",
-        "MIRA_LOG_ROTATION_CONFIG",
-    ];
+    const allowed = ["PATH", "HOME", "LANG", "NODE_ENV", "TZ", "MIRA_DASHBOARD_DB_PATH"];
     const environment: NodeJS.ProcessEnv = {};
-    // Keep sudo -E narrow: only runtime lookup, home/locale, mode, and config path.
+    // Keep sudo -E narrow: only runtime lookup, home/locale, mode, and database path.
     for (const key of allowed) {
         if (process.env[key] !== undefined) {
             environment[key] = process.env[key];
@@ -2057,7 +2045,6 @@ function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
 export async function runLogRotationCli(): Promise<void> {
     try {
         const summary = await runLogRotationService({
-            config: process.env.MIRA_LOG_ROTATION_CONFIG,
             isDryRun: process.argv.includes("--dry-run"),
         });
         if (process.argv.includes("--json")) {

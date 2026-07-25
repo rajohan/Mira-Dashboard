@@ -1,16 +1,12 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { resolveBuildSourceIdentity } from "./buildSourceIdentity.ts";
+
 const backendDirectory = path.resolve(import.meta.dirname, "..");
 const outdir = path.join(backendDirectory, "dist");
-const commitResult = Bun.spawnSync({
-    cmd: ["git", "-C", backendDirectory, "rev-parse", "HEAD"],
-    stderr: "pipe",
-    stdin: "ignore",
-    stdout: "pipe",
-});
-const commitSha = new TextDecoder().decode(commitResult.stdout).trim();
-if (commitResult.exitCode !== 0 || !/^[\da-f]{40}$/u.test(commitSha)) {
+const commitSha = resolveBuildSourceIdentity(backendDirectory);
+if (commitSha === "unknown") {
     throw new Error("Backend build requires a full Git commit identity");
 }
 

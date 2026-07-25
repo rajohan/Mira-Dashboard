@@ -3,6 +3,10 @@ import path from "node:path";
 
 import tailwindPlugin from "bun-plugin-tailwind";
 
+import {
+    isReleaseBuildCommit,
+    resolveBuildSourceIdentity,
+} from "../backend/scripts/buildSourceIdentity.ts";
 import reactCompilerPlugin from "./reactCompilerPlugin";
 
 type FrontendBuildMode = "development" | "production";
@@ -26,33 +30,13 @@ const productionDevtoolsPlugin: Bun.BunPlugin = {
     },
 };
 
-function getAppCommit(): string {
-    try {
-        const result = Bun.spawnSync({
-            cmd: ["git", "rev-parse", "HEAD"],
-            stderr: "ignore",
-            stdin: "ignore",
-            stdout: "pipe",
-        });
-
-        if (result.exitCode !== 0) {
-            return "unknown";
-        }
-
-        const commit = new TextDecoder().decode(result.stdout).trim();
-        return /^[\da-f]{40}$/u.test(commit) ? commit : "unknown";
-    } catch {
-        return "unknown";
-    }
-}
-
 export async function buildFrontend({
     mode,
     outdir = "dist",
 }: FrontendBuildOptions): Promise<void> {
     const resolvedOutdir = path.resolve(outdir);
     const isProduction = mode === "production";
-    const commitSha = getAppCommit();
+    const commitSha = resolveBuildSourceIdentity();
     if (isProduction && commitSha === "unknown") {
         throw new Error("Production frontend build requires a full Git commit identity");
     }
@@ -63,7 +47,7 @@ export async function buildFrontend({
     const result = await Bun.build({
         define: {
             __APP_COMMIT__: JSON.stringify(
-                commitSha === "unknown" ? commitSha : commitSha.slice(0, 8)
+                isReleaseBuildCommit(commitSha) ? commitSha.slice(0, 8) : commitSha
             ),
             "process.env.PUBLIC_DASHBOARD_WS_PORT": "undefined",
             "process.env.NODE_ENV": JSON.stringify(mode),

@@ -5,6 +5,8 @@ import path from "node:path";
 import type { Server } from "bun";
 import { describe, expect, it, jest } from "bun:test";
 
+const TEST_RELEASE_COMMIT = "a".repeat(40);
+
 describe("server start scheduler policy", () => {
     it("starts scheduled jobs unless explicitly disabled", async () => {
         const { shouldStartScheduledJobs } = await import("../src/serverStartPolicy.ts");
@@ -273,6 +275,44 @@ describe("server start scheduler policy", () => {
         }
     });
 
+    it("verifies the production backend release before opening SQLite", async () => {
+        const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-backend-release-"));
+        const databasePath = path.join(temporaryRoot, "dashboard.db");
+        const child = Bun.spawn({
+            cmd: [
+                process.execPath,
+                path.resolve(import.meta.dirname, "../src/serverStart.ts"),
+            ],
+            cwd: path.resolve(import.meta.dirname, ".."),
+            env: {
+                ...process.env,
+                MIRA_DASHBOARD_DB_PATH: databasePath,
+                MIRA_DASHBOARD_RELEASE_ROOT: temporaryRoot,
+                NODE_ENV: "production",
+                PORT: "0",
+            },
+            stderr: "pipe",
+            stdin: "ignore",
+            stdout: "ignore",
+        });
+
+        try {
+            const [exitCode, stderr] = await Promise.all([
+                child.exited,
+                new Response(child.stderr).text(),
+            ]);
+
+            expect(exitCode).toBe(1);
+            expect(stderr).toContain(
+                "Backend release identity is not ready (manifest-missing)"
+            );
+            expect(existsSync(databasePath)).toBe(false);
+        } finally {
+            child.kill();
+            rmSync(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
     it("keeps worker startup blocked until failed executor cleanup is retried", async () => {
         const backups = await import("../src/services/backups.ts");
         const cacheRefresh = await import("../src/services/cacheRefresh.ts");
@@ -408,7 +448,7 @@ describe("server start scheduler policy", () => {
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
             process.env.OPENCLAW_GATEWAY_TOKEN = " test-token ";
-            serverStartModule.handleServerListening();
+            serverStartModule.handleServerListening(TEST_RELEASE_COMMIT);
             expect(initSpy).toHaveBeenCalledWith("test-token");
             await new Promise((resolve) => setTimeout(resolve, 20));
         } finally {
@@ -431,14 +471,13 @@ describe("server start scheduler policy", () => {
         }
     });
 
-    it("starts the combined worker with the embedded backend release identity", async () => {
+    it("starts the combined worker with the verified release identity", async () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
         const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
         const originalExecutionRole = process.env.MIRA_DASHBOARD_EXECUTION_ROLE;
         process.env.OPENCLAW_GATEWAY_TOKEN = "test-token";
         delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
         process.env.MIRA_DASHBOARD_EXECUTION_ROLE = "combined";
-        const buildIdentity = await import("../src/buildIdentity.ts");
         const gatewayModule = await import("../src/gateway.ts");
         const jobWorker = await import("../src/services/jobWorker.ts");
         const serverStartModule = await import("../src/serverStart.ts");
@@ -449,10 +488,8 @@ describe("server start scheduler policy", () => {
             .spyOn(jobWorker, "startDashboardJobWorker")
             .mockImplementation(() => {});
         try {
-            serverStartModule.handleServerListening();
-            expect(startWorkerSpy).toHaveBeenCalledWith(
-                buildIdentity.getBackendBuildCommit()
-            );
+            serverStartModule.handleServerListening(TEST_RELEASE_COMMIT);
+            expect(startWorkerSpy).toHaveBeenCalledWith(TEST_RELEASE_COMMIT);
         } finally {
             initSpy.mockRestore();
             startWorkerSpy.mockRestore();
@@ -499,7 +536,7 @@ describe("server start scheduler policy", () => {
         const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
-            serverStartModule.handleServerListening();
+            serverStartModule.handleServerListening(TEST_RELEASE_COMMIT);
             expect(initSpy).not.toHaveBeenCalled();
             expect(warnSpy).toHaveBeenCalledWith(
                 "[Backend] No gateway token configured yet; waiting for bootstrap registration"
@@ -559,9 +596,9 @@ describe("server start scheduler policy", () => {
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
         try {
-            expect(() => serverStartModule.handleServerListening()).toThrow(
-                "gateway boot failed"
-            );
+            expect(() =>
+                serverStartModule.handleServerListening(TEST_RELEASE_COMMIT)
+            ).toThrow("gateway boot failed");
             expect(shutdownSpy).not.toHaveBeenCalled();
             expect(errorSpy).toHaveBeenCalledWith(
                 "[Backend] Failed to start background services:",
@@ -612,8 +649,8 @@ describe("server start scheduler policy", () => {
             const { runBackendServer, startBackendServer, stopBackendServer } =
                 await import("../src/serverStart.ts");
 
-            startBackendServer(0);
-            startBackendServer(0);
+            await startBackendServer(0);
+            await startBackendServer(0);
             await stopBackendServer();
             await stopBackendServer();
 

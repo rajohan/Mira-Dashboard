@@ -21,6 +21,7 @@ import {
     loadRuntimeReleaseIdentity,
     parseReleaseManifest,
     RELEASE_MANIFEST_FILE_NAME,
+    requireRunnableReleaseCommit,
     verifyReleaseArtifacts,
     writeReleaseManifest,
 } from "../src/releaseManifest.ts";
@@ -123,6 +124,47 @@ afterEach(() => {
 });
 
 describe("Dashboard release manifest", () => {
+    it("accepts only runtime identities that can safely start services", () => {
+        expect(
+            requireRunnableReleaseCommit(
+                {
+                    backendCommit: TEST_COMMIT,
+                    commitSha: TEST_COMMIT,
+                    frontendCommit: TEST_COMMIT,
+                    ready: true,
+                    source: "manifest",
+                },
+                "Backend",
+                "production"
+            )
+        ).toBe(TEST_COMMIT);
+        expect(() =>
+            requireRunnableReleaseCommit(
+                {
+                    backendCommit: TEST_COMMIT,
+                    frontendCommit: TEST_COMMIT,
+                    issue: "manifest-invalid",
+                    ready: false,
+                    source: "manifest",
+                },
+                "Worker",
+                "production"
+            )
+        ).toThrow("Worker release identity is not ready (manifest-invalid)");
+        expect(() =>
+            requireRunnableReleaseCommit(
+                {
+                    backendCommit: "unknown",
+                    frontendCommit: "unknown",
+                    ready: true,
+                    source: "unknown",
+                },
+                "Backend",
+                "development"
+            )
+        ).toThrow("Backend release identity does not contain a valid commit");
+    });
+
     it("builds a deterministic manifest for every runtime artifact", async () => {
         const root = temporaryReleaseRoot();
         const manifest = await createReleaseManifest(manifestOptions(root));
@@ -318,6 +360,29 @@ describe("Dashboard release manifest", () => {
 
             await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
                 `${component} build identity does not match the release source`
+            );
+        }
+    });
+
+    it("refuses to stamp build identities captured from dirty source", async () => {
+        for (const component of ["frontend", "backend"] as const) {
+            const root = temporaryReleaseRoot();
+            const identityPath =
+                component === "frontend"
+                    ? path.join(root, "dist", "build-identity.json")
+                    : path.join(root, "backend", "dist", "build-identity.json");
+            writeFileSync(
+                identityPath,
+                `${JSON.stringify({
+                    bunVersion: TEST_BUN_VERSION,
+                    commitSha: `${TEST_COMMIT}-dirty`,
+                    component,
+                    formatVersion: 1,
+                })}\n`
+            );
+
+            await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
+                `${component} build identity is invalid`
             );
         }
     });

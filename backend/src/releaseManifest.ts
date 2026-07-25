@@ -36,6 +36,7 @@ const MAX_BUILD_IDENTITY_BYTES = 4096;
 const RUNTIME_RELEASE_VERIFICATION_CACHE_MS = 15_000;
 const SHA_256_PATTERN = /^[\da-f]{64}$/u;
 const COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
+const RUNTIME_COMMIT_PATTERN = /^[\da-f]{8,40}$/u;
 
 export interface ReleaseManifestArtifact {
     path: string;
@@ -73,6 +74,25 @@ export interface RuntimeReleaseIdentity {
     ready: boolean;
     schema?: DashboardReleaseManifest["schema"];
     source: "git" | "manifest" | "unknown";
+}
+
+export function requireRunnableReleaseCommit(
+    release: RuntimeReleaseIdentity,
+    runtimeLabel: string,
+    environment = process.env.NODE_ENV
+): string {
+    if (environment === "production" && !release.ready) {
+        throw new Error(
+            `${runtimeLabel} release identity is not ready (${release.issue ?? release.source})`
+        );
+    }
+    const releaseCommit = release.commitSha ?? release.backendCommit;
+    if (!RUNTIME_COMMIT_PATTERN.test(releaseCommit)) {
+        throw new Error(
+            `${runtimeLabel} release identity does not contain a valid commit`
+        );
+    }
+    return releaseCommit;
 }
 
 interface CreateReleaseManifestOptions {
