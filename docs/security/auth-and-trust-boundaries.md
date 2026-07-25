@@ -33,7 +33,10 @@ The cookie is SameSite Strict and is Secure only when the request is HTTPS or a
 trusted forwarded proto says HTTPS. Sessions use a 30-day absolute lifetime and
 a configurable 30-minute idle lifetime. Polling does not extend idle time;
 frontend requests only touch activity after recent keyboard, pointer, touch, or
-focus activity. Session validators are stored only as SHA-256 hashes.
+focus activity. Each token combines a non-secret 128-bit selector with an
+independent 256-bit validator. Client-readable session responses expose only the
+selector for identity and revocation; the validator remains in the HTTP-only
+cookie and is stored by Dashboard only as a SHA-256 hash.
 
 Auth routes are rate-limited more tightly than general API routes. Password,
 second-factor, and account-password failures also use persistent, hashed,
@@ -84,16 +87,21 @@ is not an MFA authority. If a request races that deadline, the shared
 HTTP/WebSocket clients hold the rejected action, complete step-up, reconnect
 WebSockets in every open tab with the rotated session cookie, and retry
 replay-safe requests once. Held actions remain bound to their authenticated user
-and browser-session identity, except for an explicitly signaled same-user
-session rotation that is confirmed by a coherent fresh security summary.
-One-shot request bodies never replay. Session-bound selectors and WebAuthn
-responses opt out of both recovery paths. Expiring TOTP enrollment codes opt out
-of post-verification replay, but a replayable JSON request can be sent once after
-a same-user stale `401` because request policy rejected it before the handler.
-Chat keeps its optimistic message during this flow and restores unsent composer
-input if delivery still fails. The recent-auth window is fixed rather than
-extended by general page activity, so an active or compromised browser cannot
-keep privileged access fresh indefinitely.
+and browser-session identity, except for an explicitly signaled, short-lived
+same-user rotation whose previous and replacement session selectors are
+reconciled. Each rotation signal reconnects a socket only once, while cross-tab
+step-up completion also requires a coherent fresh security summary. One-shot
+request bodies never replay. Session-bound selectors and WebAuthn responses opt
+out of both recovery paths. Expiring TOTP enrollment codes opt out of
+post-verification replay, but a replayable JSON request can be sent once after a
+signaled same-user stale `401` because request policy rejected it before the
+handler. Chat keeps its optimistic message during this flow and restores unsent
+composer input if delivery still fails. The recent-auth window is fixed rather
+than extended by general page activity, so an active or compromised browser
+cannot keep privileged access fresh indefinitely. Socket retry waiters inherit
+the originating request's reconnect deadline (including indefinite operations)
+and reject instead of reopening a connection after a terminal authorization
+failure.
 
 Changing the Dashboard password requires the current password plus recent MFA
 when enabled, rotates the current session, and revokes every other session.

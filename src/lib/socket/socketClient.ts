@@ -23,6 +23,7 @@ function normalizedRequestTimeoutMs(requestedTimeoutMs: number | undefined): num
 interface PendingRequest {
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
+    requestOptions?: SocketRequestOptions;
     retryAfterVerification?: () => Promise<unknown>;
     socket: WebSocket;
     timeout?: ReturnType<typeof setTimeout>;
@@ -61,17 +62,20 @@ export interface SocketClient {
 export function createSocketClient(options: SocketClientOptions): SocketClient {
     let ws: WebSocket | undefined;
     let shouldReconnect = true;
+    let isRecoveringAuthorization = false;
     let requestId = 0;
     const pendingRequests = new Map<string, PendingRequest>();
     const connectionWaiters = new Set<{
         reject: (reason: Error) => void;
         resolve: () => void;
-        timeout: ReturnType<typeof setTimeout>;
+        timeout?: ReturnType<typeof setTimeout>;
     }>();
 
     const resolveConnectionWaiters = () => {
         for (const waiter of connectionWaiters) {
-            clearTimeout(waiter.timeout);
+            if (waiter.timeout !== undefined) {
+                clearTimeout(waiter.timeout);
+            }
             waiter.resolve();
         }
         connectionWaiters.clear();
@@ -79,31 +83,49 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
 
     const rejectConnectionWaiters = (message: string) => {
         for (const waiter of connectionWaiters) {
-            clearTimeout(waiter.timeout);
+            if (waiter.timeout !== undefined) {
+                clearTimeout(waiter.timeout);
+            }
             waiter.reject(new Error(message));
         }
         connectionWaiters.clear();
     };
 
-    const waitForOpenSocket = (): Promise<void> => {
+    const waitForOpenSocket = (requestOptions?: SocketRequestOptions): Promise<void> => {
         if (ws?.readyState === WebSocket.OPEN) {
             return Promise.resolve();
         }
-        if (!ws || ws.readyState !== WebSocket.CONNECTING) {
+        if (!shouldReconnect && !isRecoveringAuthorization) {
+            return Promise.reject(new Error("WebSocket authorization failed"));
+        }
+        if (shouldReconnect && (!ws || ws.readyState !== WebSocket.CONNECTING)) {
             connect();
         }
-        if (!ws || ws.readyState !== WebSocket.CONNECTING) {
+        if (
+            !isRecoveringAuthorization &&
+            (!ws || ws.readyState !== WebSocket.CONNECTING)
+        ) {
             return Promise.reject(new Error("WebSocket not connected"));
         }
+        const reconnectTimeoutMs =
+            requestOptions?.shouldWaitIndefinitely === true
+                ? undefined
+                : normalizedRequestTimeoutMs(requestOptions?.timeoutMs);
         return new Promise((resolve, reject) => {
-            const waiter = {
+            const waiter: {
+                reject: (reason: Error) => void;
+                resolve: () => void;
+                timeout?: ReturnType<typeof setTimeout>;
+            } = {
                 reject,
                 resolve,
-                timeout: setTimeout(() => {
+            };
+            if (reconnectTimeoutMs !== undefined) {
+                waiter.timeout = setTimeout(() => {
                     connectionWaiters.delete(waiter);
                     reject(new Error("WebSocket reconnect timeout"));
-                }, DEFAULT_REQUEST_TIMEOUT_MS),
-            };
+                }, reconnectTimeoutMs);
+            }
             connectionWaiters.add(waiter);
         });
     };
@@ -142,6 +164,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
         }
 
         shouldReconnect = true;
+        isRecoveringAuthorization = false;
         const socket = new WebSocket(options.url);
         ws = socket;
 
@@ -187,7 +210,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                                         return;
                                     }
                                     try {
-                                        await waitForOpenSocket();
+                                        await waitForOpenSocket(pending.requestOptions);
                                         pending.resolve(
                                             await pending.retryAfterVerification?.()
                                         );
@@ -221,11 +244,13 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             options.onClose?.();
             if (event.code === 4401) {
                 shouldReconnect = false;
+                isRecoveringAuthorization = true;
                 void (async () => {
                     const recovered = await recoverOrHandleUnauthorizedSession();
                     if (ws !== socket) {
                         return;
                     }
+                    isRecoveringAuthorization = false;
                     if (!recovered) {
                         rejectConnectionWaiters("WebSocket authorization failed");
                         return;
@@ -255,6 +280,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     /** Performs disconnect. */
     const disconnect = () => {
         shouldReconnect = false;
+        isRecoveringAuthorization = false;
         const socket = ws;
         ws = undefined;
         rejectPendingRequests();
@@ -301,6 +327,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             pendingRequests.set(id, {
                 resolve: resolve as (value: unknown) => void,
                 reject,
+                requestOptions,
                 ...(canRetryAfterVerification && {
                     retryAfterVerification: () =>
                         requestAttempt(method, parameters, requestOptions, false),

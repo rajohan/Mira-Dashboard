@@ -9,7 +9,11 @@ import {
     useRevokeSession,
 } from "../hooks/useAccountSecurity";
 import { ApiError } from "../hooks/useApi";
-import { UNAUTHORIZED_EVENT_NAME } from "../lib/authBoundary";
+import {
+    notifyAuthSessionRotated,
+    UNAUTHORIZED_EVENT_NAME,
+    uninstallAuthSessionRotationSync,
+} from "../lib/authBoundary";
 import {
     completeSecurityVerification,
     SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
@@ -37,6 +41,7 @@ function createQueryHarness() {
 }
 
 afterEach(() => {
+    uninstallAuthSessionRotationSync();
     authActions.clearSession();
     Object.defineProperty(globalThis, "fetch", {
         configurable: true,
@@ -252,6 +257,7 @@ describe("Account security logout navigation", () => {
         const view = renderHook(() => useRevokeSession(), { wrapper });
 
         try {
+            notifyAuthSessionRotated();
             let revokeError: unknown;
             await act(async () => {
                 try {

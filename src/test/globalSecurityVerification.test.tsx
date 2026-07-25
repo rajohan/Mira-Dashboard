@@ -8,7 +8,10 @@ import {
     accountSecurityKeys,
     type AccountSecuritySummary,
 } from "../hooks/useAccountSecurity";
-import { AUTH_SESSION_ROTATED_EVENT_NAME } from "../lib/authBoundary";
+import {
+    AUTH_SESSION_ROTATED_EVENT_NAME,
+    uninstallAuthSessionRotationSync,
+} from "../lib/authBoundary";
 import {
     cancelSecurityVerification,
     completeSecurityVerification,
@@ -115,6 +118,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    uninstallAuthSessionRotationSync();
     act(() => {
         authActions.clearSession();
     });

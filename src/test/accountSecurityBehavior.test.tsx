@@ -6,7 +6,10 @@ import { createElement } from "react";
 
 import { AccountSecuritySection } from "../components/features/settings/AccountSecuritySection";
 import type { AccountSecuritySummary } from "../hooks/useAccountSecurity";
-import { AUTH_SESSION_ROTATED_EVENT_NAME } from "../lib/authBoundary";
+import {
+    AUTH_SESSION_ROTATED_EVENT_NAME,
+    uninstallAuthSessionRotationSync,
+} from "../lib/authBoundary";
 import {
     completeSecurityVerification,
     SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
@@ -48,6 +51,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    uninstallAuthSessionRotationSync();
     removeEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, sessionRotationHandler);
     act(() => {
         authActions.clearSession();
@@ -589,6 +593,8 @@ describe("Dashboard account security", () => {
         expect(
             await screen.findByText("Recent MFA verification recorded")
         ).toBeInTheDocument();
+        expect(sessionRotationHandler).toHaveBeenCalledTimes(1);
+        sessionRotationHandler.mockClear();
 
         await userEvent.click(
             screen.getByRole("button", { name: "Remove Primary YubiKey" })
@@ -649,6 +655,7 @@ describe("Dashboard account security", () => {
         );
         expect(await screen.findByText("Two-step login disabled")).toBeInTheDocument();
         expect(await screen.findByText("Not enabled")).toBeInTheDocument();
+        expect(sessionRotationHandler).toHaveBeenCalledTimes(1);
         act(() => {
             queryClient.clear();
         });

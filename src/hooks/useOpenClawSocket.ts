@@ -10,7 +10,11 @@ import {
 } from "react";
 
 import { replaceSessionsFromWebSocket } from "../collections/sessions";
-import { AUTH_SESSION_ROTATED_EVENT_NAME } from "../lib/authBoundary";
+import {
+    AUTH_SESSION_ROTATED_EVENT_NAME,
+    type AuthSessionIdentity,
+    isSignaledAuthSessionRotation,
+} from "../lib/authBoundary";
 import {
     createSocketClient,
     type SocketClient,
@@ -48,6 +52,9 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const sessionId = useSelector(authStore, (state) => state.sessionId);
     const clientReference = useRef<SocketClient | undefined>(undefined);
     const listenersReference = useRef(new Set<(data: unknown) => void>());
+    const previousAuthIdentityReference = useRef<AuthSessionIdentity | undefined>(
+        undefined
+    );
 
     const [isConnected, setIsConnected] = useState(false);
     const [hasConfirmedSessionList, setHasConfirmedSessionList] = useState(false);
@@ -159,13 +166,36 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     };
 
     useEffect(() => {
+        const currentAuthIdentity =
+            isAuthenticated && authenticatedUserId !== undefined && sessionId
+                ? {
+                      sessionId,
+                      userId: authenticatedUserId,
+                  }
+                : undefined;
+        const previousAuthIdentity = previousAuthIdentityReference.current;
+        previousAuthIdentityReference.current =
+            currentAuthIdentity ?? (isAuthenticated ? previousAuthIdentity : undefined);
         if (isAuthenticated) {
+            if (!currentAuthIdentity) {
+                return;
+            }
+            if (
+                previousAuthIdentity &&
+                isSignaledAuthSessionRotation(previousAuthIdentity, currentAuthIdentity)
+            ) {
+                if (!clientReference.current) {
+                    connect();
+                }
+                return;
+            }
             if (clientReference.current) {
                 clientReference.current.reconnect();
             } else {
                 connect();
             }
         } else {
+            previousAuthIdentityReference.current = undefined;
             disconnect();
             setError(undefined);
         }

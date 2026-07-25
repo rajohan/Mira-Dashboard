@@ -5,6 +5,7 @@ import {
     AUTH_SESSION_ROTATED_EVENT_NAME,
     AUTH_SESSION_ROTATED_STORAGE_KEY,
     installAuthSessionRotationSync,
+    isSignaledAuthSessionRotation,
     notifyAuthSessionRotated,
     recoverOrHandleUnauthorizedSession,
     UNAUTHORIZED_EVENT_NAME,
@@ -27,6 +28,18 @@ afterEach(() => {
 
 describe("Dashboard authentication boundary", () => {
     it("reconnects locally and refreshes session identity after a cross-tab rotation", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T03:59:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
         installAuthSessionRotationSync();
         installAuthSessionRotationSync();
         const rotationHandler = jest.fn();
@@ -91,6 +104,30 @@ describe("Dashboard authentication boundary", () => {
             expect(fetch).toHaveBeenCalledWith("/api/auth/session", {
                 credentials: "include",
             });
+            expect(
+                isSignaledAuthSessionRotation(
+                    {
+                        sessionId: "11111111111111111111111111111111",
+                        userId: 1,
+                    },
+                    {
+                        sessionId: "22222222222222222222222222222222",
+                        userId: 1,
+                    }
+                )
+            ).toBe(true);
+            expect(
+                isSignaledAuthSessionRotation(
+                    {
+                        sessionId: "11111111111111111111111111111111",
+                        userId: 1,
+                    },
+                    {
+                        sessionId: "33333333333333333333333333333333",
+                        userId: 1,
+                    }
+                )
+            ).toBe(false);
         } finally {
             removeEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, rotationHandler);
         }
@@ -253,6 +290,86 @@ describe("Dashboard authentication boundary", () => {
             expect(unauthorizedHandler).toHaveBeenCalledTimes(1);
         } finally {
             removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
+
+    it("does not replay after an unsigned same-user session replacement", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json({
+                    authenticated: true,
+                    isBootstrapRequired: false,
+                    session: {
+                        authMethod: "webauthn",
+                        expiresAt: "2026-08-24T12:00:00.000Z",
+                        lastSeenAt: "2026-07-25T04:01:00.000Z",
+                        mfaEnabled: true,
+                        sessionId: "22222222222222222222222222222222",
+                    },
+                    user: { id: 1, username: "raymond" },
+                })
+            ),
+            writable: true,
+        });
+        const unauthorizedHandler = jest.fn();
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+
+        try {
+            await expect(recoverOrHandleUnauthorizedSession()).resolves.toBe(false);
+            expect(authStore.state.isAuthenticated).toBe(true);
+            expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
+            expect(unauthorizedHandler).not.toHaveBeenCalled();
+        } finally {
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
+
+    it("expires an unclaimed session-rotation signal", () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const performanceNow = jest.spyOn(performance, "now");
+        performanceNow.mockReturnValue(1000);
+
+        try {
+            notifyAuthSessionRotated();
+            performanceNow.mockReturnValue(61_001);
+            expect(
+                isSignaledAuthSessionRotation(
+                    {
+                        sessionId: "11111111111111111111111111111111",
+                        userId: 1,
+                    },
+                    {
+                        sessionId: "22222222222222222222222222222222",
+                        userId: 1,
+                    }
+                )
+            ).toBe(false);
+        } finally {
+            performanceNow.mockRestore();
         }
     });
 

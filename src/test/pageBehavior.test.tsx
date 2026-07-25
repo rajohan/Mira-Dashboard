@@ -1993,6 +1993,13 @@ describe("Mira Dashboard pages", () => {
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
             user: { id: 1, username: "mira" },
         });
         Object.defineProperties(globalThis, {
