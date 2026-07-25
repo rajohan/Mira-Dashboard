@@ -1,4 +1,5 @@
 import {
+    existsSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
@@ -15,6 +16,7 @@ import {
     createReleaseManifest,
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     getRuntimeReleaseIdentity,
+    invalidateRuntimeReleaseIdentityCache,
     loadReleaseManifest,
     loadRuntimeReleaseIdentity,
     parseReleaseManifest,
@@ -53,11 +55,16 @@ function temporaryReleaseRoot(): string {
     const root = mkdtempSync(path.join(tmpdir(), "mira-release-manifest-"));
     temporaryRoots.push(root);
     mkdirSync(path.join(root, "backend", "dist"), { recursive: true });
+    mkdirSync(path.join(root, "backend", "config"), { recursive: true });
     mkdirSync(path.join(root, "dist", "assets"), { recursive: true });
     writeFileSync(path.join(root, "package.json"), "{}\n");
     writeFileSync(path.join(root, "bun.lock"), "root-lock\n");
     writeFileSync(path.join(root, "backend", "package.json"), "{}\n");
     writeFileSync(path.join(root, "backend", "bun.lock"), "backend-lock\n");
+    writeFileSync(
+        path.join(root, "backend", "config", "log-rotation.json"),
+        '{"jobs":[]}\n'
+    );
     writeFileSync(path.join(root, "dist", "index.html"), "<main>release</main>\n");
     writeFileSync(path.join(root, "dist", "assets", "app.js"), "export {};\n");
     writeTestBuildIdentities(root);
@@ -107,6 +114,7 @@ function runGit(releaseRoot: string, arguments_: string[]): string {
 }
 
 afterEach(() => {
+    invalidateRuntimeReleaseIdentityCache();
     const rootsToRemove = [...temporaryRoots];
     temporaryRoots.length = 0;
     for (const root of rootsToRemove) {
@@ -138,6 +146,7 @@ describe("Dashboard release manifest", () => {
         });
         expect(manifest.artifacts.map((artifact) => artifact.path)).toEqual([
             "backend/bun.lock",
+            "backend/config/log-rotation.json",
             "backend/dist/build-identity.json",
             "backend/dist/databasePreflight.js",
             "backend/dist/resetDashboardPassword.js",
@@ -168,6 +177,27 @@ describe("Dashboard release manifest", () => {
         expect(
             readFileSync(path.join(root, RELEASE_MANIFEST_FILE_NAME), "utf8")
         ).toEndWith("\n");
+    });
+
+    it("refuses to write a manifest larger than the loader accepts", async () => {
+        const root = temporaryReleaseRoot();
+        const longName = "x".repeat(120);
+        for (let index = 0; index < 1200; index += 1) {
+            writeFileSync(
+                path.join(
+                    root,
+                    "dist",
+                    "assets",
+                    `${index.toString().padStart(4, "0")}-${longName}.js`
+                ),
+                "x"
+            );
+        }
+
+        await expect(writeReleaseManifest(manifestOptions(root))).rejects.toThrow(
+            "bounded regular file"
+        );
+        expect(existsSync(path.join(root, RELEASE_MANIFEST_FILE_NAME))).toBe(false);
     });
 
     it("fails artifact verification after content or inventory drift", async () => {
@@ -222,10 +252,22 @@ describe("Dashboard release manifest", () => {
         ).toThrow("Release manifest schema range is invalid");
     });
 
+    it("requires the default runtime log-rotation configuration", async () => {
+        const root = temporaryReleaseRoot();
+        rmSync(path.join(root, "backend", "config", "log-rotation.json"));
+
+        await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
+            "ENOENT"
+        );
+    });
+
     it("requires every runtime and recovery entrypoint", async () => {
-        for (const entrypoint of ["resetDashboardPassword.js", "workerStart.js"]) {
+        for (const relativePath of [
+            "backend/dist/resetDashboardPassword.js",
+            "backend/dist/workerStart.js",
+        ]) {
             const root = temporaryReleaseRoot();
-            rmSync(path.join(root, "backend", "dist", entrypoint));
+            rmSync(path.join(root, relativePath));
 
             await expect(createReleaseManifest(manifestOptions(root))).rejects.toThrow(
                 "Release manifest artifact inventory is invalid"
@@ -360,17 +402,27 @@ describe("Dashboard release manifest", () => {
         });
     });
 
-    it("revalidates artifacts after an earlier readiness success", async () => {
+    it("coalesces readiness verification and revalidates after invalidation", async () => {
         const root = temporaryReleaseRoot();
         await writeReleaseManifest(manifestOptions(root));
 
+        const first = getRuntimeReleaseIdentity(root, "production", TEST_COMMIT);
+        const concurrent = getRuntimeReleaseIdentity(root, "production", TEST_COMMIT);
+        expect(concurrent).toBe(first);
+        await expect(first).resolves.toMatchObject({
+            ready: true,
+            source: "manifest",
+        });
+
+        writeFileSync(path.join(root, "dist", "assets", "app.js"), "drift\n");
         await expect(
             getRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             ready: true,
             source: "manifest",
         });
-        writeFileSync(path.join(root, "dist", "assets", "app.js"), "drift\n");
+
+        invalidateRuntimeReleaseIdentityCache();
         await expect(
             getRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({

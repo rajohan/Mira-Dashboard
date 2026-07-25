@@ -16,6 +16,7 @@ export const RELEASE_MANIFEST_FORMAT_VERSION = 1;
 const MAX_RELEASE_MANIFEST_BYTES = 256 * 1024;
 const RELEASE_ARTIFACT_DIRECTORIES = ["dist", "backend/dist"] as const;
 const RELEASE_STATIC_ARTIFACTS = [
+    "backend/config/log-rotation.json",
     "backend/bun.lock",
     "backend/package.json",
     "bun.lock",
@@ -32,6 +33,7 @@ const REQUIRED_RELEASE_ARTIFACTS = [
     "dist/index.html",
 ] as const;
 const MAX_BUILD_IDENTITY_BYTES = 4096;
+const RUNTIME_RELEASE_VERIFICATION_CACHE_MS = 15_000;
 const SHA_256_PATTERN = /^[\da-f]{64}$/u;
 const COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 
@@ -87,6 +89,16 @@ interface ComponentBuildIdentity {
     component: "backend" | "frontend";
     formatVersion: 1;
 }
+
+interface RuntimeReleaseIdentityCache {
+    expiresAt: number;
+    key: string;
+    promise: Promise<RuntimeReleaseIdentity>;
+}
+
+const runtimeReleaseIdentityCacheState: {
+    entry?: RuntimeReleaseIdentityCache;
+} = {};
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -488,9 +500,13 @@ export async function writeReleaseManifest(
 ): Promise<DashboardReleaseManifest> {
     const releaseRoot = await fsp.realpath(options.releaseRoot);
     const manifest = await createReleaseManifest({ ...options, releaseRoot });
+    const serialized = `${JSON.stringify(manifest, undefined, 2)}\n`;
+    if (Buffer.byteLength(serialized) > MAX_RELEASE_MANIFEST_BYTES) {
+        throw new TypeError("Release manifest must be a bounded regular file");
+    }
     await writeTextNoFollowGuarded(
         guardedPath(path.join(releaseRoot, RELEASE_MANIFEST_FILE_NAME)),
-        `${JSON.stringify(manifest, undefined, 2)}\n`,
+        serialized,
         0o644
     );
     return manifest;
@@ -629,5 +645,42 @@ export function getRuntimeReleaseIdentity(
     environment = process.env.NODE_ENV,
     backendBuildCommit = getBackendBuildCommit()
 ): Promise<RuntimeReleaseIdentity> {
-    return loadRuntimeReleaseIdentity(releaseRoot, environment, backendBuildCommit);
+    const key = JSON.stringify([releaseRoot, environment, backendBuildCommit]);
+    const now = Date.now();
+    if (
+        runtimeReleaseIdentityCacheState.entry?.key === key &&
+        runtimeReleaseIdentityCacheState.entry.expiresAt > now
+    ) {
+        return runtimeReleaseIdentityCacheState.entry.promise;
+    }
+
+    const promise = loadRuntimeReleaseIdentity(
+        releaseRoot,
+        environment,
+        backendBuildCommit
+    );
+    const cacheEntry: RuntimeReleaseIdentityCache = {
+        // Concurrent probes share the in-flight verification. The bounded TTL
+        // begins only after the complete artifact scan settles.
+        expiresAt: Infinity,
+        key,
+        promise,
+    };
+    runtimeReleaseIdentityCacheState.entry = cacheEntry;
+    void promise
+        .then(() => {
+            if (runtimeReleaseIdentityCacheState.entry === cacheEntry) {
+                cacheEntry.expiresAt = Date.now() + RUNTIME_RELEASE_VERIFICATION_CACHE_MS;
+            }
+        })
+        .catch(() => {
+            if (runtimeReleaseIdentityCacheState.entry === cacheEntry) {
+                runtimeReleaseIdentityCacheState.entry = undefined;
+            }
+        });
+    return promise;
+}
+
+export function invalidateRuntimeReleaseIdentityCache(): void {
+    runtimeReleaseIdentityCacheState.entry = undefined;
 }

@@ -14,7 +14,7 @@ import {
 
 const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_EXECUTION_LIST_LIMIT = 200;
-const WORKER_READINESS_MAX_AGE_MS = 3000;
+const WORKER_HEARTBEAT_MAX_AGE_MS = 30_000;
 const RELEASE_COMMIT_PATTERN = /^[\da-f]{8,40}$/u;
 
 export type JobExecutionStatus =
@@ -431,7 +431,9 @@ export function getJobExecutionSummary(timestamp = Date.now()): JobExecutionSumm
         .all() as Array<{ resource_class: string }>;
     const oldestQueuedAt = fromSqlNullable(counts.oldest_queued_at);
     const parsedOldestQueuedAt = oldestQueuedAt ? Date.parse(oldestQueuedAt) : NaN;
-    const workerFreshAfter = new Date(timestamp - 30_000).toISOString();
+    const workerFreshAfter = new Date(
+        timestamp - WORKER_HEARTBEAT_MAX_AGE_MS
+    ).toISOString();
     const worker = database
         .prepare(
             `SELECT COUNT(*) AS count,
@@ -469,7 +471,7 @@ export function isJobWorkerReleaseReady(
     if (!RELEASE_COMMIT_PATTERN.test(releaseCommit)) {
         return false;
     }
-    const freshAfter = new Date(timestamp - WORKER_READINESS_MAX_AGE_MS).toISOString();
+    const freshAfter = new Date(timestamp - WORKER_HEARTBEAT_MAX_AGE_MS).toISOString();
     const row = database
         .prepare(
             `SELECT 1

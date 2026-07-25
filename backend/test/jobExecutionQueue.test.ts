@@ -171,19 +171,19 @@ describe("persistent job execution queue", () => {
             expect(
                 isJobWorkerReleaseReady(
                     releaseCommit,
-                    Date.parse("2026-07-22T10:00:02.000Z")
+                    Date.parse("2026-07-22T10:00:29.000Z")
                 )
             ).toBe(true);
             expect(
                 isJobWorkerReleaseReady(
                     releaseCommit,
-                    Date.parse("2026-07-22T10:00:04.000Z")
+                    Date.parse("2026-07-22T10:00:31.000Z")
                 )
             ).toBe(false);
             expect(
                 isJobWorkerReleaseReady(
                     "b".repeat(40),
-                    Date.parse("2026-07-22T10:00:02.000Z")
+                    Date.parse("2026-07-22T10:00:29.000Z")
                 )
             ).toBe(false);
             expect(isJobWorkerReleaseReady("not-a-commit")).toBe(false);

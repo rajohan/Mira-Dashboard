@@ -308,7 +308,8 @@ Manifest format version 1 records:
 - the target, minimum-compatible, and maximum-compatible SQLite schema;
 - a checksum of the immutable migration registry;
 - the SHA-256 and byte length of every frontend/backend build artifact plus
-  both package manifests and Bun lockfiles.
+  both package manifests, Bun lockfiles, and the default runtime log-rotation
+  configuration.
 
 The backend bundle also embeds its full build commit. Runtime readiness requires
 that embedded commit, both build-identity files, and the release manifest to
@@ -334,6 +335,8 @@ Deployment health is split by purpose:
 - `GET /api/health/ready` requires a valid release identity,
   current/accessible SQLite schema, built frontend, and a fresh worker heartbeat
   from the exact manifest commit.
+  Concurrent probes share one artifact scan, and a completed result is reused
+  for at most 15 seconds before the checksummed inventory is verified again.
   This readiness route returns HTTP 503 with `status: "notReady"` when an
   internal activation check fails.
 - `GET /api/health/diagnostics` returns the readiness breakdown plus session
