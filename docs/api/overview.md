@@ -49,8 +49,9 @@ or another authentication mechanism.
 
 Public routes:
 
-- `GET /api/health/live`
-- `GET /api/health/ready`
+- `GET|HEAD /api/health/live`
+- `GET|HEAD /api/health/ready` — returns `503` whenever any required
+  activation-readiness check fails
 - `GET /api/auth/bootstrap`
 - `GET /api/auth/session`
 - `POST /api/auth/register-first-user`

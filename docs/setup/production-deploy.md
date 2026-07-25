@@ -104,7 +104,17 @@ journalctl --user -u mira-dashboard-worker.service -n 120 --no-pager
 ## Smoke Test
 
 ```bash
-curl --fail http://127.0.0.1:3100/api/health/ready
+wait_for_dashboard_ready() {
+  for attempt in {1..20}; do
+    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+      http://127.0.0.1:3100/api/health/ready >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+wait_for_dashboard_ready
 curl http://127.0.0.1:3100/api/auth/bootstrap
 ```
 
@@ -173,8 +183,8 @@ cd /home/ubuntu/projects/mira-dashboard
 git log --oneline -n 10
 git switch main
 git reset --hard <known-good-sha>
-bun run build
-(cd backend && bun run build)
+/usr/local/bin/doppler run --config prd --project rajohan -- \
+  bun run deploy:prepare
 install -m 0644 systemd/mira-dashboard.service \
   /home/ubuntu/.config/systemd/user/mira-dashboard.service
 if test -f backend/dist/workerStart.js; then
@@ -188,7 +198,17 @@ else
   systemctl --user daemon-reload
   systemctl --user restart mira-dashboard.service
 fi
-curl --fail http://127.0.0.1:3100/api/health/ready
+wait_for_dashboard_ready() {
+  for attempt in {1..20}; do
+    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+      http://127.0.0.1:3100/api/health/ready >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+wait_for_dashboard_ready
 ```
 
 If the known-good target predates `workerStart.js`, the branch above stops the
@@ -301,8 +321,8 @@ Deployment health is split by purpose:
 - `GET /api/health/live` proves that the web process can answer requests.
 - `GET /api/health/ready` requires a valid release identity,
   current/accessible SQLite schema, built frontend, and online worker.
-  They return HTTP 503 with `status: "notReady"` when an internal activation
-  check fails.
+  This readiness route returns HTTP 503 with `status: "notReady"` when an
+  internal activation check fails.
 - `GET /api/health/diagnostics` returns the readiness breakdown plus session
   count and requires an authenticated Dashboard session.
 

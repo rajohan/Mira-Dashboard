@@ -103,7 +103,8 @@ layout unless a deliberate migration requires otherwise.
 
 ```bash
 cd /home/ubuntu/projects/mira-dashboard
-bun run build
+/usr/local/bin/doppler run --config prd --project rajohan -- \
+  bun run deploy:prepare
 systemctl --user restart mira-dashboard.service
 curl --fail http://127.0.0.1:3100/api/health/ready
 ```

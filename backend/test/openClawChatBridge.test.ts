@@ -3328,22 +3328,29 @@ describe("OpenClaw chat bridge", () => {
         const provisionalRunId = "dashboard-chat-quiet-before-restart";
         const providerRunId = "provider-after-quiet-restart";
         const disconnectedAt = 1_785_000_000_000;
+        const hydratedAt = disconnectedAt - 60 * 60_000 - 1;
         const providerStartedAt = disconnectedAt + 1000;
-        store.snapshots.set(
-            MAIN,
-            persistedSnapshot(MAIN, provisionalRunId, disconnectedAt - 7 * 60 * 60_000)
-        );
-        const bridge = new OpenClawChatBridge(store);
-
-        bridge.snapshot(MAIN);
-        bridge.markGatewayDisconnected(disconnectedAt);
-        expect(bridge.flush()).toBe(true);
-        expect(store.snapshots.get(MAIN)?.interruptedAtByRun).toEqual({
-            [provisionalRunId]: disconnectedAt,
-        });
-        const restarted = new OpenClawChatBridge(store);
-        const dateNow = jest.spyOn(Date, "now").mockReturnValue(providerStartedAt);
+        const dateNow = jest.spyOn(Date, "now");
         try {
+            dateNow.mockReturnValue(hydratedAt);
+            store.snapshots.set(
+                MAIN,
+                persistedSnapshot(
+                    MAIN,
+                    provisionalRunId,
+                    disconnectedAt - 7 * 60 * 60_000
+                )
+            );
+            const bridge = new OpenClawChatBridge(store);
+
+            bridge.snapshot(MAIN);
+            bridge.markGatewayDisconnected(disconnectedAt);
+            expect(bridge.flush()).toBe(true);
+            expect(store.snapshots.get(MAIN)?.interruptedAtByRun).toEqual({
+                [provisionalRunId]: disconnectedAt,
+            });
+            const restarted = new OpenClawChatBridge(store);
+            dateNow.mockReturnValue(providerStartedAt);
             restarted.recordEvent(
                 "agent",
                 {
@@ -3354,15 +3361,15 @@ describe("OpenClaw chat bridge", () => {
                 },
                 []
             );
+
+            expect(
+                restarted
+                    .snapshot(MAIN)
+                    .events.map((event) => (event.payload as { runId?: string }).runId)
+            ).toEqual([providerRunId, providerRunId]);
         } finally {
             dateNow.mockRestore();
         }
-
-        expect(
-            restarted
-                .snapshot(MAIN)
-                .events.map((event) => (event.payload as { runId?: string }).runId)
-        ).toEqual([providerRunId, providerRunId]);
     });
 
     it("does not join an interrupted run across a newer chat send", () => {

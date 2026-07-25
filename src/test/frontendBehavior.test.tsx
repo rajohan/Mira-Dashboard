@@ -129,7 +129,7 @@ import {
 import { useDatabaseOverview } from "../hooks/useDatabase";
 import { useDockerContainers } from "../hooks/useDocker";
 import { useFileContent, useFiles, useSaveFile } from "../hooks/useFiles";
-import { useHealth } from "../hooks/useHealth";
+import { type HealthResponse, useHealth } from "../hooks/useHealth";
 import {
     jobExecutionKeys,
     refreshJobExecutionQueueWhilePending,
@@ -897,6 +897,42 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(screen.getByTitle("Worker online")).toBeInTheDocument();
             expect(screen.getByText("WK")).toBeInTheDocument();
             expect(screen.getByText("v2026.6.9")).toBeInTheDocument();
+
+            const readyHealth = queryClient.getQueryData<HealthResponse>(["health"]);
+            expect(readyHealth).toBeDefined();
+            if (!readyHealth) {
+                throw new TypeError("Expected health data after layout initialization");
+            }
+            act(() => {
+                queryClient.setQueryData<HealthResponse>(["health"], {
+                    ...readyHealth,
+                    checks: {
+                        ...readyHealth.checks,
+                        worker: { ready: false },
+                    },
+                    status: "notReady",
+                });
+            });
+            await waitFor(() => {
+                expect(screen.getByTitle("Worker offline")).toBeInTheDocument();
+            });
+
+            const healthQuery = queryClient
+                .getQueryCache()
+                .find<HealthResponse>({ queryKey: ["health"] });
+            act(() => {
+                healthQuery?.setState({
+                    data: undefined,
+                    fetchStatus: "idle",
+                    status: "pending",
+                });
+            });
+            await waitFor(() => {
+                expect(
+                    screen.getByTitle("Worker status unavailable")
+                ).toBeInTheDocument();
+            });
+
             await userEvent.click(screen.getByLabelText("Open navigation menu"));
             expect(
                 screen.getAllByLabelText("Close navigation menu").length

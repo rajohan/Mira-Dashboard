@@ -193,7 +193,28 @@ journalctl --user -u mira-dashboard-worker.service -n 100 --no-pager
 Healthy response shape:
 
 ```json
-{ "status": "isReady", "checks": { "worker": { "ready": true } } }
+{
+    "checks": {
+        "database": {
+            "currentSchemaVersion": 6,
+            "maximumCompatibleSchemaVersion": 6,
+            "minimumCompatibleSchemaVersion": 6,
+            "ready": true,
+            "targetSchemaVersion": 6
+        },
+        "frontend": { "ready": true },
+        "release": {
+            "backendCommit": "12345678",
+            "frontendCommit": "12345678",
+            "manifestFormatVersion": 1,
+            "ready": true,
+            "source": "manifest"
+        },
+        "worker": { "ready": true }
+    },
+    "dependencies": { "gatewayConnected": true },
+    "status": "isReady"
+}
 ```
 
 The authenticated Dashboard header shows `WS`, `BE`, and `WK` separately. If

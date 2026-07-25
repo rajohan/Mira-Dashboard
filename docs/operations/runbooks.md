@@ -24,7 +24,17 @@ Expected health:
 ```bash
 systemctl --user restart mira-dashboard.service
 systemctl --user status mira-dashboard.service --no-pager
-curl --fail http://127.0.0.1:3100/api/health/ready
+wait_for_dashboard_ready() {
+  for attempt in {1..20}; do
+    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+      http://127.0.0.1:3100/api/health/ready >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+wait_for_dashboard_ready
 ```
 
 ## Dashboard Shows WebSocket Disconnected
@@ -231,7 +241,17 @@ install -m 0600 "$backup_path" "$db_path"
 test "$(sqlite3 -readonly "$db_path" "PRAGMA quick_check;")" = "ok"
 systemctl --user start mira-dashboard.service
 systemctl --user start mira-dashboard-worker.service
-curl --fail --show-error --silent http://127.0.0.1:3100/api/health/ready
+wait_for_dashboard_ready() {
+  for attempt in {1..20}; do
+    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+      http://127.0.0.1:3100/api/health/ready >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+wait_for_dashboard_ready
 printf '\nRecovery files retained at %s\n' "$recovery_dir"
 ```
 

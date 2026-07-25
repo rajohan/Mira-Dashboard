@@ -1473,7 +1473,7 @@ async function scheduleRestartHealthCheck(
         "restart_status=0",
         `systemctl --user restart ${DASHBOARD_SERVICES.join(" ")} || restart_status=$?`,
         "sleep 4",
-        `if [ "$restart_status" -eq 0 ] && curl -fsS http://127.0.0.1:3100/api/health/ready >/dev/null; then`,
+        `if [ "$restart_status" -eq 0 ] && curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:3100/api/health/ready >/dev/null; then`,
         `  ${deploymentJobUpdateCommand(okJob)}`,
         "else",
         `  ${deploymentJobUpdateCommand(failedJob)}`,

@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Server } from "bun";
 import { describe, expect, it, jest } from "bun:test";
 
+import * as databaseMigrationRunnerModule from "../src/databaseMigrationRunner.ts";
 import {
     isAllowedDashboardOrigin,
     readJson,
@@ -741,6 +742,43 @@ describe("backend service utilities", () => {
             );
         } finally {
             summarySpy.mockRestore();
+            warnSpy.mockRestore();
+        }
+    });
+
+    it("logs database readiness failures without exposing them in the response", async () => {
+        const databaseError = new Error("database unavailable");
+        const migrationSpy = jest
+            .spyOn(databaseMigrationRunnerModule, "validateDatabaseMigrationHistory")
+            .mockImplementation(() => {
+                throw databaseError;
+            });
+        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+        try {
+            const response = await callTestRoute(
+                appRoutes,
+                "/api/health/ready",
+                serverWithAddress("127.0.0.1")
+            );
+
+            expect(response.status).toBe(503);
+            const payload = await response.json();
+            expect(payload).toMatchObject({
+                checks: {
+                    database: {
+                        ready: false,
+                    },
+                },
+                status: "notReady",
+            });
+            expect(JSON.stringify(payload)).not.toContain(databaseError.message);
+            expect(warnSpy).toHaveBeenCalledWith(
+                "[Health] Database readiness failed:",
+                databaseError
+            );
+        } finally {
+            migrationSpy.mockRestore();
             warnSpy.mockRestore();
         }
     });

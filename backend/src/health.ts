@@ -62,7 +62,8 @@ function databaseReadiness(): DatabaseReadiness {
             ready: isDatabaseSchemaCompatible(currentSchemaVersion),
             targetSchemaVersion: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target,
         };
-    } catch {
+    } catch (error) {
+        console.warn("[Health] Database readiness failed:", error);
         return {
             maximumCompatibleSchemaVersion:
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,

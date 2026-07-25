@@ -14,8 +14,8 @@ important trust boundaries:
 All `/api/*` routes require a Dashboard session except the exact public
 bootstrap/login surface:
 
-- `GET /api/health/live`
-- `GET /api/health/ready`
+- `GET|HEAD /api/health/live`
+- `GET|HEAD /api/health/ready`
 - `GET /api/auth/bootstrap`
 - `GET /api/auth/session`
 - `POST /api/auth/register-first-user`

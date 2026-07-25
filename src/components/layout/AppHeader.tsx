@@ -27,7 +27,28 @@ export function AppHeader({
     const { data: health, isError: isBackendError } = useHealth();
 
     const isBackendConnected = !isBackendError && health !== undefined;
-    const isWorkerReady = isBackendConnected && health?.checks.worker.ready === true;
+    const workerState = isBackendConnected
+        ? health.checks.worker.ready
+            ? "ready"
+            : "offline"
+        : "unknown";
+    const workerStatus = {
+        offline: {
+            className: "border-red-500/40 bg-red-500/10 text-red-300",
+            label: "Worker offline",
+            symbol: "○",
+        },
+        ready: {
+            className: "border-green-500/40 bg-green-500/10 text-green-300",
+            label: "Worker online",
+            symbol: "●",
+        },
+        unknown: {
+            className: "border-primary-600 bg-primary-800 text-primary-300",
+            label: "Worker status unavailable",
+            symbol: "?",
+        },
+    }[workerState];
     const backendCommit = health?.releaseDetails.backendCommit || "unknown";
     const frontendCommit = typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "dev";
     const hasVersionMismatch =
@@ -99,14 +120,12 @@ export function AppHeader({
                         <span
                             className={[
                                 "inline-flex items-center gap-1.5 rounded-md border px-2 py-1",
-                                isWorkerReady
-                                    ? "border-green-500/40 bg-green-500/10 text-green-300"
-                                    : "border-red-500/40 bg-red-500/10 text-red-300",
+                                workerStatus.className,
                             ].join(" ")}
-                            title={isWorkerReady ? "Worker online" : "Worker offline"}
+                            title={workerStatus.label}
                         >
                             <span className="font-medium">WK</span>
-                            <span>{isWorkerReady ? "●" : "○"}</span>
+                            <span>{workerStatus.symbol}</span>
                         </span>
                     </div>
                     <Button

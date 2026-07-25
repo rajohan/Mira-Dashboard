@@ -1972,6 +1972,7 @@ printf 'scheduled\n'
             );
             const restartCommand = await Bun.file(systemdLog).text();
             expect(restartCommand).toContain("/api/health/ready");
+            expect(restartCommand).toContain("--connect-timeout 2 --max-time 5");
             expect(restartCommand).not.toContain('"workerOnline":true');
             expect(restartCommand).not.toContain("/api/job-executions");
             expect(existsSync(path.join(fakeRoot, "node_modules"))).toBe(false);
