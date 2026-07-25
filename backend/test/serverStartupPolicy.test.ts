@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -233,6 +233,43 @@ describe("server start scheduler policy", () => {
         } finally {
             startSpy.mockRestore();
             stopSpy.mockRestore();
+        }
+    });
+
+    it("verifies the production worker release before opening SQLite", async () => {
+        const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-worker-release-"));
+        const databasePath = path.join(temporaryRoot, "dashboard.db");
+        const child = Bun.spawn({
+            cmd: [
+                process.execPath,
+                path.resolve(import.meta.dirname, "../src/workerStart.ts"),
+            ],
+            cwd: path.resolve(import.meta.dirname, ".."),
+            env: {
+                ...process.env,
+                MIRA_DASHBOARD_DB_PATH: databasePath,
+                MIRA_DASHBOARD_RELEASE_ROOT: temporaryRoot,
+                NODE_ENV: "production",
+            },
+            stderr: "pipe",
+            stdin: "ignore",
+            stdout: "ignore",
+        });
+
+        try {
+            const [exitCode, stderr] = await Promise.all([
+                child.exited,
+                new Response(child.stderr).text(),
+            ]);
+
+            expect(exitCode).toBe(1);
+            expect(stderr).toContain(
+                "Worker release identity is not ready (manifest-missing)"
+            );
+            expect(existsSync(databasePath)).toBe(false);
+        } finally {
+            child.kill();
+            rmSync(temporaryRoot, { force: true, recursive: true });
         }
     });
 

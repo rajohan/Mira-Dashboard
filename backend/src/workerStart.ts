@@ -16,8 +16,6 @@ export function createWorkerKeepAliveHandle(): NodeJS.Timeout {
 }
 
 export async function runDashboardWorker(): Promise<void> {
-    validateAuthenticationConfig();
-    validateStoredSecretConfig();
     const release = await getRuntimeReleaseIdentity();
     if (process.env.NODE_ENV === "production" && !release.ready) {
         throw new Error(
@@ -28,6 +26,8 @@ export async function runDashboardWorker(): Promise<void> {
     if (!/^[\da-f]{8,40}$/u.test(releaseCommit)) {
         throw new Error("Worker release identity does not contain a valid commit");
     }
+    validateAuthenticationConfig();
+    validateStoredSecretConfig();
     const shutdown = Promise.withResolvers<NodeJS.Signals>();
     const stop = (signal: NodeJS.Signals) => shutdown.resolve(signal);
     const keepAlive = createWorkerKeepAliveHandle();
