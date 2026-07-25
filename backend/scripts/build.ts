@@ -16,7 +16,7 @@ const result = await Bun.build({
     ],
     format: "esm",
     outdir,
-    packages: "external",
+    packages: "bundle",
     splitting: false,
     sourcemap: "external",
     target: "bun",

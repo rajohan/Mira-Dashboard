@@ -502,9 +502,6 @@ function inferProcessReleaseRoot(): string {
 }
 
 const PROCESS_RELEASE_ROOT = inferProcessReleaseRoot();
-const runtimeIdentityState: {
-    promise?: Promise<RuntimeReleaseIdentity>;
-} = {};
 
 export function getProcessReleaseRoot(): string {
     return PROCESS_RELEASE_ROOT;
@@ -526,7 +523,8 @@ export async function loadRuntimeReleaseIdentity(
     try {
         const manifest = await loadReleaseManifest(releaseRoot);
         await verifyReleaseArtifacts(releaseRoot, manifest);
-        const isSchemaMatchesCode =
+        const isManifestMatchesCode =
+            manifest.bunVersion === Bun.version &&
             manifest.schema.target === DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target &&
             manifest.schema.minimumCompatible ===
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum &&
@@ -538,9 +536,11 @@ export async function loadRuntimeReleaseIdentity(
             backendCommit: manifest.components.backendCommit,
             commitSha: manifest.commitSha,
             frontendCommit: manifest.components.frontendCommit,
-            ...(!isSchemaMatchesCode && { issue: "manifest-code-mismatch" as const }),
+            ...(!isManifestMatchesCode && {
+                issue: "manifest-code-mismatch" as const,
+            }),
             manifestFormatVersion: manifest.formatVersion,
-            ready: isSchemaMatchesCode,
+            ready: isManifestMatchesCode,
             schema: manifest.schema,
             source: "manifest",
         };
@@ -562,11 +562,9 @@ export async function loadRuntimeReleaseIdentity(
     }
 }
 
-export function getRuntimeReleaseIdentity(): Promise<RuntimeReleaseIdentity> {
-    runtimeIdentityState.promise ??= loadRuntimeReleaseIdentity();
-    return runtimeIdentityState.promise;
-}
-
-export function resetRuntimeReleaseIdentityForTests(): void {
-    delete runtimeIdentityState.promise;
+export function getRuntimeReleaseIdentity(
+    releaseRoot = PROCESS_RELEASE_ROOT,
+    environment = process.env.NODE_ENV
+): Promise<RuntimeReleaseIdentity> {
+    return loadRuntimeReleaseIdentity(releaseRoot, environment);
 }

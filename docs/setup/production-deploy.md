@@ -183,6 +183,10 @@ cd /home/ubuntu/projects/mira-dashboard
 git log --oneline -n 10
 git switch main
 git reset --hard <known-good-sha>
+if ! bun -e 'const packageJson = await Bun.file("package.json").json(); process.exit(typeof packageJson.scripts?.["deploy:prepare"] === "string" ? 0 : 1)'; then
+  echo "Rollback target predates the supported deploy contract" >&2
+  exit 1
+fi
 if test -f scripts/writeReleaseManifest.ts; then
   release_health_path=/api/health/ready
 else
@@ -193,17 +197,11 @@ fi
   bun run deploy:prepare
 install -m 0644 systemd/mira-dashboard.service \
   /home/ubuntu/.config/systemd/user/mira-dashboard.service
-if test -f backend/dist/workerStart.js; then
-  install -m 0644 systemd/mira-dashboard-worker.service \
-    /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
-  systemctl --user daemon-reload
-  systemctl --user restart mira-dashboard.service
-  systemctl --user restart mira-dashboard-worker.service
-else
-  systemctl --user disable --now mira-dashboard-worker.service
-  systemctl --user daemon-reload
-  systemctl --user restart mira-dashboard.service
-fi
+install -m 0644 systemd/mira-dashboard-worker.service \
+  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
+systemctl --user daemon-reload
+systemctl --user restart mira-dashboard.service
+systemctl --user restart mira-dashboard-worker.service
 wait_for_dashboard_ready() {
   for attempt in {1..20}; do
     if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
@@ -221,10 +219,9 @@ The conditional health target exists only for the first rollback across the
 manifest-contract cutover. Manifest-aware releases always regenerate their
 ignored manifest through `deploy:prepare` and verify `/api/health/ready`.
 
-If the known-good target predates `workerStart.js`, the branch above stops the
-worker before starting that version and reinstalls the checked-out legacy
-combined web unit. Do not repeatedly restart a worker unit whose target
-entrypoint does not exist.
+Rollback targets older than the split-worker/database-preflight contract are
+deliberately unsupported. This private single-operator service keeps a supported
+known-good release instead of retaining an untested legacy activation path.
 
 Do not use `git reset --hard` casually in normal work. It is a rollback
 procedure for production incidents after an explicit decision.

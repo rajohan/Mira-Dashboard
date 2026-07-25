@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
     createReleaseManifest,
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
+    getRuntimeReleaseIdentity,
     loadReleaseManifest,
     loadRuntimeReleaseIdentity,
     parseReleaseManifest,
@@ -253,6 +254,30 @@ describe("Dashboard release manifest", () => {
         });
     });
 
+    it("rejects a manifest built by another Bun runtime", async () => {
+        const root = temporaryReleaseRoot();
+        const manifest = await writeReleaseManifest(manifestOptions(root));
+        writeFileSync(
+            path.join(root, RELEASE_MANIFEST_FILE_NAME),
+            `${JSON.stringify(
+                {
+                    ...manifest,
+                    bunVersion: "0.0.0",
+                },
+                undefined,
+                2
+            )}\n`
+        );
+
+        await expect(
+            loadRuntimeReleaseIdentity(root, "production")
+        ).resolves.toMatchObject({
+            issue: "manifest-code-mismatch",
+            ready: false,
+            source: "manifest",
+        });
+    });
+
     it("fails runtime readiness when a declared artifact changes", async () => {
         const root = temporaryReleaseRoot();
         await writeReleaseManifest(manifestOptions(root));
@@ -260,6 +285,25 @@ describe("Dashboard release manifest", () => {
 
         await expect(
             loadRuntimeReleaseIdentity(root, "production")
+        ).resolves.toMatchObject({
+            issue: "manifest-invalid",
+            ready: false,
+        });
+    });
+
+    it("revalidates artifacts after an earlier readiness success", async () => {
+        const root = temporaryReleaseRoot();
+        await writeReleaseManifest(manifestOptions(root));
+
+        await expect(
+            getRuntimeReleaseIdentity(root, "production")
+        ).resolves.toMatchObject({
+            ready: true,
+            source: "manifest",
+        });
+        writeFileSync(path.join(root, "dist", "assets", "app.js"), "drift\n");
+        await expect(
+            getRuntimeReleaseIdentity(root, "production")
         ).resolves.toMatchObject({
             issue: "manifest-invalid",
             ready: false,

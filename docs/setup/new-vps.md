@@ -57,8 +57,18 @@ From `backend/`:
 bun run build
 ```
 
-The frontend build writes to `dist/`. The backend build writes to
-`backend/dist/`.
+Return to the repository root and create the checksummed runtime manifest:
+
+```bash
+cd ..
+bun run release:manifest
+```
+
+The frontend build writes to `dist/`, the backend build writes to
+`backend/dist/`, and `release:manifest` binds both outputs to the checked-out
+commit. A fresh host may not have a Dashboard database yet, so this first build
+uses `release:manifest` directly instead of the normal database-aware
+`deploy:prepare`; first startup creates and migrates the database.
 
 ## Configure Secrets
 
