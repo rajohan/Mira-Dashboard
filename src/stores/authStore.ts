@@ -13,6 +13,7 @@ interface AuthState {
     isInitialized: boolean;
     isBootstrapRequired: boolean;
     mfaEnabled: boolean;
+    sessionId: string | undefined;
 }
 
 /** Represents the session API response. */
@@ -25,6 +26,7 @@ export interface SessionResponse {
         lastSeenAt: string;
         mfaEnabled: boolean;
         mfaVerifiedAt?: string;
+        sessionId?: string;
     };
     user: AuthUser | undefined;
 }
@@ -32,7 +34,7 @@ export interface SessionResponse {
 /** Represents auth actions. */
 interface AuthActions {
     initialize: () => Promise<void>;
-    refreshSession: () => Promise<SessionResponse>;
+    refreshSession: () => Promise<void>;
     setSession: (payload: SessionResponse) => void;
     clearSession: () => void;
     logout: () => Promise<void>;
@@ -44,13 +46,25 @@ const initialState: AuthState = {
     isInitialized: false,
     isBootstrapRequired: false,
     mfaEnabled: false,
+    sessionId: undefined,
 };
 
 /** Defines auth store. */
 export const authStore = new Store<AuthState>(initialState);
 
-const authRuntimeState: { initializePromise: Promise<void> | undefined } = {
+const authRuntimeState: {
+    initializePromise: Promise<void> | undefined;
+    latestRefresh:
+        | {
+              generation: number;
+              promise: Promise<void>;
+          }
+        | undefined;
+    refreshGeneration: number;
+} = {
     initializePromise: undefined,
+    latestRefresh: undefined,
+    refreshGeneration: 0,
 };
 
 /** Fetches session. */
@@ -74,10 +88,12 @@ export const authActions: AuthActions = {
                 try {
                     await authActions.refreshSession();
                 } catch {
-                    authStore.setState(() => ({
-                        ...initialState,
-                        isInitialized: true,
-                    }));
+                    if (!authStore.state.isInitialized) {
+                        authStore.setState(() => ({
+                            ...initialState,
+                            isInitialized: true,
+                        }));
+                    }
                 } finally {
                     authRuntimeState.initializePromise = undefined;
                 }
@@ -87,23 +103,40 @@ export const authActions: AuthActions = {
         return authRuntimeState.initializePromise;
     },
 
-    async refreshSession() {
-        const session = await fetchSession();
-        authActions.setSession(session);
-        return session;
+    refreshSession() {
+        const refreshGeneration = ++authRuntimeState.refreshGeneration;
+        const refreshPromise = (async () => {
+            const session = await fetchSession();
+            if (authRuntimeState.refreshGeneration === refreshGeneration) {
+                authActions.setSession(session);
+                return;
+            }
+            const latestRefresh = authRuntimeState.latestRefresh;
+            if (latestRefresh && latestRefresh.generation > refreshGeneration) {
+                await latestRefresh.promise;
+            }
+        })();
+        authRuntimeState.latestRefresh = {
+            generation: refreshGeneration,
+            promise: refreshPromise,
+        };
+        return refreshPromise;
     },
 
     setSession(payload) {
+        authRuntimeState.refreshGeneration += 1;
         authStore.setState(() => ({
             user: payload.user,
             isAuthenticated: payload.authenticated,
             isInitialized: true,
             isBootstrapRequired: payload.isBootstrapRequired,
             mfaEnabled: payload.session?.mfaEnabled ?? false,
+            sessionId: payload.session?.sessionId,
         }));
     },
 
     clearSession() {
+        authRuntimeState.refreshGeneration += 1;
         authStore.setState(() => ({
             ...initialState,
             isInitialized: true,
@@ -135,4 +168,9 @@ export function useAuthStore(): AuthState & AuthActions {
 /** Provides auth user. */
 export function useAuthUser(): AuthUser | undefined {
     return useSelector(authStore, (state) => state.user);
+}
+
+/** Provides the opaque identity of the active browser session. */
+export function useAuthSessionId(): string | undefined {
+    return useSelector(authStore, (state) => state.sessionId);
 }

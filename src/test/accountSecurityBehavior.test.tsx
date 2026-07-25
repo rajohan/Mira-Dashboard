@@ -1,12 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, jest } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement } from "react";
 
 import { AccountSecuritySection } from "../components/features/settings/AccountSecuritySection";
 import type { AccountSecuritySummary } from "../hooks/useAccountSecurity";
-import { authActions } from "../stores/authStore";
+import {
+    AUTH_SESSION_ROTATED_EVENT_NAME,
+    uninstallAuthSessionRotationSync,
+} from "../lib/authBoundary";
+import {
+    completeSecurityVerification,
+    SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+} from "../lib/securityVerification";
+import { authActions, authStore } from "../stores/authStore";
 import { createWebAuthnBrowserTestHarness } from "./webAuthnBrowserTestHelper";
 
 const originalFetch = fetch;
@@ -17,9 +25,37 @@ const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
 const originalCreateObjectUrl = URL.createObjectURL;
 const originalRevokeObjectUrl = URL.revokeObjectURL;
 const webAuthnBrowser = createWebAuthnBrowserTestHarness();
+const sessionRotationHandler = jest.fn(() => {});
+const CURRENT_SESSION_ID = "0123456789abcdef0123456789abcdef";
+
+function claimAndCompleteSecurityVerification(event: Event): void {
+    event.preventDefault();
+    queueMicrotask(completeSecurityVerification);
+}
+
+beforeEach(() => {
+    sessionRotationHandler.mockClear();
+    addEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, sessionRotationHandler);
+    authActions.setSession({
+        authenticated: true,
+        isBootstrapRequired: false,
+        session: {
+            authMethod: "webauthn",
+            expiresAt: "2026-08-23T12:00:00.000Z",
+            lastSeenAt: "2026-07-24T12:00:00.000Z",
+            mfaEnabled: true,
+            sessionId: CURRENT_SESSION_ID,
+        },
+        user: { id: 1, username: "raymond" },
+    });
+});
 
 afterEach(() => {
-    authActions.clearSession();
+    uninstallAuthSessionRotationSync();
+    removeEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, sessionRotationHandler);
+    act(() => {
+        authActions.clearSession();
+    });
     Object.defineProperties(globalThis, {
         fetch: {
             configurable: true,
@@ -102,7 +138,7 @@ function summary({
                 expiresAt: "2026-08-23T12:00:00.000Z",
                 isCurrent: true,
                 lastSeenAt: "2026-07-24T12:00:00.000Z",
-                sessionId: "0123456789abcdef0123456789abcdef",
+                sessionId: CURRENT_SESSION_ID,
                 userAgent: "Current test browser",
             },
             {
@@ -154,6 +190,7 @@ function installAccountFetch(
                         expiresAt: "2026-08-23T12:00:00.000Z",
                         lastSeenAt: "2026-07-24T12:00:00.000Z",
                         mfaEnabled: Boolean(securitySummary().factors.enabledAt),
+                        sessionId: CURRENT_SESSION_ID,
                     },
                     user: { id: 1, username: "raymond" },
                 });
@@ -285,7 +322,9 @@ describe("Dashboard account security", () => {
                 name: "Change Dashboard password",
             })
         ).toBeInTheDocument();
-        queryClient.clear();
+        act(() => {
+            queryClient.clear();
+        });
     });
 
     it("reauthenticates before TOTP enrollment and exposes recovery-code actions", async () => {
@@ -351,6 +390,7 @@ describe("Dashboard account security", () => {
                         factorId: "01900000-0000-7000-8000-000000000099",
                         isOk: true,
                         recoveryCodes,
+                        sessionRotated: true,
                     });
                 }
                 if (
@@ -380,6 +420,8 @@ describe("Dashboard account security", () => {
         );
         await userEvent.click(screen.getByRole("button", { name: "Verify" }));
         await screen.findByText("Password verified for sensitive changes");
+        expect(sessionRotationHandler).toHaveBeenCalledTimes(1);
+        sessionRotationHandler.mockClear();
 
         await userEvent.click(screen.getByRole("button", { name: "Add app" }));
         expect(
@@ -399,6 +441,7 @@ describe("Dashboard account security", () => {
         expect(
             await screen.findByRole("heading", { name: "Save recovery codes now" })
         ).toBeInTheDocument();
+        expect(sessionRotationHandler).toHaveBeenCalledTimes(1);
         expect(screen.getByText("alpha-bravo")).toBeInTheDocument();
         await userEvent.click(screen.getByRole("button", { name: "Copy" }));
         await waitFor(() => {
@@ -450,7 +493,9 @@ describe("Dashboard account security", () => {
                     call.method === "POST"
             )
         ).toBe(true);
-        queryClient.clear();
+        act(() => {
+            queryClient.clear();
+        });
     });
 
     it("supports recovery-only step-up, factor removal, session revocation, and disable", async () => {
@@ -522,12 +567,6 @@ describe("Dashboard account security", () => {
                 ) {
                     return Response.json({ isOk: true, revoked: 1 });
                 }
-                if (
-                    url === "/api/account/security/sessions/revoke-all" &&
-                    method === "POST"
-                ) {
-                    return Response.json({ isOk: true, revoked: 2 });
-                }
                 if (url === "/api/account/security/mfa/disable" && method === "POST") {
                     expect(body).toEqual({ password: "current-password" });
                     securitySummary = summary({
@@ -554,6 +593,8 @@ describe("Dashboard account security", () => {
         expect(
             await screen.findByText("Recent MFA verification recorded")
         ).toBeInTheDocument();
+        expect(sessionRotationHandler).toHaveBeenCalledTimes(1);
+        sessionRotationHandler.mockClear();
 
         await userEvent.click(
             screen.getByRole("button", { name: "Remove Primary YubiKey" })
@@ -604,17 +645,6 @@ describe("Dashboard account security", () => {
             ).toBe(true);
         });
 
-        await userEvent.click(screen.getByRole("button", { name: "Log out all" }));
-        await waitFor(() => {
-            expect(
-                calls.some(
-                    (call) =>
-                        call.url.endsWith("/sessions/revoke-all") &&
-                        call.method === "POST"
-                )
-            ).toBe(true);
-        });
-
         await userEvent.click(screen.getByRole("button", { name: "Disable MFA" }));
         await userEvent.type(
             screen.getByLabelText("Current password"),
@@ -625,7 +655,43 @@ describe("Dashboard account security", () => {
         );
         expect(await screen.findByText("Two-step login disabled")).toBeInTheDocument();
         expect(await screen.findByText("Not enabled")).toBeInTheDocument();
-        queryClient.clear();
+        expect(sessionRotationHandler).toHaveBeenCalledTimes(1);
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("logs out all sessions from the account-security interface", async () => {
+        const { calls } = installAccountFetch(
+            () => summary(),
+            (url, method) => {
+                if (
+                    url === "/api/account/security/sessions/revoke-all" &&
+                    method === "POST"
+                ) {
+                    return Response.json({ isOk: true, revoked: 2 });
+                }
+                return;
+            }
+        );
+
+        const { queryClient } = renderAccountSecurity();
+        await screen.findByText("Primary YubiKey");
+        await userEvent.click(screen.getByRole("button", { name: "Log out all" }));
+
+        await waitFor(() => {
+            expect(
+                calls.some(
+                    (call) =>
+                        call.url === "/api/account/security/sessions/revoke-all" &&
+                        call.method === "POST"
+                )
+            ).toBe(true);
+            expect(authStore.state.isAuthenticated).toBe(false);
+        });
+        act(() => {
+            queryClient.clear();
+        });
     });
 
     it("registers a named backup security key through the browser ceremony", async () => {
@@ -682,6 +748,7 @@ describe("Dashboard account security", () => {
                         },
                         isOk: true,
                         recoveryCodes,
+                        sessionRotated: false,
                     });
                 }
                 return;
@@ -701,6 +768,7 @@ describe("Dashboard account security", () => {
             screen.getByRole("button", { name: "Touch and register key" })
         );
         expect(await screen.findByText("Security key registered")).toBeInTheDocument();
+        expect(sessionRotationHandler).not.toHaveBeenCalled();
         expect(await screen.findByText("key-recovery-one")).toHaveClass(
             "min-w-0",
             "break-all",
@@ -713,6 +781,105 @@ describe("Dashboard account security", () => {
                     call.method === "POST"
             )
         ).toBe(true);
-        queryClient.clear();
+        act(() => {
+            queryClient.clear();
+        });
+    });
+
+    it("does not replay a session-bound security-key registration response", async () => {
+        webAuthnBrowser.install();
+        let verificationRequests = 0;
+        addEventListener(
+            SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+            claimAndCompleteSecurityVerification
+        );
+        const { calls } = installAccountFetch(
+            () => summary(),
+            (url, method) => {
+                if (
+                    url === "/api/account/security/webauthn/register/options" &&
+                    method === "POST"
+                ) {
+                    return Response.json({
+                        options: {
+                            attestation: "none",
+                            authenticatorSelection: {
+                                authenticatorAttachment: "cross-platform",
+                                residentKey: "discouraged",
+                                userVerification: "required",
+                            },
+                            challenge: "AA",
+                            pubKeyCredParams: [{ alg: -7, type: "public-key" }],
+                            rp: {
+                                id: "dashboard.example.com",
+                                name: "Mira Dashboard",
+                            },
+                            timeout: 60_000,
+                            user: {
+                                displayName: "raymond",
+                                id: "AA",
+                                name: "raymond",
+                            },
+                        },
+                    });
+                }
+                if (
+                    url === "/api/account/security/webauthn/register/verify" &&
+                    method === "POST"
+                ) {
+                    verificationRequests += 1;
+                    return verificationRequests === 1
+                        ? Response.json(
+                              {
+                                  code: "recent_verification_required",
+                                  error: "Recent verification is required",
+                              },
+                              { status: 403 }
+                          )
+                        : Response.json({
+                              credential: {
+                                  backedUp: false,
+                                  createdAt: "2026-07-24T12:00:00.000Z",
+                                  deviceType: "singleDevice",
+                                  id: "credential-browser",
+                                  label: "Backup YubiKey",
+                              },
+                              isOk: true,
+                              sessionRotated: false,
+                          });
+                }
+                return;
+            }
+        );
+        const { queryClient } = renderAccountSecurity();
+
+        try {
+            await screen.findByText("Primary YubiKey");
+            await userEvent.click(screen.getByRole("button", { name: "Add key" }));
+            await userEvent.click(
+                screen.getByRole("button", { name: "Touch and register key" })
+            );
+
+            expect(
+                await screen.findByText("Recent verification is required")
+            ).toBeInTheDocument();
+            expect(verificationRequests).toBe(1);
+            expect(
+                calls.filter(
+                    (call) =>
+                        call.url === "/api/account/security/webauthn/register/verify" &&
+                        call.method === "POST"
+                )
+            ).toHaveLength(1);
+            expect(screen.queryByText("Security key registered")).not.toBeInTheDocument();
+        } finally {
+            act(() => {
+                queryClient.clear();
+            });
+            removeEventListener(
+                SECURITY_VERIFICATION_REQUIRED_EVENT_NAME,
+                claimAndCompleteSecurityVerification
+            );
+        }
     });
 });

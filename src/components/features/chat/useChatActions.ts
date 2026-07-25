@@ -7,6 +7,7 @@ import {
     useState,
 } from "react";
 
+import { SecurityVerificationCancelledError } from "../../../lib/securityVerification";
 import type { Session } from "../../../types/session";
 import { currentIsoString } from "../../../utils/date";
 import { isResetSlashCommand, isSessionActive } from "./chatPageUtilities";
@@ -31,13 +32,17 @@ interface ChatActionsOptions {
     activeRunCount: number;
     attachments: ChatSendAttachment[];
     attachmentsReference: RefObject<ChatSendAttachment[]>;
-    clearAttachments(): void;
+    clearAttachments(): number;
     confirmResetSession(): Promise<boolean>;
     draft: string;
     isCompacting: boolean;
     isConnected: boolean;
     isRecording: boolean;
     isTranscribing: boolean;
+    restoreAttachments?(
+        attachments: ChatSendAttachment[],
+        expectedAttachmentRestoreEpoch: number
+    ): boolean;
     runtime: ChatRuntimeController;
     scheduleBottomFollow(): void;
     selectedSession?: Session;
@@ -82,6 +87,7 @@ export function useChatActions({
     isConnected,
     isRecording,
     isTranscribing,
+    restoreAttachments,
     runtime,
     scheduleBottomFollow,
     selectedSession,
@@ -132,8 +138,8 @@ export function useChatActions({
         sendEpochReference.current += 1;
         sendCountReference.current = 0;
         inFlightInputRevisionsReference.current.clear();
-        compactingSessionKeysReference.current = new Set();
-        setCompactingSessionKeys(new Set());
+        // A session-cookie rotation disconnects while a verified RPC is still pending.
+        // Let each compaction promise release its own lock when it actually settles.
         setIsSending(false);
     }, [isConnected]);
 
@@ -212,6 +218,7 @@ export function useChatActions({
         }
 
         const inputRevision = inputRevisionReference.current.revision;
+        const clearedInputRevision = inputRevision + 1;
         const sendEpoch = beginSend(inputRevision);
         if (text.startsWith("/")) {
             try {
@@ -261,8 +268,9 @@ export function useChatActions({
                 return dedupeMessages([...previous, userMessage]);
             });
         }
+        draftReference.current = "";
         setDraft("");
-        clearAttachments();
+        const clearedAttachmentRestoreEpoch = clearAttachments();
         setSendError(undefined);
         shouldStickToBottomReference.current = true;
         setIsAtBottom(true);
@@ -280,7 +288,10 @@ export function useChatActions({
                     await transport.patchSession(pendingSessionKey, {
                         verboseLevel: "full",
                     });
-                } catch {
+                } catch (error) {
+                    if (error instanceof SecurityVerificationCancelledError) {
+                        throw error;
+                    }
                     // Diagnostics are best effort and must not block delivery.
                 }
             }
@@ -317,12 +328,33 @@ export function useChatActions({
                 runtime.failRun(pendingSessionKey, idempotencyKey);
             }
             if (selectedSessionKeyReference.current === pendingSessionKey) {
-                setSendError(chatErrorMessage(error, "Failed to send message"));
+                setSendError(
+                    error instanceof SecurityVerificationCancelledError
+                        ? undefined
+                        : chatErrorMessage(error, "Failed to send message")
+                );
             }
             if (
                 !resetCommand &&
                 selectedSessionKeyReference.current === pendingSessionKey
             ) {
+                const currentInputRevision = inputRevisionReference.current.revision;
+                if (
+                    !draftReference.current.trim() &&
+                    (currentInputRevision === inputRevision ||
+                        currentInputRevision === clearedInputRevision)
+                ) {
+                    const canRestoreAttachments = restoreAttachments
+                        ? restoreAttachments(
+                              currentAttachments,
+                              clearedAttachmentRestoreEpoch
+                          )
+                        : currentAttachments.length === 0;
+                    if (canRestoreAttachments) {
+                        draftReference.current = text;
+                        setDraft(text);
+                    }
+                }
                 setMessages((previous) =>
                     rollbackFailedOptimisticMessage(
                         previous,

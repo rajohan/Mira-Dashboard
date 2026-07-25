@@ -44,6 +44,7 @@ export function useChatInputMedia({
     const recordingChunksReference = useRef<Blob[]>([]);
     const attachmentsReference = useRef<ChatSendAttachment[]>([]);
     const mediaEpochReference = useRef(0);
+    const attachmentRestoreEpochReference = useRef(0);
     const pendingAttachmentSlotsReference = useRef(0);
     const recordingStartEpochReference = useRef<number | undefined>(undefined);
     const sessionKeyReference = useRef(sessionKey);
@@ -57,8 +58,10 @@ export function useChatInputMedia({
 
     attachmentsReference.current = attachments;
 
-    const invalidateMedia = (shouldUpdateState = true) => {
+    const invalidateMedia = (shouldUpdateState = true): number => {
         mediaEpochReference.current += 1;
+        attachmentRestoreEpochReference.current += 1;
+        const attachmentRestoreEpoch = attachmentRestoreEpochReference.current;
         pendingAttachmentSlotsReference.current = 0;
         recordingStartEpochReference.current = undefined;
         transcriptionCountReference.current = 0;
@@ -91,9 +94,27 @@ export function useChatInputMedia({
             setIsRecording(false);
             setIsTranscribing(false);
         }
+        return attachmentRestoreEpoch;
     };
 
     const clearAttachments = () => invalidateMedia();
+
+    const restoreAttachments = (
+        restored: ChatSendAttachment[],
+        expectedAttachmentRestoreEpoch: number
+    ) => {
+        if (
+            attachmentRestoreEpochReference.current !== expectedAttachmentRestoreEpoch ||
+            attachmentsReference.current.length > 0
+        ) {
+            return false;
+        }
+        if (restored.length > 0) {
+            attachmentsReference.current = restored;
+            setAttachments(restored);
+        }
+        return true;
+    };
 
     const clearAttachmentError = (source?: ChatAttachmentInputSource) => {
         setAttachmentError((current) =>
@@ -140,6 +161,7 @@ export function useChatInputMedia({
             }
             return;
         }
+        attachmentRestoreEpochReference.current += 1;
         const operationEpoch = mediaEpochReference.current;
         const remainingSlots = Math.max(
             0,
@@ -288,6 +310,7 @@ export function useChatInputMedia({
         if (!file) {
             return;
         }
+        attachmentRestoreEpochReference.current += 1;
         const operationEpoch = mediaEpochReference.current;
         try {
             if (file.size > MAX_ATTACHMENT_BYTES) {
@@ -332,6 +355,7 @@ export function useChatInputMedia({
         if (recordingStartEpochReference.current !== undefined) {
             return;
         }
+        attachmentRestoreEpochReference.current += 1;
         const mediaDevices = navigator.mediaDevices as MediaDevices | undefined;
         const canRecord =
             Boolean(mediaDevices) &&
@@ -439,6 +463,7 @@ export function useChatInputMedia({
         isRecording,
         isTranscribing,
         removeAttachment,
+        restoreAttachments,
         voiceFileInputReference,
     };
 }

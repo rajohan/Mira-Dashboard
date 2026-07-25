@@ -247,6 +247,8 @@ export function createAuthRoutes(
                             lastSeenAt: session.lastSeenAt,
                             mfaEnabled: session.mfaEnabled,
                             mfaVerifiedAt: session.mfaVerifiedAt,
+                            // This is only the non-secret selector; the validator stays in the cookie.
+                            sessionId: session.sessionId,
                         },
                     }),
                     user,

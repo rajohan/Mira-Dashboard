@@ -369,6 +369,17 @@ describe("backend route and service behavior", () => {
         expect(login.status).toBe(200);
         const cookie = login.headers.get("set-cookie") ?? "";
         expect(cookie).toContain("mira_dashboard_session=");
+        const encodedSessionToken = cookie.match(/mira_dashboard_session=([^;]+)/u)?.[1];
+        if (!encodedSessionToken) {
+            throw new Error("Expected a Dashboard session cookie");
+        }
+        const sessionTokenParts = decodeURIComponent(encodedSessionToken).split(".", 3);
+        const [sessionSelector, sessionValidator] = sessionTokenParts;
+        if (!sessionSelector || !sessionValidator || sessionTokenParts.length !== 2) {
+            throw new Error("Expected a selector/validator session token");
+        }
+        expect(sessionSelector).toMatch(/^[a-f0-9]{32}$/u);
+        expect(sessionValidator).toMatch(/^[a-f0-9]{64}$/u);
         await expect(login.json()).resolves.toMatchObject({
             authenticated: true,
             user: { id: user.id, username },
@@ -380,9 +391,19 @@ describe("backend route and service behavior", () => {
             }),
             server
         );
-        await expect(session.json()).resolves.toMatchObject({
+        const sessionBody = (await session.json()) as {
+            authenticated: boolean;
+            isBootstrapRequired: boolean;
+            session: { sessionId: string };
+        };
+        expect(sessionBody.session.sessionId).toBe(sessionSelector);
+        expect(JSON.stringify(sessionBody)).not.toContain(sessionValidator);
+        expect(sessionBody).toMatchObject({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                sessionId: expect.stringMatching(/^[a-f0-9]{32}$/u),
+            },
         });
 
         const anonymousSession = await authRoutes["/api/auth/session"].GET(

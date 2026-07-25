@@ -31,9 +31,13 @@ because they contain authentication functionality.
 The browser session is stored in the `mira_dashboard_session` HTTP-only cookie.
 The cookie is SameSite Strict and is Secure only when the request is HTTPS or a
 trusted forwarded proto says HTTPS. Sessions use a 30-day absolute lifetime and
-a configurable 30-minute idle lifetime. Polling does not extend idle time;
+a configurable 30-minute idle lifetime
+(`MIRA_DASHBOARD_SESSION_IDLE_MINUTES`). Polling does not extend idle time;
 frontend requests only touch activity after recent keyboard, pointer, touch, or
-focus activity. Session validators are stored only as SHA-256 hashes.
+focus activity. Each token combines a non-secret 128-bit selector with an
+independent 256-bit validator. Client-readable session responses expose only the
+selector for identity and revocation; the validator remains in the HTTP-only
+cookie and is stored by Dashboard only as a SHA-256 hash.
 
 Auth routes are rate-limited more tightly than general API routes. Password,
 second-factor, and account-password failures also use persistent, hashed,
@@ -73,13 +77,32 @@ cannot be removed. Disabling MFA requires both a recent second factor and the
 current password, removes all factors/codes, and revokes all sessions.
 
 Host-control actions require a second-factor verification within the
-configurable recent-auth window (10 minutes by default). This includes config
-or workspace writes, raw secret reveal/config backup, Gateway restart,
-Docker/exec, backups, scheduled jobs/cron, PR/deploy operations, session
-mutations, job cancellation, and other centrally classified privileged
-mutations. A user without MFA receives `mfa_enrollment_required`; a stale MFA
-session receives `step_up_required`. The frontend opens one global verification
-dialog and requires the original action to be retried after successful step-up.
+configurable recent-auth window (`MIRA_DASHBOARD_RECENT_AUTH_MINUTES`, 10 minutes
+by default). This includes config or workspace writes, raw secret reveal/config
+backup, Gateway restart, Docker/exec, backups, scheduled jobs/cron, PR/deploy
+operations, session mutations, job cancellation, and other centrally classified
+privileged mutations. A user without MFA receives `mfa_enrollment_required`; a
+stale MFA session receives `step_up_required`. The frontend opens one global
+verification dialog when the server-relative verification lifetime expires; the
+client clock is not an MFA authority. If a request races that deadline, the
+shared HTTP/WebSocket clients hold the rejected action, complete step-up,
+reconnect WebSockets in every open tab with the rotated session cookie, and retry
+replay-safe requests once. Held actions remain bound to their authenticated user
+and browser-session identity, except for an explicitly signaled, short-lived
+same-user rotation whose previous and replacement session selectors are
+reconciled. Each rotation signal reconnects a socket only once, while cross-tab
+step-up completion also requires a coherent fresh security summary. One-shot
+request bodies never replay. Session-bound selectors and WebAuthn responses opt
+out of both recovery paths. Expiring TOTP enrollment codes opt out of
+post-verification replay, but a replayable JSON request can be sent once after a
+signaled same-user stale `401` because request policy rejected it before the
+handler. Chat keeps its optimistic message during this flow and restores unsent
+composer input if delivery still fails. The recent-auth window is fixed rather
+than extended by general page activity, so an active or compromised browser
+cannot keep privileged access fresh indefinitely. Socket retry waiters inherit
+the originating request's reconnect deadline (including indefinite operations)
+and reject instead of reopening a connection after a terminal authorization
+failure.
 
 Changing the Dashboard password requires the current password plus recent MFA
 when enabled, rotates the current session, and revokes every other session.

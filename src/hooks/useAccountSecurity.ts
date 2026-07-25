@@ -1,8 +1,8 @@
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { handleUnauthorizedSession } from "../lib/authBoundary";
-import { authActions } from "../stores/authStore";
+import { handleUnauthorizedSession, notifyAuthSessionRotated } from "../lib/authBoundary";
+import { authActions, useAuthSessionId, useAuthUser } from "../stores/authStore";
 import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
 
 export type MfaMethod = "recovery" | "totp" | "webauthn";
@@ -47,6 +47,7 @@ export interface AccountSecuritySummary {
     };
     recentVerification: {
         mfa: boolean;
+        mfaRemainingMs?: number;
         mfaUntil?: string;
         password: boolean;
         passwordUntil?: string;
@@ -77,22 +78,35 @@ export interface TotpEnrollment {
 interface FactorConfirmationResponse {
     isOk: boolean;
     recoveryCodes?: string[];
+    sessionRotated: boolean;
 }
 
 export const accountSecurityKeys = {
     all: ["account-security"] as const,
+    session: (userId: number | undefined, sessionId: string | undefined) =>
+        [...accountSecurityKeys.all, userId, sessionId] as const,
 };
 
-function invalidateSecurity(queryClient: ReturnType<typeof useQueryClient>) {
-    queryClient.invalidateQueries({ queryKey: accountSecurityKeys.all });
-    void authActions.refreshSession();
+function invalidateSecurity(
+    queryClient: ReturnType<typeof useQueryClient>,
+    didRotateSession = false
+): void {
+    if (didRotateSession) {
+        notifyAuthSessionRotated();
+    }
+    void queryClient.invalidateQueries({ queryKey: accountSecurityKeys.all });
+    void authActions.refreshSession().catch(() => {
+        // The rotated cookie remains authoritative when a best-effort refresh fails.
+    });
 }
 
 export function useAccountSecurity(isEnabled = true) {
+    const user = useAuthUser();
+    const sessionId = useAuthSessionId();
     return useQuery({
-        enabled: isEnabled,
+        enabled: isEnabled && user !== undefined,
         queryFn: () => apiFetchRequired<AccountSecuritySummary>("/account/security"),
-        queryKey: accountSecurityKeys.all,
+        queryKey: accountSecurityKeys.session(user?.id, sessionId),
         staleTime: 15_000,
     });
 }
@@ -104,7 +118,7 @@ export function usePasswordReauthentication() {
             apiPostRequired<{ isOk: boolean }>("/account/security/reauth/password", {
                 password,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -125,7 +139,7 @@ export function useChangePassword() {
                 currentPassword,
                 newPassword,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -136,7 +150,7 @@ export function useTotpStepUp() {
             apiPostRequired<{ isOk: boolean }>("/account/security/step-up/totp", {
                 code,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -147,7 +161,7 @@ export function useRecoveryStepUp() {
             apiPostRequired<{ isOk: boolean }>("/account/security/step-up/recovery", {
                 code,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -163,10 +177,14 @@ export function useWebAuthnStepUp() {
             });
             return apiPostRequired<{ isOk: boolean }>(
                 "/account/security/step-up/webauthn/verify",
-                { response }
+                { response },
+                {
+                    canRetryAfterUnauthorizedRecovery: false,
+                    canRetryAfterSecurityVerification: false,
+                }
             );
         },
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
@@ -186,9 +204,11 @@ export function useConfirmTotpEnrollment() {
         mutationFn: ({ code, factorId }: { code: string; factorId: string }) =>
             apiPostRequired<FactorConfirmationResponse>(
                 "/account/security/totp/confirm",
-                { code, factorId }
+                { code, factorId },
+                { canRetryAfterSecurityVerification: false }
             ),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: (response) =>
+            invalidateSecurity(queryClient, response.sessionRotated === true),
     });
 }
 
@@ -217,12 +237,20 @@ export function useRegisterSecurityKey() {
                 FactorConfirmationResponse & {
                     credential: WebAuthnCredential;
                 }
-            >("/account/security/webauthn/register/verify", {
-                label,
-                response,
-            });
+            >(
+                "/account/security/webauthn/register/verify",
+                {
+                    label,
+                    response,
+                },
+                {
+                    canRetryAfterUnauthorizedRecovery: false,
+                    canRetryAfterSecurityVerification: false,
+                }
+            );
         },
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: (response) =>
+            invalidateSecurity(queryClient, response.sessionRotated === true),
     });
 }
 
@@ -255,16 +283,21 @@ export function useDisableMfa() {
             apiPostRequired<{ isOk: boolean }>("/account/security/mfa/disable", {
                 password,
             }),
-        onSuccess: () => invalidateSecurity(queryClient),
+        onSuccess: () => invalidateSecurity(queryClient, true),
     });
 }
 
 export function useRevokeSession() {
     const queryClient = useQueryClient();
+    const currentSessionId = useAuthSessionId();
     return useMutation({
         mutationFn: (sessionId: string) =>
             apiDeleteRequired<{ isOk: boolean; loggedOut: boolean }>(
-                `/account/security/sessions/${encodeURIComponent(sessionId)}`
+                `/account/security/sessions/${encodeURIComponent(sessionId)}`,
+                {
+                    canRetryAfterUnauthorizedRecovery: sessionId !== currentSessionId,
+                    canRetryAfterSecurityVerification: sessionId !== currentSessionId,
+                }
             ),
         onSuccess: (response) => {
             if (response.loggedOut) {

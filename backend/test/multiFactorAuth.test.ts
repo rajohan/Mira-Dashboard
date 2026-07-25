@@ -429,8 +429,10 @@ describe("Dashboard multi-factor authentication", () => {
         expect(confirmation.status).toBe(200);
         const confirmed = (await confirmation.json()) as {
             recoveryCodes: string[];
+            sessionRotated: boolean;
         };
         expect(confirmed.recoveryCodes).toHaveLength(10);
+        expect(confirmed.sessionRotated).toBe(true);
         cookie = sessionCookieHeader(confirmation);
 
         const summary = accountSecurityRoutes["/api/account/security"].GET(

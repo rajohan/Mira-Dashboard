@@ -1990,9 +1990,19 @@ describe("Mira Dashboard pages", () => {
                 output: { message: "ok" },
             },
         ];
+        const sessionLastSeenAt = Date.now();
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: new Date(
+                    sessionLastSeenAt + 30 * 24 * 60 * 60_000
+                ).toISOString(),
+                lastSeenAt: new Date(sessionLastSeenAt).toISOString(),
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
             user: { id: 1, username: "mira" },
         });
         Object.defineProperties(globalThis, {
@@ -3403,7 +3413,7 @@ describe("Mira Dashboard pages", () => {
         await flushQueuedTimers();
 
         await waitFor(() => {
-            expect(screen.queryByText("failed.txt")).not.toBeInTheDocument();
+            expect(screen.getByText("failed.txt")).toBeInTheDocument();
             expect(screen.getByText("Failed to send message")).toBeInTheDocument();
         });
         await act(async () => {

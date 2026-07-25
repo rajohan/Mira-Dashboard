@@ -724,6 +724,19 @@ describe("Account security routes", () => {
         expect(verified.status).toBe(200);
         currentCookie = sessionCookie(verified);
 
+        const freshSummary = routes["/api/account/security"].GET(
+            request("/api/account/security", { cookie: currentCookie }),
+            server
+        );
+        const freshSummaryBody = (await freshSummary.json()) as {
+            recentVerification: {
+                mfa: boolean;
+                mfaRemainingMs?: number;
+            };
+        };
+        expect(freshSummaryBody.recentVerification.mfa).toBe(true);
+        expect(freshSummaryBody.recentVerification.mfaRemainingMs).toBeGreaterThan(0);
+
         const registrationOptions = await routes[
             "/api/account/security/webauthn/register/options"
         ].POST(
@@ -758,8 +771,10 @@ describe("Account security routes", () => {
         expect(registered.status).toBe(200);
         const registeredBody = (await registered.json()) as {
             credential: { id: string };
+            sessionRotated: boolean;
         };
         expect(registeredBody.credential.id).toBe(longCredentialId);
+        expect(registeredBody.sessionRotated).toBe(false);
         const auditEvent = listAuditEvents(10).events.find(
             (event) =>
                 event.action === "account.security-key-added" &&

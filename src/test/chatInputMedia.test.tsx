@@ -110,6 +110,158 @@ describe("chat input media", () => {
         ).toHaveLength(4);
     });
 
+    it("restores only the attachment snapshot cleared in the current restoration epoch", async () => {
+        const { result } = renderHook(() =>
+            useChatInputMedia({
+                onError: jest.fn(),
+                sessionKey: "session-a",
+                setDraft: jest.fn(),
+            })
+        );
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["preserve"], "preserve.txt", {
+                        type: "text/plain",
+                    }),
+                ])
+            );
+        });
+        const attachmentSnapshot = result.current.attachments;
+        let clearedEpoch = 0;
+        act(() => {
+            clearedEpoch = result.current.clearAttachments();
+        });
+        expect(result.current.attachments).toEqual([]);
+
+        let didRestore = false;
+        act(() => {
+            didRestore = result.current.restoreAttachments(
+                attachmentSnapshot,
+                clearedEpoch
+            );
+        });
+        expect(didRestore).toBe(true);
+        expect(result.current.attachments).toEqual(attachmentSnapshot);
+
+        let staleEpoch = 0;
+        let didRestoreStaleSnapshot = true;
+        act(() => {
+            staleEpoch = result.current.clearAttachments();
+            result.current.clearAttachments();
+            didRestoreStaleSnapshot = result.current.restoreAttachments(
+                attachmentSnapshot,
+                staleEpoch
+            );
+        });
+        expect(didRestoreStaleSnapshot).toBe(false);
+        expect(result.current.attachments).toEqual([]);
+    });
+
+    it("does not restore sent attachments after replacement selection starts", async () => {
+        const { result } = renderHook(() =>
+            useChatInputMedia({
+                onError: jest.fn(),
+                sessionKey: "session-a",
+                setDraft: jest.fn(),
+            })
+        );
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["sent"], "sent.txt", {
+                        type: "text/plain",
+                    }),
+                ])
+            );
+        });
+        const sentAttachments = result.current.attachments;
+        let clearedEpoch = 0;
+        act(() => {
+            clearedEpoch = result.current.clearAttachments();
+        });
+
+        let didRestoreSentAttachments = true;
+        await act(async () => {
+            const replacementSelection = result.current.handleFilesSelected(
+                fileList([
+                    new File(["replacement"], "replacement.txt", {
+                        type: "text/plain",
+                    }),
+                ])
+            );
+            didRestoreSentAttachments = result.current.restoreAttachments(
+                sentAttachments,
+                clearedEpoch
+            );
+            await replacementSelection;
+        });
+
+        expect(didRestoreSentAttachments).toBe(false);
+        expect(
+            result.current.attachments.map((attachment) => attachment.fileName)
+        ).toEqual(["replacement.txt"]);
+    });
+
+    it("does not restore sent input after voice-file transcription starts", async () => {
+        const originalFetch = fetch;
+        const transcriptionResponse = Promise.withResolvers<Response>();
+        const { result } = renderHook(() =>
+            useChatInputMedia({
+                onError: jest.fn(),
+                sessionKey: "session-a",
+                setDraft: jest.fn(),
+            })
+        );
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["sent"], "sent.txt", {
+                        type: "text/plain",
+                    }),
+                ])
+            );
+        });
+        const sentAttachments = result.current.attachments;
+        let clearedEpoch = 0;
+        act(() => {
+            clearedEpoch = result.current.clearAttachments();
+        });
+
+        try {
+            defineFetch(
+                jest.fn(() => transcriptionResponse.promise) as unknown as typeof fetch
+            );
+            let transcription: Promise<void> | undefined;
+            act(() => {
+                transcription = result.current.handleVoiceFileSelected(
+                    fileList([
+                        new File(["voice"], "voice.webm", {
+                            type: "audio/webm",
+                        }),
+                    ])
+                );
+            });
+            await waitFor(() => expect(result.current.isTranscribing).toBe(true));
+
+            let didRestoreSentInput = true;
+            act(() => {
+                didRestoreSentInput = result.current.restoreAttachments(
+                    sentAttachments,
+                    clearedEpoch
+                );
+            });
+            await act(async () => {
+                transcriptionResponse.resolve(Response.json({ text: "new transcript" }));
+                await transcription;
+            });
+
+            expect(didRestoreSentInput).toBe(false);
+        } finally {
+            defineFetch(originalFetch);
+        }
+    });
+
     it("skips video files while preserving valid attachments", async () => {
         const onError = jest.fn();
         const { result } = renderHook(() =>
@@ -450,6 +602,20 @@ describe("chat input media", () => {
         result.current.voiceFileInputReference.current = {
             click,
         } as unknown as HTMLInputElement;
+        await act(async () => {
+            await result.current.handleFilesSelected(
+                fileList([
+                    new File(["sent"], "sent.txt", {
+                        type: "text/plain",
+                    }),
+                ])
+            );
+        });
+        const sentAttachments = result.current.attachments;
+        let clearedEpoch = 0;
+        act(() => {
+            clearedEpoch = result.current.clearAttachments();
+        });
 
         try {
             Object.defineProperty(globalThis, "MediaRecorder", {
@@ -463,7 +629,15 @@ describe("chat input media", () => {
             await act(async () => {
                 await result.current.handleToggleRecording();
             });
+            let didRestoreSentInput = true;
+            act(() => {
+                didRestoreSentInput = result.current.restoreAttachments(
+                    sentAttachments,
+                    clearedEpoch
+                );
+            });
             expect(click).toHaveBeenCalledTimes(1);
+            expect(didRestoreSentInput).toBe(false);
             expect(onError.mock.calls.at(-1)?.[0]).toContain("voice recording");
         } finally {
             if (mediaRecorderDescriptor) {

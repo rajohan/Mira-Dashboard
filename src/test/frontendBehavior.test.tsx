@@ -183,7 +183,19 @@ import {
     useTerminalJob,
 } from "../hooks/useTerminal";
 import { useWeather } from "../hooks/useWeather";
-import { UNAUTHORIZED_EVENT_NAME } from "../lib/authBoundary";
+import {
+    notifyAuthSessionRotated,
+    UNAUTHORIZED_EVENT_NAME,
+    uninstallAuthSessionRotationSync,
+} from "../lib/authBoundary";
+import {
+    cancelSecurityVerification,
+    completeSecurityVerification,
+    refreshSecurityVerificationDeadline,
+    SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
+    SecurityVerificationCancelledError,
+    waitForSecurityVerification,
+} from "../lib/securityVerification";
 import { createSocketClient } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import {
@@ -599,13 +611,22 @@ class FakeWebSocket {
 
 function latestSocketRequest(socket: FakeWebSocket): {
     id: string;
+    method?: string;
     timeoutMs?: number;
 } {
     const serializedRequest = socket.sent.at(-1);
     if (!serializedRequest) {
         throw new Error("Expected a WebSocket request");
     }
-    return JSON.parse(serializedRequest) as { id: string; timeoutMs?: number };
+    return JSON.parse(serializedRequest) as {
+        id: string;
+        method?: string;
+        timeoutMs?: number;
+    };
+}
+
+function claimSecurityVerification(event: Event): void {
+    event.preventDefault();
 }
 
 describe("Mira Dashboard frontend behavior", () => {
@@ -615,6 +636,7 @@ describe("Mira Dashboard frontend behavior", () => {
     });
 
     afterEach(() => {
+        uninstallAuthSessionRotationSync();
         authActions.clearSession();
         resetUserActivityForTests();
     });
@@ -691,6 +713,13 @@ describe("Mira Dashboard frontend behavior", () => {
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
             user: { id: 1, username: "raymond" },
         });
         const originalFetch = fetch;
@@ -1122,6 +1151,13 @@ describe("Mira Dashboard frontend behavior", () => {
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
             user: { id: 1, username: "raymond" },
         });
         const unauthorizedEvents: Event[] = [];
@@ -1131,9 +1167,20 @@ describe("Mira Dashboard frontend behavior", () => {
         addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
-            value: jest.fn(async () =>
-                Response.json({ error: "Unauthorized" }, { status: 401 })
-            ),
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/tasks") {
+                    return Response.json({ error: "Unauthorized" }, { status: 401 });
+                }
+                if (String(input) === "/api/auth/session") {
+                    return Response.json({
+                        authenticated: false,
+                        isBootstrapRequired: false,
+                    });
+                }
+                throw new Error(
+                    `Unexpected authorization-boundary request: ${String(input)}`
+                );
+            }),
             writable: true,
         });
 
@@ -1141,9 +1188,134 @@ describe("Mira Dashboard frontend behavior", () => {
             await expect(apiFetch("/tasks")).rejects.toBeInstanceOf(UnauthorizedError);
             expect(authStore.state.isAuthenticated).toBe(false);
             expect(unauthorizedEvents).toHaveLength(1);
+            expect(fetch).toHaveBeenCalledTimes(2);
         } finally {
             removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
         }
+    });
+
+    it("retries a stale 401 against the browser's rotated session", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        let taskRequests = 0;
+        const unauthorizedHandler = jest.fn();
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL) => {
+                if (String(input) === "/api/auth/session") {
+                    return Response.json({
+                        authenticated: true,
+                        isBootstrapRequired: false,
+                        session: {
+                            authMethod: "webauthn",
+                            expiresAt: "2026-08-24T12:00:00.000Z",
+                            lastSeenAt: "2026-07-25T04:01:00.000Z",
+                            mfaEnabled: true,
+                            sessionId: "22222222222222222222222222222222",
+                        },
+                        user: { id: 1, username: "raymond" },
+                    });
+                }
+                if (String(input) === "/api/tasks") {
+                    taskRequests += 1;
+                    return taskRequests === 1
+                        ? Response.json({ error: "Unauthorized" }, { status: 401 })
+                        : Response.json({ isOk: true });
+                }
+                throw new Error(`Unexpected stale-401 request: ${String(input)}`);
+            }),
+            writable: true,
+        });
+
+        try {
+            notifyAuthSessionRotated();
+            await expect(apiFetch("/tasks")).resolves.toEqual({ isOk: true });
+            expect(taskRequests).toBe(2);
+            expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
+            expect(unauthorizedHandler).not.toHaveBeenCalled();
+        } finally {
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        }
+    });
+
+    it("recovers a stale 401 independently of verification replay opt-out", async () => {
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        let confirmationRequests = 0;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(
+                async (
+                    input: RequestInfo | URL,
+                    init?: RequestInit
+                ): Promise<Response> => {
+                    if (String(input) === "/api/auth/session") {
+                        return Response.json({
+                            authenticated: true,
+                            isBootstrapRequired: false,
+                            session: {
+                                authMethod: "webauthn",
+                                expiresAt: "2026-08-24T12:00:00.000Z",
+                                lastSeenAt: "2026-07-25T04:01:00.000Z",
+                                mfaEnabled: true,
+                                sessionId: "22222222222222222222222222222222",
+                            },
+                            user: { id: 1, username: "raymond" },
+                        });
+                    }
+                    if (
+                        String(input) === "/api/account/security/totp/confirm" &&
+                        init?.method === "POST"
+                    ) {
+                        confirmationRequests += 1;
+                        return confirmationRequests === 1
+                            ? Response.json({ error: "Unauthorized" }, { status: 401 })
+                            : Response.json({ isOk: true });
+                    }
+                    throw new Error(
+                        `Unexpected verification-opt-out recovery request: ${String(
+                            input
+                        )}`
+                    );
+                }
+            ),
+            writable: true,
+        });
+
+        notifyAuthSessionRotated();
+        await expect(
+            apiFetch("/account/security/totp/confirm", {
+                body: JSON.stringify({
+                    code: "123456",
+                    factorId: "01900000-0000-7000-8000-000000000099",
+                }),
+                canRetryAfterSecurityVerification: false,
+                method: "POST",
+            })
+        ).resolves.toEqual({ isOk: true });
+        expect(confirmationRequests).toBe(2);
+        expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
     });
 
     it("refreshes idle-session activity only after a real browser interaction", () => {
@@ -1195,6 +1367,152 @@ describe("Mira Dashboard frontend behavior", () => {
             });
         } finally {
             removeEventListener("mira:security-verification-required", handler);
+        }
+    });
+
+    it("retries an API action once after the shared verification flow completes", async () => {
+        let requestCount = 0;
+        const verificationHandler = jest.fn(claimSecurityVerification);
+        addEventListener("mira:security-verification-required", verificationHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () => {
+                requestCount += 1;
+                return requestCount === 1
+                    ? Response.json(
+                          {
+                              code: "step_up_required",
+                              error: "Recent MFA verification is required",
+                          },
+                          { status: 403 }
+                      )
+                    : Response.json({ isOk: true });
+            }),
+            writable: true,
+        });
+
+        try {
+            const request = apiFetch<{ isOk: boolean }>("/privileged", {
+                method: "POST",
+            });
+            await waitFor(() => {
+                expect(verificationHandler).toHaveBeenCalledTimes(1);
+            });
+            expect(requestCount).toBe(1);
+            completeSecurityVerification();
+            await expect(request).resolves.toEqual({ isOk: true });
+            expect(requestCount).toBe(2);
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+        }
+    });
+
+    it("does not replay a one-shot request body after verification", async () => {
+        let requestCount = 0;
+        const verificationHandler = jest.fn(claimSecurityVerification);
+        addEventListener("mira:security-verification-required", verificationHandler);
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () => {
+                requestCount += 1;
+                return requestCount === 1
+                    ? Response.json(
+                          {
+                              code: "step_up_required",
+                              error: "Recent MFA verification is required",
+                          },
+                          { status: 403 }
+                      )
+                    : Response.json({ isOk: true });
+            }),
+            writable: true,
+        });
+
+        try {
+            const request = apiFetch<{ isOk: boolean }>("/privileged-stream", {
+                body: new ReadableStream<Uint8Array>(),
+                method: "POST",
+            });
+            const rejection = expect(request).rejects.toBeInstanceOf(ApiError);
+            await waitFor(() => {
+                expect(verificationHandler).toHaveBeenCalledTimes(1);
+            });
+            expect(requestCount).toBe(1);
+            completeSecurityVerification();
+            await rejection;
+            expect(requestCount).toBe(1);
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+        }
+    });
+
+    it("bounds a claimed verification wait when the host never settles it", async () => {
+        jest.useFakeTimers();
+        const verificationHandler = claimSecurityVerification;
+        const cancellationHandler = jest.fn();
+        addEventListener("mira:security-verification-required", verificationHandler);
+        addEventListener(SECURITY_VERIFICATION_CANCELLED_EVENT_NAME, cancellationHandler);
+        try {
+            const verification = waitForSecurityVerification("step_up_required", 1000);
+            jest.advanceTimersByTime(1000);
+            await expect(verification).resolves.toBe(false);
+            expect(cancellationHandler).not.toHaveBeenCalled();
+            cancelSecurityVerification();
+            expect(cancellationHandler).toHaveBeenCalledTimes(1);
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+            removeEventListener(
+                SECURITY_VERIFICATION_CANCELLED_EVENT_NAME,
+                cancellationHandler
+            );
+            jest.useRealTimers();
+        }
+    });
+
+    it("refreshes every held request deadline when verification is submitted", async () => {
+        jest.useFakeTimers();
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        try {
+            const verification = waitForSecurityVerification("step_up_required", 1000);
+            let outcome = "pending";
+            const observedSettlement = (async () => {
+                const verified = await verification;
+                outcome = verified ? "verified" : "cancelled";
+                return "settled" as const;
+            })();
+
+            jest.advanceTimersByTime(750);
+            refreshSecurityVerificationDeadline();
+            jest.advanceTimersByTime(750);
+            await expect(
+                Promise.race([
+                    observedSettlement,
+                    new Promise<"pending">((resolve) => {
+                        queueMicrotask(() => resolve("pending"));
+                    }),
+                ])
+            ).resolves.toBe("pending");
+            expect(outcome).toBe("pending");
+
+            jest.advanceTimersByTime(250);
+            await expect(verification).resolves.toBe(false);
+            expect(outcome).toBe("cancelled");
+        } finally {
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+            jest.useRealTimers();
         }
     });
 
@@ -1458,6 +1776,72 @@ describe("Mira Dashboard frontend behavior", () => {
                 );
             }
 
+            const cancelledVerificationHandler = claimSecurityVerification;
+            addEventListener(
+                "mira:security-verification-required",
+                cancelledVerificationHandler
+            );
+            try {
+                const cancelledPromise = client.request("privileged.cancelled");
+                const cancelledRequest = latestSocketRequest(socket);
+                socket.message({
+                    type: "response",
+                    id: cancelledRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                cancelSecurityVerification();
+                await expect(cancelledPromise).rejects.toBeInstanceOf(
+                    SecurityVerificationCancelledError
+                );
+                expect(latestSocketRequest(socket)).toEqual(cancelledRequest);
+            } finally {
+                removeEventListener(
+                    "mira:security-verification-required",
+                    cancelledVerificationHandler
+                );
+            }
+
+            const resumableVerificationHandler = claimSecurityVerification;
+            addEventListener(
+                "mira:security-verification-required",
+                resumableVerificationHandler
+            );
+            try {
+                const resumablePromise = client.request<{ resumed: boolean }>(
+                    "privileged.resumable"
+                );
+                const blockedRequest = latestSocketRequest(socket);
+                socket.message({
+                    type: "response",
+                    id: blockedRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                completeSecurityVerification();
+                await waitFor(() =>
+                    expect(latestSocketRequest(socket).id).not.toBe(blockedRequest.id)
+                );
+                const retriedRequest = latestSocketRequest(socket);
+                expect(retriedRequest).toMatchObject({
+                    method: "privileged.resumable",
+                });
+                socket.message({
+                    type: "response",
+                    id: retriedRequest.id,
+                    isOk: true,
+                    payload: { resumed: true },
+                });
+                await expect(resumablePromise).resolves.toEqual({ resumed: true });
+            } finally {
+                removeEventListener(
+                    "mira:security-verification-required",
+                    resumableVerificationHandler
+                );
+            }
+
             installUserActivityTracking();
             dispatchEvent(new Event("pointerdown"));
             const activeRequestPromise = client.request<{ active: boolean }>(
@@ -1619,7 +2003,7 @@ describe("Mira Dashboard frontend behavior", () => {
         }
     });
 
-    it("logs out without reconnecting after a 4401 WebSocket close", () => {
+    it("reconnects before retrying a verified request when no socket is open", async () => {
         const originalWebSocket = WebSocket;
         FakeWebSocket.instances = [];
         Object.defineProperty(globalThis, "WebSocket", {
@@ -1627,14 +2011,245 @@ describe("Mira Dashboard frontend behavior", () => {
             value: FakeWebSocket,
             writable: true,
         });
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        const onMessage = jest.fn();
+        const client = createSocketClient({
+            onMessage,
+            url: "ws://dashboard.test/socket",
+        });
+
+        try {
+            client.connect();
+            const originalSocket = FakeWebSocket.instances[0]!;
+            originalSocket.open();
+            let request: Promise<{ resumed: boolean }>;
+            const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+            try {
+                request = client.request<{ resumed: boolean }>(
+                    "privileged.reconnect",
+                    undefined,
+                    { timeoutMs: 9876 }
+                );
+                expect(
+                    timeoutSpy.mock.calls.filter(([, timeout]) => timeout === 9876)
+                ).toHaveLength(1);
+                const blockedRequest = latestSocketRequest(originalSocket);
+                originalSocket.message({
+                    type: "response",
+                    id: blockedRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                originalSocket.readyState = FakeWebSocket.CLOSED;
+
+                await act(async () => {
+                    completeSecurityVerification();
+                    await Promise.resolve();
+                });
+                expect(FakeWebSocket.instances).toHaveLength(2);
+                expect(
+                    timeoutSpy.mock.calls.filter(([, timeout]) => timeout === 9876)
+                ).toHaveLength(2);
+            } finally {
+                timeoutSpy.mockRestore();
+            }
+            const replacementSocket = FakeWebSocket.instances[1]!;
+            expect(replacementSocket.sent).toEqual([]);
+
+            replacementSocket.open();
+            await waitFor(() => expect(replacementSocket.sent).toHaveLength(1));
+            const currentMessageCount = onMessage.mock.calls.length;
+            originalSocket.message({
+                type: "event",
+                event: "stale-after-session-rotation",
+            });
+            expect(onMessage).toHaveBeenCalledTimes(currentMessageCount);
+            const retriedRequest = latestSocketRequest(replacementSocket);
+            expect(retriedRequest).toMatchObject({
+                method: "privileged.reconnect",
+            });
+            replacementSocket.message({
+                type: "response",
+                id: retriedRequest.id,
+                isOk: true,
+                payload: { resumed: true },
+            });
+            await expect(request).resolves.toEqual({ resumed: true });
+
+            let indefiniteRequest: Promise<{ resumed: boolean }>;
+            const indefiniteTimeoutSpy = jest.spyOn(globalThis, "setTimeout");
+            try {
+                const defaultTimeoutCallCount = indefiniteTimeoutSpy.mock.calls.filter(
+                    ([, timeout]) => timeout === 30_000
+                ).length;
+                indefiniteRequest = client.request<{ resumed: boolean }>(
+                    "privileged.indefinite",
+                    undefined,
+                    { shouldWaitIndefinitely: true }
+                );
+                const indefiniteBlockedRequest = latestSocketRequest(replacementSocket);
+                replacementSocket.message({
+                    type: "response",
+                    id: indefiniteBlockedRequest.id,
+                    isOk: false,
+                    code: "step_up_required",
+                    error: "Recent MFA verification is required",
+                });
+                replacementSocket.readyState = FakeWebSocket.CLOSED;
+
+                await act(async () => {
+                    completeSecurityVerification();
+                    await Promise.resolve();
+                });
+                expect(FakeWebSocket.instances).toHaveLength(3);
+                expect(
+                    indefiniteTimeoutSpy.mock.calls.filter(
+                        ([, timeout]) => timeout === 30_000
+                    )
+                ).toHaveLength(defaultTimeoutCallCount);
+            } finally {
+                indefiniteTimeoutSpy.mockRestore();
+            }
+            const indefiniteSocket = FakeWebSocket.instances[2]!;
+            indefiniteSocket.open();
+            await waitFor(() => expect(indefiniteSocket.sent).toHaveLength(1));
+            const indefiniteRetry = latestSocketRequest(indefiniteSocket);
+            expect(indefiniteRetry).not.toHaveProperty("timeoutMs");
+            indefiniteSocket.message({
+                type: "response",
+                id: indefiniteRetry.id,
+                isOk: true,
+                payload: { resumed: true },
+            });
+            await expect(indefiniteRequest).resolves.toEqual({ resumed: true });
+        } finally {
+            client.disconnect();
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+        }
+    });
+
+    it("does not revive a verified request after terminal socket authorization failure", async () => {
+        const originalWebSocket = WebSocket;
+        const originalFetch = fetch;
+        FakeWebSocket.instances = [];
+        Object.defineProperties(globalThis, {
+            WebSocket: {
+                configurable: true,
+                value: FakeWebSocket,
+                writable: true,
+            },
+            fetch: {
+                configurable: true,
+                value: jest.fn(async () =>
+                    Response.json({
+                        authenticated: false,
+                        isBootstrapRequired: false,
+                        user: undefined,
+                    })
+                ),
+                writable: true,
+            },
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const verificationHandler = claimSecurityVerification;
+        addEventListener("mira:security-verification-required", verificationHandler);
+        const client = createSocketClient({
+            url: "ws://dashboard.test/socket",
+        });
+
+        try {
+            client.connect();
+            const socket = FakeWebSocket.instances[0]!;
+            socket.open();
+            const request = client.request("privileged.terminal");
+            const blockedRequest = latestSocketRequest(socket);
+            socket.message({
+                type: "response",
+                id: blockedRequest.id,
+                isOk: false,
+                code: "step_up_required",
+                error: "Recent MFA verification is required",
+            });
+            socket.close(4401);
+            await waitFor(() => expect(authStore.state.isAuthenticated).toBe(false));
+
+            completeSecurityVerification();
+            await expect(request).rejects.toThrow("WebSocket authorization failed");
+            expect(FakeWebSocket.instances).toHaveLength(1);
+        } finally {
+            client.disconnect();
+            removeEventListener(
+                "mira:security-verification-required",
+                verificationHandler
+            );
+            Object.defineProperties(globalThis, {
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
+            });
+        }
+    });
+
+    it("logs out without reconnecting after a confirmed 4401 WebSocket close", async () => {
+        const originalWebSocket = WebSocket;
+        const originalFetch = fetch;
+        FakeWebSocket.instances = [];
+        Object.defineProperties(globalThis, {
+            WebSocket: {
+                configurable: true,
+                value: FakeWebSocket,
+                writable: true,
+            },
+            fetch: {
+                configurable: true,
+                value: jest.fn(async () =>
+                    Response.json({
+                        authenticated: false,
+                        isBootstrapRequired: false,
+                        user: undefined,
+                    })
+                ),
+                writable: true,
+            },
+        });
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
             user: { id: 1, username: "raymond" },
         });
+        const unauthorized = Promise.withResolvers<void>();
         const unauthorizedEvents: Event[] = [];
         const unauthorizedHandler = (event: Event) => {
             unauthorizedEvents.push(event);
+            unauthorized.resolve();
         };
         addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
         const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
@@ -1648,6 +2263,7 @@ describe("Mira Dashboard frontend behavior", () => {
             socket.open();
             socket.close(4401);
 
+            await unauthorized.promise;
             expect(authStore.state.isAuthenticated).toBe(false);
             expect(unauthorizedEvents).toHaveLength(1);
             expect(timeoutSpy).not.toHaveBeenCalledWith(expect.any(Function), 2000);
@@ -1655,10 +2271,100 @@ describe("Mira Dashboard frontend behavior", () => {
         } finally {
             timeoutSpy.mockRestore();
             removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
-            Object.defineProperty(globalThis, "WebSocket", {
+            Object.defineProperties(globalThis, {
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
+            });
+        }
+    });
+
+    it("reconnects a 4401 WebSocket when the browser has a rotated session", async () => {
+        const originalWebSocket = WebSocket;
+        const originalFetch = fetch;
+        FakeWebSocket.instances = [];
+        Object.defineProperties(globalThis, {
+            WebSocket: {
                 configurable: true,
-                value: originalWebSocket,
+                value: FakeWebSocket,
                 writable: true,
+            },
+            fetch: {
+                configurable: true,
+                value: jest.fn(async (input: RequestInfo | URL) => {
+                    if (String(input) !== "/api/auth/session") {
+                        throw new Error(
+                            `Unexpected socket recovery request: ${String(input)}`
+                        );
+                    }
+                    return Response.json({
+                        authenticated: true,
+                        isBootstrapRequired: false,
+                        session: {
+                            authMethod: "webauthn",
+                            expiresAt: "2026-08-24T12:00:00.000Z",
+                            lastSeenAt: "2026-07-25T04:01:00.000Z",
+                            mfaEnabled: true,
+                            sessionId: "22222222222222222222222222222222",
+                        },
+                        user: { id: 1, username: "raymond" },
+                    });
+                }),
+                writable: true,
+            },
+        });
+        authActions.setSession({
+            authenticated: true,
+            isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
+            user: { id: 1, username: "raymond" },
+        });
+        const unauthorizedHandler = jest.fn();
+        addEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+        const client = createSocketClient({
+            url: "ws://dashboard.test/socket",
+        });
+
+        try {
+            client.connect();
+            const oldSocket = FakeWebSocket.instances[0]!;
+            oldSocket.open();
+            notifyAuthSessionRotated();
+            oldSocket.close(4401);
+
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+            expect(authStore.state.sessionId).toBe("22222222222222222222222222222222");
+            expect(unauthorizedHandler).not.toHaveBeenCalled();
+            const rotatedSocket = FakeWebSocket.instances[1]!;
+            rotatedSocket.open();
+            expect(client.isOpen()).toBe(true);
+        } finally {
+            client.disconnect();
+            removeEventListener(UNAUTHORIZED_EVENT_NAME, unauthorizedHandler);
+            Object.defineProperties(globalThis, {
+                WebSocket: {
+                    configurable: true,
+                    value: originalWebSocket,
+                    writable: true,
+                },
+                fetch: {
+                    configurable: true,
+                    value: originalFetch,
+                    writable: true,
+                },
             });
         }
     });
@@ -1674,6 +2380,13 @@ describe("Mira Dashboard frontend behavior", () => {
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
             user: { id: 1, username: "raymond" },
         });
         const receivedMessages: unknown[] = [];
@@ -1809,7 +2522,69 @@ describe("Mira Dashboard frontend behavior", () => {
             await expect(request).resolves.toEqual({ pong: true });
 
             act(() => {
-                socket.message({ type: "state", gatewayConnected: false });
+                notifyAuthSessionRotated();
+            });
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+            const rotatedSocket = FakeWebSocket.instances[1]!;
+            expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+            act(() => {
+                rotatedSocket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+
+            act(() => {
+                authActions.setSession({
+                    authenticated: true,
+                    isBootstrapRequired: false,
+                    user: { id: 1, username: "raymond" },
+                });
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+            expect(FakeWebSocket.instances).toHaveLength(2);
+            expect(rotatedSocket.readyState).toBe(FakeWebSocket.OPEN);
+
+            act(() => {
+                authActions.setSession({
+                    authenticated: true,
+                    isBootstrapRequired: false,
+                    session: {
+                        authMethod: "webauthn",
+                        expiresAt: "2026-08-24T12:00:00.000Z",
+                        lastSeenAt: "2026-07-25T04:01:00.000Z",
+                        mfaEnabled: true,
+                        sessionId: "22222222222222222222222222222222",
+                    },
+                    user: { id: 1, username: "raymond" },
+                });
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+            expect(FakeWebSocket.instances).toHaveLength(2);
+            expect(rotatedSocket.readyState).toBe(FakeWebSocket.OPEN);
+
+            act(() => {
+                authActions.setSession({
+                    authenticated: true,
+                    isBootstrapRequired: false,
+                    session: {
+                        authMethod: "webauthn",
+                        expiresAt: "2026-08-24T12:00:00.000Z",
+                        lastSeenAt: "2026-07-25T04:02:00.000Z",
+                        mfaEnabled: true,
+                        sessionId: "33333333333333333333333333333333",
+                    },
+                    user: { id: 2, username: "second-user" },
+                });
+            });
+            await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3));
+            const identitySocket = FakeWebSocket.instances[2]!;
+            expect(rotatedSocket.readyState).toBe(FakeWebSocket.CLOSED);
+            act(() => {
+                identitySocket.open();
+            });
+            await waitFor(() => expect(result.current.isConnected).toBe(true));
+
+            act(() => {
+                identitySocket.message({ type: "state", gatewayConnected: false });
             });
             await waitFor(() => expect(result.current.isConnected).toBe(false));
             expect(receivedMessages).toContainEqual({
@@ -1844,6 +2619,13 @@ describe("Mira Dashboard frontend behavior", () => {
         authActions.setSession({
             authenticated: true,
             isBootstrapRequired: false,
+            session: {
+                authMethod: "webauthn",
+                expiresAt: "2026-08-24T12:00:00.000Z",
+                lastSeenAt: "2026-07-25T04:00:00.000Z",
+                mfaEnabled: true,
+                sessionId: "11111111111111111111111111111111",
+            },
             user: { id: 1, username: "raymond" },
         });
 

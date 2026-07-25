@@ -11,6 +11,11 @@ import {
 
 import { replaceSessionsFromWebSocket } from "../collections/sessions";
 import {
+    AUTH_SESSION_ROTATED_EVENT_NAME,
+    type AuthSessionIdentity,
+    isSignaledAuthSessionRotation,
+} from "../lib/authBoundary";
+import {
     createSocketClient,
     type SocketClient,
     type SocketRequestOptions,
@@ -43,8 +48,13 @@ const OpenClawSocketContext = createContext<OpenClawSocketContextValue | undefin
 /** Provides OpenClaw socket state. */
 export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const isAuthenticated = useSelector(authStore, (state) => state.isAuthenticated);
+    const authenticatedUserId = useSelector(authStore, (state) => state.user?.id);
+    const sessionId = useSelector(authStore, (state) => state.sessionId);
     const clientReference = useRef<SocketClient | undefined>(undefined);
     const listenersReference = useRef(new Set<(data: unknown) => void>());
+    const previousAuthIdentityReference = useRef<AuthSessionIdentity | undefined>(
+        undefined
+    );
 
     const [isConnected, setIsConnected] = useState(false);
     const [hasConfirmedSessionList, setHasConfirmedSessionList] = useState(false);
@@ -156,12 +166,55 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     };
 
     useEffect(() => {
+        const currentAuthIdentity =
+            isAuthenticated && authenticatedUserId !== undefined && sessionId
+                ? {
+                      sessionId,
+                      userId: authenticatedUserId,
+                  }
+                : undefined;
+        const previousAuthIdentity = previousAuthIdentityReference.current;
+        previousAuthIdentityReference.current =
+            currentAuthIdentity ?? (isAuthenticated ? previousAuthIdentity : undefined);
         if (isAuthenticated) {
-            connect();
+            if (!currentAuthIdentity) {
+                return;
+            }
+            if (
+                previousAuthIdentity &&
+                isSignaledAuthSessionRotation(previousAuthIdentity, currentAuthIdentity)
+            ) {
+                if (!clientReference.current) {
+                    connect();
+                }
+                return;
+            }
+            if (clientReference.current) {
+                clientReference.current.reconnect();
+            } else {
+                connect();
+            }
         } else {
+            previousAuthIdentityReference.current = undefined;
             disconnect();
             setError(undefined);
         }
+    }, [authenticatedUserId, isAuthenticated, sessionId]);
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return;
+        }
+        const reconnectWithRotatedSession = () => {
+            clientReference.current?.reconnect();
+        };
+        addEventListener(AUTH_SESSION_ROTATED_EVENT_NAME, reconnectWithRotatedSession);
+        return () => {
+            removeEventListener(
+                AUTH_SESSION_ROTATED_EVENT_NAME,
+                reconnectWithRotatedSession
+            );
+        };
     }, [isAuthenticated]);
 
     useEffect(() => {
