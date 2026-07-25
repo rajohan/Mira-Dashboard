@@ -40,6 +40,18 @@ async function ready() {
     return json(snapshot, { status: snapshot.status === "isReady" ? 200 : 503 });
 }
 
+async function legacyReady() {
+    const snapshot = await readinessSnapshot();
+    const isReady = snapshot.status === "isReady";
+    return json(
+        {
+            status: isReady ? "isOk" : "notReady",
+            workerOnline: snapshot.checks.worker.ready,
+        },
+        { status: isReady ? 200 : 503 }
+    );
+}
+
 async function diagnostics() {
     return json(await diagnosticsSnapshot());
 }
@@ -65,6 +77,12 @@ const routeTable = {
     },
     "/api/health/diagnostics": {
         GET: diagnostics,
+    },
+    // Transitional compatibility for the in-flight pre-readiness deploy
+    // executor. Remove after the atomic release executor has completed cutover.
+    "/api/health": {
+        GET: legacyReady,
+        HEAD: legacyReady,
     },
     "/api/health/live": {
         GET: live,

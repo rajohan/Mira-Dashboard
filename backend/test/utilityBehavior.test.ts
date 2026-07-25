@@ -721,6 +721,11 @@ describe("backend service utilities", () => {
             .mockImplementation(() => {
                 throw new Error("queue telemetry unavailable");
             });
+        const releaseSummarySpy = jest
+            .spyOn(jobExecutionQueueModule, "isJobWorkerReleaseReady")
+            .mockImplementation(() => {
+                throw new Error("queue telemetry unavailable");
+            });
         const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
         try {
             const response = await callTestRoute(
@@ -742,6 +747,7 @@ describe("backend service utilities", () => {
             );
         } finally {
             summarySpy.mockRestore();
+            releaseSummarySpy.mockRestore();
             warnSpy.mockRestore();
         }
     });

@@ -187,6 +187,8 @@ if ! bun -e 'const packageJson = await Bun.file("package.json").json(); process.
   echo "Rollback target predates the supported deploy contract" >&2
   exit 1
 fi
+bun install --frozen-lockfile
+(cd backend && bun install --frozen-lockfile)
 if test -f scripts/writeReleaseManifest.ts; then
   release_health_path=/api/health/ready
 else
@@ -204,7 +206,13 @@ systemctl --user restart mira-dashboard.service
 systemctl --user restart mira-dashboard-worker.service
 wait_for_dashboard_ready() {
   for attempt in {1..20}; do
-    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+    if test "$release_health_path" = "/api/health"; then
+      if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+        "http://127.0.0.1:3100${release_health_path}" |
+        grep -Fq '"workerOnline":true'; then
+        return 0
+      fi
+    elif curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
       "http://127.0.0.1:3100${release_health_path}" >/dev/null; then
       return 0
     fi
@@ -341,6 +349,9 @@ Deployment health is split by purpose:
   internal activation check fails.
 - `GET /api/health/diagnostics` returns the readiness breakdown plus session
   count and requires an authenticated Dashboard session.
+- `GET /api/health` is a temporary compatibility adapter for the pre-readiness
+  deploy executor. It returns 503 unless the full readiness contract passes and
+  retains `workerOnline` only until the atomic executor cutover is complete.
 
 Gateway connectivity is reported as an external dependency but deliberately
 does not fail release readiness: rolling Dashboard code back cannot repair an
