@@ -345,28 +345,38 @@ fails the release contract.
 The release lifecycle layer validates immutable directories named by full Git
 SHA under `/home/ubuntu/projects/mira-dashboard-releases/releases/`. This is the
 production default; a deliberately configured `MIRA_DASHBOARD_RELEASES_ROOT`
-overrides it. Run lifecycle commands from a verified release with the same
-Doppler production environment as the services so schema checks always inspect
-the live Dashboard database. Pass the service's stable absolute database path
-after Doppler injection; changing into an immutable release must not redirect
-SQLite state into that release:
+overrides it. Run lifecycle commands from a known format-v2 release with the
+same Doppler production environment as the services so schema checks always
+inspect the live Dashboard database. Do not invoke the lifecycle CLI through
+`current`: the first managed rollback may point `current` at the retained
+format-v1 release, which does not contain that artifact. Record and retain the
+first format-v2 release SHA as the management release until the v1 rollback
+window closes.
+
+Pass the service's stable absolute database path after Doppler injection;
+changing into an immutable release must not redirect SQLite state into that
+release:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard-releases/current
-doppler run --config prd --project rajohan -- \
-  env NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
-  bun backend/dist/releaseLifecycle.js status
-doppler run --config prd --project rajohan -- \
-  env NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
-  bun backend/dist/releaseLifecycle.js rollback
+RELEASES_ROOT="${MIRA_DASHBOARD_RELEASES_ROOT:-/home/ubuntu/projects/mira-dashboard-releases}"
+LIFECYCLE_RELEASE_SHA="REPLACE_WITH_RETAINED_FORMAT_2_SHA"
+CANDIDATE_RELEASE_SHA="REPLACE_WITH_CANDIDATE_FULL_SHA"
+LIFECYCLE_CLI="$RELEASES_ROOT/releases/$LIFECYCLE_RELEASE_SHA/backend/dist/releaseLifecycle.js"
+test -f "$LIFECYCLE_CLI"
 
-cd /home/ubuntu/projects/mira-dashboard-releases/releases/<full-commit-sha>
 doppler run --config prd --project rajohan -- \
   env NODE_ENV=production \
   MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
-  bun backend/dist/releaseLifecycle.js activate <full-commit-sha>
+  bun "$LIFECYCLE_CLI" status
+doppler run --config prd --project rajohan -- \
+  env NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
+  bun "$LIFECYCLE_CLI" rollback
+
+doppler run --config prd --project rajohan -- \
+  env NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
+  bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA"
 ```
 
 `current` and `previous` are relative links inside the release root. Link
@@ -378,6 +388,21 @@ live SQLite schema, and the previous release's rollback window. Rollback also
 checks the live schema rather than assuming it was downgraded by a code-only
 rollback.
 
+The lifecycle CLI changes release links only; an already-running process keeps
+executing the physical release it started from. After the final systemd
+cutover, every activation and rollback must therefore restart both units and
+verify release readiness before reporting success:
+
+```bash
+systemctl --user restart mira-dashboard-worker.service
+systemctl --user restart mira-dashboard.service
+curl --fail --silent --show-error http://127.0.0.1:3100/api/health/ready
+```
+
+The final deploy executor owns this sequence and automatically runs the same
+restart/readiness checks after switching back on failure. The commands above
+are the required manual fallback, not an optional post-deploy check.
+
 Normal activation refuses a schema target outside the current release's rollback
 window. After the final systemd/executor cutover, the exceptional snapshot-backed
 procedure above runs the candidate command only after preflight succeeds, both
@@ -385,11 +410,10 @@ services are stopped, their `WorkingDirectory`/`ExecStart` resolve through the
 managed `current` link, and the queue is idle:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard-releases/releases/<full-commit-sha>
 doppler run --config prd --project rajohan -- \
   env NODE_ENV=production \
   MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
-  bun backend/dist/releaseLifecycle.js activate <full-commit-sha> \
+  bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA" \
   --coordinated-schema-cutover
 ```
 
@@ -410,6 +434,19 @@ so an interruption cannot discard the known-good rollback target.
 
 The Dashboard executor still uses the in-place transition flow until the final
 deploy integration performs the controlled systemd cutover to these links.
+That cutover must set both units' stable state paths explicitly before changing
+their working directories:
+
+```ini
+[Service]
+Environment=MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db
+Environment=MIRA_DASHBOARD_OPENCLAW_HOME=/home/ubuntu/projects/mira-dashboard/backend/data/openclaw-client
+```
+
+The OpenClaw home value preserves the existing signed Gateway device identity
+at
+`backend/data/openclaw-client/.openclaw/identity/device.json`. Leaving it unset
+would derive a different path below each SHA-specific working directory.
 
 ## Health Signals
 
