@@ -290,16 +290,19 @@ managed `current` link; incompatible cutovers are unsupported while production
 still uses the in-place checkout:
 
 1. run the candidate's production preflight, then record the release SHA,
-   supported schema range, and selected verified pre-deploy/pre-migration
-   snapshot in the deployment record;
+   supported schema range, and preflight result in the deployment record;
 2. stop both Dashboard units for the cutover and verify the execution queue is
    idle;
-3. activate the immutable release with the explicit
+3. rerun the candidate's database preflight against the stable production
+   database, require restore verification, and record the newly created
+   `pre-deploy` snapshot; do not reuse the snapshot from step 1 because writes
+   may have committed before the units stopped;
+4. activate the immutable release with the explicit
    `--coordinated-schema-cutover` flag;
-4. start both units through the managed `current` link, migrate forward on
+5. start both units through the managed `current` link, migrate forward on
    startup, and run readiness against the new release and schema;
-5. on failure, stop both units, restore the matching snapshot, switch the
-   `current` release link back, and only then restart.
+6. on failure, stop both units, restore the snapshot recorded in step 3,
+   switch the `current` release link back, and only then restart.
 
 The migration runner intentionally has no destructive down-migration path.
 Unknown newer migration versions make older code fail closed. A future release
@@ -358,26 +361,34 @@ changing into an immutable release must not redirect SQLite state into that
 release:
 
 ```bash
-RELEASES_ROOT="${MIRA_DASHBOARD_RELEASES_ROOT:-/home/ubuntu/projects/mira-dashboard-releases}"
+RELEASES_ROOT="/home/ubuntu/projects/mira-dashboard-releases"
 LIFECYCLE_RELEASE_SHA="REPLACE_WITH_RETAINED_FORMAT_2_SHA"
 CANDIDATE_RELEASE_SHA="REPLACE_WITH_CANDIDATE_FULL_SHA"
 LIFECYCLE_CLI="$RELEASES_ROOT/releases/$LIFECYCLE_RELEASE_SHA/backend/dist/releaseLifecycle.js"
 test -f "$LIFECYCLE_CLI"
 
 doppler run --config prd --project rajohan -- \
-  env NODE_ENV=production \
+  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
   MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
   bun "$LIFECYCLE_CLI" status
 doppler run --config prd --project rajohan -- \
-  env NODE_ENV=production \
+  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
   MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
   bun "$LIFECYCLE_CLI" rollback
 
 doppler run --config prd --project rajohan -- \
-  env NODE_ENV=production \
+  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
   MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
   bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA"
 ```
+
+If production uses a non-default release root, replace `RELEASES_ROOT` with
+that explicit absolute path. Passing it through `env` after Doppler injection
+ensures the lifecycle process and the shell-resolved CLI always use the same
+release tree.
 
 `current` and `previous` are relative links inside the release root. Link
 replacement uses same-directory temporary symlinks, atomic rename, and a
@@ -411,7 +422,8 @@ managed `current` link, and the queue is idle:
 
 ```bash
 doppler run --config prd --project rajohan -- \
-  env NODE_ENV=production \
+  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
   MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
   bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA" \
   --coordinated-schema-cutover
