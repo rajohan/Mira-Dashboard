@@ -179,16 +179,19 @@ describe("git hygiene automation", () => {
         );
     });
 
-    it("uses the process home OpenClaw default when no OpenClaw home is configured", async () => {
+    it("uses the process home OpenClaw default instead of the Dashboard client identity", async () => {
         rememberEnvironment("HOME");
         rememberEnvironment("MIRA_OPENCLAW_ROOT");
         rememberEnvironment("OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
         const homeRoot = createTemporaryRoot("mira-openclaw-home-default-");
+        const dashboardClientRoot = createTemporaryRoot(
+            "mira-dashboard-openclaw-client-"
+        );
         process.env.HOME = homeRoot;
         delete process.env.MIRA_OPENCLAW_ROOT;
         delete process.env.OPENCLAW_HOME;
-        delete process.env.MIRA_DASHBOARD_OPENCLAW_HOME;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardClientRoot;
         const calls: Array<{ arguments_: readonly string[]; cwd: string }> = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")

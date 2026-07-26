@@ -1638,6 +1638,88 @@ describe("backend route and service behavior", () => {
         expect(stored.disable_intent_json).toBeNull();
     });
 
+    it("keeps primary OpenClaw data separate from the Dashboard client identity", async () => {
+        rememberEnvironment("HOME");
+        rememberEnvironment("OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("WORKSPACE_ROOT");
+        const homeRoot = createTemporaryRoot("mira-primary-openclaw-home-");
+        const primaryRoot = path.join(homeRoot, ".openclaw");
+        const dashboardClientRoot = createTemporaryRoot("mira-dashboard-client-home-");
+        mkdirSync(path.join(primaryRoot, "media", "images"), { recursive: true });
+        mkdirSync(path.join(primaryRoot, "workspace"), { recursive: true });
+        mkdirSync(path.join(dashboardClientRoot, "media", "images"), {
+            recursive: true,
+        });
+        mkdirSync(path.join(dashboardClientRoot, "workspace"), { recursive: true });
+        writeFileSync(path.join(primaryRoot, "openclaw.json"), '{"primary":true}\n');
+        writeFileSync(
+            path.join(dashboardClientRoot, "openclaw.json"),
+            '{"clientIdentity":true}\n'
+        );
+        writeFileSync(path.join(primaryRoot, "workspace", "primary.txt"), "primary");
+        writeFileSync(
+            path.join(dashboardClientRoot, "workspace", "client.txt"),
+            "client"
+        );
+        writeFileSync(
+            path.join(primaryRoot, "media", "images", "primary.txt"),
+            "primary media"
+        );
+        writeFileSync(
+            path.join(dashboardClientRoot, "media", "images", "client.txt"),
+            "client media"
+        );
+        process.env.HOME = homeRoot;
+        delete process.env.OPENCLAW_HOME;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = dashboardClientRoot;
+        delete process.env.WORKSPACE_ROOT;
+
+        const { configFileRoutes } = await import("../src/routes/configFileRoutes.ts");
+        const configList = await responseJson(
+            await configFileRoutes["/api/config-files"].GET()
+        );
+        expect(configList.root).toBe(primaryRoot);
+
+        const { fileRoutes } = await import("../src/routes/fileRoutes.ts");
+        const workspaceList = await responseJson(
+            await fileRoutes["/api/files"].GET(
+                new Request("https://test.local/api/files")
+            )
+        );
+        expect(workspaceList).toMatchObject({
+            files: [expect.objectContaining({ name: "primary.txt" })],
+            root: path.join(primaryRoot, "workspace"),
+        });
+
+        const { mediaRoutes } = await import("../src/routes/mediaRoutes.ts");
+        const media = await mediaRoutes["/api/media"].GET(
+            new Request(
+                "https://test.local/api/media?path=images/primary.txt&preview=text"
+            )
+        );
+        expect(media.status).toBe(200);
+        await expect(media.text()).resolves.toBe("primary media");
+
+        const agentId = `separation-${Bun.randomUUIDv7()}`;
+        try {
+            const { updateAgentCurrentTask } = await import("../src/services/agents.ts");
+            await updateAgentCurrentTask(agentId, "Primary OpenClaw root");
+            expect(
+                existsSync(
+                    path.join(primaryRoot, "agents", agentId, "sessions", "metadata.json")
+                )
+            ).toBe(true);
+            expect(existsSync(path.join(dashboardClientRoot, "agents", agentId))).toBe(
+                false
+            );
+        } finally {
+            database
+                .prepare("DELETE FROM agent_task_history WHERE agent_id = ?")
+                .run(agentId);
+        }
+    });
+
     it("config file route allowlist, reads, writes, and backups", async () => {
         isolateOpenClawEnvironment("mira-config-file-route-");
         const root = process.env.OPENCLAW_HOME!;

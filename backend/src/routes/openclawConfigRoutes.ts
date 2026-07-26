@@ -80,9 +80,7 @@ function resolveSafeAbsolutePath(candidate: string | undefined): string | undefi
 }
 
 function resolveOpenClawHome(): string | undefined {
-    const configuredRoot =
-        process.env.OPENCLAW_HOME?.trim() ||
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    const configuredRoot = process.env.OPENCLAW_HOME?.trim();
     if (configuredRoot) {
         return resolveSafeAbsolutePath(configuredRoot);
     }

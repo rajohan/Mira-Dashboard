@@ -19,9 +19,7 @@ function defaultOpenclawRoot(): string {
 }
 
 function resolveOpenclawRoot(): string {
-    const configuredRoot =
-        process.env.OPENCLAW_HOME?.trim() ||
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    const configuredRoot = process.env.OPENCLAW_HOME?.trim();
     if (configuredRoot) {
         const resolved = Path.resolve(configuredRoot);
         return Path.isAbsolute(configuredRoot) && Path.parse(resolved).root !== resolved

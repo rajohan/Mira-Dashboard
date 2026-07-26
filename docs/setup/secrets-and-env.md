@@ -46,7 +46,9 @@ and immutable releases. SQLite backups are derived as
 `/home/ubuntu/projects/mira-dashboard-state/backups/`. Versioned
 `backend/config/` files are release artifacts, not external state.
 `OPENCLAW_HOME` remains the primary OpenClaw installation/configuration root;
-`MIRA_DASHBOARD_OPENCLAW_HOME` is the separate Dashboard client identity root.
+`MIRA_DASHBOARD_OPENCLAW_HOME` is the separate Dashboard client identity root
+and is never used as a fallback for primary OpenClaw files, agents, config,
+workspace, or media.
 
 ## Network, Auth, And Browser Access
 

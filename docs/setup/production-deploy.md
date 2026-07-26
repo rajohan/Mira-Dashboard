@@ -107,6 +107,7 @@ git switch main
 git pull --ff-only origin main
 
 RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
+WORKTREE_ROOT=/home/ubuntu/projects/mira-dashboard-worktrees
 OLD_STATE_ROOT=/home/ubuntu/projects/mira-dashboard/backend/data
 STATE_ROOT=/home/ubuntu/projects/mira-dashboard-state
 OLD_DATABASE_PATH="$OLD_STATE_ROOT/mira-dashboard.db"
@@ -129,6 +130,7 @@ if ! [[ "$DASHBOARD_PORT" =~ ^[0-9]+$ ]] ||
   (( DASHBOARD_PORT < 1 || DASHBOARD_PORT > 65535 )); then
   DASHBOARD_PORT=3100
 fi
+install --directory --mode=0700 "$WORKTREE_ROOT"
 
 env \
   MIRA_DASHBOARD_DB_PATH="$OLD_DATABASE_PATH" \

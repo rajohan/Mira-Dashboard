@@ -316,9 +316,7 @@ async function proxyGatewayMedia(request: Request): Promise<Response> {
 }
 
 function resolveOpenclawRoot(): string | undefined {
-    const configuredRoot =
-        process.env.OPENCLAW_HOME?.trim() ||
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    const configuredRoot = process.env.OPENCLAW_HOME?.trim();
     const homeDirectory = process.env.HOME?.trim() || os.homedir().trim();
     if (
         !configuredRoot &&
