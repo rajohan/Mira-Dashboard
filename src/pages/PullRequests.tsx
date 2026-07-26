@@ -299,7 +299,7 @@ function SectionHeader({
 
 /** Renders the deployment commit title and commit reference. */
 function deploymentCommitLabel(deployment: DeploymentJob): ReactNode {
-    const commit = deployment.commit || deployment.id;
+    const commit = deployment.commit?.slice(0, 8) || deployment.id;
     if (!deployment.commitTitle) return commit;
 
     return (

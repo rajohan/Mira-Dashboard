@@ -48,9 +48,11 @@ It is a Bun-native application with:
 - background schedulers for cache refresh, backups, Docker update checks, log
   rotation, quota notifications, and OpenClaw update notifications.
 
-The production service is `mira-dashboard.service`, running from
-`/home/ubuntu/projects/mira-dashboard/backend` through Doppler
-`rajohan/prd`.
+Production uses `mira-dashboard.service` plus
+`mira-dashboard-worker.service`. Both run through Doppler `rajohan/prd` from
+the immutable release selected by
+`/home/ubuntu/projects/mira-dashboard-releases/current`; the Git checkout is
+only the deployment control plane.
 
 ## Documentation Rules
 

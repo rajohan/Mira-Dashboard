@@ -231,46 +231,6 @@ describe("Dashboard release manifest", () => {
         ).toEndWith("\n");
     });
 
-    it("keeps deployed version 1 manifests readable during the format transition", async () => {
-        const root = temporaryReleaseRoot();
-        const manifest = await createReleaseManifest(manifestOptions(root));
-        rmSync(path.join(root, "backend", "dist", "releaseLifecycle.js"));
-        const legacySchema = {
-            maximumCompatible: manifest.schema.maximumCompatible,
-            migrationRegistrySha256: manifest.schema.migrationRegistrySha256,
-            minimumCompatible: manifest.schema.minimumCompatible,
-            target: manifest.schema.target,
-        };
-
-        const legacyManifest = parseReleaseManifest({
-            ...manifest,
-            artifacts: manifest.artifacts.filter(
-                (artifact) => artifact.path !== "backend/dist/releaseLifecycle.js"
-            ),
-            formatVersion: 1,
-            schema: legacySchema,
-        });
-        writeFileSync(
-            path.join(root, RELEASE_MANIFEST_FILE_NAME),
-            `${JSON.stringify(legacyManifest, undefined, 2)}\n`
-        );
-
-        expect(await loadReleaseManifest(root)).toMatchObject({
-            formatVersion: 1,
-            schema: legacySchema,
-        });
-        await expect(
-            verifyReleaseArtifacts(root, legacyManifest)
-        ).resolves.toBeUndefined();
-        await expect(
-            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
-        ).resolves.toMatchObject({
-            manifestFormatVersion: 1,
-            ready: true,
-            source: "manifest",
-        });
-    });
-
     it("refuses to write a manifest larger than the loader accepts", async () => {
         const root = temporaryReleaseRoot();
         const longName = "x".repeat(120);

@@ -10,6 +10,7 @@ import {
     renameSync,
     rmSync,
     symlinkSync,
+    utimesSync,
     writeFileSync,
 } from "node:fs";
 import fsp from "node:fs/promises";
@@ -25,11 +26,14 @@ import {
 import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
 import {
     activateDashboardRelease,
+    assertDashboardReleaseHostRuntimeCompatible,
     assertReleaseTransitionLockCommandSucceeded,
     ensureDashboardReleaseLayout,
     isReleaseTransitionLockAvailable,
     loadManagedRelease,
     managedReleasePath,
+    pruneDashboardReleases,
+    publishVerifiedDashboardRelease,
     readDashboardReleaseState,
     RELEASE_TRANSITION_LOCK_FILE_NAME,
     RELEASE_TRANSITION_LOCK_PROGRAM,
@@ -43,11 +47,13 @@ import {
     RELEASE_MANIFEST_FILE_NAME,
     writeReleaseManifest,
 } from "../src/releaseManifest.ts";
+import { createReleaseFixture } from "./support/releaseFixture.ts";
 
 const temporaryRoots: string[] = [];
 const FIRST_COMMIT = "a".repeat(40);
 const SECOND_COMMIT = "b".repeat(40);
 const THIRD_COMMIT = "c".repeat(40);
+const FOURTH_COMMIT = "d".repeat(40);
 const TEST_FUTURE_MIGRATIONS: DatabaseMigrationIdentity[] = [
     {
         checksum: "7".repeat(64),
@@ -103,6 +109,19 @@ function holdTransitionLock(releasesRoot: string): number {
     return lockFileDescriptor;
 }
 
+async function throwWhenPromiseSettles(
+    promise: Promise<unknown>,
+    message: string
+): Promise<never> {
+    await promise;
+    throw new Error(message);
+}
+
+async function throwAfterDelay(milliseconds: number, message: string): Promise<never> {
+    await Bun.sleep(milliseconds);
+    throw new Error(message);
+}
+
 function temporaryReleasesRoot(): string {
     const root = mkdtempSync(path.join(tmpdir(), "mira-releases-"));
     temporaryRoots.push(root);
@@ -113,7 +132,8 @@ async function createManagedRelease(
     releasesRoot: string,
     directoryCommit: string,
     manifestCommit = directoryCommit,
-    bunVersion = Bun.version
+    bunVersion = Bun.version,
+    builtAt = new Date("2026-07-25T17:00:00.000Z")
 ): Promise<string> {
     await ensureDashboardReleaseLayout(releasesRoot);
     const releasePath = managedReleasePath(releasesRoot, directoryCommit);
@@ -167,7 +187,7 @@ async function createManagedRelease(
         );
     }
     await writeReleaseManifest({
-        builtAt: new Date("2026-07-25T17:00:00.000Z"),
+        builtAt,
         bunVersion,
         commitSha: manifestCommit,
         commitTitle: `Release ${manifestCommit.slice(0, 8)}`,
@@ -272,6 +292,49 @@ describe("Dashboard immutable release manager", () => {
         expect(() => managedReleasePath("/tmp/dashboard-releases", "abc")).toThrow(
             "full lowercase Git SHA"
         );
+    });
+
+    it("does not expose active staging paths before publication owns the transition lock", async () => {
+        const releasesRoot = temporaryReleasesRoot();
+        const buildRoot = temporaryReleasesRoot();
+        await ensureDashboardReleaseLayout(releasesRoot);
+        await createReleaseFixture(buildRoot, FIRST_COMMIT);
+        await readDashboardReleaseState(releasesRoot);
+        const lockFileDescriptor = holdTransitionLock(releasesRoot);
+        const { promise: lockContention, resolve: didReachLockContention } =
+            Promise.withResolvers<void>();
+        const publication = publishVerifiedDashboardRelease(
+            buildRoot,
+            FIRST_COMMIT,
+            releasesRoot,
+            {
+                onTransitionLockContention: () => {
+                    didReachLockContention();
+                },
+            }
+        );
+        try {
+            await Promise.race([
+                lockContention,
+                throwWhenPromiseSettles(
+                    publication,
+                    "Release publication completed before waiting for the held transition lock"
+                ),
+                throwAfterDelay(
+                    2000,
+                    "Release publication did not reach transition-lock contention"
+                ),
+            ]);
+            expect(
+                readdirSync(path.join(releasesRoot, "releases")).filter((entry) =>
+                    entry.startsWith(".staging-")
+                )
+            ).toEqual([]);
+        } finally {
+            closeSync(lockFileDescriptor);
+        }
+        const release = await publication;
+        expect(release.commitSha).toBe(FIRST_COMMIT);
     });
 
     it("activates and rolls back verified releases through relative atomic links", async () => {
@@ -382,7 +445,18 @@ describe("Dashboard immutable release manager", () => {
             },
             root,
         });
-        expect(status.current).not.toHaveProperty("manifest");
+        expect(status).not.toHaveProperty("current.manifest");
+        await expect(runReleaseLifecycleCommand(["prune"], root)).resolves.toEqual({
+            removed: [],
+            retained: [SECOND_COMMIT, FIRST_COMMIT],
+            warnings: [],
+        });
+        await expect(runReleaseLifecycleCommand(["prune", "2"], root)).rejects.toThrow(
+            "retention must be between 3 and 20"
+        );
+        await expect(
+            runReleaseLifecycleCommand(["prune", "3", "extra"], root)
+        ).rejects.toThrow("unexpected arguments");
         await expect(
             runReleaseLifecycleCommand(["rollback", FIRST_COMMIT], root)
         ).rejects.toThrow("takes no commit SHA");
@@ -509,6 +583,10 @@ describe("Dashboard immutable release manager", () => {
 
         const runtimeRoot = temporaryReleasesRoot();
         await createManagedRelease(runtimeRoot, FIRST_COMMIT, FIRST_COMMIT, "0.0.0");
+        const incompatibleRelease = await loadManagedRelease(runtimeRoot, FIRST_COMMIT);
+        expect(() =>
+            assertDashboardReleaseHostRuntimeCompatible(incompatibleRelease)
+        ).toThrow("requires Bun 0.0.0");
         await expect(
             activateDashboardRelease(FIRST_COMMIT, runtimeRoot, SCHEMA_6_OPTIONS)
         ).rejects.toThrow("requires Bun 0.0.0");
@@ -697,6 +775,39 @@ describe("Dashboard immutable release manager", () => {
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
     });
 
+    it("recovers a journal when current changed before previous was linked", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        writeFileSync(
+            path.join(root, ".release-transition.json"),
+            `${JSON.stringify({
+                after: {
+                    current: SECOND_COMMIT,
+                    previous: FIRST_COMMIT,
+                },
+                before: {
+                    current: FIRST_COMMIT,
+                    previous: false,
+                },
+                formatVersion: 1,
+                operation: "activate",
+            })}\n`
+        );
+        rmSync(path.join(root, "current"));
+        symlinkSync(`releases/${SECOND_COMMIT}`, path.join(root, "current"), "dir");
+
+        const recovered = await activateDashboardRelease(
+            SECOND_COMMIT,
+            root,
+            SCHEMA_6_OPTIONS
+        );
+        expect(recovered.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(recovered.previous?.commitSha).toBe(FIRST_COMMIT);
+        expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
+    });
+
     it.skipIf(!isReleaseTransitionLockAvailable())(
         "serializes status and transitions with a kernel-owned lock",
         async () => {
@@ -812,6 +923,99 @@ describe("Dashboard immutable release manager", () => {
 
         await expect(rollbackDashboardRelease(root, SCHEMA_6_OPTIONS)).rejects.toThrow(
             "requires two distinct releases"
+        );
+    });
+
+    it("prunes old releases while preserving current and previous", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(
+            root,
+            FIRST_COMMIT,
+            FIRST_COMMIT,
+            Bun.version,
+            new Date("2026-07-25T17:00:00.000Z")
+        );
+        await createManagedRelease(
+            root,
+            SECOND_COMMIT,
+            SECOND_COMMIT,
+            Bun.version,
+            new Date("2026-07-25T17:01:00.000Z")
+        );
+        await createManagedRelease(
+            root,
+            THIRD_COMMIT,
+            THIRD_COMMIT,
+            Bun.version,
+            new Date("2026-07-25T17:02:00.000Z")
+        );
+        await createManagedRelease(
+            root,
+            FOURTH_COMMIT,
+            FOURTH_COMMIT,
+            Bun.version,
+            new Date("2026-07-25T17:03:00.000Z")
+        );
+        await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(THIRD_COMMIT, root, SCHEMA_6_OPTIONS);
+        const interruptedRetirementPath = path.join(
+            root,
+            "releases",
+            `.retired-${"e".repeat(40)}-00000000-0000-4000-8000-000000000000`
+        );
+        mkdirSync(interruptedRetirementPath);
+        writeFileSync(path.join(interruptedRetirementPath, "stale"), "stale\n");
+        const staleStagingPath = path.join(
+            root,
+            "releases",
+            `.staging-${FIRST_COMMIT}-00000000-0000-4000-8000-000000000001`
+        );
+        mkdirSync(staleStagingPath);
+        writeFileSync(path.join(staleStagingPath, "partial"), "partial\n");
+        const staleTimestamp = new Date(Date.now() - 25 * 60 * 60 * 1000);
+        utimesSync(staleStagingPath, staleTimestamp, staleTimestamp);
+        const activeStagingPath = path.join(
+            root,
+            "releases",
+            `.staging-${FOURTH_COMMIT}-00000000-0000-4000-8000-000000000002`
+        );
+        mkdirSync(activeStagingPath);
+        writeFileSync(path.join(activeStagingPath, "partial"), "active\n");
+        const unverifiableCommit = "e".repeat(40);
+        const unverifiablePath = managedReleasePath(root, unverifiableCommit);
+        mkdirSync(unverifiablePath);
+        writeFileSync(path.join(unverifiablePath, "invalid"), "invalid\n");
+
+        const result = await pruneDashboardReleases(3, root);
+
+        expect(result).toEqual({
+            removed: [FIRST_COMMIT],
+            retained: [FOURTH_COMMIT, THIRD_COMMIT, SECOND_COMMIT],
+            warnings: [`Skipped unverifiable release ${unverifiableCommit}`],
+        });
+        expect(existsSync(managedReleasePath(root, FIRST_COMMIT))).toBe(false);
+        expect(existsSync(managedReleasePath(root, SECOND_COMMIT))).toBe(true);
+        expect(existsSync(managedReleasePath(root, THIRD_COMMIT))).toBe(true);
+        expect(existsSync(managedReleasePath(root, FOURTH_COMMIT))).toBe(true);
+        expect(existsSync(unverifiablePath)).toBe(true);
+        expect(existsSync(interruptedRetirementPath)).toBe(false);
+        expect(existsSync(staleStagingPath)).toBe(false);
+        expect(existsSync(activeStagingPath)).toBe(true);
+        const state = await readDashboardReleaseState(root);
+        expect(state.current?.commitSha).toBe(THIRD_COMMIT);
+        expect(state.previous?.commitSha).toBe(SECOND_COMMIT);
+    });
+
+    it("validates release retention bounds", async () => {
+        const root = temporaryReleasesRoot();
+        await expect(pruneDashboardReleases(2, root)).rejects.toThrow(
+            "retention must be between 3 and 20"
+        );
+        await expect(pruneDashboardReleases(21, root)).rejects.toThrow(
+            "retention must be between 3 and 20"
+        );
+        await expect(pruneDashboardReleases(NaN, root)).rejects.toThrow(
+            "retention must be between 3 and 20"
         );
     });
 });

@@ -4,6 +4,7 @@ import type {
 } from "./releaseManager.ts";
 import {
     activateDashboardRelease,
+    pruneDashboardReleases,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
     rollbackDashboardRelease,
@@ -70,9 +71,13 @@ export async function runReleaseLifecycleCommand(
             state = await readDashboardReleaseState(releasesRoot);
             break;
         }
+        case "prune": {
+            const retainCount = commitSha === undefined ? 3 : Number(commitSha);
+            return pruneDashboardReleases(retainCount, releasesRoot);
+        }
         default: {
             throw new TypeError(
-                "Usage: releaseLifecycle.js <status|activate COMMIT_SHA [--coordinated-schema-cutover]|rollback>"
+                "Usage: releaseLifecycle.js <status|activate COMMIT_SHA [--coordinated-schema-cutover]|rollback|prune [RETAIN_COUNT]>"
             );
         }
     }

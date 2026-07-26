@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { database } from "../database.ts";
 import { runProcess } from "../lib/processes.ts";
+import { resolveAbsoluteNonRootPath } from "../lib/safePath.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
     getScheduledJob,
@@ -68,7 +69,20 @@ const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
 const LOG_ROTATION_JOB_ID = "ops.log-rotation";
 const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
 const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
-const logRotationLockFile = DEFAULT_LOCK_FILE;
+const ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT = [
+    "LANG",
+    "NODE_ENV",
+    "TZ",
+    "MIRA_DASHBOARD_DB_PATH",
+    "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE",
+] as const;
+
+function resolveLogRotationLockFile(): string {
+    return resolveAbsoluteNonRootPath(
+        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE?.trim() || DEFAULT_LOCK_FILE,
+        "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE"
+    );
+}
 
 type ExecFileRunner = (
     file: string,
@@ -1471,15 +1485,22 @@ async function processRotationCandidate({
     }
 }
 
-async function acquireLogRotationLock(isDryRun: boolean) {
+interface LogRotationLock {
+    file: fs.FileHandle;
+    path: string;
+}
+
+async function acquireLogRotationLock(
+    isDryRun: boolean
+): Promise<LogRotationLock | undefined> {
     if (isDryRun) return;
-    const lockFile = logRotationLockFile;
+    const lockFile = resolveLogRotationLockFile();
     await fs.mkdir(path.dirname(lockFile), { recursive: true });
     const openLock = async () => {
         const handle = await fs.open(lockFile, "wx");
         try {
             await handle.writeFile(`${process.pid}\n`);
-            return handle;
+            return { file: handle, path: lockFile };
         } catch (error) {
             await ignoreRejection(handle.close());
             await ignoreRejection(fs.unlink(lockFile));
@@ -1502,8 +1523,8 @@ async function acquireLogRotationLock(isDryRun: boolean) {
 
 async function reclaimStaleLogRotationLock(
     lockFile: string,
-    openLock: () => Promise<fs.FileHandle>
-) {
+    openLock: () => Promise<LogRotationLock>
+): Promise<LogRotationLock | undefined> {
     const reclaimDirectory = `${lockFile}.reclaim`;
     try {
         await fs.mkdir(reclaimDirectory);
@@ -1604,17 +1625,16 @@ function isProcessRunning(pid: number): boolean {
     }
 }
 
-async function releaseLogRotationLock(handle: fs.FileHandle | undefined) {
-    if (!handle) return;
-    const lockFile = logRotationLockFile;
+async function releaseLogRotationLock(lock: LogRotationLock | undefined) {
+    if (!lock) return;
     try {
-        const heldStat = await handle.stat();
-        const pathStat = await fs.stat(lockFile);
+        const heldStat = await lock.file.stat();
+        const pathStat = await fs.stat(lock.path);
         if (pathStat && pathStat.dev === heldStat.dev && pathStat.ino === heldStat.ino) {
-            await fs.unlink(lockFile);
+            await fs.unlink(lock.path);
         }
     } finally {
-        await handle.close();
+        await lock.file.close();
     }
 }
 
@@ -2019,7 +2039,7 @@ function buildElevatedLogRotationCliArguments(
     ].join("\n");
     return [
         "-n",
-        "-E",
+        `--preserve-env=${ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT.join(",")}`,
         resolveBunExecutable(),
         "--input-type=module",
         "--eval",
@@ -2031,9 +2051,13 @@ function buildElevatedLogRotationCliArguments(
 }
 
 function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
-    const allowed = ["PATH", "HOME", "LANG", "NODE_ENV", "TZ", "MIRA_DASHBOARD_DB_PATH"];
+    const allowed = [
+        "PATH",
+        "HOME",
+        ...ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT,
+    ] as const;
     const environment: NodeJS.ProcessEnv = {};
-    // Keep sudo -E narrow: only runtime lookup, home/locale, mode, and database path.
+    // Keep sudo environment preservation narrow: runtime lookup, locale, and state paths.
     for (const key of allowed) {
         if (process.env[key] !== undefined) {
             environment[key] = process.env[key];

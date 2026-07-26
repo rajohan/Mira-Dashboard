@@ -56,7 +56,6 @@ function getOpenClawRoot(): string {
     return (
         process.env.MIRA_OPENCLAW_ROOT?.trim() ||
         process.env.OPENCLAW_HOME?.trim() ||
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim() ||
         path.join(homeDirectory, ".openclaw")
     );
 }

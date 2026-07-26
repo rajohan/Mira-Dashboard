@@ -110,7 +110,7 @@ when enabled, rotates the current session, and revokes every other session.
 Forgotten-password recovery is intentionally host-local:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
+cd /home/ubuntu/projects/mira-dashboard-releases/current/backend
 bun run auth:reset-password -- --username <username>
 ```
 

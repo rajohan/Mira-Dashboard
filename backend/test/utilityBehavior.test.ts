@@ -19,6 +19,7 @@ import { loadOrCreateDeviceIdentity } from "../src/lib/openclawGatewayClient.ts"
 import { pipeProcessOutput, runProcess } from "../src/lib/processes.ts";
 import {
     prepareSafeWriteTargetWithinRoot,
+    resolveAbsoluteNonRootPath,
     safePathWithinRoot,
     sanitizeFilename,
 } from "../src/lib/safePath.ts";
@@ -28,6 +29,7 @@ import {
     nonEmptyEnvironmentFallback,
     nullableString,
     objectFallback,
+    resolveDashboardPort,
     stringFallback,
 } from "../src/lib/values.ts";
 import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
@@ -405,6 +407,10 @@ describe("backend service utilities", () => {
             ).toEqual({});
             expect(arrayFallback(["a"])).toEqual(["a"]);
             expect(arrayFallback("not-array", ["fallback"])).toEqual(["fallback"]);
+            expect(resolveDashboardPort(" 4310 ")).toBe(4310);
+            expect(resolveDashboardPort("0")).toBe(3100);
+            expect(resolveDashboardPort("65536")).toBe(3100);
+            expect(resolveDashboardPort("not-a-port")).toBe(3100);
         } finally {
             if (originalValue === undefined) {
                 delete process.env.MIRA_TEST_OPTIONAL_VALUE;
@@ -442,6 +448,12 @@ describe("backend service utilities", () => {
             expect(safePathWithinRoot("../escape.txt", root)).toBeUndefined();
             expect(safePathWithinRoot("outside-link/escape.txt", root)).toBeUndefined();
             expect(safePathWithinRoot("bad\0name", root)).toBeUndefined();
+            expect(resolveAbsoluteNonRootPath(` ${root} `, "Test path")).toBe(root);
+            for (const invalidPath of ["", "relative", "/", "bad\0path"]) {
+                expect(() =>
+                    resolveAbsoluteNonRootPath(invalidPath, "Test path")
+                ).toThrow("Test path must be an absolute non-root path");
+            }
 
             const writeTarget = path.join(root, "nested", "report.txt");
             expect(

@@ -33,8 +33,13 @@ const latestRunsJobIdChunkSize = 900;
 const executorTickMs = 1000;
 const executorHeartbeatMs = 1000;
 const executorCapacity = 1;
+const deploymentCutoverReconcileIntervalMs = 5000;
+const deploymentCutoverMaximumUnknownMs = 10 * 60 * 1000;
 const interruptedHandlerGraceMs = 30_000;
 const RELEASE_COMMIT_PATTERN = /^(?:[\da-f]{8,40}|development)$/u;
+const FULL_RELEASE_COMMIT_PATTERN = /^[\da-f]{40}$/u;
+const DEPLOYMENT_GUARDIAN_UNIT_PREFIX = "mira-dashboard-deploy-";
+const DEPLOYMENT_RECOVERY_UNIT_PREFIX = "mira-dashboard-deploy-recovery-";
 const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
 const interruptedHandlerSettled = new WeakMap<
     ScheduledJobInterruptionError,
@@ -43,23 +48,40 @@ const interruptedHandlerSettled = new WeakMap<
 const activeExecutionControllers = new Map<string, AbortController>();
 const activeExecutionRuns = new Map<string, Promise<void>>();
 
+type DeploymentGuardianState = "active" | "inactive" | "unknown";
+type DeploymentGuardianStateReader = (jobId: string) => DeploymentGuardianState;
+export interface OrphanedDeploymentCutover {
+    candidateCommit?: string;
+    id: string;
+    updatedAt: string;
+}
+export type DeploymentCutoverRecoveryHandler = (
+    cutover: OrphanedDeploymentCutover
+) => boolean;
+
 const scheduledJobRuntimeState: {
     scheduler: NodeJS.Timeout | undefined;
     executor: NodeJS.Timeout | undefined;
     workerHeartbeat: NodeJS.Timeout | undefined;
     executorClaimPauseGeneration: number;
+    deploymentCutoverRecoveryHandler: DeploymentCutoverRecoveryHandler | undefined;
     isSchedulerTickRunning: boolean;
     isExecutorClaimingPaused: boolean;
     isExecutorTickRunning: boolean;
+    missingCutoverRecoveryWarningKey: string | undefined;
+    nextDeploymentCutoverReconcileAt: number;
     workerId: string;
 } = {
     scheduler: undefined,
     executor: undefined,
     workerHeartbeat: undefined,
     executorClaimPauseGeneration: 0,
+    deploymentCutoverRecoveryHandler: undefined,
     isSchedulerTickRunning: false,
     isExecutorClaimingPaused: false,
     isExecutorTickRunning: false,
+    missingCutoverRecoveryWarningKey: undefined,
+    nextDeploymentCutoverReconcileAt: 0,
     workerId: "",
 };
 
@@ -1249,6 +1271,260 @@ function pauseExecutorClaims(): () => void {
 function resetExecutorClaimPause(): void {
     scheduledJobRuntimeState.executorClaimPauseGeneration += 1;
     scheduledJobRuntimeState.isExecutorClaimingPaused = false;
+    scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = undefined;
+    scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt = 0;
+}
+
+type SystemdUnitState = DeploymentGuardianState | "missing";
+
+function readSystemdUnitState(unit: string): SystemdUnitState {
+    const result = Bun.spawnSync({
+        cmd: [
+            "systemctl",
+            "--user",
+            "show",
+            unit,
+            "--property=ActiveState",
+            "--property=LoadState",
+            "--no-pager",
+        ],
+        env: process.env,
+        stderr: "pipe",
+        stdin: "ignore",
+        stdout: "pipe",
+    });
+    const stderr = new TextDecoder().decode(result.stderr).trim();
+    if (result.exitCode !== 0) {
+        console.warn("[ScheduledJobs] systemctl show failed", {
+            exitCode: result.exitCode,
+            stderr,
+            unit,
+        });
+        return "unknown";
+    }
+    if (stderr) {
+        console.warn("[ScheduledJobs] systemctl show reported diagnostics", {
+            stderr,
+            unit,
+        });
+    }
+    const properties = new Map(
+        new TextDecoder()
+            .decode(result.stdout)
+            .trim()
+            .split("\n")
+            .map((line) => {
+                const separator = line.indexOf("=");
+                return separator === -1
+                    ? [line, ""]
+                    : [line.slice(0, separator), line.slice(separator + 1)];
+            })
+    );
+    if (properties.get("LoadState") === "not-found") {
+        return "missing";
+    }
+    if (properties.get("LoadState") !== "loaded") {
+        return "unknown";
+    }
+    const state = properties.get("ActiveState");
+    if (state && ["active", "activating", "deactivating", "reloading"].includes(state)) {
+        return "active";
+    }
+    if (state && ["inactive", "failed"].includes(state)) {
+        return "inactive";
+    }
+    return "unknown";
+}
+
+function readDeploymentGuardianState(jobId: string): DeploymentGuardianState {
+    const guardian = readSystemdUnitState(
+        `${DEPLOYMENT_GUARDIAN_UNIT_PREFIX}${jobId}.service`
+    );
+    if (guardian === "active") {
+        return "active";
+    }
+    const recovery = readSystemdUnitState(
+        `${DEPLOYMENT_RECOVERY_UNIT_PREFIX}${jobId}.service`
+    );
+    if (recovery === "active") {
+        return "active";
+    }
+    if (guardian === "unknown" || recovery === "unknown") {
+        return "unknown";
+    }
+    return "inactive";
+}
+
+function isDeploymentCutoverReconciliationExpired(
+    updatedAt: string,
+    timestamp: string
+): boolean {
+    const updatedAtMs = Date.parse(updatedAt);
+    const timestampMs = Date.parse(timestamp);
+    return (
+        !Number.isFinite(updatedAtMs) ||
+        !Number.isFinite(timestampMs) ||
+        timestampMs - updatedAtMs >= deploymentCutoverMaximumUnknownMs
+    );
+}
+
+function didTerminalizeUnrecoverableDeploymentCutover(
+    cutover: OrphanedDeploymentCutover,
+    timestamp: string
+): boolean {
+    const terminalize = database.transaction(() => {
+        const result = database
+            .prepare(
+                `UPDATE deployment_jobs
+                 SET status = 'failed',
+                     updated_at = ?,
+                     note = ?
+                 WHERE id = ?
+                   AND status = 'restart-scheduled'`
+            )
+            .run(
+                timestamp,
+                "Interrupted legacy deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
+                cutover.id
+            );
+        if (result.changes === 0) {
+            return false;
+        }
+        database
+            .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
+            .run(cutover.id);
+        return true;
+    });
+    const didTerminalize = terminalize();
+    if (didTerminalize) {
+        console.warn(
+            "[ScheduledJobs] Terminalized unrecoverable legacy deployment cutover",
+            {
+                candidateCommit: cutover.candidateCommit,
+                cutoverId: cutover.id,
+            }
+        );
+    }
+    return didTerminalize;
+}
+
+export function reconcileOrphanedDeploymentCutovers(
+    timestamp = nowIso(),
+    readGuardianState: DeploymentGuardianStateReader = readDeploymentGuardianState,
+    ...recoveryHandlerOverride: [
+        recoverCutover?: DeploymentCutoverRecoveryHandler | undefined,
+    ]
+): number {
+    const recoverCutover =
+        recoveryHandlerOverride.length === 0
+            ? scheduledJobRuntimeState.deploymentCutoverRecoveryHandler
+            : recoveryHandlerOverride[0];
+    const pendingRows = database
+        .query(
+            `SELECT id, commit_sha AS candidateCommit, updated_at AS updatedAt
+             FROM deployment_jobs
+             WHERE status = 'restart-scheduled'`
+        )
+        .all() as Array<{
+        candidateCommit: string | null;
+        id: string;
+        updatedAt: string;
+    }>;
+    const pending: OrphanedDeploymentCutover[] = pendingRows.map((row) => ({
+        ...(row.candidateCommit && { candidateCommit: row.candidateCommit }),
+        id: row.id,
+        updatedAt: row.updatedAt,
+    }));
+    let reconciled = 0;
+    const cutoversMissingRecoveryHandler: string[] = [];
+    for (const cutover of pending) {
+        let state: DeploymentGuardianState = "unknown";
+        try {
+            state = readGuardianState(cutover.id);
+        } catch (error) {
+            console.warn(
+                "[ScheduledJobs] Failed to inspect detached deployment guardian:",
+                error
+            );
+        }
+        const shouldRecover =
+            state === "inactive" ||
+            (state === "unknown" &&
+                isDeploymentCutoverReconciliationExpired(cutover.updatedAt, timestamp));
+        if (!shouldRecover) {
+            continue;
+        }
+        if (
+            !cutover.candidateCommit ||
+            !FULL_RELEASE_COMMIT_PATTERN.test(cutover.candidateCommit)
+        ) {
+            if (didTerminalizeUnrecoverableDeploymentCutover(cutover, timestamp)) {
+                reconciled += 1;
+            }
+            continue;
+        }
+        if (!recoverCutover) {
+            cutoversMissingRecoveryHandler.push(cutover.id);
+            continue;
+        }
+        try {
+            if (recoverCutover(cutover)) {
+                reconciled += 1;
+            }
+        } catch (error) {
+            console.warn(
+                "[ScheduledJobs] Failed to schedule orphaned deployment rollback:",
+                error
+            );
+        }
+    }
+    const sortedMissingHandlerIds = cutoversMissingRecoveryHandler.toSorted(
+        (left, right) => left.localeCompare(right)
+    );
+    const warningKey = sortedMissingHandlerIds.join(",");
+    if (
+        warningKey &&
+        scheduledJobRuntimeState.missingCutoverRecoveryWarningKey !== warningKey
+    ) {
+        console.warn(
+            "[ScheduledJobs] Cannot recover orphaned deployment cutovers because no recovery handler is registered",
+            { cutoverIds: sortedMissingHandlerIds }
+        );
+    }
+    scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = warningKey || undefined;
+    return reconciled;
+}
+
+/** Registers the detached rollback scheduler used for orphaned release cutovers. */
+export function registerDeploymentCutoverRecoveryHandler(
+    didScheduleRecovery: DeploymentCutoverRecoveryHandler
+): void {
+    scheduledJobRuntimeState.deploymentCutoverRecoveryHandler = didScheduleRecovery;
+    scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = undefined;
+}
+
+function hasPendingDeploymentCutover(): boolean {
+    const now = Date.now();
+    if (now >= scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt) {
+        scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt =
+            now + deploymentCutoverReconcileIntervalMs;
+        const reconciled = reconcileOrphanedDeploymentCutovers();
+        if (reconciled > 0) {
+            console.warn("[ScheduledJobs] Reconciled orphaned deployment cutovers", {
+                reconciled,
+            });
+        }
+    }
+    return Boolean(
+        database
+            .query(
+                `SELECT 1
+                 FROM deployment_jobs
+                 WHERE status = 'restart-scheduled'
+                 LIMIT 1`
+            )
+            .get()
+    );
 }
 
 function executorTick(): void {
@@ -1262,6 +1538,12 @@ function executorTick(): void {
     }
     scheduledJobRuntimeState.isExecutorTickRunning = true;
     try {
+        // The in-memory pause is lost when the deployment restarts this worker.
+        // Keep replacement workers idle until the detached guardian records a
+        // terminal deployment status in the shared database.
+        if (hasPendingDeploymentCutover()) {
+            return;
+        }
         const execution = claimNextJobExecution(
             scheduledJobRuntimeState.workerId,
             executorCapacity

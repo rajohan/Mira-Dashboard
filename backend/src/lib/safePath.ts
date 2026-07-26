@@ -38,6 +38,19 @@ function isFilesystemRoot(rootPath: string): boolean {
     return path.parse(rootPath).root === rootPath;
 }
 
+/** Resolves an absolute path while rejecting empty, null-byte, relative, and root paths. */
+export function resolveAbsoluteNonRootPath(value: string, label: string): string {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.includes("\0") || !path.isAbsolute(trimmed)) {
+        throw new TypeError(`${label} must be an absolute non-root path`);
+    }
+    const resolved = path.resolve(trimmed);
+    if (isFilesystemRoot(resolved)) {
+        throw new TypeError(`${label} must be an absolute non-root path`);
+    }
+    return resolved;
+}
+
 function isWithinCanonicalRoot(candidate: string, root: string, normalizedRoot: string) {
     return candidate === root || candidate.startsWith(normalizedRoot);
 }

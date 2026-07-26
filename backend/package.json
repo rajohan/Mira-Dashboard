@@ -9,7 +9,7 @@
         "build": "bun node_modules/@typescript/native/bin/tsc --noEmit && bun scripts/build.ts",
         "db:preflight": "bun dist/databasePreflight.js",
         "deploy:prepare": "bun run build && bun run db:preflight",
-        "auth:reset-password": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/resetDashboardPassword.js",
+        "auth:reset-password": "MIRA_DASHBOARD_DB_PATH=${MIRA_DASHBOARD_DB_PATH:-/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db} NODE_ENV=production doppler run --config prd --project rajohan --preserve-env=MIRA_DASHBOARD_DB_PATH -- bun dist/resetDashboardPassword.js",
         "start": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/serverStart.js",
         "start:worker": "NODE_ENV=production doppler run --config prd --project rajohan -- bun dist/workerStart.js",
         "dev": "MIRA_DASHBOARD_DISABLE_SCHEDULER=1 doppler run --config prd --project rajohan -- bun --watch src/serverStart.ts",

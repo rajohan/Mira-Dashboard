@@ -29,9 +29,7 @@ interface FileItem {
 }
 
 function defaultWorkspaceRoot(): string {
-    const openclawHome =
-        process.env.OPENCLAW_HOME?.trim() ||
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    const openclawHome = process.env.OPENCLAW_HOME?.trim();
     if (
         openclawHome &&
         path.isAbsolute(openclawHome) &&

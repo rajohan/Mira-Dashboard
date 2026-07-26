@@ -330,22 +330,6 @@ describe("Mira Dashboard backend integration", () => {
         });
         expect(readyHead).toEqual({ body: undefined, status: 503 });
 
-        const legacyReady = await api<{
-            status: string;
-            workerOnline: boolean;
-        }>("/api/health");
-        expect(legacyReady).toEqual({
-            body: {
-                status: "notReady",
-                workerOnline: false,
-            },
-            status: 503,
-        });
-        const legacyReadyHead = await api<undefined>("/api/health", {
-            method: "HEAD",
-        });
-        expect(legacyReadyHead).toEqual({ body: undefined, status: 503 });
-
         const diagnostics = await api<{ error: string }>("/api/health/diagnostics");
         expect(diagnostics.status).toBe(401);
         expect(diagnostics.body).toEqual({ error: "Unauthorized" });

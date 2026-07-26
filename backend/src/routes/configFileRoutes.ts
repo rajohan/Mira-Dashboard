@@ -22,9 +22,7 @@ const CONFIG_WRITE_BODY_LIMIT = MAX_CONFIG_WRITE_SIZE * 2;
 const ALLOWED_CONFIG_FILES = new Set(["openclaw.json", "hooks/transforms/agentmail.ts"]);
 
 function openclawRoot(): string | undefined {
-    const configured =
-        process.env.OPENCLAW_HOME?.trim() ||
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME?.trim();
+    const configured = process.env.OPENCLAW_HOME?.trim();
     const rawHome = process.env.HOME?.trim();
     const home =
         rawHome && path.isAbsolute(rawHome) ? path.resolve(rawHome) : os.homedir().trim();

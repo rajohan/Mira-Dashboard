@@ -13,10 +13,12 @@ import {
 import { readAppliedDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
 import type { DatabaseMigrationIdentity } from "./databaseMigrations/index.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
+import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     type DashboardReleaseManifest,
     loadReleaseManifest,
+    RELEASE_MANIFEST_FILE_NAME,
     verifyReleaseArtifacts,
     verifyReleaseBuildIdentities,
 } from "./releaseManifest.ts";
@@ -29,6 +31,13 @@ const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const RELEASE_TRANSITION_FORMAT_VERSION = 1;
 const RELEASE_TRANSITION_JOURNAL_FILE_NAME = ".release-transition.json";
 export const RELEASE_TRANSITION_LOCK_FILE_NAME = ".release-transition.lock";
+const RETIRED_RELEASE_DIRECTORY_PATTERN =
+    /^\.retired-[\da-f]{40}-[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
+const STAGING_RELEASE_DIRECTORY_PATTERN =
+    /^\.staging-([\da-f]{40})-[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
+const STALE_STAGING_RELEASE_AGE_MS = 24 * 60 * 60 * 1000;
+const RELEASE_PUBLICATION_LOCK_WAIT_MS = 2 * 60 * 1000;
+const RELEASE_TRANSITION_LOCK_RETRY_MS = 50;
 const MAX_RELEASE_TRANSITION_FILE_BYTES = 4096;
 export const RELEASE_TRANSITION_LOCK_PROGRAM = "/usr/bin/flock";
 
@@ -53,11 +62,21 @@ export interface DashboardReleaseState {
     root: string;
 }
 
+export interface DashboardReleaseRetentionResult {
+    removed: string[];
+    retained: string[];
+    warnings: string[];
+}
+
 export interface DashboardReleaseManagerOptions {
     readLiveSchemaState?: (
         maximumCompatibleVersion: number
     ) => DashboardLiveSchemaState | Promise<DashboardLiveSchemaState>;
     schemaCutoverMode?: "coordinated";
+}
+
+export interface DashboardReleasePublicationOptions {
+    onTransitionLockContention?: () => void;
 }
 
 export interface DashboardLiveSchemaState {
@@ -93,17 +112,6 @@ function assertReleaseCommitSha(commitSha: string): void {
     }
 }
 
-function assertAbsoluteNonRootPath(value: string): string {
-    if (!value || value.includes("\0") || !path.isAbsolute(value)) {
-        throw new TypeError("Dashboard releases root must be an absolute non-root path");
-    }
-    const resolved = path.resolve(value);
-    if (resolved === path.parse(resolved).root) {
-        throw new TypeError("Dashboard releases root must be an absolute non-root path");
-    }
-    return resolved;
-}
-
 async function assertRealDirectory(directoryPath: string): Promise<void> {
     const stat = await fsp.lstat(directoryPath);
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
@@ -128,6 +136,15 @@ async function syncDirectory(directoryPath: string): Promise<void> {
         await directory.sync();
     } finally {
         await directory.close();
+    }
+}
+
+async function syncFile(filePath: string): Promise<void> {
+    const file = await fsp.open(filePath, fs.constants.O_RDONLY);
+    try {
+        await file.sync();
+    } finally {
+        await file.close();
     }
 }
 
@@ -325,13 +342,13 @@ export function resolveDashboardReleasesRoot(
     configuredRoot = process.env.MIRA_DASHBOARD_RELEASES_ROOT ??
         DEFAULT_DASHBOARD_RELEASES_ROOT
 ): string {
-    return assertAbsoluteNonRootPath(configuredRoot.trim());
+    return resolveAbsoluteNonRootPath(configuredRoot, "Dashboard releases root");
 }
 
 export async function ensureDashboardReleaseLayout(
     configuredRoot = resolveDashboardReleasesRoot()
 ): Promise<DashboardReleaseLayout> {
-    const root = assertAbsoluteNonRootPath(configuredRoot);
+    const root = resolveAbsoluteNonRootPath(configuredRoot, "Dashboard releases root");
     const releasesPath = path.join(root, MANAGED_RELEASES_DIRECTORY_NAME);
     await assertRealDirectory(path.dirname(root));
     try {
@@ -356,7 +373,7 @@ export async function ensureDashboardReleaseLayout(
 export function managedReleasePath(releasesRoot: string, commitSha: string): string {
     assertReleaseCommitSha(commitSha);
     return path.join(
-        assertAbsoluteNonRootPath(releasesRoot),
+        resolveAbsoluteNonRootPath(releasesRoot, "Dashboard releases root"),
         MANAGED_RELEASES_DIRECTORY_NAME,
         commitSha
     );
@@ -395,6 +412,17 @@ async function loadManagedReleaseFromLayout(
 
 function releaseDirectoryIdentity(stat: fs.BigIntStats): string {
     return [stat.dev, stat.ino, stat.ctimeNs, stat.birthtimeNs].join(":");
+}
+
+function isSameReleaseDirectoryInode(
+    left: fs.BigIntStats,
+    right: fs.BigIntStats
+): boolean {
+    return (
+        left.dev === right.dev &&
+        left.ino === right.ino &&
+        left.birthtimeNs === right.birthtimeNs
+    );
 }
 
 function releaseManifestIdentity(manifest: DashboardReleaseManifest): string {
@@ -630,12 +658,6 @@ function assertReleaseMigrationHistoryCompatible(
     action: "Activation" | "Rollback"
 ): void {
     const expectedMigrations = release.schema.migrations;
-    if (!expectedMigrations) {
-        // Only temporary format-v1 manifests omit migration identities. They stay
-        // readable for the first managed cutover rollback window, but cannot bind
-        // activation or rollback to the exact applied migration history.
-        return;
-    }
     for (const actual of liveState.migrations.slice(0, release.schema.target)) {
         const expected = expectedMigrations[actual.version - 1];
         if (
@@ -665,7 +687,9 @@ export function assertReleaseCanOpenLiveSchema(
     }
 }
 
-function assertHostRuntimeCompatible(release: ManagedDashboardRelease): void {
+export function assertDashboardReleaseHostRuntimeCompatible(
+    release: ManagedDashboardRelease
+): void {
     if (release.manifest.bunVersion !== Bun.version) {
         throw new Error(
             `Release ${release.commitSha} requires Bun ${release.manifest.bunVersion}; host runs ${Bun.version}`
@@ -951,41 +975,58 @@ export function assertReleaseTransitionLockCommandSucceeded(
 
 async function acquireReleaseTransitionLock(
     layout: DashboardReleaseLayout,
-    lockMode: "exclusive" | "shared"
+    lockMode: "exclusive" | "shared",
+    waitTimeoutMs = 0,
+    onContention?: () => void
 ): Promise<fs.promises.FileHandle> {
-    const lockFile = await openReleaseTransitionLockFile(layout);
-    const result = spawnSync(
-        RELEASE_TRANSITION_LOCK_PROGRAM,
-        [
-            lockMode === "exclusive" ? "--exclusive" : "--shared",
-            "--nonblock",
-            "--conflict-exit-code",
-            "75",
-            "3",
-        ],
-        {
-            stdio: ["ignore", "ignore", "pipe", lockFile.fd],
+    const deadline = Date.now() + waitTimeoutMs;
+    while (true) {
+        const lockFile = await openReleaseTransitionLockFile(layout);
+        const result = spawnSync(
+            RELEASE_TRANSITION_LOCK_PROGRAM,
+            [
+                lockMode === "exclusive" ? "--exclusive" : "--shared",
+                "--nonblock",
+                "--conflict-exit-code",
+                "75",
+                "3",
+            ],
+            {
+                stdio: ["ignore", "ignore", "pipe", lockFile.fd],
+            }
+        );
+        if (result.status === 0 && !result.error) {
+            return lockFile;
         }
-    );
-    try {
+        await lockFile.close();
+        if (result.status === 75 && Date.now() < deadline) {
+            onContention?.();
+            await Bun.sleep(
+                Math.min(RELEASE_TRANSITION_LOCK_RETRY_MS, deadline - Date.now())
+            );
+            continue;
+        }
         assertReleaseTransitionLockCommandSucceeded(
             result.error as NodeJS.ErrnoException | undefined,
             result.status,
             result.stderr?.toString("utf8") ?? ""
         );
-    } catch (error) {
-        await lockFile.close();
-        throw error;
     }
-    return lockFile;
 }
 
 async function withReleaseTransitionLock<T>(
     layout: DashboardReleaseLayout,
     lockMode: "exclusive" | "shared",
-    transition: () => Promise<T>
+    transition: () => Promise<T>,
+    waitTimeoutMs = 0,
+    onContention?: () => void
 ): Promise<T> {
-    const lockFile = await acquireReleaseTransitionLock(layout, lockMode);
+    const lockFile = await acquireReleaseTransitionLock(
+        layout,
+        lockMode,
+        waitTimeoutMs,
+        onContention
+    );
     let result: T | undefined;
     let transitionError: unknown;
     try {
@@ -1009,6 +1050,117 @@ async function withReleaseTransitionLock<T>(
         throw transitionError;
     }
     return result as T;
+}
+
+/**
+ * Copies a verified build into the immutable release store while excluding
+ * activation, rollback, pruning, and another publisher from its staging path.
+ */
+export async function publishVerifiedDashboardRelease(
+    buildRoot: string,
+    commitSha: string,
+    releasesRoot = resolveDashboardReleasesRoot(),
+    options: DashboardReleasePublicationOptions = {}
+): Promise<ManagedDashboardRelease> {
+    assertReleaseCommitSha(commitSha);
+    const layout = await ensureDashboardReleaseLayout(releasesRoot);
+    const manifest = await loadReleaseManifest(buildRoot);
+    await verifyReleaseArtifacts(buildRoot, manifest);
+    await verifyReleaseBuildIdentities(buildRoot, manifest);
+    if (manifest.commitSha !== commitSha) {
+        throw new Error(
+            `Built release identity ${manifest.commitSha} does not match ${commitSha}`
+        );
+    }
+
+    return withReleaseTransitionLock(
+        layout,
+        "exclusive",
+        async () => {
+            await recoverInterruptedReleaseTransition(layout);
+            try {
+                return await loadManagedReleaseFromLayout(layout, commitSha);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
+            }
+
+            const finalPath = path.join(layout.releasesPath, commitSha);
+            const stagingPath = path.join(
+                layout.releasesPath,
+                `.staging-${commitSha}-${randomUUID()}`
+            );
+            await fsp.mkdir(stagingPath, { mode: 0o755 });
+            try {
+                const files = [
+                    ...manifest.artifacts.map((artifact) => artifact.path),
+                    RELEASE_MANIFEST_FILE_NAME,
+                ];
+                const createdDirectories = new Set<string>([stagingPath]);
+                for (const relativePath of files) {
+                    const sourcePath = path.join(buildRoot, relativePath);
+                    const destinationPath = path.join(stagingPath, relativePath);
+                    const destinationDirectory = path.dirname(destinationPath);
+                    await fsp.mkdir(destinationDirectory, {
+                        mode: 0o755,
+                        recursive: true,
+                    });
+                    for (
+                        let directory = destinationDirectory;
+                        directory.startsWith(`${stagingPath}${path.sep}`);
+                        directory = path.dirname(directory)
+                    ) {
+                        createdDirectories.add(directory);
+                    }
+                    await fsp.copyFile(
+                        sourcePath,
+                        destinationPath,
+                        fs.constants.COPYFILE_EXCL
+                    );
+                    await syncFile(destinationPath);
+                }
+
+                const stagedManifest = await loadReleaseManifest(stagingPath);
+                await verifyReleaseArtifacts(stagingPath, stagedManifest);
+                await verifyReleaseBuildIdentities(stagingPath, stagedManifest);
+                if (stagedManifest.commitSha !== commitSha) {
+                    throw new Error(
+                        `Staged release identity ${stagedManifest.commitSha} does not match ${commitSha}`
+                    );
+                }
+                const deepestFirst = [...createdDirectories].toSorted(
+                    (left, right) => right.length - left.length
+                );
+                for (const directory of deepestFirst) {
+                    await syncDirectory(directory);
+                }
+                try {
+                    await fsp.rename(stagingPath, finalPath);
+                } catch (error) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code !== "EEXIST" && code !== "ENOTEMPTY") {
+                        throw error;
+                    }
+                    // A publisher from an older process may have won the same SHA.
+                    const concurrentlyPublished = await loadManagedReleaseFromLayout(
+                        layout,
+                        commitSha
+                    );
+                    await fsp.rm(stagingPath, { recursive: true });
+                    await syncDirectory(layout.releasesPath);
+                    return concurrentlyPublished;
+                }
+                await syncDirectory(layout.releasesPath);
+            } catch (error) {
+                await fsp.rm(stagingPath, { force: true, recursive: true });
+                throw error;
+            }
+            return loadManagedReleaseFromLayout(layout, commitSha);
+        },
+        RELEASE_PUBLICATION_LOCK_WAIT_MS,
+        options.onTransitionLockContention
+    );
 }
 
 async function executeReleaseTransition(
@@ -1064,7 +1216,7 @@ export async function activateDashboardRelease(
     return withReleaseTransitionLock(layout, "exclusive", async () => {
         await recoverInterruptedReleaseTransition(layout);
         const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
-        assertHostRuntimeCompatible(candidate);
+        assertDashboardReleaseHostRuntimeCompatible(candidate);
         const state = await readActivationReleaseStateFromLayout(layout);
         if (state.current) {
             assertReleaseActivationCompatible(
@@ -1148,7 +1300,7 @@ export async function rollbackDashboardRelease(
 
         const activeRelease = state.current;
         const rollbackRelease = state.previous;
-        assertHostRuntimeCompatible(rollbackRelease);
+        assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
         const maximumInspectableSchemaVersion = Math.max(
             DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
             activeRelease.manifest.schema.maximumCompatible,
@@ -1193,5 +1345,195 @@ export async function rollbackDashboardRelease(
                 activeRelease
             );
         });
+    });
+}
+
+export async function pruneDashboardReleases(
+    retainCount = 3,
+    releasesRoot = resolveDashboardReleasesRoot()
+): Promise<DashboardReleaseRetentionResult> {
+    if (!Number.isSafeInteger(retainCount) || retainCount < 3 || retainCount > 20) {
+        throw new TypeError("Managed release retention must be between 3 and 20");
+    }
+
+    const layout = await ensureDashboardReleaseLayout(releasesRoot);
+    return withReleaseTransitionLock(layout, "exclusive", async () => {
+        await recoverInterruptedReleaseTransition(layout);
+        const state = await readDashboardReleaseStateFromLayout(layout);
+        const protectedCommits = new Set(
+            [state.current?.commitSha, state.previous?.commitSha].filter(
+                (commitSha): commitSha is string => commitSha !== undefined
+            )
+        );
+        const entries = await fsp.readdir(layout.releasesPath, {
+            withFileTypes: true,
+        });
+        let hasFilesystemChanges = false;
+        const releases: Array<{
+            publishedAtNs: bigint;
+            release: ManagedDashboardRelease;
+        }> = [];
+        const warnings: string[] = [];
+        for (const entry of entries) {
+            if (RETIRED_RELEASE_DIRECTORY_PATTERN.test(entry.name)) {
+                if (!entry.isDirectory() || entry.isSymbolicLink()) {
+                    throw new TypeError(
+                        `Retired release entry must be a real directory: ${entry.name}`
+                    );
+                }
+                await fsp.rm(path.join(layout.releasesPath, entry.name), {
+                    recursive: true,
+                });
+                hasFilesystemChanges = true;
+                continue;
+            }
+            const stagingMatch = STAGING_RELEASE_DIRECTORY_PATTERN.exec(entry.name);
+            if (stagingMatch) {
+                if (!entry.isDirectory() || entry.isSymbolicLink()) {
+                    throw new TypeError(
+                        `Staging release entry must be a real directory: ${entry.name}`
+                    );
+                }
+                const stagingPath = path.join(layout.releasesPath, entry.name);
+                const stagingStat = await fsp.lstat(stagingPath, { bigint: true });
+                const staleBeforeNs =
+                    BigInt(Math.max(0, Date.now() - STALE_STAGING_RELEASE_AGE_MS)) *
+                    1_000_000n;
+                if (stagingStat.mtimeNs > staleBeforeNs) {
+                    continue;
+                }
+                const currentStat = await fsp.lstat(stagingPath, { bigint: true });
+                if (
+                    !currentStat.isDirectory() ||
+                    currentStat.isSymbolicLink() ||
+                    !isSameReleaseDirectoryInode(stagingStat, currentStat)
+                ) {
+                    throw new Error(
+                        `Staging release changed before cleanup: ${entry.name}`
+                    );
+                }
+                const retiredPath = path.join(
+                    layout.releasesPath,
+                    `.retired-${stagingMatch[1]}-${randomUUID()}`
+                );
+                await fsp.rename(stagingPath, retiredPath);
+                await syncDirectory(layout.releasesPath);
+                const retiredStat = await fsp.lstat(retiredPath, { bigint: true });
+                if (
+                    !retiredStat.isDirectory() ||
+                    retiredStat.isSymbolicLink() ||
+                    !isSameReleaseDirectoryInode(currentStat, retiredStat)
+                ) {
+                    throw new Error(
+                        `Staging release changed during cleanup: ${entry.name}`
+                    );
+                }
+                await fsp.rm(retiredPath, { recursive: true });
+                hasFilesystemChanges = true;
+                continue;
+            }
+            if (!RELEASE_COMMIT_SHA_PATTERN.test(entry.name)) {
+                continue;
+            }
+            if (!entry.isDirectory() || entry.isSymbolicLink()) {
+                throw new TypeError(
+                    `Managed release entry must be a real directory: ${entry.name}`
+                );
+            }
+            try {
+                const release = await loadManagedReleaseFromLayout(layout, entry.name);
+                const directoryStat = await fsp.lstat(release.path, { bigint: true });
+                if (
+                    !directoryStat.isDirectory() ||
+                    directoryStat.isSymbolicLink() ||
+                    releaseDirectoryIdentity(directoryStat) !== release.directoryIdentity
+                ) {
+                    throw new Error(
+                        `Managed release changed before retention ordering: ${entry.name}`
+                    );
+                }
+                releases.push({
+                    publishedAtNs: directoryStat.birthtimeNs,
+                    release,
+                });
+            } catch (error) {
+                if (protectedCommits.has(entry.name)) {
+                    throw error;
+                }
+                warnings.push(`Skipped unverifiable release ${entry.name}`);
+            }
+        }
+
+        const newestFirst = releases.toSorted((left, right) => {
+            if (left.release.manifest.builtAt !== right.release.manifest.builtAt) {
+                return left.release.manifest.builtAt < right.release.manifest.builtAt
+                    ? 1
+                    : -1;
+            }
+            if (left.publishedAtNs === right.publishedAtNs) {
+                // Once the build and filesystem publication timestamps tie,
+                // the SHA is a deterministic fallback rather than a recency signal.
+                if (left.release.commitSha === right.release.commitSha) {
+                    return 0;
+                }
+                return left.release.commitSha < right.release.commitSha ? 1 : -1;
+            }
+            return left.publishedAtNs < right.publishedAtNs ? 1 : -1;
+        });
+        const retained = new Set(protectedCommits);
+        for (const { release } of newestFirst) {
+            if (retained.size >= retainCount) {
+                break;
+            }
+            retained.add(release.commitSha);
+        }
+
+        const removed: string[] = [];
+        for (const { release } of newestFirst.toReversed()) {
+            if (retained.has(release.commitSha)) {
+                continue;
+            }
+            const currentStat = await fsp.lstat(release.path, { bigint: true });
+            if (
+                !currentStat.isDirectory() ||
+                currentStat.isSymbolicLink() ||
+                releaseDirectoryIdentity(currentStat) !== release.directoryIdentity
+            ) {
+                throw new Error(
+                    `Managed release changed before retention cleanup: ${release.commitSha}`
+                );
+            }
+            const retiredPath = path.join(
+                layout.releasesPath,
+                `.retired-${release.commitSha}-${randomUUID()}`
+            );
+            await fsp.rename(release.path, retiredPath);
+            await syncDirectory(layout.releasesPath);
+            const retiredStat = await fsp.lstat(retiredPath, { bigint: true });
+            if (
+                !retiredStat.isDirectory() ||
+                retiredStat.isSymbolicLink() ||
+                !isSameReleaseDirectoryInode(currentStat, retiredStat)
+            ) {
+                throw new Error(
+                    `Managed release changed during retention cleanup: ${release.commitSha}`
+                );
+            }
+            await fsp.rm(retiredPath, { recursive: true });
+            hasFilesystemChanges = true;
+            removed.push(release.commitSha);
+        }
+        if (hasFilesystemChanges) {
+            await syncDirectory(layout.releasesPath);
+        }
+
+        return {
+            removed,
+            retained: newestFirst
+                .map(({ release }) => release)
+                .filter((release) => retained.has(release.commitSha))
+                .map((release) => release.commitSha),
+            warnings: warnings.toSorted(compareStrings),
+        };
     });
 }

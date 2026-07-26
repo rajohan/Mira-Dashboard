@@ -232,16 +232,14 @@ run automatic `VACUUM`.
 List scheduled job tables:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
-sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
+sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
   "SELECT id, name, enabled, schedule_type, next_run_at, updated_at FROM scheduled_jobs ORDER BY id;"
 ```
 
 Inspect recent runs:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
-sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
+sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
   "SELECT job_id, status, started_at, finished_at FROM scheduled_job_runs ORDER BY id DESC LIMIT 20;"
 ```
 
@@ -249,11 +247,7 @@ Inspect SQLite lifecycle state:
 
 ```bash
 set -euo pipefail
-cd /home/ubuntu/projects/mira-dashboard/backend
-db_path="$(
-  /usr/local/bin/doppler run --config prd --project rajohan -- \
-    sh -c 'realpath -m -- "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}"'
-)"
+db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
 sqlite3 -readonly "$db_path" \
   "SELECT version, name, applied_at FROM schema_migrations ORDER BY version;"
 sqlite3 -readonly "$db_path" \
@@ -263,7 +257,6 @@ sqlite3 -readonly "$db_path" \
 Inspect cache freshness:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
-sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
+sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
   "SELECT key, status, updated_at FROM cache_entries ORDER BY updated_at DESC LIMIT 30;"
 ```

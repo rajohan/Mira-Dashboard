@@ -23,32 +23,46 @@ Environment token precedence is:
 
 ## Dashboard Storage And Paths
 
-| Variable                       | Required | Default                                           | Purpose                                                                                                                |
-| ------------------------------ | -------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `MIRA_DASHBOARD_DB_PATH`       | Optional | `backend/data/mira-dashboard.db` from backend cwd | SQLite database path.                                                                                                  |
-| `MIRA_DASHBOARD_FRONTEND_PATH` | Optional | repo `dist/`                                      | Static frontend build served by the backend.                                                                           |
-| `OPENCLAW_HOME`                | Optional | `~/.openclaw`                                     | Primary OpenClaw home for file/config/media/agent lookups when set.                                                    |
-| `MIRA_DASHBOARD_OPENCLAW_HOME` | Optional | `~/.openclaw`                                     | Dashboard-specific fallback OpenClaw home. Most file/config/media routes use this only when `OPENCLAW_HOME` is absent. |
-| `WORKSPACE_ROOT`               | Optional | OpenClaw workspace                                | Root exposed by `/api/files`. Must be absolute and normalized if set.                                                  |
-| `MIRA_DASHBOARD_LOGS_ROOT`     | Optional | system log root default                           | Root used by log stream services.                                                                                      |
+| Variable                                | Required                       | Default                                           | Purpose                                                                                                                            |
+| --------------------------------------- | ------------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `MIRA_DASHBOARD_DB_PATH`                | Explicit in production units   | `backend/data/mira-dashboard.db` from backend cwd | SQLite database path. Production uses `/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db`.                              |
+| `MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE` | Explicit in production units   | `backend/data/log-rotation.lock` from backend cwd | Stable cross-release lock for elevated log rotation.                                                                               |
+| `MIRA_DASHBOARD_FRONTEND_PATH`          | Optional                       | repo `dist/`                                      | Static frontend build served by the backend.                                                                                       |
+| `OPENCLAW_HOME`                         | Optional                       | `~/.openclaw`                                     | Primary OpenClaw home for file/config/media/agent lookups when set.                                                                |
+| `MIRA_DASHBOARD_OPENCLAW_HOME`          | Explicit in production units   | `backend/data/openclaw-client` from backend cwd   | Dashboard Gateway-client identity home. Production uses the persistent state root so its signed device identity survives releases. |
+| `MIRA_DASHBOARD_RELEASE_ROOT`           | Explicit in production units   | inferred runtime root                             | Active immutable release root; production uses `/home/ubuntu/projects/mira-dashboard-releases/current`.                            |
+| `MIRA_DASHBOARD_RELEASES_ROOT`          | Explicit in production tooling | `/home/ubuntu/projects/mira-dashboard-releases`   | Managed release layout containing `releases/`, `current`, `previous`, locks, and transition journal.                               |
+| `WORKSPACE_ROOT`                        | Optional                       | OpenClaw workspace                                | Root exposed by `/api/files`. Must be absolute and normalized if set.                                                              |
+| `MIRA_DASHBOARD_LOGS_ROOT`              | Optional                       | system log root default                           | Root used by log stream services.                                                                                                  |
 
 `MIRA_DASHBOARD_FRONTEND_PATH` is a development/test escape hatch. Production
 serves the active release's checksummed `dist/`; any configured value that does
 not resolve exactly to that directory is rejected.
 
+Production mutable state lives in
+`/home/ubuntu/projects/mira-dashboard-state`, outside both the control checkout
+and immutable releases. SQLite backups are derived as
+`dirname(MIRA_DASHBOARD_DB_PATH)/backups`, so the production backup directory is
+`/home/ubuntu/projects/mira-dashboard-state/backups/`. Versioned
+`backend/config/` files are release artifacts, not external state.
+`OPENCLAW_HOME` remains the primary OpenClaw installation/configuration root;
+`MIRA_DASHBOARD_OPENCLAW_HOME` is the separate Dashboard client identity root
+and is never used as a fallback for primary OpenClaw files, agents, config,
+workspace, or media.
+
 ## Network, Auth, And Browser Access
 
-| Variable                                    | Required                                | Default                        | Purpose                                                                                                      |
-| ------------------------------------------- | --------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `MIRA_DASHBOARD_ALLOWED_ORIGINS`            | Production browser access               | same-origin/localhost behavior | Comma-separated allowed origins for browser/WebSocket checks.                                                |
-| `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`     | Local non-browser callers               | none                           | Strict JSON list of hash-only, minimum-scope automation credentials. There is no loopback auth bypass.       |
-| `MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY`      | Always                                  | none                           | Base64 that decodes to exactly 32 bytes. External AES-256-GCM key for persisted Gateway token and TOTP seeds; preserve it with backups. |
-| `MIRA_DASHBOARD_WEBAUTHN_RP_ID`             | Security-key enrollment/use             | none                           | Stable DNS relying-party id, for example `dashboard.example.com`. Raw IP addresses are rejected.             |
-| `MIRA_DASHBOARD_WEBAUTHN_ORIGINS`           | Security-key enrollment/use             | none                           | Explicit comma-separated HTTPS origins belonging to the RP ID. `http://localhost` is allowed for dev only.  |
-| `MIRA_DASHBOARD_SESSION_IDLE_MINUTES`       | Optional                                | `30`                           | Idle session lifetime, integer `5`–`1440`. Polling alone does not refresh it.                                |
-| `MIRA_DASHBOARD_RECENT_AUTH_MINUTES`        | Optional                                | `10`                           | Fresh password/MFA verification window, integer `1`–`60`.                                                    |
-| `MIRA_DASHBOARD_TRUSTED_PROXY_IPS`          | Optional                                | none                           | Trusted proxy IPs. Only use if the proxy strips or overwrites untrusted forwarding headers.                  |
-| `OPENCLAW_GATEWAY_URL`                      | Optional                                | `ws://127.0.0.1:18789`         | Gateway WebSocket URL.                                                                                       |
+| Variable                                | Required                    | Default                        | Purpose                                                                                                                                 |
+| --------------------------------------- | --------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `MIRA_DASHBOARD_ALLOWED_ORIGINS`        | Production browser access   | same-origin/localhost behavior | Comma-separated allowed origins for browser/WebSocket checks.                                                                           |
+| `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS` | Local non-browser callers   | none                           | Strict JSON list of hash-only, minimum-scope automation credentials. There is no loopback auth bypass.                                  |
+| `MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY`  | Always                      | none                           | Base64 that decodes to exactly 32 bytes. External AES-256-GCM key for persisted Gateway token and TOTP seeds; preserve it with backups. |
+| `MIRA_DASHBOARD_WEBAUTHN_RP_ID`         | Security-key enrollment/use | none                           | Stable DNS relying-party id, for example `dashboard.example.com`. Raw IP addresses are rejected.                                        |
+| `MIRA_DASHBOARD_WEBAUTHN_ORIGINS`       | Security-key enrollment/use | none                           | Explicit comma-separated HTTPS origins belonging to the RP ID. `http://localhost` is allowed for dev only.                              |
+| `MIRA_DASHBOARD_SESSION_IDLE_MINUTES`   | Optional                    | `30`                           | Idle session lifetime, integer `5`–`1440`. Polling alone does not refresh it.                                                           |
+| `MIRA_DASHBOARD_RECENT_AUTH_MINUTES`    | Optional                    | `10`                           | Fresh password/MFA verification window, integer `1`–`60`.                                                                               |
+| `MIRA_DASHBOARD_TRUSTED_PROXY_IPS`      | Optional                    | none                           | Trusted proxy IPs. Only use if the proxy strips or overwrites untrusted forwarding headers.                                             |
+| `OPENCLAW_GATEWAY_URL`                  | Optional                    | `ws://127.0.0.1:18789`         | Gateway WebSocket URL.                                                                                                                  |
 
 See [Auth and trust boundaries](../security/auth-and-trust-boundaries.md) for
 route auth, scope names, token generation, two-step login, proxy trust,
@@ -74,9 +88,10 @@ password-hashed recovery validators need no equivalent decryption key.
 | `MIRA_DASHBOARD_JOB_SCOPE_OWNER`   | owning service unit | Binds transient scopes to their service lifecycle so restarts terminate orphaned children. |
 | `MIRA_DASHBOARD_DISABLE_SCHEDULER` | unset in production | Development/test escape hatch; `1` disables scheduler/executor startup.                    |
 
-The tracked systemd units set these orchestration values directly. Doppler
-remains the source of auth, origin, provider, and credential values. Production
-actions run in the worker, so their child scopes bind to
+The tracked systemd units set these orchestration values directly and preserve
+them, together with `NODE_ENV` and the managed state/release paths, through
+Doppler. Doppler remains the source of auth, origin, provider, and credential
+values. Production actions run in the worker, so their child scopes bind to
 `mira-dashboard-worker.service`; restarting only the web unit leaves them
 untouched.
 

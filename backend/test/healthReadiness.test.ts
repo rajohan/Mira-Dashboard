@@ -19,7 +19,7 @@ function readySignals(): ReadinessSignals {
             backendCommit: "aaaaaaaa",
             commitSha: "a".repeat(40),
             frontendCommit: "aaaaaaaa",
-            manifestFormatVersion: 1,
+            manifestFormatVersion: 2,
             ready: true,
             source: "manifest",
         },
@@ -43,7 +43,7 @@ describe("Dashboard readiness contract", () => {
         expect(ready.checks.release).toEqual({
             backendCommit: "aaaaaaaa",
             frontendCommit: "aaaaaaaa",
-            manifestFormatVersion: 1,
+            manifestFormatVersion: 2,
             ready: true,
             source: "manifest",
         });

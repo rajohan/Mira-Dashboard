@@ -83,7 +83,6 @@ const BUCKET_CLEANUP_INTERVAL_MS = 60_000;
 const BUCKET_STALE_MS = Math.max(apiRule.windowMs, authRule.windowMs) * 2;
 const SAFE_REQUEST_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const PUBLIC_API_METHODS = new Map<string, ReadonlySet<string>>([
-    ["/api/health", new Set(["GET", "HEAD"])],
     ["/api/health/live", new Set(["GET", "HEAD"])],
     ["/api/health/ready", new Set(["GET", "HEAD"])],
     ["/api/auth/bootstrap", new Set(["GET", "HEAD"])],

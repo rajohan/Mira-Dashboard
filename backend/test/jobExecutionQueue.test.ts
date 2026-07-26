@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { database } from "../src/database.ts";
 import {
@@ -24,6 +28,7 @@ import {
 import { waitForJobExecution } from "../src/services/queuedJobExecution.ts";
 import {
     enqueueScheduledJob,
+    reconcileOrphanedDeploymentCutovers,
     recoverOrphanedScheduledJobRuns,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
@@ -36,6 +41,7 @@ import {
 
 const testJobIds = new Set<string>();
 const testExecutionIds = new Set<string>();
+const testDeploymentIds = new Set<string>();
 
 afterEach(async () => {
     await stopScheduledJobExecutor();
@@ -46,8 +52,15 @@ afterEach(async () => {
         database.prepare("DELETE FROM scheduled_job_runs WHERE job_id = ?").run(jobId);
         database.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(jobId);
     }
+    for (const deploymentId of testDeploymentIds) {
+        database
+            .prepare("DELETE FROM deployment_lock WHERE job_id = ?")
+            .run(deploymentId);
+        database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(deploymentId);
+    }
     testExecutionIds.clear();
     testJobIds.clear();
+    testDeploymentIds.clear();
 });
 
 function createScheduledTestJob(
@@ -68,7 +81,276 @@ function createScheduledTestJob(
     return id;
 }
 
+function createRestartScheduledDeployment(
+    updatedAt: string,
+    candidateCommit = "c".repeat(40)
+): string {
+    const deploymentId = `test-orphaned-cutover-${Bun.randomUUIDv7()}`;
+    testDeploymentIds.add(deploymentId);
+    database
+        .prepare(
+            `INSERT INTO deployment_jobs (
+                id, status, started_at, updated_at, commit_sha, note, stdout, stderr
+             ) VALUES (?, 'restart-scheduled', ?, ?, ?, ?, '', '')`
+        )
+        .run(deploymentId, updatedAt, updatedAt, candidateCommit, "Waiting for guardian");
+    database
+        .prepare("INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)")
+        .run(deploymentId, updatedAt);
+    return deploymentId;
+}
+
 describe("persistent job execution queue", () => {
+    it("schedules rollback recovery for an inactive detached cutover", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        const recoveredAt = "2026-07-26T03:01:00.000Z";
+        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const recovery = jest.fn(() => true);
+
+        expect(
+            reconcileOrphanedDeploymentCutovers(recoveredAt, () => "active", recovery)
+        ).toBe(0);
+        expect(recovery).not.toHaveBeenCalled();
+        expect(
+            reconcileOrphanedDeploymentCutovers(recoveredAt, () => "inactive", recovery)
+        ).toBe(1);
+        expect(recovery).toHaveBeenCalledWith({
+            candidateCommit: "c".repeat(40),
+            id: deploymentId,
+            updatedAt: startedAt,
+        });
+        expect(
+            database
+                .prepare(
+                    `SELECT status, updated_at AS updatedAt, note
+                     FROM deployment_jobs
+                     WHERE id = ?`
+                )
+                .get(deploymentId)
+        ).toEqual({
+            note: "Waiting for guardian",
+            status: "restart-scheduled",
+            updatedAt: startedAt,
+        });
+        expect(
+            database
+                .prepare("SELECT job_id FROM deployment_lock WHERE job_id = ?")
+                .get(deploymentId)
+        ).toEqual({ job_id: deploymentId });
+    });
+
+    it("warns once when an orphaned cutover has no recovery handler", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    "2026-07-26T03:11:00.000Z",
+                    () => "inactive",
+                    undefined
+                )
+            ).toBe(0);
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    "2026-07-26T03:12:00.000Z",
+                    () => "inactive",
+                    undefined
+                )
+            ).toBe(0);
+            expect(warning).toHaveBeenCalledTimes(1);
+            expect(warning).toHaveBeenCalledWith(
+                "[ScheduledJobs] Cannot recover orphaned deployment cutovers because no recovery handler is registered",
+                { cutoverIds: [deploymentId] }
+            );
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("terminalizes an inactive legacy cutover without a persisted full SHA", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        const deploymentId = createRestartScheduledDeployment(startedAt, "c0ffee12");
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const recovery = jest.fn(() => true);
+        try {
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    "2026-07-26T03:01:00.000Z",
+                    () => "inactive",
+                    recovery
+                )
+            ).toBe(1);
+            expect(recovery).not.toHaveBeenCalled();
+            expect(warning).toHaveBeenCalledWith(
+                "[ScheduledJobs] Terminalized unrecoverable legacy deployment cutover",
+                {
+                    candidateCommit: "c0ffee12",
+                    cutoverId: deploymentId,
+                }
+            );
+        } finally {
+            warning.mockRestore();
+        }
+        expect(
+            database
+                .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                .get(deploymentId)
+        ).toEqual({
+            note: "Interrupted legacy deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
+            status: "failed",
+        });
+        expect(
+            database
+                .prepare("SELECT job_id FROM deployment_lock WHERE job_id = ?")
+                .get(deploymentId)
+        ).toBeNull();
+        expect(
+            reconcileOrphanedDeploymentCutovers(
+                "2026-07-26T03:02:00.000Z",
+                () => "inactive",
+                recovery
+            )
+        ).toBe(0);
+    });
+
+    it("bounds an explicit unknown guardian state by scheduling recovery", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const recovery = jest.fn(() => true);
+
+        expect(
+            reconcileOrphanedDeploymentCutovers(
+                "2026-07-26T03:01:00.000Z",
+                () => "unknown",
+                recovery
+            )
+        ).toBe(0);
+        expect(recovery).not.toHaveBeenCalled();
+        expect(
+            reconcileOrphanedDeploymentCutovers(
+                "2026-07-26T03:10:00.000Z",
+                () => "unknown",
+                recovery
+            )
+        ).toBe(1);
+        expect(
+            reconcileOrphanedDeploymentCutovers(
+                "2026-07-26T03:11:00.000Z",
+                () => "unknown",
+                recovery
+            )
+        ).toBe(1);
+        expect(recovery).toHaveBeenCalledWith({
+            candidateCommit: "c".repeat(40),
+            id: deploymentId,
+            updatedAt: startedAt,
+        });
+        expect(recovery).toHaveBeenCalledTimes(2);
+    });
+
+    it("bounds guardian inspection failures by scheduling rollback recovery", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const recovery = jest.fn(() => true);
+
+        expect(
+            reconcileOrphanedDeploymentCutovers(
+                "2026-07-26T03:01:00.000Z",
+                () => "unknown",
+                recovery
+            )
+        ).toBe(0);
+        expect(recovery).not.toHaveBeenCalled();
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    "2026-07-26T03:11:00.000Z",
+                    () => {
+                        throw new Error("systemd unavailable");
+                    },
+                    recovery
+                )
+            ).toBe(1);
+            expect(warning).toHaveBeenCalledWith(
+                "[ScheduledJobs] Failed to inspect detached deployment guardian:",
+                expect.any(Error)
+            );
+        } finally {
+            warning.mockRestore();
+        }
+        expect(recovery).toHaveBeenCalledWith({
+            candidateCommit: "c".repeat(40),
+            id: deploymentId,
+            updatedAt: startedAt,
+        });
+        expect(
+            database
+                .prepare(
+                    `SELECT status, updated_at AS updatedAt, note
+                     FROM deployment_jobs
+                     WHERE id = ?`
+                )
+                .get(deploymentId)
+        ).toEqual({
+            note: "Waiting for guardian",
+            status: "restart-scheduled",
+            updatedAt: startedAt,
+        });
+        expect(
+            database
+                .prepare("SELECT job_id FROM deployment_lock WHERE job_id = ?")
+                .get(deploymentId)
+        ).toEqual({ job_id: deploymentId });
+    });
+
+    it("accepts a loaded active unit when systemctl emits benign diagnostics", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        createRestartScheduledDeployment(startedAt);
+        const originalPath = process.env.PATH;
+        let fakeBin: string | undefined;
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            fakeBin = mkdtempSync(path.join(tmpdir(), "mira-systemctl-test-"));
+            const systemctl = path.join(fakeBin, "systemctl");
+            writeFileSync(
+                systemctl,
+                String.raw`#!/usr/bin/env bash
+printf 'benign diagnostic\n' >&2
+printf 'LoadState=loaded\nActiveState=active\n'
+`
+            );
+            chmodSync(systemctl, 0o755);
+            process.env.PATH = `${fakeBin}${path.delimiter}${originalPath ?? ""}`;
+            const recovery = jest.fn(() => true);
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    "2026-07-26T03:11:00.000Z",
+                    undefined,
+                    recovery
+                )
+            ).toBe(0);
+            expect(recovery).not.toHaveBeenCalled();
+            expect(warning).toHaveBeenCalledWith(
+                "[ScheduledJobs] systemctl show reported diagnostics",
+                expect.objectContaining({
+                    stderr: "benign diagnostic",
+                })
+            );
+        } finally {
+            warning.mockRestore();
+            if (originalPath === undefined) {
+                delete process.env.PATH;
+            } else {
+                process.env.PATH = originalPath;
+            }
+            if (fakeBin) {
+                rmSync(fakeBin, { force: true, recursive: true });
+            }
+        }
+    });
+
     it("persists worker progress and structured action failures", async () => {
         const actionKey = `test.worker-${Bun.randomUUIDv7()}`;
         registerScheduledJobAction(actionKey, async (_job, _signal, context) => {
