@@ -1,4 +1,5 @@
 import {
+    chmodSync,
     existsSync,
     mkdirSync,
     mkdtempSync,
@@ -219,7 +220,6 @@ describe("managed pull request preview", () => {
                 "--clearenv",
                 "--ro-bind",
                 "--bind",
-                "/state",
                 "MIRA_DASHBOARD_DEV_STATE_OWNER",
                 "managed-pr-335",
                 "MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE",
@@ -227,6 +227,21 @@ describe("managed pull request preview", () => {
             ]) {
                 expect(command).toContain(value);
             }
+            const stateBindIndex = command.findIndex(
+                (value, index) =>
+                    value === "--bind" &&
+                    command[index + 1] === stateRoot &&
+                    command[index + 2] === stateRoot
+            );
+            const stateEnvironmentIndex = command.findIndex(
+                (value, index) =>
+                    value === "--setenv" &&
+                    command[index + 1] === "MIRA_DASHBOARD_DEV_STATE_ROOT" &&
+                    command[index + 2] === stateRoot
+            );
+            expect(stateBindIndex).toBeGreaterThanOrEqual(0);
+            expect(stateEnvironmentIndex).toBeGreaterThanOrEqual(0);
+            expect(command).not.toContain("/state");
             expect(command).not.toContain("MIRA_GITHUB_TOKEN");
             expect(command).not.toContain("OPENCLAW_GATEWAY_TOKEN");
             expect(command.at(-1)).toBe(
@@ -263,6 +278,51 @@ describe("managed pull request preview", () => {
         }
     });
 
+    it("does not quarantine a preview record that cannot be safely read", async () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-unreadable-state-"));
+        const config = previewConfig(root);
+        mkdirSync(config.previewRoot, { recursive: true });
+        writeFileSync(config.stateFile, "x".repeat(256 * 1024 + 1), {
+            mode: 0o600,
+        });
+
+        try {
+            await expect(getPullRequestPreviewStatus(config)).rejects.toThrow(
+                "Dashboard preview state is too large"
+            );
+            expect(existsSync(config.stateFile)).toBe(true);
+            expect(
+                readdirSync(config.previewRoot).filter((entry) =>
+                    entry.startsWith("active-preview.corrupt-")
+                )
+            ).toHaveLength(0);
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("preserves preview state after a transient read failure", async () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-read-failure-"));
+        const config = previewConfig(root);
+        mkdirSync(config.previewRoot, { recursive: true });
+        writeFileSync(config.stateFile, "{}\n", { mode: 0o000 });
+
+        try {
+            await expect(getPullRequestPreviewStatus(config)).rejects.toThrow();
+            expect(existsSync(config.stateFile)).toBe(true);
+            expect(
+                readdirSync(config.previewRoot).filter((entry) =>
+                    entry.startsWith("active-preview.corrupt-")
+                )
+            ).toHaveLength(0);
+        } finally {
+            if (existsSync(config.stateFile)) {
+                chmodSync(config.stateFile, 0o600);
+            }
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
     it("starts, reuses, updates, reports, and stops one trusted preview slot", async () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-lifecycle-"));
         const config = {
@@ -272,6 +332,8 @@ describe("managed pull request preview", () => {
         };
         const worktreePath = path.join(config.worktreeRoot, "preview-pr-335");
         let expectedCommit = COMMIT;
+        let shouldFailServeDisable = false;
+        let shouldFailServeInspectionWhenEnabled = false;
         let isServeEnabled = false;
         let isUnitActive = false;
         const commands: string[] = [];
@@ -297,6 +359,13 @@ describe("managed pull request preview", () => {
                     commandArguments[0] === "serve" &&
                     commandArguments[1] === "status"
                 ) {
+                    if (isServeEnabled && shouldFailServeInspectionWhenEnabled) {
+                        return {
+                            code: 1,
+                            stderr: "serve status unavailable",
+                            stdout: "",
+                        };
+                    }
                     return {
                         code: 0,
                         stderr: "",
@@ -319,6 +388,13 @@ describe("managed pull request preview", () => {
                     };
                 }
                 if (executable === "sudo" && commandArguments.includes("serve")) {
+                    if (shouldFailServeDisable && commandArguments.includes("off")) {
+                        return {
+                            code: 1,
+                            stderr: "serve cleanup unavailable",
+                            stdout: "",
+                        };
+                    }
                     isServeEnabled = !commandArguments.includes("off");
                 }
                 if (executable === "systemd-run") {
@@ -427,6 +503,33 @@ describe("managed pull request preview", () => {
                 commitSha: COMMIT,
                 status: "running",
             });
+            const interruptedRecord = JSON.parse(
+                readFileSync(config.stateFile, "utf8")
+            ) as Record<string, unknown>;
+            writeFileSync(
+                config.stateFile,
+                `${JSON.stringify({
+                    ...interruptedRecord,
+                    ownsTailscaleServe: false,
+                    status: "starting",
+                })}\n`,
+                { mode: 0o600 }
+            );
+            isServeEnabled = false;
+            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+                commitSha: COMMIT,
+                status: "starting",
+            });
+            await expect(
+                startPullRequestPreview(candidate, {
+                    config,
+                    readGatewayToken: () => "persisted-gateway-token",
+                })
+            ).resolves.toMatchObject({
+                commitSha: COMMIT,
+                status: "running",
+            });
+            expect(prepareStateSpy).toHaveBeenCalledTimes(2);
             await expect(
                 startPullRequestPreview(
                     { ...candidate, number: 336, title: "Other trusted preview" },
@@ -484,6 +587,30 @@ describe("managed pull request preview", () => {
             });
             expect(isServeEnabled).toBe(false);
             expect(existsSync(config.gatewayTokenFile)).toBe(false);
+
+            expectedCommit = "c".repeat(40);
+            shouldFailServeDisable = true;
+            shouldFailServeInspectionWhenEnabled = true;
+            await expect(
+                startPullRequestPreview(
+                    {
+                        ...candidate,
+                        commitSha: expectedCommit,
+                        title: "Preview with failed Serve verification",
+                    },
+                    {
+                        config,
+                        readGatewayToken: () => "failure-path-gateway-token",
+                    }
+                )
+            ).rejects.toThrow(
+                "Tailscale Serve activation failed and its route could not be removed"
+            );
+            expect(JSON.parse(readFileSync(config.stateFile, "utf8"))).toMatchObject({
+                commitSha: expectedCommit,
+                ownsTailscaleServe: true,
+                status: "failed",
+            });
         } finally {
             processSpy.mockRestore();
             prepareStateSpy.mockRestore();

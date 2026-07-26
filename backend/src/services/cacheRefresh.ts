@@ -91,7 +91,7 @@ type MoltbookCacheKey = (typeof MOLTBOOK_CACHE_KEY_LIST)[number];
 const MOLTBOOK_CACHE_KEYS = new Set<string>(MOLTBOOK_CACHE_KEY_LIST);
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 const DOCKER_SUMMARY_KEY = "docker.summary";
-const DATABASE_SUMMARY_KEY = "database.summary";
+export const DATABASE_SUMMARY_KEY = "database.summary";
 const DATABASE_SUMMARY_JOB_ID = "cache.database.summary";
 
 const gitRepos = [
@@ -2331,6 +2331,7 @@ const localCacheSeedPromises = new Map<string, Promise<void>>();
 type CacheSeedStrategy = "local" | "none" | "queue";
 
 interface CacheRefreshScheduledJobOptions {
+    allowedKeys?: readonly string[];
     refreshDatabaseOnStartup?: boolean;
     seedStrategy?: CacheSeedStrategy;
 }
@@ -2408,8 +2409,20 @@ function queueMissingCacheSeeds(
 export function registerCacheRefreshScheduledJobs(
     options: CacheRefreshScheduledJobOptions = {}
 ): void {
+    const allowedKeys = options.allowedKeys ? new Set(options.allowedKeys) : undefined;
+    const registeredJobs = allowedKeys
+        ? cacheRefreshScheduledJobs.filter((job) =>
+              allowedKeys.has(job.actionPayload.key)
+          )
+        : cacheRefreshScheduledJobs;
     registerScheduledJobAction("cache.refresh", async (job, signal) => {
         const key = getScheduledCacheKey(job);
+        if (allowedKeys && !allowedKeys.has(key)) {
+            throw Object.assign(
+                new Error(`Cache refresh is not allowed in this job profile: ${key}`),
+                { statusCode: 403 }
+            );
+        }
         const result = await refreshCacheProducer(key, signal);
         return { key, ...result };
     });
@@ -2418,10 +2431,10 @@ export function registerCacheRefreshScheduledJobs(
     try {
         removeScheduledJobsNotInAction(
             "cache.refresh",
-            cacheRefreshScheduledJobs.map((job) => job.id)
+            registeredJobs.map((job) => job.id)
         );
 
-        for (const job of cacheRefreshScheduledJobs) {
+        for (const job of registeredJobs) {
             const existing = getScheduledJob(job.id);
             upsertScheduledJob({
                 ...job,

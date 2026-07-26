@@ -1851,7 +1851,7 @@ async function scheduleReleaseCutover(
         throw new TypeError("Release cutover requires a distinct full rollback commit");
     }
     const releasesRoot = resolveDashboardReleasesRoot();
-    const lifecycleCommand = path.join(
+    const activationLifecycleCommand = path.join(
         releasesRoot,
         "releases",
         preActivationCommit,
@@ -1859,9 +1859,21 @@ async function scheduleReleaseCutover(
         "dist",
         "releaseLifecycle.js"
     );
-    const lifecycleEnvironment = releaseLifecycleInvocation(
+    const guardedLifecycleCommand = path.join(
         releasesRoot,
-        lifecycleCommand
+        "releases",
+        candidateCommit,
+        "backend",
+        "dist",
+        "releaseLifecycle.js"
+    );
+    const activationLifecycleEnvironment = releaseLifecycleInvocation(
+        releasesRoot,
+        activationLifecycleCommand
+    );
+    const guardedLifecycleEnvironment = releaseLifecycleInvocation(
+        releasesRoot,
+        guardedLifecycleCommand
     );
     const candidateShort = candidateCommit.slice(0, 8);
     const rollbackShort = rollbackCommit.slice(0, 8);
@@ -1897,15 +1909,15 @@ async function scheduleReleaseCutover(
     const script = [
         "sleep 2",
         ...releaseCutoverShellFunctions(),
-        `if ${lifecycleEnvironment} activate ${shellQuote(candidateCommit)}; then`,
+        `if ${activationLifecycleEnvironment} activate ${shellQuote(candidateCommit)}; then`,
         `  if restart_services && ready_for_commit ${shellQuote(candidateShort)}; then`,
-        `    if ${lifecycleEnvironment} prune 3; then`,
+        `    if ${activationLifecycleEnvironment} prune 3; then`,
         `      ${deploymentJobUpdateCommand(okJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(okWithRetentionWarningJob)}`,
         "    fi",
         "  else",
-        `    if ${lifecycleEnvironment} rollback ${shellQuote(candidateCommit)} ${shellQuote(rollbackCommit)} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
+        `    if ${guardedLifecycleEnvironment} rollback ${shellQuote(candidateCommit)} ${shellQuote(rollbackCommit)} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
         `      ${deploymentJobUpdateCommand(rolledBackJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
@@ -2017,7 +2029,7 @@ async function scheduleReleaseRollback(
         [
             "--user",
             "--collect",
-            `--unit=mira-dashboard-rollback-${job.id}`,
+            `--unit=mira-dashboard-deploy-${job.id}`,
             "--description=Mira Dashboard atomic release rollback",
             "/bin/bash",
             "-lc",

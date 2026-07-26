@@ -1956,7 +1956,7 @@ printf 'scheduled\n'
                 "Original release cccccccc was restored automatically"
             );
             expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
-                `--unit=mira-dashboard-rollback-${rollback.id}\n`
+                `--unit=mira-dashboard-deploy-${rollback.id}\n`
             );
         } finally {
             database
@@ -2502,12 +2502,26 @@ printf 'scheduled\n'
             expect(restartCommand).toContain(
                 `${releasesRoot}/releases/${oldCommit}/backend/dist/releaseLifecycle.js`
             );
+            expect(restartCommand).toContain(
+                `${releasesRoot}/releases/${candidateCommit}/backend/dist/releaseLifecycle.js`
+            );
             expect(restartCommand).toContain(`activate '${candidateCommit}'`);
             expect(restartCommand.indexOf(`activate '${candidateCommit}'`)).toBeLessThan(
                 restartCommand.indexOf("if restart_services")
             );
             expect(restartCommand).toContain(
                 `rollback '${candidateCommit}' '${oldCommit}'`
+            );
+            const automaticRollbackLine = restartCommand
+                .split("\n")
+                .find((line) =>
+                    line.includes(`rollback '${candidateCommit}' '${oldCommit}'`)
+                );
+            expect(automaticRollbackLine).toContain(
+                `${releasesRoot}/releases/${candidateCommit}/backend/dist/releaseLifecycle.js`
+            );
+            expect(automaticRollbackLine).not.toContain(
+                `${releasesRoot}/releases/${oldCommit}/backend/dist/releaseLifecycle.js`
             );
             expect(restartCommand).toContain("prune 3");
             expect(restartCommand).not.toContain("/api/job-executions");

@@ -1,5 +1,6 @@
 import { registerBackupScheduledJobs } from "./backups.ts";
 import {
+    DATABASE_SUMMARY_KEY,
     enqueueDatabaseSummaryRefresh,
     registerCacheRefreshScheduledJobs,
 } from "./cacheRefresh.ts";
@@ -54,6 +55,9 @@ function trackWorkerStop(operation: () => Promise<void>): Promise<void> {
 
 function registerScheduledActions(profile = dashboardJobProfile()): void {
     registerCacheRefreshScheduledJobs({
+        ...(profile === "isolated" && {
+            allowedKeys: [DATABASE_SUMMARY_KEY],
+        }),
         refreshDatabaseOnStartup: true,
         seedStrategy: "queue",
     });

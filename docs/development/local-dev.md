@@ -122,9 +122,10 @@ production config, cron, sessions, host operations, backups, Docker, terminal,
 exec, PR actions, and restarts. File and Dashboard-record mutations target only
 the isolated snapshots.
 
-The isolated worker registers the scheduler and safe local maintenance/cache
-adapters. It does not register Kopia, WAL-G, Docker, deploy, PR, exec, log
-rotation, or OpenClaw restart actions.
+The isolated worker registers the scheduler, SQLite maintenance, and only the
+database-summary cache job. It does not register the host-facing weather,
+quota, system, git, backup, Docker, or Moltbook cache jobs, nor Kopia, WAL-G,
+deploy, PR, exec, log rotation, or OpenClaw restart actions.
 
 Dev cookies use a port-specific namespace. Logging into dev therefore does not
 replace the production Dashboard session on the same Tailscale hostname, and

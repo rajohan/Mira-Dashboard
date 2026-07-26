@@ -29,6 +29,7 @@ const PREVIEW_RECORD_FORMAT_VERSION = 1;
 const PREVIEW_READY_TIMEOUT_MS = 90_000;
 const PREVIEW_READY_POLL_MS = 500;
 const MAX_COMMAND_BUFFER = 10 * 1024 * 1024;
+const MAX_PREVIEW_RECORD_BYTES = 256 * 1024;
 const COMMIT_PATTERN = /^[\da-f]{40}$/u;
 const UNIT_NAME_PATTERN = /^[A-Za-z0-9_.@-]+\.service$/u;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
@@ -433,11 +434,11 @@ function readPreviewRecord(
     if (!isRealRegularFile(config.stateFile)) {
         throw new Error("Dashboard preview state must be a real regular file");
     }
+    if (lstatSync(config.stateFile).size > MAX_PREVIEW_RECORD_BYTES) {
+        throw new Error("Dashboard preview state is too large");
+    }
+    const content = readFileSync(config.stateFile, "utf8");
     try {
-        const content = readFileSync(config.stateFile, "utf8");
-        if (Buffer.byteLength(content) > 256 * 1024) {
-            throw new Error("Dashboard preview state is too large");
-        }
         return previewRecordFromJson(JSON.parse(content) as unknown);
     } catch (error) {
         const quarantinePath = path.join(
@@ -715,6 +716,7 @@ async function inspectTailscaleServe(
 async function enableTailscaleServe(
     config: PullRequestPreviewConfig,
     expectedUrl: string,
+    onOwnershipChange: (isOwned: boolean) => void,
     signal?: AbortSignal
 ): Promise<void> {
     const current = await inspectTailscaleServe(config, signal);
@@ -741,6 +743,7 @@ async function enableTailscaleServe(
         ],
         { signal }
     );
+    onOwnershipChange(true);
     try {
         const enabled = await inspectTailscaleServe(config, signal);
         if (!enabled.enabled || enabled.url !== expectedUrl) {
@@ -749,6 +752,7 @@ async function enableTailscaleServe(
     } catch (error) {
         try {
             await disableOwnedTailscaleServe(config, true);
+            onOwnershipChange(false);
         } catch (cleanupError) {
             throw new AggregateError(
                 [error, cleanupError],
@@ -848,9 +852,9 @@ async function preparePreviewState(
     return stateRoot;
 }
 
-function sandboxDirectories(worktreePath: string, dashboardRoot: string): string[] {
+function sandboxDirectories(...targets: string[]): string[] {
     const directories = new Set<string>();
-    for (const target of [worktreePath, dashboardRoot]) {
+    for (const target of targets) {
         let current = path.dirname(target);
         const ancestors: string[] = [];
         while (current !== path.parse(current).root) {
@@ -904,7 +908,11 @@ export function buildPullRequestPreviewSandboxCommand(input: {
         "--dir",
         "/run/mira-dashboard-preview",
     ];
-    for (const directory of sandboxDirectories(worktreePath, config.dashboardRoot)) {
+    for (const directory of sandboxDirectories(
+        worktreePath,
+        config.dashboardRoot,
+        stateRoot
+    )) {
         arguments_.push("--dir", directory);
     }
     const sandboxGatewayTokenFile = "/run/mira-dashboard-preview/gateway.token";
@@ -919,7 +927,7 @@ export function buildPullRequestPreviewSandboxCommand(input: {
         config.gitCommonDirectory,
         "--bind",
         stateRoot,
-        "/state",
+        stateRoot,
         "--ro-bind",
         config.gatewayTokenFile,
         sandboxGatewayTokenFile,
@@ -956,7 +964,7 @@ export function buildPullRequestPreviewSandboxCommand(input: {
         `managed-pr-${number}`,
         "--setenv",
         "MIRA_DASHBOARD_DEV_STATE_ROOT",
-        "/state"
+        stateRoot
     );
     if (config.recentAuthMinutes) {
         arguments_.push(
@@ -1058,7 +1066,7 @@ function lifecycleFromUnit(
 ): PullRequestPreviewLifecycle {
     switch (state?.activeState) {
         case "active": {
-            return "running";
+            return fallback === "starting" ? "starting" : "running";
         }
         case "activating": {
             return "starting";
@@ -1256,13 +1264,6 @@ export async function startPullRequestPreview(
             { statusCode: 409 }
         );
     }
-    if (
-        current.status === "running" &&
-        current.number === number &&
-        current.commitSha === pullRequest.commitSha
-    ) {
-        return current;
-    }
     const existingRecord = readPreviewRecord(config);
     const timestamp = new Date().toISOString();
     const tailscaleRoute = await inspectTailscaleServe(config, signal);
@@ -1274,8 +1275,19 @@ export async function startPullRequestPreview(
             { statusCode: 409 }
         );
     }
-    let isTailscaleServeOwned = existingRecord?.ownsTailscaleServe === true;
-    if (isTailscaleServeOwned && tailscaleRoute.enabled) {
+    if (
+        current.status === "running" &&
+        current.number === number &&
+        current.commitSha === pullRequest.commitSha &&
+        existingRecord?.status === "running" &&
+        existingRecord.ownsTailscaleServe &&
+        tailscaleRoute.enabled
+    ) {
+        return current;
+    }
+    let isTailscaleServeOwned =
+        existingRecord?.ownsTailscaleServe === true && tailscaleRoute.enabled;
+    if (isTailscaleServeOwned) {
         await disableOwnedTailscaleServe(config, true);
         isTailscaleServeOwned = false;
     }
@@ -1319,8 +1331,19 @@ export async function startPullRequestPreview(
         options.protectFromCancellation?.();
         await startPreviewUnit(config, sandboxCommand, signal);
         await waitForPreviewReady(config, signal);
-        await enableTailscaleServe(config, publicOrigin, signal);
-        isTailscaleServeOwned = true;
+        await enableTailscaleServe(
+            config,
+            publicOrigin,
+            (isOwned) => {
+                isTailscaleServeOwned = isOwned;
+                writePreviewRecord(config, {
+                    ...startingRecord,
+                    ownsTailscaleServe: isOwned,
+                    updatedAt: new Date().toISOString(),
+                });
+            },
+            signal
+        );
         const startedAt = new Date().toISOString();
         const runningRecord: PullRequestPreviewRecord = {
             ...startingRecord,

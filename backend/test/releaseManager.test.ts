@@ -854,6 +854,18 @@ describe("Dashboard immutable release manager", () => {
         }
     );
 
+    it("rejects invalid release transition lock wait values", async () => {
+        const root = temporaryReleasesRoot();
+
+        for (const transitionLockWaitMs of [-1, NaN, Infinity]) {
+            await expect(
+                readDashboardReleaseState(root, { transitionLockWaitMs })
+            ).rejects.toThrow(
+                "Managed release transition lock wait must be a finite non-negative number"
+            );
+        }
+    });
+
     it.skipIf(!isReleaseTransitionLockAvailable())(
         "lets lifecycle transitions wait for an in-flight status reader",
         async () => {

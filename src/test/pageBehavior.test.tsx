@@ -59,7 +59,6 @@ import {
 } from "../pages/Terminal";
 import { normalizeChatSearch } from "../router";
 import { authActions } from "../stores/authStore";
-import { appTimeZoneParts } from "../utils/date";
 import { parseLogLine } from "../utils/logUtilities";
 
 type FakeWebSocketListener = (event?: { data?: string }) => void;
@@ -2679,6 +2678,7 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getAllByText("Schedule: Every 1h").length).toBeGreaterThan(0);
         });
 
+        const disableDraftBeforeOpen = defaultDisableUntilDraft();
         await user.click(screen.getByLabelText("Enabled"));
         expect(screen.getByRole("heading", { name: "Disable job" })).toBeInTheDocument();
         const disabledUntilGroup = screen.getByRole("group", {
@@ -2688,10 +2688,16 @@ describe("Mira Dashboard pages", () => {
             name: /choose disabled until date, selected \d{2}\/\d{2}\/\d{4}/i,
         });
         const disableCommentInput = screen.getByLabelText("Comment");
-        const today = appTimeZoneParts(new Date());
-        expect(disabledUntilDateButton).toHaveTextContent(
-            `${String(today.day).padStart(2, "0")}/${String(today.month).padStart(2, "0")}/${today.year}`
+        const disableDraftAfterOpen = defaultDisableUntilDraft();
+        const expectedDisableDates = [disableDraftBeforeOpen, disableDraftAfterOpen].map(
+            ({ day, month, year }) =>
+                `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`
         );
+        expect(
+            expectedDisableDates.some((date) =>
+                disabledUntilDateButton.textContent?.includes(date)
+            )
+        ).toBe(true);
         expect(screen.getByTestId("date-time-picker-fields")).toHaveClass(
             "min-w-0",
             "grid-cols-1"

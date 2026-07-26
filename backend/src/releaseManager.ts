@@ -989,6 +989,11 @@ async function acquireReleaseTransitionLock(
     waitTimeoutMs = 0,
     onContention?: () => void
 ): Promise<fs.promises.FileHandle> {
+    if (!Number.isFinite(waitTimeoutMs) || waitTimeoutMs < 0) {
+        throw new RangeError(
+            "Managed release transition lock wait must be a finite non-negative number"
+        );
+    }
     const deadline = Date.now() + waitTimeoutMs;
     while (true) {
         const lockFile = await openReleaseTransitionLockFile(layout);

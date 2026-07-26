@@ -5062,6 +5062,42 @@ esac
         });
     });
 
+    it("limits isolated cache jobs and execution to the database-local producer", async () => {
+        const { registerCacheRefreshScheduledJobs } =
+            await import("../src/services/cacheRefresh.ts");
+        const { runScheduledJob, upsertScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
+
+        registerCacheRefreshScheduledJobs({
+            allowedKeys: ["database.summary"],
+            seedStrategy: "none",
+        });
+        expect(
+            database
+                .prepare(
+                    "SELECT id FROM scheduled_jobs WHERE action_key = 'cache.refresh' ORDER BY id"
+                )
+                .all()
+        ).toEqual([{ id: "cache.database.summary" }]);
+
+        upsertScheduledJob({
+            actionKey: "cache.refresh",
+            actionPayload: { key: "quotas.summary" },
+            description: "Unsafe in isolated development.",
+            enabled: false,
+            id: "cache.quotas",
+            intervalSeconds: 3600,
+            name: "Quota cache",
+            scheduleType: "interval",
+        });
+        await startTestScheduledExecutor();
+        await expect(runScheduledJob("cache.quotas")).resolves.toMatchObject({
+            jobId: "cache.quotas",
+            message: "Cache refresh is not allowed in this job profile: quotas.summary",
+            status: "failed",
+        });
+    });
+
     it("registers hourly git cache and daily OpenClaw workspace sync jobs", async () => {
         const { registerCacheRefreshScheduledJobs } =
             await import("../src/services/cacheRefresh.ts");
