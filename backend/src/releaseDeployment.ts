@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
@@ -7,19 +6,12 @@ import { runProcess } from "./lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
     type DashboardReleaseRetentionResult,
-    ensureDashboardReleaseLayout,
     loadManagedRelease,
     type ManagedDashboardRelease,
-    managedReleasePath,
     pruneDashboardReleases,
+    publishVerifiedDashboardRelease,
     resolveDashboardReleasesRoot,
 } from "./releaseManager.ts";
-import {
-    loadReleaseManifest,
-    RELEASE_MANIFEST_FILE_NAME,
-    verifyReleaseArtifacts,
-    verifyReleaseBuildIdentities,
-} from "./releaseManifest.ts";
 
 const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const DEFAULT_DASHBOARD_SOURCE_ROOT = "/home/ubuntu/projects/mira-dashboard";
@@ -194,27 +186,6 @@ async function assertRealDirectory(directoryPath: string, label: string): Promis
     }
 }
 
-async function syncFile(filePath: string): Promise<void> {
-    const file = await fsp.open(filePath, fs.constants.O_RDONLY);
-    try {
-        await file.sync();
-    } finally {
-        await file.close();
-    }
-}
-
-async function syncDirectory(directoryPath: string): Promise<void> {
-    const directory = await fsp.open(
-        directoryPath,
-        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY
-    );
-    try {
-        await directory.sync();
-    } finally {
-        await directory.close();
-    }
-}
-
 async function defaultCommandRunner(
     command: string,
     arguments_: readonly string[],
@@ -240,96 +211,6 @@ async function defaultCommandRunner(
         );
     }
     return { stderr: result.stderr, stdout: result.stdout };
-}
-
-async function copyVerifiedRelease(
-    buildRoot: string,
-    commitSha: string,
-    releasesRoot: string
-): Promise<ManagedDashboardRelease> {
-    const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    const finalPath = managedReleasePath(releasesRoot, commitSha);
-    try {
-        return await loadManagedRelease(releasesRoot, commitSha);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-            throw error;
-        }
-    }
-
-    const manifest = await loadReleaseManifest(buildRoot);
-    await verifyReleaseArtifacts(buildRoot, manifest);
-    await verifyReleaseBuildIdentities(buildRoot, manifest);
-    if (manifest.commitSha !== commitSha) {
-        throw new Error(
-            `Built release identity ${manifest.commitSha} does not match ${commitSha}`
-        );
-    }
-
-    const stagingPath = path.join(
-        layout.releasesPath,
-        `.staging-${commitSha}-${randomUUID()}`
-    );
-    await fsp.mkdir(stagingPath, { mode: 0o755 });
-    try {
-        const files = [
-            ...manifest.artifacts.map((artifact) => artifact.path),
-            RELEASE_MANIFEST_FILE_NAME,
-        ];
-        const createdDirectories = new Set<string>([stagingPath]);
-        for (const relativePath of files) {
-            const sourcePath = path.join(buildRoot, relativePath);
-            const destinationPath = path.join(stagingPath, relativePath);
-            const destinationDirectory = path.dirname(destinationPath);
-            await fsp.mkdir(destinationDirectory, { mode: 0o755, recursive: true });
-            for (
-                let directory = destinationDirectory;
-                directory.startsWith(`${stagingPath}${path.sep}`);
-                directory = path.dirname(directory)
-            ) {
-                createdDirectories.add(directory);
-            }
-            await fsp.copyFile(sourcePath, destinationPath, fs.constants.COPYFILE_EXCL);
-            await syncFile(destinationPath);
-        }
-
-        const stagedManifest = await loadReleaseManifest(stagingPath);
-        await verifyReleaseArtifacts(stagingPath, stagedManifest);
-        await verifyReleaseBuildIdentities(stagingPath, stagedManifest);
-        if (stagedManifest.commitSha !== commitSha) {
-            throw new Error(
-                `Staged release identity ${stagedManifest.commitSha} does not match ${commitSha}`
-            );
-        }
-        const deepestFirst = [...createdDirectories].toSorted(
-            (left, right) => right.length - left.length
-        );
-        for (const directory of deepestFirst) {
-            await syncDirectory(directory);
-        }
-        try {
-            await fsp.rename(stagingPath, finalPath);
-        } catch (error) {
-            const code = (error as NodeJS.ErrnoException).code;
-            if (code !== "EEXIST" && code !== "ENOTEMPTY") {
-                throw error;
-            }
-            // A concurrent publisher may have won the same immutable SHA.
-            // Accept it only after full manifest, artifact, and identity verification.
-            const concurrentlyPublished = await loadManagedRelease(
-                releasesRoot,
-                commitSha
-            );
-            await fsp.rm(stagingPath, { recursive: true });
-            await syncDirectory(layout.releasesPath);
-            return concurrentlyPublished;
-        }
-        await syncDirectory(layout.releasesPath);
-    } catch (error) {
-        await fsp.rm(stagingPath, { force: true, recursive: true });
-        throw error;
-    }
-    return loadManagedRelease(releasesRoot, commitSha);
 }
 
 export function managedDashboardUnitContract(
@@ -506,7 +387,7 @@ export async function stageDashboardRelease(
             timeoutMs: 12 * 60 * 1000,
         });
         options.onProgress?.("Publishing verified immutable release");
-        stagedRelease = await copyVerifiedRelease(
+        stagedRelease = await publishVerifiedDashboardRelease(
             worktreePath,
             expectedCommit,
             contract.releasesRoot

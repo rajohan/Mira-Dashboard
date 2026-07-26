@@ -32,6 +32,7 @@ import {
     loadManagedRelease,
     managedReleasePath,
     pruneDashboardReleases,
+    publishVerifiedDashboardRelease,
     readDashboardReleaseState,
     RELEASE_TRANSITION_LOCK_FILE_NAME,
     RELEASE_TRANSITION_LOCK_PROGRAM,
@@ -45,6 +46,7 @@ import {
     RELEASE_MANIFEST_FILE_NAME,
     writeReleaseManifest,
 } from "../src/releaseManifest.ts";
+import { createReleaseFixture } from "./support/releaseFixture.ts";
 
 const temporaryRoots: string[] = [];
 const FIRST_COMMIT = "a".repeat(40);
@@ -276,6 +278,32 @@ describe("Dashboard immutable release manager", () => {
         expect(() => managedReleasePath("/tmp/dashboard-releases", "abc")).toThrow(
             "full lowercase Git SHA"
         );
+    });
+
+    it("does not expose active staging paths before publication owns the transition lock", async () => {
+        const releasesRoot = temporaryReleasesRoot();
+        const buildRoot = temporaryReleasesRoot();
+        await ensureDashboardReleaseLayout(releasesRoot);
+        await createReleaseFixture(buildRoot, FIRST_COMMIT);
+        await readDashboardReleaseState(releasesRoot);
+        const lockFileDescriptor = holdTransitionLock(releasesRoot);
+        const publication = publishVerifiedDashboardRelease(
+            buildRoot,
+            FIRST_COMMIT,
+            releasesRoot
+        );
+        try {
+            await Bun.sleep(100);
+            expect(
+                readdirSync(path.join(releasesRoot, "releases")).filter((entry) =>
+                    entry.startsWith(".staging-")
+                )
+            ).toEqual([]);
+        } finally {
+            closeSync(lockFileDescriptor);
+        }
+        const release = await publication;
+        expect(release.commitSha).toBe(FIRST_COMMIT);
     });
 
     it("activates and rolls back verified releases through relative atomic links", async () => {

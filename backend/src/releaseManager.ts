@@ -18,6 +18,7 @@ import {
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     type DashboardReleaseManifest,
     loadReleaseManifest,
+    RELEASE_MANIFEST_FILE_NAME,
     verifyReleaseArtifacts,
     verifyReleaseBuildIdentities,
 } from "./releaseManifest.ts";
@@ -35,6 +36,8 @@ const RETIRED_RELEASE_DIRECTORY_PATTERN =
 const STAGING_RELEASE_DIRECTORY_PATTERN =
     /^\.staging-([\da-f]{40})-[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
 const STALE_STAGING_RELEASE_AGE_MS = 24 * 60 * 60 * 1000;
+const RELEASE_PUBLICATION_LOCK_WAIT_MS = 2 * 60 * 1000;
+const RELEASE_TRANSITION_LOCK_RETRY_MS = 50;
 const MAX_RELEASE_TRANSITION_FILE_BYTES = 4096;
 export const RELEASE_TRANSITION_LOCK_PROGRAM = "/usr/bin/flock";
 
@@ -129,6 +132,15 @@ async function syncDirectory(directoryPath: string): Promise<void> {
         await directory.sync();
     } finally {
         await directory.close();
+    }
+}
+
+async function syncFile(filePath: string): Promise<void> {
+    const file = await fsp.open(filePath, fs.constants.O_RDONLY);
+    try {
+        await file.sync();
+    } finally {
+        await file.close();
     }
 }
 
@@ -957,41 +969,50 @@ export function assertReleaseTransitionLockCommandSucceeded(
 
 async function acquireReleaseTransitionLock(
     layout: DashboardReleaseLayout,
-    lockMode: "exclusive" | "shared"
+    lockMode: "exclusive" | "shared",
+    waitTimeoutMs = 0
 ): Promise<fs.promises.FileHandle> {
-    const lockFile = await openReleaseTransitionLockFile(layout);
-    const result = spawnSync(
-        RELEASE_TRANSITION_LOCK_PROGRAM,
-        [
-            lockMode === "exclusive" ? "--exclusive" : "--shared",
-            "--nonblock",
-            "--conflict-exit-code",
-            "75",
-            "3",
-        ],
-        {
-            stdio: ["ignore", "ignore", "pipe", lockFile.fd],
+    const deadline = Date.now() + waitTimeoutMs;
+    while (true) {
+        const lockFile = await openReleaseTransitionLockFile(layout);
+        const result = spawnSync(
+            RELEASE_TRANSITION_LOCK_PROGRAM,
+            [
+                lockMode === "exclusive" ? "--exclusive" : "--shared",
+                "--nonblock",
+                "--conflict-exit-code",
+                "75",
+                "3",
+            ],
+            {
+                stdio: ["ignore", "ignore", "pipe", lockFile.fd],
+            }
+        );
+        if (result.status === 0 && !result.error) {
+            return lockFile;
         }
-    );
-    try {
+        await lockFile.close();
+        if (result.status === 75 && Date.now() < deadline) {
+            await Bun.sleep(
+                Math.min(RELEASE_TRANSITION_LOCK_RETRY_MS, deadline - Date.now())
+            );
+            continue;
+        }
         assertReleaseTransitionLockCommandSucceeded(
             result.error as NodeJS.ErrnoException | undefined,
             result.status,
             result.stderr?.toString("utf8") ?? ""
         );
-    } catch (error) {
-        await lockFile.close();
-        throw error;
     }
-    return lockFile;
 }
 
 async function withReleaseTransitionLock<T>(
     layout: DashboardReleaseLayout,
     lockMode: "exclusive" | "shared",
-    transition: () => Promise<T>
+    transition: () => Promise<T>,
+    waitTimeoutMs = 0
 ): Promise<T> {
-    const lockFile = await acquireReleaseTransitionLock(layout, lockMode);
+    const lockFile = await acquireReleaseTransitionLock(layout, lockMode, waitTimeoutMs);
     let result: T | undefined;
     let transitionError: unknown;
     try {
@@ -1015,6 +1036,115 @@ async function withReleaseTransitionLock<T>(
         throw transitionError;
     }
     return result as T;
+}
+
+/**
+ * Copies a verified build into the immutable release store while excluding
+ * activation, rollback, pruning, and another publisher from its staging path.
+ */
+export async function publishVerifiedDashboardRelease(
+    buildRoot: string,
+    commitSha: string,
+    releasesRoot = resolveDashboardReleasesRoot()
+): Promise<ManagedDashboardRelease> {
+    assertReleaseCommitSha(commitSha);
+    const layout = await ensureDashboardReleaseLayout(releasesRoot);
+    const manifest = await loadReleaseManifest(buildRoot);
+    await verifyReleaseArtifacts(buildRoot, manifest);
+    await verifyReleaseBuildIdentities(buildRoot, manifest);
+    if (manifest.commitSha !== commitSha) {
+        throw new Error(
+            `Built release identity ${manifest.commitSha} does not match ${commitSha}`
+        );
+    }
+
+    return withReleaseTransitionLock(
+        layout,
+        "exclusive",
+        async () => {
+            await recoverInterruptedReleaseTransition(layout);
+            try {
+                return await loadManagedReleaseFromLayout(layout, commitSha);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    throw error;
+                }
+            }
+
+            const finalPath = path.join(layout.releasesPath, commitSha);
+            const stagingPath = path.join(
+                layout.releasesPath,
+                `.staging-${commitSha}-${randomUUID()}`
+            );
+            await fsp.mkdir(stagingPath, { mode: 0o755 });
+            try {
+                const files = [
+                    ...manifest.artifacts.map((artifact) => artifact.path),
+                    RELEASE_MANIFEST_FILE_NAME,
+                ];
+                const createdDirectories = new Set<string>([stagingPath]);
+                for (const relativePath of files) {
+                    const sourcePath = path.join(buildRoot, relativePath);
+                    const destinationPath = path.join(stagingPath, relativePath);
+                    const destinationDirectory = path.dirname(destinationPath);
+                    await fsp.mkdir(destinationDirectory, {
+                        mode: 0o755,
+                        recursive: true,
+                    });
+                    for (
+                        let directory = destinationDirectory;
+                        directory.startsWith(`${stagingPath}${path.sep}`);
+                        directory = path.dirname(directory)
+                    ) {
+                        createdDirectories.add(directory);
+                    }
+                    await fsp.copyFile(
+                        sourcePath,
+                        destinationPath,
+                        fs.constants.COPYFILE_EXCL
+                    );
+                    await syncFile(destinationPath);
+                }
+
+                const stagedManifest = await loadReleaseManifest(stagingPath);
+                await verifyReleaseArtifacts(stagingPath, stagedManifest);
+                await verifyReleaseBuildIdentities(stagingPath, stagedManifest);
+                if (stagedManifest.commitSha !== commitSha) {
+                    throw new Error(
+                        `Staged release identity ${stagedManifest.commitSha} does not match ${commitSha}`
+                    );
+                }
+                const deepestFirst = [...createdDirectories].toSorted(
+                    (left, right) => right.length - left.length
+                );
+                for (const directory of deepestFirst) {
+                    await syncDirectory(directory);
+                }
+                try {
+                    await fsp.rename(stagingPath, finalPath);
+                } catch (error) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code !== "EEXIST" && code !== "ENOTEMPTY") {
+                        throw error;
+                    }
+                    // A publisher from an older process may have won the same SHA.
+                    const concurrentlyPublished = await loadManagedReleaseFromLayout(
+                        layout,
+                        commitSha
+                    );
+                    await fsp.rm(stagingPath, { recursive: true });
+                    await syncDirectory(layout.releasesPath);
+                    return concurrentlyPublished;
+                }
+                await syncDirectory(layout.releasesPath);
+            } catch (error) {
+                await fsp.rm(stagingPath, { force: true, recursive: true });
+                throw error;
+            }
+            return loadManagedReleaseFromLayout(layout, commitSha);
+        },
+        RELEASE_PUBLICATION_LOCK_WAIT_MS
+    );
 }
 
 async function executeReleaseTransition(
