@@ -14,6 +14,7 @@ import path from "node:path";
 import { Database } from "bun:sqlite";
 import { describe, expect, it, jest } from "bun:test";
 
+import { prepareDevelopmentOpenClawSnapshot } from "../src/development/developmentOpenClaw.ts";
 import {
     developmentBackendEnvironment,
     prepareDevelopmentState,
@@ -406,6 +407,35 @@ describe("development stack", () => {
             } else {
                 process.env.MIRA_GITHUB_TOKEN = originalGitHubToken;
             }
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("reads bounded OpenClaw config through one no-follow descriptor", () => {
+        const root = temporaryRoot("mira-development-openclaw-config-");
+        const configSource = path.join(root, "openclaw.json");
+        const linkedConfigSource = path.join(root, "linked-openclaw.json");
+        writeFileSync(configSource, JSON.stringify({ agents: {} }));
+        symlinkSync(configSource, linkedConfigSource);
+
+        try {
+            expect(() =>
+                prepareDevelopmentOpenClawSnapshot({
+                    configSource: linkedConfigSource,
+                    openClawHome: path.join(root, "linked-state"),
+                })
+            ).toThrow(
+                "MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE must be a real regular file"
+            );
+
+            writeFileSync(configSource, " ".repeat(2 * 1024 * 1024 + 1));
+            expect(() =>
+                prepareDevelopmentOpenClawSnapshot({
+                    configSource,
+                    openClawHome: path.join(root, "oversized-state"),
+                })
+            ).toThrow("Development OpenClaw config source is too large");
+        } finally {
             rmSync(root, { force: true, recursive: true });
         }
     });

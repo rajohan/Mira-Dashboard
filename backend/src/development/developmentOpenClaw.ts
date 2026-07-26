@@ -1,9 +1,13 @@
 import {
     chmodSync,
+    closeSync,
+    constants,
     cpSync,
+    fstatSync,
     lstatSync,
     mkdirSync,
-    readFileSync,
+    openSync,
+    readSync,
     renameSync,
     rmSync,
     writeFileSync,
@@ -95,6 +99,48 @@ function defaultAgentsConfig(openClawHome: string) {
     };
 }
 
+function readOpenClawConfigSource(filePath: string): string {
+    let descriptor: number;
+    try {
+        descriptor = openSync(
+            filePath,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+    } catch (error) {
+        throw new Error(
+            `MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE must be a real regular file: ${filePath}`,
+            { cause: error }
+        );
+    }
+
+    try {
+        if (!fstatSync(descriptor).isFile()) {
+            throw new Error(
+                `MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE must be a real regular file: ${filePath}`
+            );
+        }
+        const content = Buffer.allocUnsafe(MAX_OPENCLAW_CONFIG_BYTES + 1);
+        let bytesRead = 0;
+        while (bytesRead < content.length) {
+            const chunkLength = readSync(
+                descriptor,
+                content,
+                bytesRead,
+                content.length - bytesRead,
+                undefined
+            );
+            if (chunkLength === 0) break;
+            bytesRead += chunkLength;
+        }
+        if (bytesRead > MAX_OPENCLAW_CONFIG_BYTES) {
+            throw new Error("Development OpenClaw config source is too large");
+        }
+        return content.toString("utf8", 0, bytesRead);
+    } finally {
+        closeSync(descriptor);
+    }
+}
+
 function sanitizedAgentConfigValue(value: unknown, openClawHome: string): unknown {
     if (Array.isArray(value)) {
         return value.map((item) => sanitizedAgentConfigValue(item, openClawHome));
@@ -120,16 +166,7 @@ function snapshotAgentsConfig(config: DevelopmentOpenClawSnapshotConfig): unknow
     if (!config.configSource) {
         return defaultAgentsConfig(config.openClawHome);
     }
-    if (!isRealRegularFile(config.configSource)) {
-        throw new Error(
-            `MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE must be a real regular file: ${config.configSource}`
-        );
-    }
-    const stat = lstatSync(config.configSource);
-    if (stat.size > MAX_OPENCLAW_CONFIG_BYTES) {
-        throw new Error("Development OpenClaw config source is too large");
-    }
-    const parsed = Bun.JSON5.parse(readFileSync(config.configSource, "utf8")) as {
+    const parsed = Bun.JSON5.parse(readOpenClawConfigSource(config.configSource)) as {
         agents?: unknown;
     };
     if (!parsed.agents || typeof parsed.agents !== "object") {
