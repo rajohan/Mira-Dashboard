@@ -21,6 +21,7 @@ import {
 } from "../releaseManager.ts";
 import {
     enqueueJobExecution,
+    JOB_WORKER_HEARTBEAT_MAX_AGE_MS,
     type JobExecution,
     registerExpiredJobExecutionHandler,
     registerQueuedJobCancellationHandler,
@@ -30,6 +31,8 @@ import {
     waitForJobExecution,
 } from "./queuedJobExecution.ts";
 import {
+    type OrphanedDeploymentCutover,
+    registerDeploymentCutoverRecoveryHandler,
     registerScheduledJobAction,
     type ScheduledJob,
     type ScheduledJobActionContext,
@@ -66,6 +69,8 @@ const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
 const DEPLOYMENT_RESTART_STATUS_POLL_MS = 1000;
 const DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS = 2 * 60 * 1000;
+const DEPLOYMENT_WORKER_STABILITY_SECONDS =
+    Math.ceil(JOB_WORKER_HEARTBEAT_MAX_AGE_MS / 1000) + 1;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
@@ -1459,6 +1464,77 @@ try {
     ].join(" ");
 }
 
+function releaseLifecycleInvocation(
+    releasesRoot: string,
+    lifecycleCommand: string
+): string {
+    return [
+        `MIRA_DASHBOARD_RELEASES_ROOT=${shellQuote(releasesRoot)}`,
+        `MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())}`,
+        "NODE_ENV=production",
+        shellQuote(resolveBunExecutable()),
+        shellQuote(lifecycleCommand),
+    ].join(" ");
+}
+
+function releaseCutoverShellFunctions(): string[] {
+    return [
+        "resolve_dashboard_port() {",
+        '  dashboard_port=$(/usr/local/bin/doppler run --config prd --project rajohan -- /bin/sh -c \'printf "%s" "${PORT:-3100}"\' 2>/dev/null || true)',
+        "  dashboard_port=\"$(printf \"%s\" \"$dashboard_port\" | /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^0*//')\"",
+        '  [ -n "$dashboard_port" ] || dashboard_port=0',
+        '  case "$dashboard_port" in',
+        "    *[!0-9]*) dashboard_port=3100 ;;",
+        "  esac",
+        "  if ((${#dashboard_port} > 5)); then",
+        "    dashboard_port=3100",
+        "  fi",
+        "  if ((10#$dashboard_port < 1 || 10#$dashboard_port > 65535)); then",
+        "    dashboard_port=3100",
+        "  fi",
+        '  printf "%s" "$dashboard_port"',
+        "}",
+        "worker_identity() {",
+        "  worker_properties=$(/usr/bin/systemctl --user show mira-dashboard-worker.service --property=ActiveState --property=SubState --property=MainPID --property=ExecMainStartTimestampMonotonic --no-pager 2>/dev/null) || return 1",
+        String.raw`  worker_active="$(printf "%s\n" "$worker_properties" | /usr/bin/sed -n 's/^ActiveState=//p')"`,
+        String.raw`  worker_substate="$(printf "%s\n" "$worker_properties" | /usr/bin/sed -n 's/^SubState=//p')"`,
+        String.raw`  worker_pid="$(printf "%s\n" "$worker_properties" | /usr/bin/sed -n 's/^MainPID=//p')"`,
+        String.raw`  worker_started="$(printf "%s\n" "$worker_properties" | /usr/bin/sed -n 's/^ExecMainStartTimestampMonotonic=//p')"`,
+        '  [ "$worker_active" = active ] || return 1',
+        '  [ "$worker_substate" = running ] || return 1',
+        '  case "$worker_pid:$worker_started" in',
+        "    *[!0-9:]*|0:*|*:0|:*|*:) return 1 ;;",
+        "  esac",
+        '  printf "%s:%s" "$worker_pid" "$worker_started"',
+        "}",
+        "readiness_matches() {",
+        '  expected_commit="$1"',
+        '  dashboard_port="$(resolve_dashboard_port)"',
+        '  response=$(/usr/bin/curl --fail --silent --show-error --connect-timeout 2 --max-time 5 "http://127.0.0.1:${dashboard_port}/api/health/ready" 2>/dev/null || true)',
+        '  printf "%s" "$response" | /usr/bin/jq --exit-status --arg expected "$expected_commit" \'.status == "isReady" and .checks.release.ready == true and .checks.release.backendCommit == $expected and .checks.release.frontendCommit == $expected and .checks.worker.ready == true\' >/dev/null 2>&1',
+        "}",
+        "ready_for_commit() {",
+        '  expected_commit="$1"',
+        '  initial_worker_identity=""',
+        "  for attempt in {1..30}; do",
+        '    if readiness_matches "$expected_commit"; then',
+        '      initial_worker_identity="$(worker_identity || true)"',
+        '      [ -n "$initial_worker_identity" ] && break',
+        "    fi",
+        "    sleep 1",
+        "  done",
+        '  [ -n "$initial_worker_identity" ] || return 1',
+        `  sleep ${DEPLOYMENT_WORKER_STABILITY_SECONDS}`,
+        '  current_worker_identity="$(worker_identity || true)"',
+        '  [ "$current_worker_identity" = "$initial_worker_identity" ] || return 1',
+        '  readiness_matches "$expected_commit"',
+        "}",
+        "restart_services() {",
+        `  /usr/bin/systemctl --user restart ${DASHBOARD_SERVICES.join(" ")}`,
+        "}",
+    ];
+}
+
 async function assertManagedDashboardServiceContract(
     signal?: AbortSignal
 ): Promise<void> {
@@ -1486,38 +1562,37 @@ async function assertManagedDashboardServiceContract(
 async function scheduleReleaseCutover(
     job: DeploymentJob,
     candidateCommit: string,
+    preActivationCommit: string,
     rollbackCommit: string,
     signal?: AbortSignal
 ): Promise<CommandResult> {
-    if (!job.commit || !/^[\da-f]{8}$/u.test(job.commit)) {
-        throw new TypeError("Release cutover requires an eight-character commit");
+    if (!job.commit || !/^[\da-f]{40}$/u.test(job.commit)) {
+        throw new TypeError("Release cutover requires a full candidate commit");
     }
-    if (
-        !/^[\da-f]{40}$/u.test(candidateCommit) ||
-        candidateCommit.slice(0, 8) !== job.commit
-    ) {
+    if (!/^[\da-f]{40}$/u.test(candidateCommit) || candidateCommit !== job.commit) {
         throw new TypeError("Release cutover requires the matching full candidate SHA");
     }
-    if (!/^[\da-f]{8}$/u.test(rollbackCommit)) {
-        throw new TypeError(
-            "Release cutover requires an eight-character rollback commit"
-        );
+    if (!/^[\da-f]{40}$/u.test(preActivationCommit)) {
+        throw new TypeError("Release cutover requires a full pre-activation commit");
+    }
+    if (rollbackCommit === candidateCommit || !/^[\da-f]{40}$/u.test(rollbackCommit)) {
+        throw new TypeError("Release cutover requires a distinct full rollback commit");
     }
     const releasesRoot = resolveDashboardReleasesRoot();
-    const releaseRoot = path.join(releasesRoot, "current");
     const lifecycleCommand = path.join(
-        releaseRoot,
+        releasesRoot,
+        "releases",
+        preActivationCommit,
         "backend",
         "dist",
         "releaseLifecycle.js"
     );
-    const lifecycleEnvironment = [
-        `MIRA_DASHBOARD_RELEASES_ROOT=${shellQuote(releasesRoot)}`,
-        `MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())}`,
-        "NODE_ENV=production",
-        shellQuote(resolveBunExecutable()),
-        shellQuote(lifecycleCommand),
-    ].join(" ");
+    const lifecycleEnvironment = releaseLifecycleInvocation(
+        releasesRoot,
+        lifecycleCommand
+    );
+    const candidateShort = candidateCommit.slice(0, 8);
+    const rollbackShort = rollbackCommit.slice(0, 8);
     const okJob: DeploymentJob = {
         ...job,
         status: "isOk",
@@ -1532,13 +1607,13 @@ async function scheduleReleaseCutover(
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: `Release readiness failed; automatic rollback restored ${rollbackCommit}`,
+        note: `Release readiness failed; automatic rollback restored ${rollbackShort}`,
     };
     const rollbackFailedJob: DeploymentJob = {
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: `Release readiness failed and automatic rollback to ${rollbackCommit} failed`,
+        note: `Release readiness failed and automatic rollback to ${rollbackShort} failed`,
     };
     const activationFailedJob: DeploymentJob = {
         ...job,
@@ -1549,44 +1624,16 @@ async function scheduleReleaseCutover(
 
     const script = [
         "sleep 2",
-        "resolve_dashboard_port() {",
-        '  dashboard_port=$(/usr/local/bin/doppler run --config prd --project rajohan -- /bin/sh -c \'printf "%s" "${PORT:-3100}"\' 2>/dev/null || true)',
-        '  dashboard_port="$(printf "%s" "$dashboard_port" | /usr/bin/sed -e \'s/^[[:space:]]*//\' -e \'s/[[:space:]]*$//\')"',
-        '  case "$dashboard_port" in',
-        '    ""|*[!0-9]*) dashboard_port=3100 ;;',
-        "  esac",
-        "  if ((${#dashboard_port} > 5)); then",
-        "    dashboard_port=3100",
-        "  fi",
-        "  if ((10#$dashboard_port < 1 || 10#$dashboard_port > 65535)); then",
-        "    dashboard_port=3100",
-        "  fi",
-        '  printf "%s" "$dashboard_port"',
-        "}",
-        "ready_for_commit() {",
-        '  expected_commit="$1"',
-        '  dashboard_port="$(resolve_dashboard_port)"',
-        "  for attempt in {1..30}; do",
-        '    response=$(/usr/bin/curl --fail --silent --show-error --connect-timeout 2 --max-time 5 "http://127.0.0.1:${dashboard_port}/api/health/ready" 2>/dev/null || true)',
-        '    if printf "%s" "$response" | /usr/bin/jq --exit-status --arg expected "$expected_commit" \'.status == "isReady" and .checks.release.ready == true and .checks.release.backendCommit == $expected and .checks.release.frontendCommit == $expected and .checks.worker.ready == true\' >/dev/null 2>&1; then',
-        "      return 0",
-        "    fi",
-        "    sleep 1",
-        "  done",
-        "  return 1",
-        "}",
-        "restart_services() {",
-        `  /usr/bin/systemctl --user restart ${DASHBOARD_SERVICES.join(" ")}`,
-        "}",
+        ...releaseCutoverShellFunctions(),
         `if ${lifecycleEnvironment} activate ${shellQuote(candidateCommit)}; then`,
-        `  if restart_services && ready_for_commit ${shellQuote(job.commit)}; then`,
+        `  if restart_services && ready_for_commit ${shellQuote(candidateShort)}; then`,
         `    if ${lifecycleEnvironment} prune 3; then`,
         `      ${deploymentJobUpdateCommand(okJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(okWithRetentionWarningJob)}`,
         "    fi",
         "  else",
-        `    if ${lifecycleEnvironment} rollback && restart_services && ready_for_commit ${shellQuote(rollbackCommit)}; then`,
+        `    if ${lifecycleEnvironment} rollback && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
         `      ${deploymentJobUpdateCommand(rolledBackJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
@@ -1601,6 +1648,7 @@ async function scheduleReleaseCutover(
         "systemd-run",
         [
             "--user",
+            "--collect",
             `--unit=mira-dashboard-deploy-${job.id}`,
             "--description=Mira Dashboard atomic release cutover",
             "/bin/bash",
@@ -1609,6 +1657,123 @@ async function scheduleReleaseCutover(
         ],
         { signal, timeoutMs: 30_000 }
     );
+}
+
+function didScheduleOrphanedReleaseCutoverRecovery(
+    cutover: OrphanedDeploymentCutover
+): boolean {
+    const job = readDeploymentJob(cutover.id);
+    if (!job || job.status !== "restart-scheduled") {
+        return false;
+    }
+    const candidateCommit = cutover.candidateCommit ?? job.commit;
+    if (
+        !candidateCommit ||
+        !/^[\da-f]{40}$/u.test(candidateCommit) ||
+        job.commit !== candidateCommit
+    ) {
+        throw new Error(
+            "Orphaned release cutover recovery requires its persisted full candidate SHA"
+        );
+    }
+
+    const releasesRoot = resolveDashboardReleasesRoot();
+    const rolledBackJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Interrupted release cutover recovered; automatic rollback restored the previous verified release",
+    };
+    const activationNotAppliedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Interrupted release cutover recovered before candidate activation; current verified release remains ready",
+    };
+    const script = [
+        "sleep 1",
+        ...releaseCutoverShellFunctions(),
+        `releases_root=${shellQuote(releasesRoot)}`,
+        `candidate_commit=${shellQuote(candidateCommit)}`,
+        `bun_executable=${shellQuote(resolveBunExecutable())}`,
+        "resolve_trusted_lifecycle() {",
+        '  current_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/current") || return 1',
+        '  current_commit="$(/usr/bin/basename -- "$current_release")"',
+        '  [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || return 1',
+        '  [ "$current_release" = "$releases_root/releases/$current_commit" ] || return 1',
+        '  if [ "$current_commit" = "$candidate_commit" ]; then',
+        '    trusted_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous") || return 1',
+        "  else",
+        '    trusted_release="$current_release"',
+        "  fi",
+        '  trusted_commit="$(/usr/bin/basename -- "$trusted_release")"',
+        '  [[ "$trusted_commit" =~ ^[0-9a-f]{40}$ ]] || return 1',
+        '  [ "$trusted_release" = "$releases_root/releases/$trusted_commit" ] || return 1',
+        '  trusted_lifecycle="$trusted_release/backend/dist/releaseLifecycle.js"',
+        '  [ -f "$trusted_lifecycle" ] && [ ! -L "$trusted_lifecycle" ]',
+        "}",
+        "run_lifecycle() {",
+        '  MIRA_DASHBOARD_RELEASES_ROOT="$releases_root" \\',
+        `  MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())} \\`,
+        "  NODE_ENV=production \\",
+        '  "$bun_executable" "$trusted_lifecycle" "$@"',
+        "}",
+        "resolve_trusted_lifecycle",
+        'if activation_output="$(run_lifecycle activate "$candidate_commit")"; then',
+        '  rollback_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.previous.commitSha // empty\')"',
+        '  [[ "$rollback_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
+        '  [ "$rollback_commit" != "$candidate_commit" ] || exit 1',
+        '  if run_lifecycle rollback && restart_services && ready_for_commit "${rollback_commit:0:8}"; then',
+        `    ${deploymentJobUpdateCommand(rolledBackJob)}`,
+        "  else",
+        "    exit 1",
+        "  fi",
+        "else",
+        '  status_output="$(run_lifecycle status)" || exit 1',
+        '  current_commit="$(printf "%s" "$status_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
+        '  [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
+        '  [ "$current_commit" != "$candidate_commit" ] || exit 1',
+        '  if ready_for_commit "${current_commit:0:8}" || { restart_services && ready_for_commit "${current_commit:0:8}"; }; then',
+        `    ${deploymentJobUpdateCommand(activationNotAppliedJob)}`,
+        "  else",
+        "    exit 1",
+        "  fi",
+        "fi",
+    ].join("\n");
+
+    writeDeploymentJob({
+        ...job,
+        updatedAt: dateToISOString(new Date()),
+        note: "Detached release guardian ended without a terminal result; automatic rollback recovery scheduled",
+    });
+    const result = Bun.spawnSync({
+        cmd: [
+            "systemd-run",
+            "--user",
+            "--collect",
+            `--unit=mira-dashboard-deploy-recovery-${job.id}`,
+            "--description=Mira Dashboard orphaned release rollback",
+            "/bin/bash",
+            "-lc",
+            script,
+        ],
+        cwd: getDashboardRoot(),
+        env: buildCommandEnvironment(),
+        stderr: "pipe",
+        stdin: "ignore",
+        stdout: "pipe",
+    });
+    if (result.exitCode !== 0) {
+        const diagnostic =
+            new TextDecoder().decode(result.stderr).trim() ||
+            new TextDecoder().decode(result.stdout).trim();
+        throw new Error(
+            `systemd-run failed to schedule orphaned release rollback: ${
+                diagnostic || `exit ${result.exitCode}`
+            }`
+        );
+    }
+    return true;
 }
 
 /** Runs deployment work after the API has returned a job to the caller. */
@@ -1669,7 +1834,7 @@ async function runDeploymentJob(
             ...currentJob,
             status: "restart-scheduled",
             updatedAt: dateToISOString(new Date()),
-            commit: candidate.manifest.commitShort,
+            commit: candidate.manifest.commitSha,
             commitTitle: candidate.manifest.commitTitle,
             note: "Immutable release published. Detached activation and rollback check scheduled",
         };
@@ -1677,7 +1842,8 @@ async function runDeploymentJob(
         await scheduleReleaseCutover(
             restartScheduled,
             expectedCommit,
-            rollbackRelease.manifest.commitShort,
+            currentState.current.commitSha,
+            rollbackRelease.commitSha,
             signal
         );
         return true;
@@ -2055,6 +2221,7 @@ async function executePullRequestMerge(
 /** Registers every mutating GitHub/deploy action exclusively in the worker. */
 export function registerPullRequestExecutionActions(): void {
     registerPullRequestJobLifecycleHandlers();
+    registerDeploymentCutoverRecoveryHandler(didScheduleOrphanedReleaseCutoverRecovery);
     registerScheduledJobAction("dashboard.deploy", async (job, signal, context) => {
         const deploymentId = job.actionPayload.deploymentId;
         if (typeof deploymentId !== "string" || deploymentId.trim() === "") {

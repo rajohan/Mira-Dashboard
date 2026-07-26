@@ -50,8 +50,10 @@ MIRA_DASHBOARD_RELEASE_ROOT=/home/ubuntu/projects/mira-dashboard-releases/curren
 MIRA_DASHBOARD_RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
 ```
 
-Their Doppler command selectively preserves these five values, so production
-secrets cannot replace unit-owned state or release paths.
+Their Doppler command selectively preserves these five values plus `NODE_ENV`,
+`MIRA_DASHBOARD_EXECUTION_ROLE`, `MIRA_DASHBOARD_ENABLE_JOB_SCOPES`, and
+`MIRA_DASHBOARD_JOB_SCOPE_OWNER`, so production secrets cannot replace
+unit-owned state, release paths, or orchestration policy.
 
 The OpenClaw home preserves the signed Gateway device identity across releases.
 Secrets remain in Doppler `rajohan/prd`; tracked unit files contain no secret
@@ -240,12 +242,15 @@ before retrying; never continue to candidate activation after this branch.
 ### 4. Activate and verify the candidate
 
 ```bash
-env \
+if ! env \
   MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
   MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
   bun "$RELEASES_ROOT/releases/$BOOTSTRAP_SHA/backend/dist/releaseLifecycle.js" \
-  activate "$CANDIDATE_SHA"
+  activate "$CANDIDATE_SHA"; then
+  echo "Candidate activation failed; bootstrap remains active" >&2
+  exit 1
+fi
 systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 ```
 
@@ -256,7 +261,7 @@ if ! ready_for_commit "$CANDIDATE_SHA"; then
     MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
     MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
     NODE_ENV=production \
-    bun "$RELEASES_ROOT/releases/$CANDIDATE_SHA/backend/dist/releaseLifecycle.js" \
+    bun "$RELEASES_ROOT/releases/$BOOTSTRAP_SHA/backend/dist/releaseLifecycle.js" \
     rollback; then
     echo "Candidate rollback failed; manual recovery is required" >&2
     exit 1

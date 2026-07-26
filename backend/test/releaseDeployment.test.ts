@@ -494,7 +494,7 @@ describe("immutable release deployment", () => {
         );
         const properties = [
             `WorkingDirectory=${contract.releaseRoot}/backend`,
-            `Environment=NODE_ENV=production MIRA_DASHBOARD_DB_PATH=${contract.databasePath} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${contract.logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${contract.openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${contract.releaseRoot} MIRA_DASHBOARD_RELEASES_ROOT=${contract.releasesRoot}`,
+            `Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=web MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=mira-dashboard.service MIRA_DASHBOARD_DB_PATH=${contract.databasePath} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${contract.logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${contract.openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${contract.releaseRoot} MIRA_DASHBOARD_RELEASES_ROOT=${contract.releasesRoot}`,
             `ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=${MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT.join(",")} -- bun dist/serverStart.js ; }`,
         ].join("\n");
         expect(() =>
@@ -521,6 +521,16 @@ describe("immutable release deployment", () => {
                 contract
             )
         ).toThrow("unexpected managed release entrypoint");
+        expect(() =>
+            assertManagedDashboardUnitProperties(
+                "mira-dashboard.service",
+                properties.replace(
+                    "MIRA_DASHBOARD_EXECUTION_ROLE=web",
+                    "MIRA_DASHBOARD_EXECUTION_ROLE=worker"
+                ),
+                contract
+            )
+        ).toThrow("missing stable managed release environment");
         expect(() =>
             assertManagedDashboardUnitProperties(
                 "mira-dashboard.service",

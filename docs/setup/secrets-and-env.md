@@ -86,9 +86,10 @@ password-hashed recovery validators need no equivalent decryption key.
 | `MIRA_DASHBOARD_JOB_SCOPE_OWNER`   | owning service unit | Binds transient scopes to their service lifecycle so restarts terminate orphaned children. |
 | `MIRA_DASHBOARD_DISABLE_SCHEDULER` | unset in production | Development/test escape hatch; `1` disables scheduler/executor startup.                    |
 
-The tracked systemd units set these orchestration values directly. Doppler
-remains the source of auth, origin, provider, and credential values. Production
-actions run in the worker, so their child scopes bind to
+The tracked systemd units set these orchestration values directly and preserve
+them, together with `NODE_ENV` and the managed state/release paths, through
+Doppler. Doppler remains the source of auth, origin, provider, and credential
+values. Production actions run in the worker, so their child scopes bind to
 `mira-dashboard-worker.service`; restarting only the web unit leaves them
 untouched.
 

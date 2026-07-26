@@ -38,6 +38,7 @@ const deploymentCutoverMaximumUnknownMs = 10 * 60 * 1000;
 const interruptedHandlerGraceMs = 30_000;
 const RELEASE_COMMIT_PATTERN = /^(?:[\da-f]{8,40}|development)$/u;
 const DEPLOYMENT_GUARDIAN_UNIT_PREFIX = "mira-dashboard-deploy-";
+const DEPLOYMENT_RECOVERY_UNIT_PREFIX = "mira-dashboard-deploy-recovery-";
 const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
 const interruptedHandlerSettled = new WeakMap<
     ScheduledJobInterruptionError,
@@ -46,11 +47,23 @@ const interruptedHandlerSettled = new WeakMap<
 const activeExecutionControllers = new Map<string, AbortController>();
 const activeExecutionRuns = new Map<string, Promise<void>>();
 
+type DeploymentGuardianState = "active" | "inactive" | "unknown";
+type DeploymentGuardianStateReader = (jobId: string) => DeploymentGuardianState;
+export interface OrphanedDeploymentCutover {
+    candidateCommit?: string;
+    id: string;
+    updatedAt: string;
+}
+export type DeploymentCutoverRecoveryHandler = (
+    cutover: OrphanedDeploymentCutover
+) => boolean;
+
 const scheduledJobRuntimeState: {
     scheduler: NodeJS.Timeout | undefined;
     executor: NodeJS.Timeout | undefined;
     workerHeartbeat: NodeJS.Timeout | undefined;
     executorClaimPauseGeneration: number;
+    deploymentCutoverRecoveryHandler: DeploymentCutoverRecoveryHandler | undefined;
     isSchedulerTickRunning: boolean;
     isExecutorClaimingPaused: boolean;
     isExecutorTickRunning: boolean;
@@ -61,15 +74,13 @@ const scheduledJobRuntimeState: {
     executor: undefined,
     workerHeartbeat: undefined,
     executorClaimPauseGeneration: 0,
+    deploymentCutoverRecoveryHandler: undefined,
     isSchedulerTickRunning: false,
     isExecutorClaimingPaused: false,
     isExecutorTickRunning: false,
     nextDeploymentCutoverReconcileAt: 0,
     workerId: "",
 };
-
-type DeploymentGuardianState = "active" | "inactive" | "unknown";
-type DeploymentGuardianStateReader = (jobId: string) => DeploymentGuardianState;
 
 export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
 export type ScheduledJobRunStatus =
@@ -1260,13 +1271,15 @@ function resetExecutorClaimPause(): void {
     scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt = 0;
 }
 
-function readDeploymentGuardianState(jobId: string): DeploymentGuardianState {
+type SystemdUnitState = DeploymentGuardianState | "missing";
+
+function readSystemdUnitState(unit: string): SystemdUnitState {
     const result = Bun.spawnSync({
         cmd: [
             "systemctl",
             "--user",
             "show",
-            `${DEPLOYMENT_GUARDIAN_UNIT_PREFIX}${jobId}.service`,
+            unit,
             "--property=ActiveState",
             "--property=LoadState",
             "--no-pager",
@@ -1292,6 +1305,9 @@ function readDeploymentGuardianState(jobId: string): DeploymentGuardianState {
                     : [line.slice(0, separator), line.slice(separator + 1)];
             })
     );
+    if (properties.get("LoadState") === "not-found") {
+        return "missing";
+    }
     if (properties.get("LoadState") !== "loaded") {
         return "unknown";
     }
@@ -1303,6 +1319,25 @@ function readDeploymentGuardianState(jobId: string): DeploymentGuardianState {
         return "inactive";
     }
     return "unknown";
+}
+
+function readDeploymentGuardianState(jobId: string): DeploymentGuardianState {
+    const guardian = readSystemdUnitState(
+        `${DEPLOYMENT_GUARDIAN_UNIT_PREFIX}${jobId}.service`
+    );
+    if (guardian === "active") {
+        return "active";
+    }
+    const recovery = readSystemdUnitState(
+        `${DEPLOYMENT_RECOVERY_UNIT_PREFIX}${jobId}.service`
+    );
+    if (recovery === "active") {
+        return "active";
+    }
+    if (guardian === "unknown" || recovery === "unknown") {
+        return "unknown";
+    }
+    return "inactive";
 }
 
 function isDeploymentCutoverReconciliationExpired(
@@ -1320,60 +1355,64 @@ function isDeploymentCutoverReconciliationExpired(
 
 export function reconcileOrphanedDeploymentCutovers(
     timestamp = nowIso(),
-    readGuardianState: DeploymentGuardianStateReader = readDeploymentGuardianState
+    readGuardianState: DeploymentGuardianStateReader = readDeploymentGuardianState,
+    recoverCutover:
+        | DeploymentCutoverRecoveryHandler
+        | undefined = scheduledJobRuntimeState.deploymentCutoverRecoveryHandler
 ): number {
-    const pending = database
+    const pendingRows = database
         .query(
-            `SELECT id, updated_at AS updatedAt
+            `SELECT id, commit_sha AS candidateCommit, updated_at AS updatedAt
              FROM deployment_jobs
              WHERE status = 'restart-scheduled'`
         )
-        .all() as Array<{ id: string; updatedAt: string }>;
-    const failOrphanedCutover = database.transaction((jobId: string, note: string) => {
-        const result = database
-            .query(
-                `UPDATE deployment_jobs
-                     SET status = 'failed',
-                         updated_at = ?,
-                         note = ?
-                     WHERE id = ?
-                       AND status = 'restart-scheduled'`
-            )
-            .run(timestamp, note, jobId);
-        if (result.changes === 1) {
-            database
-                .query("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
-                .run(jobId);
-        }
-        return result.changes;
-    });
+        .all() as Array<{
+        candidateCommit: string | null;
+        id: string;
+        updatedAt: string;
+    }>;
+    const pending: OrphanedDeploymentCutover[] = pendingRows.map((row) => ({
+        ...(row.candidateCommit && { candidateCommit: row.candidateCommit }),
+        id: row.id,
+        updatedAt: row.updatedAt,
+    }));
     let recovered = 0;
-    for (const { id, updatedAt } of pending) {
+    for (const cutover of pending) {
         let state: DeploymentGuardianState = "unknown";
         try {
-            state = readGuardianState(id);
+            state = readGuardianState(cutover.id);
         } catch (error) {
             console.warn(
                 "[ScheduledJobs] Failed to inspect detached deployment guardian:",
                 error
             );
         }
-        if (state === "inactive") {
-            recovered += failOrphanedCutover(
-                id,
-                "Detached release cutover guardian is no longer active"
-            );
-        } else if (
-            state === "unknown" &&
-            isDeploymentCutoverReconciliationExpired(updatedAt, timestamp)
-        ) {
-            recovered += failOrphanedCutover(
-                id,
-                "Detached release cutover guardian could not be confirmed within ten minutes"
+        const shouldRecover =
+            state === "inactive" ||
+            (state === "unknown" &&
+                isDeploymentCutoverReconciliationExpired(cutover.updatedAt, timestamp));
+        if (!shouldRecover || !recoverCutover) {
+            continue;
+        }
+        try {
+            if (recoverCutover(cutover)) {
+                recovered += 1;
+            }
+        } catch (error) {
+            console.warn(
+                "[ScheduledJobs] Failed to schedule orphaned deployment rollback:",
+                error
             );
         }
     }
     return recovered;
+}
+
+/** Registers the detached rollback scheduler used for orphaned release cutovers. */
+export function registerDeploymentCutoverRecoveryHandler(
+    didScheduleRecovery: DeploymentCutoverRecoveryHandler
+): void {
+    scheduledJobRuntimeState.deploymentCutoverRecoveryHandler = didScheduleRecovery;
 }
 
 function hasPendingDeploymentCutover(): boolean {
@@ -1383,8 +1422,8 @@ function hasPendingDeploymentCutover(): boolean {
             now + deploymentCutoverReconcileIntervalMs;
         const recovered = reconcileOrphanedDeploymentCutovers();
         if (recovered > 0) {
-            console.warn("[ScheduledJobs] Recovered orphaned deployment cutovers", {
-                recovered,
+            console.warn("[ScheduledJobs] Scheduled orphaned deployment rollbacks", {
+                scheduled: recovered,
             });
         }
     }

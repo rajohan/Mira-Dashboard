@@ -32,6 +32,9 @@ const RELEASE_TRANSITION_JOURNAL_FILE_NAME = ".release-transition.json";
 export const RELEASE_TRANSITION_LOCK_FILE_NAME = ".release-transition.lock";
 const RETIRED_RELEASE_DIRECTORY_PATTERN =
     /^\.retired-[\da-f]{40}-[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
+const STAGING_RELEASE_DIRECTORY_PATTERN =
+    /^\.staging-([\da-f]{40})-[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
+const STALE_STAGING_RELEASE_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_RELEASE_TRANSITION_FILE_BYTES = 4096;
 export const RELEASE_TRANSITION_LOCK_PROGRAM = "/usr/bin/flock";
 
@@ -1235,6 +1238,51 @@ export async function pruneDashboardReleases(
                 await fsp.rm(path.join(layout.releasesPath, entry.name), {
                     recursive: true,
                 });
+                hasFilesystemChanges = true;
+                continue;
+            }
+            const stagingMatch = STAGING_RELEASE_DIRECTORY_PATTERN.exec(entry.name);
+            if (stagingMatch) {
+                if (!entry.isDirectory() || entry.isSymbolicLink()) {
+                    throw new TypeError(
+                        `Staging release entry must be a real directory: ${entry.name}`
+                    );
+                }
+                const stagingPath = path.join(layout.releasesPath, entry.name);
+                const stagingStat = await fsp.lstat(stagingPath, { bigint: true });
+                const staleBeforeNs =
+                    BigInt(Math.max(0, Date.now() - STALE_STAGING_RELEASE_AGE_MS)) *
+                    1_000_000n;
+                if (stagingStat.mtimeNs > staleBeforeNs) {
+                    continue;
+                }
+                const currentStat = await fsp.lstat(stagingPath, { bigint: true });
+                if (
+                    !currentStat.isDirectory() ||
+                    currentStat.isSymbolicLink() ||
+                    !isSameReleaseDirectoryInode(stagingStat, currentStat)
+                ) {
+                    throw new Error(
+                        `Staging release changed before cleanup: ${entry.name}`
+                    );
+                }
+                const retiredPath = path.join(
+                    layout.releasesPath,
+                    `.retired-${stagingMatch[1]}-${randomUUID()}`
+                );
+                await fsp.rename(stagingPath, retiredPath);
+                await syncDirectory(layout.releasesPath);
+                const retiredStat = await fsp.lstat(retiredPath, { bigint: true });
+                if (
+                    !retiredStat.isDirectory() ||
+                    retiredStat.isSymbolicLink() ||
+                    !isSameReleaseDirectoryInode(currentStat, retiredStat)
+                ) {
+                    throw new Error(
+                        `Staging release changed during cleanup: ${entry.name}`
+                    );
+                }
+                await fsp.rm(retiredPath, { recursive: true });
                 hasFilesystemChanges = true;
                 continue;
             }

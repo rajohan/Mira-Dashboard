@@ -1908,12 +1908,16 @@ if [[ "$*" != *"--user show"* ]]; then
 fi
 if [[ "$*" == *"mira-dashboard-worker.service"* ]]; then
   entrypoint="dist/workerStart.js"
+  execution_role="worker"
+  scope_owner="mira-dashboard-worker.service"
 else
   entrypoint="dist/serverStart.js"
+  execution_role="web"
+  scope_owner="mira-dashboard.service"
 fi
 printf '%s\n' \
-  'Environment=NODE_ENV=production MIRA_DASHBOARD_DB_PATH=${getMiraDatabasePath()} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${releasesRoot}/current MIRA_DASHBOARD_RELEASES_ROOT=${releasesRoot}' \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=MIRA_DASHBOARD_DB_PATH,MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE,MIRA_DASHBOARD_OPENCLAW_HOME,MIRA_DASHBOARD_RELEASE_ROOT,MIRA_DASHBOARD_RELEASES_ROOT -- bun $entrypoint ; }" \
+  "Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=$execution_role MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=$scope_owner MIRA_DASHBOARD_DB_PATH=${getMiraDatabasePath()} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${releasesRoot}/current MIRA_DASHBOARD_RELEASES_ROOT=${releasesRoot}" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_EXECUTION_ROLE,MIRA_DASHBOARD_ENABLE_JOB_SCOPES,MIRA_DASHBOARD_JOB_SCOPE_OWNER,MIRA_DASHBOARD_DB_PATH,MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE,MIRA_DASHBOARD_OPENCLAW_HOME,MIRA_DASHBOARD_RELEASE_ROOT,MIRA_DASHBOARD_RELEASES_ROOT -- bun $entrypoint ; }" \
   'WorkingDirectory=${releasesRoot}/current/backend'
 `
         );
@@ -1921,7 +1925,8 @@ printf '%s\n' \
             path.join(fakeBin, "systemd-run"),
             String.raw`#!/usr/bin/env bash
 set -euo pipefail
-/bin/bash -n <<<"$6"
+script="${"$"}{!#}"
+/bin/bash -n <<<"$script"
 printf '%s\n' "$*" >> ${JSON.stringify(systemdLog)}
 printf 'scheduled\n'
 `
@@ -1943,6 +1948,7 @@ printf 'scheduled\n'
         const { enqueueJobExecution, getJobExecution } =
             await import("../src/services/jobExecutionQueue.ts");
         const {
+            reconcileOrphanedDeploymentCutovers,
             registerScheduledJobAction,
             startScheduledJobExecutor,
             stopScheduledJobExecutor,
@@ -2002,7 +2008,7 @@ printf 'scheduled\n'
                 status: string;
             };
             expect(row).toEqual({
-                commit_sha: candidateCommit.slice(0, 8),
+                commit_sha: candidateCommit,
                 commit_title: "Deployable dashboard commit",
                 note: "Immutable release published. Detached activation and rollback check scheduled",
                 status: "restart-scheduled",
@@ -2026,10 +2032,12 @@ printf 'scheduled\n'
                 `mira-dashboard-deploy-${job.id}`
             );
             const restartCommand = await Bun.file(systemdLog).text();
+            expect(restartCommand).toContain("--collect");
             expect(restartCommand).toContain(
                 "/usr/local/bin/doppler run --config prd --project rajohan"
             );
             expect(restartCommand).toContain("/usr/bin/sed");
+            expect(restartCommand).toContain("s/^0*//");
             expect(restartCommand).toContain(
                 "http://127.0.0.1:${dashboard_port}/api/health/ready"
             );
@@ -2038,8 +2046,14 @@ printf 'scheduled\n'
             );
             expect(restartCommand).toContain("--connect-timeout 2 --max-time 5");
             expect(restartCommand).toContain("for attempt in {1..30}");
+            expect(restartCommand).toContain("worker_identity");
+            expect(restartCommand).toContain("ExecMainStartTimestampMonotonic");
+            expect(restartCommand).toContain("sleep 31");
             expect(restartCommand).toContain(".checks.release.backendCommit");
             expect(restartCommand).toContain("releaseLifecycle.js");
+            expect(restartCommand).toContain(
+                `${releasesRoot}/releases/${oldCommit}/backend/dist/releaseLifecycle.js`
+            );
             expect(restartCommand).toContain(`activate '${candidateCommit}'`);
             expect(restartCommand.indexOf(`activate '${candidateCommit}'`)).toBeLessThan(
                 restartCommand.indexOf("if restart_services")
@@ -2071,6 +2085,36 @@ printf 'scheduled\n'
             expect(getJobExecution(followUpExecution.id)).toMatchObject({
                 status: "queued",
             });
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    new Date().toISOString(),
+                    () => "inactive"
+                )
+            ).toBe(1);
+            const recoveryCommand = await Bun.file(systemdLog).text();
+            expect(recoveryCommand).toContain(`mira-dashboard-deploy-recovery-${job.id}`);
+            expect(recoveryCommand).toContain(
+                'current_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/current")'
+            );
+            expect(recoveryCommand).toContain(
+                'trusted_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous")'
+            );
+            expect(recoveryCommand).toContain(
+                "run_lifecycle rollback && restart_services"
+            );
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(job.id)
+            ).toEqual({
+                note: "Detached release guardian ended without a terminal result; automatic rollback recovery scheduled",
+                status: "restart-scheduled",
+            });
+            expect(
+                database
+                    .prepare("SELECT job_id FROM deployment_lock WHERE job_id = ?")
+                    .get(job.id)
+            ).toEqual({ job_id: job.id });
             database
                 .prepare(
                     `UPDATE deployment_jobs

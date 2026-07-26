@@ -10,6 +10,7 @@ import {
     renameSync,
     rmSync,
     symlinkSync,
+    utimesSync,
     writeFileSync,
 } from "node:fs";
 import fsp from "node:fs/promises";
@@ -868,6 +869,22 @@ describe("Dashboard immutable release manager", () => {
         );
         mkdirSync(interruptedRetirementPath);
         writeFileSync(path.join(interruptedRetirementPath, "stale"), "stale\n");
+        const staleStagingPath = path.join(
+            root,
+            "releases",
+            `.staging-${FIRST_COMMIT}-00000000-0000-4000-8000-000000000001`
+        );
+        mkdirSync(staleStagingPath);
+        writeFileSync(path.join(staleStagingPath, "partial"), "partial\n");
+        const staleTimestamp = new Date(Date.now() - 25 * 60 * 60 * 1000);
+        utimesSync(staleStagingPath, staleTimestamp, staleTimestamp);
+        const activeStagingPath = path.join(
+            root,
+            "releases",
+            `.staging-${FOURTH_COMMIT}-00000000-0000-4000-8000-000000000002`
+        );
+        mkdirSync(activeStagingPath);
+        writeFileSync(path.join(activeStagingPath, "partial"), "active\n");
         const unverifiableCommit = "e".repeat(40);
         const unverifiablePath = managedReleasePath(root, unverifiableCommit);
         mkdirSync(unverifiablePath);
@@ -886,6 +903,8 @@ describe("Dashboard immutable release manager", () => {
         expect(existsSync(managedReleasePath(root, FOURTH_COMMIT))).toBe(true);
         expect(existsSync(unverifiablePath)).toBe(true);
         expect(existsSync(interruptedRetirementPath)).toBe(false);
+        expect(existsSync(staleStagingPath)).toBe(false);
+        expect(existsSync(activeStagingPath)).toBe(true);
         const state = await readDashboardReleaseState(root);
         expect(state.current?.commitSha).toBe(THIRD_COMMIT);
         expect(state.previous?.commitSha).toBe(SECOND_COMMIT);
