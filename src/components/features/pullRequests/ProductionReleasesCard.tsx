@@ -40,7 +40,7 @@ function ReleaseSlot({
             {release ? (
                 <>
                     <a
-                        href={`https://github.com/rajohan/Mira-Dashboard/commit/${encodeURIComponent(release.commitSha)}`}
+                        href={release.commitUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-2 line-clamp-2 block text-sm font-medium wrap-break-word text-primary-200 hover:text-primary-50"
@@ -159,7 +159,7 @@ export function ProductionReleasesCard({
                         {checkoutCommit?.slice(0, 8) || "Checking…"}
                     </div>
                     <p className="mt-1 text-xs text-primary-500">
-                        Control checkout; deploy syncs latest {baseBranch} first
+                        Control checkout. Deploy syncs latest {baseBranch} first
                     </p>
                 </div>
             </div>

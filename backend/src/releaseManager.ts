@@ -73,6 +73,7 @@ export interface DashboardReleaseManagerOptions {
         maximumCompatibleVersion: number
     ) => DashboardLiveSchemaState | Promise<DashboardLiveSchemaState>;
     schemaCutoverMode?: "coordinated";
+    transitionLockWaitMs?: number;
 }
 
 export interface DashboardReleasePublicationOptions {
@@ -1213,74 +1214,85 @@ export async function activateDashboardRelease(
     options: DashboardReleaseManagerOptions = {}
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    return withReleaseTransitionLock(layout, "exclusive", async () => {
-        await recoverInterruptedReleaseTransition(layout);
-        const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
-        assertDashboardReleaseHostRuntimeCompatible(candidate);
-        const state = await readActivationReleaseStateFromLayout(layout);
-        if (state.current) {
-            assertReleaseActivationCompatible(
+    return withReleaseTransitionLock(
+        layout,
+        "exclusive",
+        async () => {
+            await recoverInterruptedReleaseTransition(layout);
+            const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
+            assertDashboardReleaseHostRuntimeCompatible(candidate);
+            const state = await readActivationReleaseStateFromLayout(layout);
+            if (state.current) {
+                assertReleaseActivationCompatible(
+                    candidate.manifest,
+                    state.current.manifest,
+                    options.schemaCutoverMode
+                );
+            } else if (options.schemaCutoverMode === "coordinated") {
+                throw new Error(
+                    "Coordinated schema cutover mode requires an active current release"
+                );
+            }
+            const maximumInspectableSchemaVersion = Math.max(
+                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+                candidate.manifest.schema.maximumCompatible,
+                state.current?.manifest.schema.maximumCompatible ?? 0
+            );
+            const liveSchemaState = await resolveLiveSchemaState(
+                options,
+                maximumInspectableSchemaVersion
+            );
+            const requiresCoordinatedCutover =
+                requiresLiveSchemaCutover(candidate.manifest, liveSchemaState.version) ||
+                (state.current !== undefined &&
+                    requiresCurrentSchemaCutover(
+                        candidate.manifest,
+                        state.current.manifest
+                    ));
+            if (
+                !requiresCoordinatedCutover &&
+                options.schemaCutoverMode === "coordinated"
+            ) {
+                throw new Error(
+                    "Coordinated schema cutover mode requires an incompatible schema boundary"
+                );
+            }
+            assertReleaseCanActivateLiveSchema(
                 candidate.manifest,
-                state.current.manifest,
+                liveSchemaState.version,
                 options.schemaCutoverMode
             );
-        } else if (options.schemaCutoverMode === "coordinated") {
-            throw new Error(
-                "Coordinated schema cutover mode requires an active current release"
+            assertReleaseMigrationHistoryCompatible(
+                candidate.manifest,
+                liveSchemaState,
+                "Activation"
             );
-        }
-        const maximumInspectableSchemaVersion = Math.max(
-            DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
-            candidate.manifest.schema.maximumCompatible,
-            state.current?.manifest.schema.maximumCompatible ?? 0
-        );
-        const liveSchemaState = await resolveLiveSchemaState(
-            options,
-            maximumInspectableSchemaVersion
-        );
-        const requiresCoordinatedCutover =
-            requiresLiveSchemaCutover(candidate.manifest, liveSchemaState.version) ||
-            (state.current !== undefined &&
-                requiresCurrentSchemaCutover(candidate.manifest, state.current.manifest));
-        if (!requiresCoordinatedCutover && options.schemaCutoverMode === "coordinated") {
-            throw new Error(
-                "Coordinated schema cutover mode requires an incompatible schema boundary"
-            );
-        }
-        assertReleaseCanActivateLiveSchema(
-            candidate.manifest,
-            liveSchemaState.version,
-            options.schemaCutoverMode
-        );
-        assertReleaseMigrationHistoryCompatible(
-            candidate.manifest,
-            liveSchemaState,
-            "Activation"
-        );
-        if (state.current?.commitSha === candidate.commitSha) {
-            return state;
-        }
-
-        const before = releaseLinkStateFromDashboardState(state);
-        const journal: ReleaseTransitionJournal = {
-            after: {
-                current: candidate.commitSha,
-                previous: before.current,
-            },
-            before,
-            formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
-            operation: "activate",
-        };
-        return await executeReleaseTransition(layout, journal, async () => {
-            const expectedReleases = new Map<string, ManagedDashboardRelease>([
-                [candidate.commitSha, candidate],
-            ]);
-            if (state.current) {
-                expectedReleases.set(state.current.commitSha, state.current);
+            if (state.current?.commitSha === candidate.commitSha) {
+                return state;
             }
-            await applyReleaseLinkState(layout, journal.after, expectedReleases);
-        });
-    });
+
+            const before = releaseLinkStateFromDashboardState(state);
+            const journal: ReleaseTransitionJournal = {
+                after: {
+                    current: candidate.commitSha,
+                    previous: before.current,
+                },
+                before,
+                formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
+                operation: "activate",
+            };
+            return await executeReleaseTransition(layout, journal, async () => {
+                const expectedReleases = new Map<string, ManagedDashboardRelease>([
+                    [candidate.commitSha, candidate],
+                ]);
+                if (state.current) {
+                    expectedReleases.set(state.current.commitSha, state.current);
+                }
+                await applyReleaseLinkState(layout, journal.after, expectedReleases);
+            });
+        },
+        options.transitionLockWaitMs
+    );
 }
 
 export async function rollbackDashboardRelease(
@@ -1288,64 +1300,71 @@ export async function rollbackDashboardRelease(
     options: DashboardReleaseManagerOptions = {}
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    return withReleaseTransitionLock(layout, "exclusive", async () => {
-        await recoverInterruptedReleaseTransition(layout);
-        const state = await readDashboardReleaseStateFromLayout(layout);
-        if (!state.current || !state.previous) {
-            throw new Error("Managed release rollback requires current and previous");
-        }
-        if (state.current.commitSha === state.previous.commitSha) {
-            throw new Error("Managed release rollback requires two distinct releases");
-        }
+    return withReleaseTransitionLock(
+        layout,
+        "exclusive",
+        async () => {
+            await recoverInterruptedReleaseTransition(layout);
+            const state = await readDashboardReleaseStateFromLayout(layout);
+            if (!state.current || !state.previous) {
+                throw new Error("Managed release rollback requires current and previous");
+            }
+            if (state.current.commitSha === state.previous.commitSha) {
+                throw new Error(
+                    "Managed release rollback requires two distinct releases"
+                );
+            }
 
-        const activeRelease = state.current;
-        const rollbackRelease = state.previous;
-        assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
-        const maximumInspectableSchemaVersion = Math.max(
-            DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
-            activeRelease.manifest.schema.maximumCompatible,
-            rollbackRelease.manifest.schema.maximumCompatible
-        );
-        const liveSchemaState = await resolveLiveSchemaState(
-            options,
-            maximumInspectableSchemaVersion
-        );
-        assertReleaseRollbackCompatible(
-            activeRelease.manifest,
-            rollbackRelease.manifest,
-            liveSchemaState.version
-        );
-        assertReleaseMigrationHistoryCompatible(
-            rollbackRelease.manifest,
-            liveSchemaState,
-            "Rollback"
-        );
+            const activeRelease = state.current;
+            const rollbackRelease = state.previous;
+            assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
+            const maximumInspectableSchemaVersion = Math.max(
+                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+                activeRelease.manifest.schema.maximumCompatible,
+                rollbackRelease.manifest.schema.maximumCompatible
+            );
+            const liveSchemaState = await resolveLiveSchemaState(
+                options,
+                maximumInspectableSchemaVersion
+            );
+            assertReleaseRollbackCompatible(
+                activeRelease.manifest,
+                rollbackRelease.manifest,
+                liveSchemaState.version
+            );
+            assertReleaseMigrationHistoryCompatible(
+                rollbackRelease.manifest,
+                liveSchemaState,
+                "Rollback"
+            );
 
-        const before = releaseLinkStateFromDashboardState(state);
-        const journal: ReleaseTransitionJournal = {
-            after: {
-                current: rollbackRelease.commitSha,
-                previous: activeRelease.commitSha,
-            },
-            before,
-            formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
-            operation: "rollback",
-        };
-        return await executeReleaseTransition(layout, journal, async () => {
-            await replaceReleaseLink(
-                layout,
-                "current",
-                rollbackRelease.commitSha,
-                rollbackRelease
-            );
-            await replaceReleaseLink(
-                layout,
-                "previous",
-                activeRelease.commitSha,
-                activeRelease
-            );
-        });
-    });
+            const before = releaseLinkStateFromDashboardState(state);
+            const journal: ReleaseTransitionJournal = {
+                after: {
+                    current: rollbackRelease.commitSha,
+                    previous: activeRelease.commitSha,
+                },
+                before,
+                formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
+                operation: "rollback",
+            };
+            return await executeReleaseTransition(layout, journal, async () => {
+                await replaceReleaseLink(
+                    layout,
+                    "current",
+                    rollbackRelease.commitSha,
+                    rollbackRelease
+                );
+                await replaceReleaseLink(
+                    layout,
+                    "previous",
+                    activeRelease.commitSha,
+                    activeRelease
+                );
+            });
+        },
+        options.transitionLockWaitMs
+    );
 }
 
 export async function pruneDashboardReleases(

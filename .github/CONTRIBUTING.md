@@ -17,17 +17,10 @@ Run the relevant checks locally when possible:
 ```bash
 bun run lint:frontend
 bun run lint:backend
-bun run build
-bun run test:coverage
-```
-
-Backend changes use the same checks from `backend/`:
-
-```bash
-cd backend
-bun run lint:backend
-bun run build
-bun run test:coverage
+bun run build:frontend
+bun run build:backend
+bun run test:frontend:coverage
+bun run test:backend:coverage
 ```
 
 Run focused tests while iterating, then run the applicable coverage suite before

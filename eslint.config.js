@@ -33,7 +33,7 @@ const eslintConfig = defineConfig(
             "*.log",
             "*.tsbuildinfo",
             ".DS_Store",
-            "backend/**", // CommonJS, separate tooling
+            "backend/**", // Separate backend tooling
         ],
     },
     eslintConfigs.configs.recommended,

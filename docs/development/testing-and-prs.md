@@ -7,22 +7,19 @@ Root/frontend:
 ```bash
 bun run lint:frontend
 bun run lint:backend
-bun run build
-bun run test
-bun run test:coverage
+bun run build:frontend
+bun run build:backend
+bun run test:frontend
+bun run test:backend
+bun run test:frontend:coverage
+bun run test:backend:coverage
 bun run format:check
 ```
 
-Backend:
-
-```bash
-cd backend
-bun run lint:backend
-bun run build
-bun run test
-bun run test:coverage
-bun run format:check
-```
+`bun run build`, `bun run test`, and `bun run test:coverage` remain aggregate
+shortcuts when both applications are in scope. The explicit names make
+single-surface verification unambiguous and can be run from every worktree
+without changing directories.
 
 Every documentation change, whether docs-only or accompanying code, must run
 the Markdown formatter check and validate local Markdown links:

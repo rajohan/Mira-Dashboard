@@ -103,6 +103,26 @@ const READ_ONLY_GATEWAY_METHODS = new Set([
     "subscribe",
     "unsubscribe",
 ]);
+const DEVELOPMENT_ALLOWED_GATEWAY_METHODS = new Set([
+    ...READ_ONLY_GATEWAY_METHODS,
+    "chat.abort",
+    "chat.send",
+    "sessions.patch",
+]);
+const DEVELOPMENT_BLOCKED_HOST_MUTATION_PATHS = [
+    "/api/backup",
+    "/api/backups",
+    "/api/config",
+    "/api/cron",
+    "/api/docker",
+    "/api/exec",
+    "/api/ops",
+    "/api/pull-requests",
+    "/api/restart",
+    "/api/sessions",
+    "/api/skills",
+    "/api/terminal",
+] as const;
 const rateLimitState: { bucketCleanupTimer: Timer | undefined } = {
     bucketCleanupTimer: undefined,
 };
@@ -136,6 +156,38 @@ function isAuthRoute(pathname: string): boolean {
 function isPublicApiRoute(request: Request): boolean {
     const pathname = new URL(request.url).pathname;
     return PUBLIC_API_METHODS.get(pathname)?.has(request.method.toUpperCase()) === true;
+}
+
+function isPathAtOrBelow(pathname: string, prefix: string): boolean {
+    return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+/** Blocks host and external-service mutations while preserving isolated dev data. */
+export function isDevelopmentHostMutationBlocked(
+    request: Request,
+    environment: Record<string, string | undefined> = process.env
+): boolean {
+    if (
+        environment.MIRA_DASHBOARD_DEV_SAFE_MODE !== "1" ||
+        SAFE_REQUEST_METHODS.has(request.method.toUpperCase())
+    ) {
+        return false;
+    }
+    const pathname = new URL(request.url).pathname;
+    return DEVELOPMENT_BLOCKED_HOST_MUTATION_PATHS.some((prefix) =>
+        isPathAtOrBelow(pathname, prefix)
+    );
+}
+
+/** Allows only the live Gateway calls required by trusted PR dev chat. */
+export function isDevelopmentGatewayMethodBlocked(
+    method: string,
+    environment: Record<string, string | undefined> = process.env
+): boolean {
+    return (
+        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
+        !DEVELOPMENT_ALLOWED_GATEWAY_METHODS.has(method)
+    );
 }
 
 function rateLimitKey(
@@ -444,6 +496,27 @@ function secureHandler(
                 ? { id: session.id, username: session.username }
                 : undefined;
             const actor = requestActor(user, automationPrincipal);
+            if (isApi && isDevelopmentHostMutationBlocked(request)) {
+                const didRecordDenial = didWriteRequestAudit(
+                    actor,
+                    "denied",
+                    request,
+                    requestIdentifier,
+                    routePath,
+                    403,
+                    automationScope,
+                    persistAuditEvent
+                );
+                if (!didRecordDenial) {
+                    return json({ error: "Audit trail unavailable" }, { status: 503 });
+                }
+                return json(
+                    {
+                        error: "Host-control actions are disabled in Dashboard dev",
+                    },
+                    { status: 403 }
+                );
+            }
             const isPrivilegedRequest =
                 Boolean(session) && !automationPrincipal && requiresRecentMfa(request);
             if (

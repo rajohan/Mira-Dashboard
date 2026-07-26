@@ -1,9 +1,12 @@
 import {
     CheckCircle,
+    ExternalLink,
     GitBranch,
     GitMerge,
     GitPullRequest,
+    Play,
     Rocket,
+    Square,
     XCircle,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -13,6 +16,7 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
 import { ProductionReleasesCard } from "../components/features/pullRequests/ProductionReleasesCard";
+import { PullRequestPreviewCard } from "../components/features/pullRequests/PullRequestPreviewCard";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -24,6 +28,7 @@ import type {
     DashboardReleaseSummary,
     DeploymentJob,
     ProductionCheckoutStatus,
+    PullRequestPreviewStatus,
     PullRequestSummary,
     WorktreeCleanupResult,
 } from "../hooks";
@@ -34,9 +39,12 @@ import {
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
+    usePullRequestPreview,
     usePullRequests,
     useRejectPullRequest,
     useRollbackDashboard,
+    useStartPullRequestPreview,
+    useStopPullRequestPreview,
     useUpdatePullRequestBranch,
 } from "../hooks";
 import { formatDate } from "../utils/format";
@@ -47,13 +55,22 @@ type PendingAction =
     | { type: "merge"; pr: PullRequestSummary }
     | { type: "merge-deploy"; pr: PullRequestSummary }
     | { type: "review-approve"; pr: PullRequestSummary }
+    | { type: "preview-start"; pr: PullRequestSummary }
+    | { type: "preview-stop"; pr: PullRequestSummary }
     | { type: "reject"; pr: PullRequestSummary }
     | { release: DashboardReleaseSummary; type: "rollback" }
     | { type: "deploy" };
 type PendingActionType = Exclude<PendingAction, undefined>["type"];
 type UnhandledPendingActionType = Exclude<
     PendingActionType,
-    "deploy" | "merge" | "merge-deploy" | "reject" | "review-approve" | "rollback"
+    | "deploy"
+    | "merge"
+    | "merge-deploy"
+    | "preview-start"
+    | "preview-stop"
+    | "reject"
+    | "review-approve"
+    | "rollback"
 >;
 
 const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends never
@@ -65,6 +82,12 @@ const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
+const PREVIEW_AUTHORS = new Set([MIRA_AUTHOR, DEFAULT_REVIEWER_AUTHOR]);
+const ACTIVE_PREVIEW_STATUSES = new Set<PullRequestPreviewStatus["status"]>([
+    "running",
+    "starting",
+    "stopping",
+]);
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const FAILED_CHECK_VALUES = new Set([
     "error",
@@ -400,6 +423,12 @@ function actionLabel(action: Exclude<PendingAction, undefined>) {
         case "review-approve": {
             return "Approve PR";
         }
+        case "preview-start": {
+            return "Run PR in dev";
+        }
+        case "preview-stop": {
+            return "Stop PR dev";
+        }
         case "reject": {
             return "Reject PR";
         }
@@ -423,6 +452,12 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
         }
         case "review-approve": {
             return `Approve PR #${action.pr.number}: ${action.pr.title}?\n\nThis approves the PR on GitHub. It does not merge or deploy.`;
+        }
+        case "preview-start": {
+            return `Run PR #${action.pr.number} in dev: ${action.pr.title}?\n\nThis runs the trusted PR over Tailscale HTTPS with hot reload, an isolated Dashboard database, a writable workspace snapshot, and an isolated scheduler/worker without host or backup jobs. It connects to the live production Gateway so chat and session changes can affect production data. The dev environment stops automatically after four hours.`;
+        }
+        case "preview-stop": {
+            return `Stop PR dev for #${action.pr.number}: ${action.pr.title}?\n\nIts isolated database, workspace snapshot, and worktree are kept for a faster later restart.`;
         }
         case "reject": {
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
@@ -609,12 +644,19 @@ export function PullRequests() {
         useProductionCheckout();
     const { data: releaseStatus, error: releaseStatusError } =
         useDashboardReleaseStatus();
+    const {
+        data: previewStatus,
+        error: previewStatusError,
+        isLoading: isPreviewStatusLoading,
+    } = usePullRequestPreview();
     const approvePullRequest = useApprovePullRequest();
     const approvePullRequestReview = useApprovePullRequestReview();
     const rejectPullRequest = useRejectPullRequest();
     const updatePullRequestBranch = useUpdatePullRequestBranch();
     const deployDashboard = useDeployDashboard();
     const rollbackDashboard = useRollbackDashboard();
+    const startPullRequestPreview = useStartPullRequestPreview();
+    const stopPullRequestPreview = useStopPullRequestPreview();
     const [pendingAction, setPendingAction] = useState<PendingAction>(undefined);
     const [lastResult, setLastResult] = useState<string | undefined>(undefined);
     const [actionError, setActionError] = useState<string | undefined>(undefined);
@@ -624,7 +666,9 @@ export function PullRequests() {
         rejectPullRequest.isPending ||
         updatePullRequestBranch.isPending ||
         deployDashboard.isPending ||
-        rollbackDashboard.isPending;
+        rollbackDashboard.isPending ||
+        startPullRequestPreview.isPending ||
+        stopPullRequestPreview.isPending;
     const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
     const productionActionBlockedMessage = isProductionActionBlocked
         ? checkoutMessage(productionCheckout, productionCheckoutError ?? undefined)
@@ -670,6 +714,26 @@ export function PullRequests() {
                     return;
                 }
 
+                case "preview-start": {
+                    const preview = await startPullRequestPreview.mutateAsync({
+                        number: action.pr.number,
+                    });
+                    setLastResult(
+                        preview.url
+                            ? `PR #${action.pr.number} dev is running at ${preview.url}`
+                            : `PR #${action.pr.number} dev started`
+                    );
+                    break;
+                }
+
+                case "preview-stop": {
+                    await stopPullRequestPreview.mutateAsync({
+                        number: action.pr.number,
+                    });
+                    setLastResult(`PR #${action.pr.number} dev stopped`);
+                    break;
+                }
+
                 case "reject": {
                     const result = await rejectPullRequest.mutateAsync({
                         number: action.pr.number,
@@ -685,7 +749,9 @@ export function PullRequests() {
                 }
 
                 case "rollback": {
-                    const result = await rollbackDashboard.mutateAsync();
+                    const result = await rollbackDashboard.mutateAsync({
+                        targetCommit: action.release.commitSha,
+                    });
                     setLastResult(
                         result?.deployment?.note ??
                             `Rollback to ${action.release.commitSha.slice(0, 8)} scheduled`
@@ -698,6 +764,93 @@ export function PullRequests() {
         } catch (error_) {
             setActionError(error_ instanceof Error ? error_.message : "Action failed");
         }
+    }
+
+    /** Renders trusted PR dev controls for an eligible pull request. */
+    function renderPullRequestPreviewActions(pr: PullRequestSummary) {
+        const author = pr.author?.login;
+        if (!author || pr.baseRefName !== DEFAULT_BASE || !PREVIEW_AUTHORS.has(author)) {
+            return;
+        }
+        const isPreviewSlotActive =
+            previewStatus !== undefined &&
+            ACTIVE_PREVIEW_STATUSES.has(previewStatus.status);
+        const hasPullRequestPreviewSlot = previewStatus?.number === pr.number;
+        const isPreviewSlotBusy = isPreviewSlotActive && !hasPullRequestPreviewSlot;
+        const isPreviewTransitionInProgress =
+            hasPullRequestPreviewSlot &&
+            (previewStatus.status === "starting" || previewStatus.status === "stopping");
+        const isPreviewCommitCurrent =
+            previewStatus?.commitSha !== undefined &&
+            previewStatus.commitSha === pr.headRefOid;
+        const hasCurrentDevelopment =
+            isPreviewSlotActive && hasPullRequestPreviewSlot && isPreviewCommitCurrent;
+        const canStartDevelopment = !hasCurrentDevelopment;
+        const isPreviewActionDisabled =
+            isActionPending ||
+            isPreviewStatusLoading ||
+            Boolean(previewStatusError) ||
+            isPreviewSlotBusy ||
+            isPreviewTransitionInProgress;
+        let blockedMessage: string | undefined;
+        if (isPreviewStatusLoading) {
+            blockedMessage = "Loading PR dev status.";
+        } else if (previewStatusError) {
+            blockedMessage = `PR dev status is unavailable: ${previewStatusError.message}`;
+        } else if (isPreviewSlotBusy) {
+            blockedMessage = `PR #${previewStatus?.number} currently owns the dev slot. Stop it before starting another PR.`;
+        } else if (isPreviewTransitionInProgress) {
+            blockedMessage = "PR dev is currently changing state.";
+        }
+
+        return (
+            <>
+                {blockedMessage ? (
+                    <p className="text-xs text-primary-400 sm:basis-full">
+                        {blockedMessage}
+                    </p>
+                ) : undefined}
+                {hasPullRequestPreviewSlot &&
+                previewStatus.status === "running" &&
+                previewStatus.url ? (
+                    <a
+                        href={previewStatus.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-700 px-4 py-2 text-sm font-medium text-primary-100 transition-colors hover:bg-primary-600"
+                    >
+                        <ExternalLink className="size-4" />
+                        Open dev
+                    </a>
+                ) : undefined}
+                {canStartDevelopment ? (
+                    <Button
+                        variant="secondary"
+                        onClick={() =>
+                            setPendingAction({
+                                pr,
+                                type: "preview-start",
+                            })
+                        }
+                        disabled={isPreviewActionDisabled}
+                        title="Prod-like trusted dev with isolated Dashboard data and the live production Gateway"
+                    >
+                        <Play className="size-4" />
+                        Run in dev
+                    </Button>
+                ) : undefined}
+                {hasPullRequestPreviewSlot && previewStatus.status !== "stopped" ? (
+                    <Button
+                        variant="secondary"
+                        onClick={() => setPendingAction({ pr, type: "preview-stop" })}
+                        disabled={isActionPending || isPreviewTransitionInProgress}
+                    >
+                        <Square className="size-4" />
+                        Stop dev
+                    </Button>
+                ) : undefined}
+            </>
+        );
     }
 
     /** Renders merge controls for a pull request. */
@@ -784,6 +937,7 @@ export function PullRequests() {
                             : "Update branch"}
                     </Button>
                 ) : undefined}
+                {renderPullRequestPreviewActions(pr)}
                 <Button
                     variant="primary"
                     onClick={() => setPendingAction({ type: "merge-deploy", pr })}
@@ -837,9 +991,9 @@ export function PullRequests() {
                             Pull requests
                         </h2>
                         <p className="mt-1 max-w-2xl text-sm text-primary-400">
-                            Review open rajohan/Mira-Dashboard pull requests. Dashboard
-                            merge actions are enabled after review approval, passing CI,
-                            and a safe production checkout.
+                            Review or temporarily preview open rajohan/Mira-Dashboard pull
+                            requests. Merge actions are enabled after review approval,
+                            passing CI, and a safe production checkout.
                         </p>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:justify-items-end">
@@ -879,6 +1033,11 @@ export function PullRequests() {
                         <p className="text-sm text-red-300">{actionError}</p>
                     </Card>
                 ) : undefined}
+
+                <PullRequestPreviewCard
+                    error={previewStatusError ?? undefined}
+                    preview={previewStatus}
+                />
 
                 <ProductionReleasesCard
                     baseBranch={DEFAULT_BASE}

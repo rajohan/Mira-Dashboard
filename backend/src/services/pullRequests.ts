@@ -69,6 +69,8 @@ const RECENT_DEPLOYMENTS_LIMIT = 10;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
+const PUBLIC_PR_CACHE_MS = 2 * 60 * 1000;
+const PUBLIC_GITHUB_API_TIMEOUT_MS = 15_000;
 const DEPLOYMENT_RESTART_STATUS_POLL_MS = 1000;
 const DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEPLOYMENT_WORKER_STABILITY_SECONDS =
@@ -76,7 +78,11 @@ const DEPLOYMENT_WORKER_STABILITY_SECONDS =
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
+const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
+const publicPullRequestCache: {
+    value?: { expiresAt: number; pullRequests: PullRequestSummary[] };
+} = {};
 
 function resolveExecutableFromPath(executable: string): string | undefined {
     if (path.isAbsolute(executable)) {
@@ -131,7 +137,7 @@ interface PullRequestAuthor {
 }
 
 /** Represents pull request summary. */
-interface PullRequestSummary {
+export interface PullRequestSummary {
     number: number;
     title: string;
     body?: string;
@@ -168,6 +174,19 @@ interface PullRequestReviewConnection {
     nodes?: PullRequestReview[];
 }
 
+interface PublicGitHubPullRequest {
+    base?: { ref?: unknown };
+    body?: unknown;
+    created_at?: unknown;
+    draft?: unknown;
+    head?: { ref?: unknown; sha?: unknown };
+    html_url?: unknown;
+    number?: unknown;
+    title?: unknown;
+    updated_at?: unknown;
+    user?: { login?: unknown };
+}
+
 /** Represents deployment job. */
 interface DeploymentJob {
     id: string;
@@ -187,6 +206,7 @@ export interface DashboardReleaseSummary {
     builtAt: string;
     commitSha: string;
     commitTitle: string;
+    commitUrl: string;
     schema: {
         maximumCompatible: number;
         minimumCompatible: number;
@@ -288,6 +308,10 @@ interface DeploymentJobRow {
     stderr: string | null;
 }
 
+function dashboardCommitUrl(commitSha: string): string {
+    return `https://github.com/${DASHBOARD_REPO}/commit/${encodeURIComponent(commitSha)}`;
+}
+
 function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
     const commit = row.commit_sha ?? undefined;
     return {
@@ -297,9 +321,7 @@ function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
         updatedAt: row.updated_at,
         commit,
         commitTitle: row.commit_title ?? undefined,
-        commitUrl: commit
-            ? `https://github.com/${DASHBOARD_REPO}/commit/${encodeURIComponent(commit)}`
-            : undefined,
+        commitUrl: commit ? dashboardCommitUrl(commit) : undefined,
         note: row.note ?? undefined,
         stdout: row.stdout ?? undefined,
         stderr: row.stderr ?? undefined,
@@ -344,6 +366,7 @@ interface DeploymentLockRow {
 }
 
 interface DeploymentLockExecutionRow {
+    action_key: string;
     status: JobExecution["status"];
 }
 
@@ -368,7 +391,7 @@ function readDeploymentLockExecution(
 ): DeploymentLockExecutionRow | undefined {
     return database
         .prepare(
-            `SELECT status
+            `SELECT action_key, status
              FROM job_executions
              WHERE json_valid(payload_json)
                AND (
@@ -509,7 +532,10 @@ function ensureNoActiveDeployment(): void {
         if (lockExecution && activeJob?.status === "building") {
             writeDeploymentJob({
                 ...activeJob,
-                note: "Deploy execution ended before build completion",
+                note:
+                    lockExecution.action_key === "dashboard.rollback"
+                        ? "Rollback execution ended before build completion"
+                        : "Deploy execution ended before build completion",
                 status: "failed",
                 updatedAt: dateToISOString(new Date()),
             });
@@ -606,6 +632,7 @@ function dashboardReleaseSummary(
         builtAt: release.manifest.builtAt,
         commitSha: release.commitSha,
         commitTitle: release.manifest.commitTitle,
+        commitUrl: dashboardCommitUrl(release.commitSha),
         schema: {
             maximumCompatible: release.manifest.schema.maximumCompatible,
             minimumCompatible: release.manifest.schema.minimumCompatible,
@@ -677,11 +704,7 @@ function buildGithubCommandEnvironment(githubToken: string): NodeJS.ProcessEnv {
 
 /** Builds command environment. */
 function buildCommandEnvironment(): NodeJS.ProcessEnv {
-    const githubToken =
-        process.env.MIRA_GITHUB_TOKEN?.trim() ||
-        process.env.GH_TOKEN?.trim() ||
-        process.env.GITHUB_TOKEN?.trim() ||
-        "";
+    const githubToken = configuredGithubReadToken();
     const environment = buildGithubCommandEnvironment(githubToken);
     const bunBinDirectory = path.join(
         nonEmptyEnvironmentFallback("HOME", "/home/ubuntu"),
@@ -692,6 +715,15 @@ function buildCommandEnvironment(): NodeJS.ProcessEnv {
         .filter(Boolean)
         .join(path.delimiter);
     return environment;
+}
+
+function configuredGithubReadToken(): string {
+    return (
+        process.env.MIRA_GITHUB_TOKEN?.trim() ||
+        process.env.GH_TOKEN?.trim() ||
+        process.env.GITHUB_TOKEN?.trim() ||
+        ""
+    );
 }
 
 /** Builds reviewer command environment. */
@@ -755,6 +787,113 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
         reviewerApproved: isPullRequestReviewApproved(pr),
         canReviewerApprove: canReviewerApprove(pr),
     };
+}
+
+/** Parses the bounded public REST shape used only by credential-free dev previews. */
+export function parsePublicGithubPullRequests(value: unknown): PullRequestSummary[] {
+    if (!Array.isArray(value) || value.length > 100) {
+        throw new Error("GitHub public pull request response is invalid");
+    }
+    return value.map((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            throw new Error("GitHub public pull request response is invalid");
+        }
+        const pullRequest = entry as PublicGitHubPullRequest;
+        if (
+            !Number.isSafeInteger(pullRequest.number) ||
+            Number(pullRequest.number) <= 0 ||
+            typeof pullRequest.title !== "string" ||
+            typeof pullRequest.html_url !== "string" ||
+            typeof pullRequest.head?.ref !== "string" ||
+            typeof pullRequest.head.sha !== "string" ||
+            !FULL_COMMIT_SHA_PATTERN.test(pullRequest.head.sha) ||
+            typeof pullRequest.base?.ref !== "string" ||
+            typeof pullRequest.user?.login !== "string" ||
+            typeof pullRequest.created_at !== "string" ||
+            typeof pullRequest.updated_at !== "string" ||
+            typeof pullRequest.draft !== "boolean"
+        ) {
+            throw new Error("GitHub public pull request response is invalid");
+        }
+        return normalizePullRequest({
+            author: { login: pullRequest.user.login },
+            baseRefName: pullRequest.base.ref,
+            body: typeof pullRequest.body === "string" ? pullRequest.body : undefined,
+            createdAt: pullRequest.created_at,
+            headRefName: pullRequest.head.ref,
+            headRefOid: pullRequest.head.sha,
+            isDraft: pullRequest.draft,
+            number: Number(pullRequest.number),
+            statusCheckRollup: [],
+            title: pullRequest.title,
+            updatedAt: pullRequest.updated_at,
+            url: pullRequest.html_url,
+        });
+    });
+}
+
+async function readBoundedJsonResponse(
+    response: Response,
+    maximumBytes: number
+): Promise<unknown> {
+    if (!response.body) {
+        throw new Error("GitHub public pull request response was empty");
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let receivedBytes = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            receivedBytes += value.byteLength;
+            if (receivedBytes > maximumBytes) {
+                await reader.cancel();
+                throw new Error("GitHub public pull request response was too large");
+            }
+            chunks.push(value);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+    const body = Buffer.concat(chunks, receivedBytes).toString("utf8");
+    return JSON.parse(body) as unknown;
+}
+
+async function listPublicDashboardPullRequests(): Promise<PullRequestSummary[]> {
+    const now = Date.now();
+    const cachedPullRequests = publicPullRequestCache.value;
+    if (cachedPullRequests && cachedPullRequests.expiresAt > now) {
+        return cachedPullRequests.pullRequests;
+    }
+    const response = await fetch(
+        `https://api.github.com/repos/${DASHBOARD_REPO}/pulls?state=open&base=${DEFAULT_BASE}&per_page=100`,
+        {
+            headers: {
+                Accept: "application/vnd.github+json",
+                "User-Agent": "Mira-Dashboard-development-preview",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            signal: AbortSignal.timeout(PUBLIC_GITHUB_API_TIMEOUT_MS),
+        }
+    );
+    if (!response.ok) {
+        throw new Error(
+            `GitHub public pull request request failed with status ${response.status}`
+        );
+    }
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (contentLength > MAX_BUFFER) {
+        throw new Error("GitHub public pull request response was too large");
+    }
+    const pullRequests = parsePublicGithubPullRequests(
+        await readBoundedJsonResponse(response, MAX_BUFFER)
+    );
+    publicPullRequestCache.value = {
+        expiresAt: now + PUBLIC_PR_CACHE_MS,
+        pullRequests,
+    };
+    return pullRequests;
 }
 
 /** Performs run command. */
@@ -992,6 +1131,12 @@ async function runGhJsonLines<T>(
 
 /** Lists open pull requests targeting the dashboard production branch. */
 export async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
+    if (
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
+        !configuredGithubReadToken()
+    ) {
+        return listPublicDashboardPullRequests();
+    }
     const repo = parseRepoParts(DASHBOARD_REPO);
     const pullRequests = await runGhJsonLines<PullRequestSummary>(
         [
@@ -1792,7 +1937,7 @@ async function scheduleReleaseRollback(
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: `Rollback target failed readiness; original release ${originalShort} was restored automatically`,
+        note: `Rollback target failed readiness. Original release ${originalShort} was restored automatically`,
     };
     const restorationFailedJob: DeploymentJob = {
         ...job,
@@ -1804,7 +1949,7 @@ async function scheduleReleaseRollback(
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: "Atomic rollback failed before restart; current release was left unchanged",
+        note: "Atomic rollback failed before restart. Current release was left unchanged",
     };
 
     const script = [
@@ -1830,7 +1975,7 @@ async function scheduleReleaseRollback(
         [
             "--user",
             "--collect",
-            `--unit=mira-dashboard-deploy-${job.id}`,
+            `--unit=mira-dashboard-rollback-${job.id}`,
             "--description=Mira Dashboard atomic release rollback",
             "/bin/bash",
             "-lc",
@@ -2080,7 +2225,7 @@ async function runRollbackJob(
         }
         if (!job.commit || state.previous.commitSha !== job.commit) {
             throw new Error(
-                "Rollback target changed before execution; refresh release status and try again"
+                "Rollback target changed before execution. Refresh release status and try again"
             );
         }
         if (state.current.commitSha === state.previous.commitSha) {
@@ -2214,8 +2359,16 @@ export async function prepareAndStartDeployLatest(): Promise<DeploymentJob> {
     return startDeployLatest();
 }
 
-/** Validates the current release slots and queues an atomic rollback. */
-export async function prepareAndStartRollback(): Promise<DeploymentJob> {
+/** Validates the confirmed target against current release slots and queues rollback. */
+export async function prepareAndStartRollback(
+    expectedTargetCommit: string
+): Promise<DeploymentJob> {
+    if (!FULL_COMMIT_SHA_PATTERN.test(expectedTargetCommit)) {
+        throw Object.assign(
+            new TypeError("Rollback target must be a full lowercase commit SHA"),
+            { statusCode: 400 }
+        );
+    }
     registerPullRequestJobLifecycleHandlers();
     const now = dateToISOString(new Date());
     const deploymentId = Bun.randomUUIDv7();
@@ -2234,6 +2387,14 @@ export async function prepareAndStartRollback(): Promise<DeploymentJob> {
         if (state.current.commitSha === state.previous.commitSha) {
             throw Object.assign(
                 new Error("Managed release rollback requires two distinct releases"),
+                { statusCode: 409 }
+            );
+        }
+        if (state.previous.commitSha !== expectedTargetCommit) {
+            throw Object.assign(
+                new Error(
+                    "Rollback target changed. Refresh release status and confirm the current previous release"
+                ),
                 { statusCode: 409 }
             );
         }

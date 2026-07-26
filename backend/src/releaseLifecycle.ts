@@ -11,6 +11,7 @@ import {
 } from "./releaseManager.ts";
 
 const COORDINATED_SCHEMA_CUTOVER_FLAG = "--coordinated-schema-cutover";
+const RELEASE_TRANSITION_LOCK_WAIT_MS = 30_000;
 
 function releaseSummary(state: DashboardReleaseState) {
     const summarize = (release: DashboardReleaseState["current"]) =>
@@ -44,13 +45,18 @@ export async function runReleaseLifecycleCommand(
     }
 
     let state: DashboardReleaseState;
+    const transitionOptions: DashboardReleaseManagerOptions = {
+        ...options,
+        transitionLockWaitMs:
+            options.transitionLockWaitMs ?? RELEASE_TRANSITION_LOCK_WAIT_MS,
+    };
     switch (command) {
         case "activate": {
             if (!commitSha) {
                 throw new TypeError("Release lifecycle activate requires a commit SHA");
             }
             state = await activateDashboardRelease(commitSha, releasesRoot, {
-                ...options,
+                ...transitionOptions,
                 ...(isCoordinatedSchemaCutover && {
                     schemaCutoverMode: "coordinated" as const,
                 }),
@@ -61,7 +67,7 @@ export async function runReleaseLifecycleCommand(
             if (commitSha !== undefined) {
                 throw new TypeError("Release lifecycle rollback takes no commit SHA");
             }
-            state = await rollbackDashboardRelease(releasesRoot, options);
+            state = await rollbackDashboardRelease(releasesRoot, transitionOptions);
             break;
         }
         case "status": {

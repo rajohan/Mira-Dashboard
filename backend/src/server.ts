@@ -15,8 +15,11 @@ import type { DashboardSocket } from "./dashboardSocket.ts";
 import { resolveFrontendPath } from "./frontendAssets.ts";
 import gateway from "./gateway.ts";
 import { isAllowedDashboardOrigin, sessionIdFromCookie } from "./http.ts";
-import { resolveDashboardPort } from "./lib/values.ts";
-import { requiresRecentMfaForGatewayMethod } from "./requestPolicy.ts";
+import { resolveDashboardHost, resolveDashboardPort } from "./lib/values.ts";
+import {
+    isDevelopmentGatewayMethodBlocked,
+    requiresRecentMfaForGatewayMethod,
+} from "./requestPolicy.ts";
 import { withRequestSecurity } from "./requestSecurity.ts";
 import { routes } from "./routes.ts";
 import { validateTotpStorageConfig } from "./services/multiFactorAuth.ts";
@@ -73,11 +76,29 @@ function sendSocketAuthenticationError(
     );
 }
 
+function sendSocketDevelopmentError(
+    ws: ServerWebSocket<DashboardSocketData>,
+    request: DashboardSocketRequest
+): void {
+    ws.send(
+        JSON.stringify({
+            code: "development_method_blocked",
+            error: "This Gateway action is disabled in Dashboard dev",
+            id: request.id,
+            isOk: false,
+            type: "response",
+        })
+    );
+}
+
 function hasHiddenStaticSegment(relativePath: string): boolean {
     return relativePath.split(path.sep).some((segment) => segment.startsWith("."));
 }
 
-export { resolveDashboardPort as resolveListenPort } from "./lib/values.ts";
+export {
+    resolveDashboardHost as resolveListenHost,
+    resolveDashboardPort as resolveListenPort,
+} from "./lib/values.ts";
 
 function dashboardSocketFromBun(
     ws: ServerWebSocket<DashboardSocketData>
@@ -100,7 +121,10 @@ function dashboardSocketFromBun(
     };
 }
 
-export function createServer(port = resolveDashboardPort()): Server<DashboardSocketData> {
+export function createServer(
+    port = resolveDashboardPort(),
+    hostname = resolveDashboardHost()
+): Server<DashboardSocketData> {
     validateAuthenticationConfig();
     validateStoredSecretConfig();
     validateAutomationCredentials();
@@ -138,6 +162,14 @@ export function createServer(port = resolveDashboardPort()): Server<DashboardSoc
             if (
                 (socketRequest.type === "request" || socketRequest.type === "req") &&
                 socketRequest.method &&
+                isDevelopmentGatewayMethodBlocked(socketRequest.method)
+            ) {
+                sendSocketDevelopmentError(ws, socketRequest);
+                return;
+            }
+            if (
+                (socketRequest.type === "request" || socketRequest.type === "req") &&
+                socketRequest.method &&
                 requiresRecentMfaForGatewayMethod(socketRequest.method) &&
                 (!session.mfaEnabled || !hasRecentMfaVerification(session))
             ) {
@@ -160,6 +192,7 @@ export function createServer(port = resolveDashboardPort()): Server<DashboardSoc
     };
 
     return Bun.serve<DashboardSocketData>({
+        hostname,
         idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS,
         port,
         routes,

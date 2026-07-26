@@ -119,6 +119,32 @@ First confirm no deployment or rollback action is running:
 set -euo pipefail
 RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
 DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+
+assert_no_active_release_action() {
+  local active_action
+  active_action="$(
+    sqlite3 -batch -noheader "$DATABASE_PATH" "
+      SELECT action
+      FROM (
+        SELECT 'deployment_lock:' || job_id AS action
+        FROM deployment_lock
+        WHERE id = 1
+        UNION ALL
+        SELECT 'job_execution:' || id AS action
+        FROM job_executions
+        WHERE action_key IN ('dashboard.deploy', 'dashboard.rollback')
+          AND status IN ('queued', 'running')
+      )
+      LIMIT 1;
+    "
+  )"
+  if [[ -n "$active_action" ]]; then
+    echo "Dashboard release action is already active ($active_action); aborting." >&2
+    return 1
+  fi
+}
+
+assert_no_active_release_action
 CURRENT_RELEASE="$(
   readlink --canonicalize-existing "$RELEASES_ROOT/current"
 )"
@@ -160,13 +186,14 @@ ready_for_commit() {
   return 1
 }
 
+assert_no_active_release_action
 env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
   MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
   bun "$CURRENT_LIFECYCLE" rollback
 systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 if ! ready_for_commit "$TARGET_SHA"; then
-  echo "Rollback target failed readiness; restoring $CURRENT_SHA" >&2
+  echo "Rollback target failed readiness. Restoring $CURRENT_SHA" >&2
   env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
     MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
     NODE_ENV=production \

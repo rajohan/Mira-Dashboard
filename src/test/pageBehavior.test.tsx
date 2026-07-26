@@ -1740,6 +1740,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     builtAt: "2026-06-24T08:00:00.000Z",
                     commitSha: "abc12345".repeat(5),
                     commitTitle: "Current dashboard release",
+                    commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${"abc12345".repeat(5)}`,
                     schema: {
                         maximumCompatible: 31,
                         minimumCompatible: 1,
@@ -1750,6 +1751,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     builtAt: "2026-06-23T08:00:00.000Z",
                     commitSha: "def45678".repeat(5),
                     commitTitle: "Previous dashboard release",
+                    commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${"def45678".repeat(5)}`,
                     schema: {
                         maximumCompatible: 31,
                         minimumCompatible: 1,
@@ -1802,6 +1804,9 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (method === "POST" && url === "/api/pull-requests/releases/rollback") {
+        expect(parseRequestBody(init)).toEqual({
+            targetCommit: "def45678".repeat(5),
+        });
         return Response.json({
             isOk: true,
             deployment: {
@@ -1811,6 +1816,12 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 updatedAt: "2026-06-24T08:16:00.000Z",
                 note: "Rollback to def45678 queued",
             },
+        });
+    }
+
+    if (method === "GET" && url === "/api/pull-requests/preview") {
+        return Response.json({
+            preview: { status: "stopped" },
         });
     }
 

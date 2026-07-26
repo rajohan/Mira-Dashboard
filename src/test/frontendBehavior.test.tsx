@@ -145,15 +145,19 @@ import {
 import { OpenClawSocketProvider, useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "../hooks/useOpsActions";
 import {
+    pullRequestKeys,
     useApprovePullRequest,
     useApprovePullRequestReview,
     useDashboardReleaseStatus,
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
+    usePullRequestPreview,
     usePullRequests,
     useRejectPullRequest,
     useRollbackDashboard,
+    useStartPullRequestPreview,
+    useStopPullRequestPreview,
     useUpdatePullRequestBranch,
 } from "../hooks/usePullRequests";
 import { hasQuotaStatus, useQuotas } from "../hooks/useQuotas";
@@ -895,18 +899,19 @@ describe("Mira Dashboard frontend behavior", () => {
                 expect(screen.getByLabelText("1 open pull requests")).toBeInTheDocument();
             });
 
-            expect(screen.getByTitle("Backend connected")).toBeInTheDocument();
-            expect(screen.getByTitle("Worker online")).toBeInTheDocument();
-            expect(screen.getByText("WK")).toBeInTheDocument();
             expect(screen.getByText("v2026.6.9")).toBeInTheDocument();
-            const mobileStatus = screen.getByRole("button", {
+            const systemStatus = screen.getByRole("button", {
                 name: /System status: .+\. Open details/u,
             });
-            await userEvent.click(mobileStatus);
+            expect(screen.queryByText("WK")).not.toBeInTheDocument();
+            await userEvent.click(systemStatus);
             expect(screen.getByText("System status")).toBeInTheDocument();
             expect(screen.getByText("WebSocket")).toBeInTheDocument();
-            expect(screen.getByText("Backend")).toBeInTheDocument();
+            expect(screen.getAllByText("Backend")).toHaveLength(2);
             expect(screen.getByText("Worker")).toBeInTheDocument();
+            expect(screen.getByText("Frontend")).toBeInTheDocument();
+            expect(screen.getByText("Version mismatch")).toBeInTheDocument();
+            expect(screen.queryByText(/Version mismatch \(FE/u)).not.toBeInTheDocument();
 
             const readyHealth = queryClient.getQueryData<HealthResponse>(["health"]);
             expect(readyHealth).toBeDefined();
@@ -924,7 +929,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 });
             });
             await waitFor(() => {
-                expect(screen.getByTitle("Worker offline")).toBeInTheDocument();
+                expect(screen.getByText(/Worker offline/u)).toBeInTheDocument();
             });
 
             const healthQuery = queryClient
@@ -939,7 +944,7 @@ describe("Mira Dashboard frontend behavior", () => {
             });
             await waitFor(() => {
                 expect(
-                    screen.getByTitle("Worker status unavailable")
+                    screen.getByText(/Worker status unavailable/u)
                 ).toBeInTheDocument();
             });
 
@@ -3133,6 +3138,7 @@ describe("Mira Dashboard frontend behavior", () => {
                                 builtAt: "2026-06-23T08:00:00.000Z",
                                 commitSha: "a".repeat(40),
                                 commitTitle: "Current release",
+                                commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${"a".repeat(40)}`,
                                 schema: {
                                     maximumCompatible: 31,
                                     minimumCompatible: 1,
@@ -3143,6 +3149,7 @@ describe("Mira Dashboard frontend behavior", () => {
                                 builtAt: "2026-06-22T08:00:00.000Z",
                                 commitSha: "b".repeat(40),
                                 commitTitle: "Previous release",
+                                commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${"b".repeat(40)}`,
                                 schema: {
                                     maximumCompatible: 31,
                                     minimumCompatible: 1,
@@ -3150,6 +3157,16 @@ describe("Mira Dashboard frontend behavior", () => {
                                 },
                             },
                             rollback: { available: true },
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/preview" && method === "GET") {
+                    return Response.json({
+                        preview: {
+                            number: 189,
+                            status: "running",
+                            url: "https://dashboard.test:5173",
                         },
                     });
                 }
@@ -3307,6 +3324,14 @@ describe("Mira Dashboard frontend behavior", () => {
         const releases = renderHookWithQueryClient(() => useDashboardReleaseStatus());
         await waitFor(() =>
             expect(releases.result.current.data?.previous?.commitSha).toBe("b".repeat(40))
+        );
+
+        const preview = renderHookWithQueryClient(() => usePullRequestPreview());
+        await waitFor(() =>
+            expect(preview.result.current.data).toMatchObject({
+                number: 189,
+                status: "running",
+            })
         );
     });
 
@@ -4621,6 +4646,9 @@ describe("Mira Dashboard frontend behavior", () => {
                 }
 
                 if (url === "/api/pull-requests/releases/rollback" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        targetCommit: "b".repeat(40),
+                    });
                     return Response.json({
                         isOk: true,
                         deployment: {
@@ -4629,6 +4657,26 @@ describe("Mira Dashboard frontend behavior", () => {
                             startedAt: "2026-06-23T08:00:00.000Z",
                             updatedAt: "2026-06-23T08:00:00.000Z",
                         },
+                    });
+                }
+
+                if (url === "/api/pull-requests/189/preview/start" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({});
+                    return Response.json({
+                        isOk: true,
+                        preview: {
+                            number: 189,
+                            status: "running",
+                            url: "https://dashboard.test:5173",
+                        },
+                    });
+                }
+
+                if (url === "/api/pull-requests/189/preview/stop" && method === "POST") {
+                    expect(JSON.parse(String(init?.body))).toEqual({});
+                    return Response.json({
+                        isOk: true,
+                        preview: { number: 189, status: "stopped" },
                     });
                 }
 
@@ -4675,8 +4723,40 @@ describe("Mira Dashboard frontend behavior", () => {
         });
 
         const rollback = renderHookWithQueryClient(() => useRollbackDashboard());
-        await expect(rollback.result.current.mutateAsync()).resolves.toMatchObject({
-            deployment: { id: "rollback-1" },
+        await expect(
+            rollback.result.current.mutateAsync({
+                targetCommit: "b".repeat(40),
+            })
+        ).resolves.toMatchObject({ deployment: { id: "rollback-1" } });
+
+        const startPreview = renderHookWithQueryClient(() =>
+            useStartPullRequestPreview()
+        );
+        await expect(
+            startPreview.result.current.mutateAsync({ number: 189 })
+        ).resolves.toMatchObject({
+            number: 189,
+            status: "running",
+        });
+        expect(
+            startPreview.queryClient.getQueryData(pullRequestKeys.preview())
+        ).toMatchObject({
+            number: 189,
+            status: "running",
+        });
+
+        const stopPreview = renderHookWithQueryClient(() => useStopPullRequestPreview());
+        await expect(
+            stopPreview.result.current.mutateAsync({ number: 189 })
+        ).resolves.toMatchObject({
+            number: 189,
+            status: "stopped",
+        });
+        expect(
+            stopPreview.queryClient.getQueryData(pullRequestKeys.preview())
+        ).toMatchObject({
+            number: 189,
+            status: "stopped",
         });
     });
 

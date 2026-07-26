@@ -113,6 +113,8 @@ export type {
     DashboardReleaseSummary,
     DeploymentJob,
     ProductionCheckoutStatus,
+    PullRequestPreviewLifecycle,
+    PullRequestPreviewStatus,
     PullRequestSummary,
     WorktreeCleanupResult,
 } from "./usePullRequests";
@@ -126,9 +128,12 @@ export {
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
+    usePullRequestPreview,
     usePullRequests,
     useRejectPullRequest,
     useRollbackDashboard,
+    useStartPullRequestPreview,
+    useStopPullRequestPreview,
     useUpdatePullRequestBranch,
 } from "./usePullRequests";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";

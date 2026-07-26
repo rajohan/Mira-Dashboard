@@ -1,5 +1,19 @@
 const UNKNOWN_FORWARDED_CLIENT = "unknown";
 
+/** Keeps only the isolated dev session cookies before proxying into PR backend code. */
+export function developmentCookieHeader(
+    cookieHeader: string | null,
+    namespace: string
+): string | undefined {
+    if (!cookieHeader) return undefined;
+    const allowedNames = new Set([`${namespace}_pending_login`, `${namespace}_session`]);
+    const cookies = cookieHeader
+        .split(";")
+        .map((cookie) => cookie.trim())
+        .filter((cookie) => allowedNames.has(cookie.split("=", 1)[0] || ""));
+    return cookies.length > 0 ? cookies.join("; ") : undefined;
+}
+
 export function addForwardedClientHeaders(
     headers: Headers,
     clientAddress: string | undefined,

@@ -870,6 +870,7 @@ describe("server start scheduler policy", () => {
 
     it("wires Bun server websocket hooks and static fallbacks", async () => {
         const originalFrontendPath = process.env.MIRA_DASHBOARD_FRONTEND_PATH;
+        const originalDevelopmentSafeMode = process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
         const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-server-hooks-"));
         const frontendRoot = path.join(temporaryRoot, "frontend");
         mkdirSync(path.join(frontendRoot, "assets"), { recursive: true });
@@ -888,19 +889,37 @@ describe("server start scheduler policy", () => {
                 }) as unknown as Server<unknown>) as typeof Bun.serve
         );
         let handleDashboardClientSpy: { mockRestore: () => void } | undefined;
+        let getAuthSessionSpy: { mockRestore: () => void } | undefined;
         try {
+            const now = new Date().toISOString();
+            const authModule = await import("../src/auth.ts");
+            getAuthSessionSpy = jest
+                .spyOn(authModule, "getAuthSessionFromSessionId")
+                .mockReturnValue({
+                    authMethod: "webauthn",
+                    authenticatedAt: now,
+                    createdAt: now,
+                    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+                    id: 7,
+                    lastSeenAt: now,
+                    mfaEnabled: true,
+                    mfaVerifiedAt: now,
+                    sessionId: "dev-session",
+                    username: "mira",
+                });
             const gatewayModule = await import("../src/gateway.ts");
             handleDashboardClientSpy = jest
                 .spyOn(gatewayModule.default, "handleDashboardClient")
                 .mockImplementation(() => {});
             const { createServer } = await import("../src/server.ts");
             const optionsSymbol = Symbol.for("mira.test.options");
-            const server = createServer(0) as Server<unknown> & {
+            const server = createServer(0, "127.0.0.1") as Server<unknown> & {
                 [optionsSymbol]: {
                     fetch: (
                         request: Request,
                         server: Server<unknown>
                     ) => Promise<Response> | Response;
+                    hostname?: string;
                     websocket: {
                         close: (ws: {
                             data: { closeHandlers: Array<() => void> };
@@ -929,7 +948,9 @@ describe("server start scheduler policy", () => {
                                 closeHandlers: Array<() => void>;
                                 errorHandlers: Array<(error: unknown) => void>;
                                 messageHandlers: Array<(data: string | Buffer) => void>;
+                                sessionToken?: string;
                                 socket?: unknown;
+                                userId?: number;
                             };
                             readyState: number;
                             send: (data: string) => void;
@@ -938,6 +959,7 @@ describe("server start scheduler policy", () => {
                 };
             };
             const options = server[optionsSymbol];
+            expect(options.hostname).toBe("127.0.0.1");
 
             const apiFallback = await options.fetch(
                 new Request("https://test.local/api/missing"),
@@ -990,10 +1012,12 @@ describe("server start scheduler policy", () => {
                     closeHandlers: Array<() => void>;
                     errorHandlers: Array<(error: unknown) => void>;
                     messageHandlers: Array<(data: string | Buffer) => void>;
+                    sessionToken?: string;
                     socket?: {
                         close: (code?: number, reason?: string) => void;
                         send: (data: string) => void;
                     };
+                    userId?: number;
                 };
                 readyState: number;
                 send: (data: string) => void;
@@ -1019,18 +1043,60 @@ describe("server start scheduler policy", () => {
                 4401,
                 "Dashboard session is no longer valid"
             );
+
+            closeSpy.mockClear();
+            messageHandler.mockClear();
+            sendSpy.mockClear();
+            process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+            ws.data.sessionToken = "dev-session";
+            ws.data.userId = 7;
+            options.websocket.message(
+                ws,
+                JSON.stringify({
+                    id: "blocked-request",
+                    method: "config.patch",
+                    type: "request",
+                })
+            );
+            expect(closeSpy).not.toHaveBeenCalled();
+            expect(messageHandler).not.toHaveBeenCalled();
+            expect(JSON.parse(String(sendSpy.mock.calls[0]?.[0]))).toEqual({
+                code: "development_method_blocked",
+                error: "This Gateway action is disabled in Dashboard dev",
+                id: "blocked-request",
+                isOk: false,
+                type: "response",
+            });
+
+            options.websocket.message(
+                ws,
+                JSON.stringify({
+                    id: "allowed-request",
+                    method: "chat.send",
+                    type: "request",
+                })
+            );
+            expect(messageHandler).toHaveBeenCalledWith(
+                expect.stringContaining('"method":"chat.send"')
+            );
+
             options.websocket.error(ws, new Error("boom"));
             options.websocket.close(ws);
-            expect(messageHandler).not.toHaveBeenCalled();
             expect(errorHandler).toHaveBeenCalledWith(expect.any(Error));
             expect(closeHandler).toHaveBeenCalled();
         } finally {
+            getAuthSessionSpy?.mockRestore();
             handleDashboardClientSpy?.mockRestore();
             serveSpy.mockRestore();
             if (originalFrontendPath === undefined) {
                 delete process.env.MIRA_DASHBOARD_FRONTEND_PATH;
             } else {
                 process.env.MIRA_DASHBOARD_FRONTEND_PATH = originalFrontendPath;
+            }
+            if (originalDevelopmentSafeMode === undefined) {
+                delete process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+            } else {
+                process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = originalDevelopmentSafeMode;
             }
             rmSync(temporaryRoot, { force: true, recursive: true });
         }

@@ -52,23 +52,31 @@ bun install
 Install backend dependencies separately:
 
 ```bash
-cd backend
-bun install
+bun --cwd backend install
 ```
 
-Run the frontend dev server:
+Run the complete local dev stack:
 
 ```bash
 bun run dev
 ```
 
-Run the backend dev server from `backend/`:
+For WebAuthn and access from another Tailscale device, use the HTTPS route:
 
 ```bash
-bun run dev
+bun run dev:remote
 ```
 
-The backend scripts use Doppler (`rajohan` / `prd`) for runtime secrets. Do not commit `.environment` files, tokens, database dumps, or generated runtime state.
+Both commands start frontend and backend hot reload, React Compiler, an isolated
+Dashboard database/workspace snapshot, and a dev-only scheduler/worker. Dev
+connects to the live OpenClaw Gateway, so chat and session changes can affect
+production data. Production host, backup, config, cron, destructive session,
+and PR actions remain blocked.
+
+Only the Gateway token and production auth timing values are selected from
+Doppler (`rajohan` / `prd`) at runtime. No secret values are stored in scripts
+or tracked files. See [Local development](docs/development/local-dev.md) for
+state paths, reset commands, and the trusted PR-dev flow.
 
 ## Verification commands
 
@@ -78,18 +86,10 @@ From the repo root:
 bun run lint:frontend
 bun run lint:backend
 bun run build
-bun run test
-bun run test:coverage
-bun run format:check
-```
-
-From `backend/`:
-
-```bash
-bun run lint:backend
-bun run build
-bun run test
-bun run test:coverage
+bun run test:frontend
+bun run test:backend
+bun run test:frontend:coverage
+bun run test:backend:coverage
 bun run format:check
 ```
 
@@ -119,7 +119,8 @@ CI and local verification.
   restrictive storage modes, deploy/maintenance snapshots, and automated
   restore checks.
 - Frontend builds and the local frontend dev server use Bun's HTML bundler with Babel React Compiler and Bun Tailwind plugins.
-- Dev server listens on all addresses so the dashboard can be reached over Tailscale when needed.
+- Dev servers bind to loopback. `bun run dev:remote` publishes the frontend
+  through an explicit Tailscale Serve HTTPS route.
 - Auth is enforced by the backend request policy for every API route except
   `GET|HEAD /api/health/live`, `GET|HEAD /api/health/ready`,
   `GET|HEAD /api/auth/bootstrap`,

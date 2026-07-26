@@ -90,14 +90,17 @@ const SCHEMA_6_OPTIONS = {
     readLiveSchemaState: () => testLiveSchemaState(6),
 };
 
-function holdTransitionLock(releasesRoot: string): number {
+function holdTransitionLock(
+    releasesRoot: string,
+    mode: "exclusive" | "shared" = "exclusive"
+): number {
     const lockFileDescriptor = openSync(
         path.join(releasesRoot, RELEASE_TRANSITION_LOCK_FILE_NAME),
         "r+"
     );
     const result = spawnSync(
         RELEASE_TRANSITION_LOCK_PROGRAM,
-        ["--exclusive", "--nonblock", "3"],
+        [mode === "exclusive" ? "--exclusive" : "--shared", "--nonblock", "3"],
         {
             stdio: ["ignore", "ignore", "pipe", lockFileDescriptor],
         }
@@ -831,6 +834,28 @@ describe("Dashboard immutable release manager", () => {
             } finally {
                 closeSync(lockFileDescriptor);
             }
+        }
+    );
+
+    it.skipIf(!isReleaseTransitionLockAvailable())(
+        "lets lifecycle transitions wait for an in-flight status reader",
+        async () => {
+            const root = temporaryReleasesRoot();
+            await createManagedRelease(root, FIRST_COMMIT);
+            await readDashboardReleaseState(root);
+            const lockFileDescriptor = holdTransitionLock(root, "shared");
+            const activation = runReleaseLifecycleCommand(
+                ["activate", FIRST_COMMIT],
+                root,
+                SCHEMA_6_OPTIONS
+            );
+
+            await Bun.sleep(125);
+            closeSync(lockFileDescriptor);
+
+            await expect(activation).resolves.toMatchObject({
+                current: { commitSha: FIRST_COMMIT },
+            });
         }
     );
 

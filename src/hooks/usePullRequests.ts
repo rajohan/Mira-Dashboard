@@ -52,6 +52,7 @@ export interface DashboardReleaseSummary {
     builtAt: string;
     commitSha: string;
     commitTitle: string;
+    commitUrl: string;
     schema: {
         maximumCompatible: number;
         minimumCompatible: number;
@@ -85,6 +86,23 @@ export interface ProductionCheckoutStatus {
     statusShort?: string;
 }
 
+export type PullRequestPreviewLifecycle =
+    "failed" | "running" | "starting" | "stopped" | "stopping";
+
+/** Represents the managed single-slot PR preview. */
+export interface PullRequestPreviewStatus {
+    backendPort?: number;
+    commitSha?: string;
+    frontendPort?: number;
+    message?: string;
+    number?: number;
+    startedAt?: string;
+    status: PullRequestPreviewLifecycle;
+    title?: string;
+    updatedAt?: string;
+    url?: string;
+}
+
 /** Represents worktree cleanup result. */
 export interface WorktreeCleanupResult {
     status: "removed" | "skipped" | "warning";
@@ -113,6 +131,12 @@ interface ProductionCheckoutResponse {
     checkout: ProductionCheckoutStatus;
 }
 
+/** Represents the managed pull request preview API response. */
+interface PullRequestPreviewResponse {
+    isOk?: boolean;
+    preview: PullRequestPreviewStatus;
+}
+
 /** Represents the pull request action API response. */
 interface PullRequestActionResponse {
     isOk: boolean;
@@ -128,6 +152,7 @@ export const pullRequestKeys = {
     all: ["pull-requests"] as const,
     list: () => [...pullRequestKeys.all, "list"] as const,
     deployments: () => [...pullRequestKeys.all, "deployments"] as const,
+    preview: () => [...pullRequestKeys.all, "preview"] as const,
     productionCheckout: () => [...pullRequestKeys.all, "production-checkout"] as const,
     releaseStatus: () => [...pullRequestKeys.all, "releases"] as const,
 };
@@ -163,6 +188,14 @@ async function fetchDashboardReleaseStatus(): Promise<DashboardReleaseStatus> {
         "/pull-requests/releases"
     );
     return response.release;
+}
+
+/** Fetches the current managed PR preview slot. */
+async function fetchPullRequestPreview(): Promise<PullRequestPreviewStatus> {
+    const response = await apiFetchRequired<PullRequestPreviewResponse>(
+        "/pull-requests/preview"
+    );
+    return response.preview;
 }
 
 /** Performs approve pull request. */
@@ -216,13 +249,33 @@ async function deployDashboard(): Promise<{ isOk: boolean; deployment: Deploymen
 }
 
 /** Queues an atomic rollback to the previous managed release. */
-async function rollbackDashboard(): Promise<{
-    isOk: boolean;
-    deployment: DeploymentJob;
-}> {
+async function rollbackDashboard(
+    targetCommit: string
+): Promise<{ isOk: boolean; deployment: DeploymentJob }> {
     return apiPostRequired<{ isOk: boolean; deployment: DeploymentJob }>(
-        "/pull-requests/releases/rollback"
+        "/pull-requests/releases/rollback",
+        { targetCommit }
     );
+}
+
+/** Starts or updates the managed preview slot. */
+async function startPullRequestPreview(
+    number: number
+): Promise<PullRequestPreviewStatus> {
+    const response = await apiPostRequired<PullRequestPreviewResponse>(
+        `/pull-requests/${number}/preview/start`,
+        {}
+    );
+    return response.preview;
+}
+
+/** Stops the managed preview slot owned by one PR. */
+async function stopPullRequestPreview(number: number): Promise<PullRequestPreviewStatus> {
+    const response = await apiPostRequired<PullRequestPreviewResponse>(
+        `/pull-requests/${number}/preview/stop`,
+        {}
+    );
+    return response.preview;
 }
 
 /** Provides pull requests. */
@@ -262,6 +315,16 @@ export function useDashboardReleaseStatus() {
         queryFn: fetchDashboardReleaseStatus,
         staleTime: 5000,
         refetchInterval: AUTO_REFRESH_MS,
+    });
+}
+
+/** Provides the managed single-slot PR preview status. */
+export function usePullRequestPreview() {
+    return useQuery({
+        queryKey: pullRequestKeys.preview(),
+        queryFn: fetchPullRequestPreview,
+        staleTime: 2000,
+        refetchInterval: 5000,
     });
 }
 
@@ -373,7 +436,8 @@ export function useRollbackDashboard() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: rollbackDashboard,
+        mutationFn: ({ targetCommit }: { targetCommit: string }) =>
+            rollbackDashboard(targetCommit),
         onSuccess: () => {
             void queryClient.invalidateQueries({
                 queryKey: pullRequestKeys.deployments(),
@@ -383,6 +447,36 @@ export function useRollbackDashboard() {
             });
             void queryClient.invalidateQueries({
                 queryKey: pullRequestKeys.releaseStatus(),
+            });
+        },
+    });
+}
+
+/** Provides managed PR preview startup. */
+export function useStartPullRequestPreview() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ number }: { number: number }) => startPullRequestPreview(number),
+        onSuccess: (preview) => {
+            queryClient.setQueryData(pullRequestKeys.preview(), preview);
+            void queryClient.invalidateQueries({
+                queryKey: pullRequestKeys.preview(),
+            });
+        },
+    });
+}
+
+/** Provides managed PR preview shutdown. */
+export function useStopPullRequestPreview() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ number }: { number: number }) => stopPullRequestPreview(number),
+        onSuccess: (preview) => {
+            queryClient.setQueryData(pullRequestKeys.preview(), preview);
+            void queryClient.invalidateQueries({
+                queryKey: pullRequestKeys.preview(),
             });
         },
     });

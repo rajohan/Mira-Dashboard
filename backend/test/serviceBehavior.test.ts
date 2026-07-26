@@ -66,6 +66,14 @@ function routeRequest<T extends string>(
     });
 }
 
+function rollbackRouteRequest(targetCommit: unknown): Request {
+    return new Request("https://dashboard.test/api/pull-requests/releases/rollback", {
+        body: JSON.stringify({ targetCommit }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+    });
+}
+
 function writeFakeGit(binaryPath: string, repoRoot: string): void {
     writeFileSync(
         binaryPath,
@@ -1647,8 +1655,9 @@ describe("backend service behavior", () => {
             release: { rollback: { available: true } },
         });
 
-        const rollbackResponse =
-            await pullRequestRoutes["/api/pull-requests/releases/rollback"].POST();
+        const rollbackResponse = await pullRequestRoutes[
+            "/api/pull-requests/releases/rollback"
+        ].POST(rollbackRouteRequest(previousCommit));
         expect(rollbackResponse.status).toBe(200);
         const rollbackBody = (await rollbackResponse.json()) as {
             deployment: Awaited<ReturnType<typeof prepareAndStartRollback>>;
@@ -1689,6 +1698,25 @@ describe("backend service behavior", () => {
                 database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
             ).toBeNull();
 
+            await expect(prepareAndStartRollback(currentCommit)).rejects.toThrow(
+                "Rollback target changed"
+            );
+            const changedTargetResponse = await pullRequestRoutes[
+                "/api/pull-requests/releases/rollback"
+            ].POST(rollbackRouteRequest(currentCommit));
+            expect(changedTargetResponse.status).toBe(409);
+            await expect(changedTargetResponse.json()).resolves.toMatchObject({
+                error: "Rollback target changed. Refresh release status and confirm the current previous release",
+            });
+
+            const missingTargetResponse = await pullRequestRoutes[
+                "/api/pull-requests/releases/rollback"
+            ].POST(rollbackRouteRequest(undefined));
+            expect(missingTargetResponse.status).toBe(400);
+            await expect(missingTargetResponse.json()).resolves.toMatchObject({
+                error: "Rollback target commit is required",
+            });
+
             rmSync(path.join(releasesRoot, "previous"));
             await expect(getDashboardReleaseStatus()).resolves.toMatchObject({
                 previous: undefined,
@@ -1697,12 +1725,37 @@ describe("backend service behavior", () => {
                     reason: "No distinct previous release is available",
                 },
             });
-            await expect(prepareAndStartRollback()).rejects.toThrow(
+            await expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
                 "requires active current and previous releases"
+            );
+            const unavailableRollbackResponse = await pullRequestRoutes[
+                "/api/pull-requests/releases/rollback"
+            ].POST(rollbackRouteRequest(previousCommit));
+            expect(unavailableRollbackResponse.status).toBe(409);
+            await expect(unavailableRollbackResponse.json()).resolves.toMatchObject({
+                error: "Managed release rollback requires active current and previous releases",
+            });
+            expect(
+                database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+            ).toBeNull();
+
+            symlinkSync(
+                `releases/${currentCommit}`,
+                path.join(releasesRoot, "previous"),
+                "dir"
+            );
+            await expect(prepareAndStartRollback(currentCommit)).rejects.toThrow(
+                "requires two distinct releases"
             );
             expect(
                 database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
             ).toBeNull();
+
+            process.env.MIRA_DASHBOARD_RELEASES_ROOT = "relative-release-root";
+            const unavailableStatusResponse =
+                await pullRequestRoutes["/api/pull-requests/releases"].GET();
+            expect(unavailableStatusResponse.status).toBe(500);
+            process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
         } finally {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
             database
@@ -1713,6 +1766,52 @@ describe("backend service behavior", () => {
                 )
                 .run(rollback.id);
             database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(rollback.id);
+        }
+    });
+
+    it("rejects malformed and missing rollback worker executions", async () => {
+        const { registerPullRequestExecutionActions } =
+            await import("../src/services/pullRequests.ts");
+        const { enqueueJobExecution, getJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        registerPullRequestExecutionActions();
+        await startTestScheduledExecutor();
+
+        const missingIdExecution = enqueueJobExecution({
+            actionKey: "dashboard.rollback",
+            displayName: "Rollback without deployment id",
+            payload: {},
+            resourceClass: "exclusive",
+            timeoutMs: 1000,
+        });
+        const absentDeploymentId = `missing-rollback-${Bun.randomUUIDv7()}`;
+        const missingDeploymentExecution = enqueueJobExecution({
+            actionKey: "dashboard.rollback",
+            displayName: "Rollback with missing deployment",
+            payload: { deploymentId: absentDeploymentId },
+            resourceClass: "exclusive",
+            timeoutMs: 1000,
+        });
+
+        try {
+            await waitFor(
+                () =>
+                    getJobExecution(missingIdExecution.id)?.status === "failed" &&
+                    getJobExecution(missingDeploymentExecution.id)?.status === "failed",
+                5000
+            );
+            expect(getJobExecution(missingIdExecution.id)).toMatchObject({
+                message: "Deployment id is missing",
+                status: "failed",
+            });
+            expect(getJobExecution(missingDeploymentExecution.id)).toMatchObject({
+                message: "Deployment job not found",
+                status: "failed",
+            });
+        } finally {
+            database
+                .prepare("DELETE FROM job_executions WHERE id IN (?, ?)")
+                .run(missingIdExecution.id, missingDeploymentExecution.id);
         }
     });
 
@@ -1728,6 +1827,7 @@ describe("backend service behavior", () => {
         const openClawHome = path.join(fakeRoot, "state", "openclaw-client");
         const logRotationLockFile = path.join(fakeRoot, "state", "log-rotation.lock");
         const systemdScriptLog = path.join(fakeRoot, "rollback-guardian.sh");
+        const systemdArgumentsLog = path.join(fakeRoot, "rollback-systemd-run.args");
         const currentCommit = "c".repeat(40);
         const previousCommit = "d".repeat(40);
         mkdirSync(path.join(fakeRoot, "backend"), { recursive: true });
@@ -1783,6 +1883,7 @@ set -euo pipefail
 script="${"$"}{!#}"
 /bin/bash -n <<<"$script"
 printf '%s' "$script" > ${JSON.stringify(systemdScriptLog)}
+printf '%s\n' "$@" > ${JSON.stringify(systemdArgumentsLog)}
 printf 'scheduled\n'
 `
         );
@@ -1799,7 +1900,7 @@ printf 'scheduled\n'
         const { getJobExecution } = await import("../src/services/jobExecutionQueue.ts");
         registerPullRequestExecutionActions();
         await startTestScheduledExecutor();
-        const rollback = await prepareAndStartRollback();
+        const rollback = await prepareAndStartRollback(previousCommit);
         const execution = database
             .prepare(
                 `SELECT id
@@ -1834,7 +1935,10 @@ printf 'scheduled\n'
             );
             expect(guardian).toContain(`ready_for_commit '${currentCommit.slice(0, 8)}'`);
             expect(guardian).toContain(
-                "original release cccccccc was restored automatically"
+                "Original release cccccccc was restored automatically"
+            );
+            expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
+                `--unit=mira-dashboard-rollback-${rollback.id}\n`
             );
         } finally {
             database
@@ -1883,6 +1987,79 @@ printf 'scheduled\n'
         } finally {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
             database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(jobId);
+        }
+    });
+
+    it("labels stale rollback executions as rollback failures", async () => {
+        const staleRollbackId = `test-rollback-stale-${Bun.randomUUIDv7()}`;
+        const { enqueueJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        database
+            .prepare(
+                `INSERT INTO deployment_jobs
+                 (id, status, started_at, updated_at, commit_sha, commit_title, note, stdout, stderr)
+                 VALUES (?, 'building', ?, ?, ?, ?, 'rollback queued', '', '')`
+            )
+            .run(
+                staleRollbackId,
+                new Date().toISOString(),
+                new Date().toISOString(),
+                "b".repeat(40),
+                "Previous release"
+            );
+        database
+            .prepare(
+                "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+            )
+            .run(staleRollbackId, new Date().toISOString());
+        const staleExecution = enqueueJobExecution({
+            actionKey: "dashboard.rollback",
+            displayName: "Stale rollback",
+            payload: { deploymentId: staleRollbackId },
+            resourceClass: "exclusive",
+            timeoutMs: 1000,
+        });
+        database
+            .prepare(
+                `UPDATE job_executions
+                 SET status = 'failed', finished_at = ?, message = 'worker stopped'
+                 WHERE id = ?`
+            )
+            .run(new Date().toISOString(), staleExecution.id);
+
+        let replacementId: string | undefined;
+        try {
+            const replacement = startDeployLatest();
+            replacementId = replacement.id;
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(staleRollbackId)
+            ).toEqual({
+                note: "Rollback execution ended before build completion",
+                status: "failed",
+            });
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database
+                .prepare("DELETE FROM job_executions WHERE id = ?")
+                .run(staleExecution.id);
+            database
+                .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                .run(staleRollbackId);
+            if (replacementId) {
+                database
+                    .prepare(
+                        `DELETE FROM job_executions
+                         WHERE action_key = 'dashboard.deploy'
+                           AND json_extract(payload_json, '$.deploymentId') = ?`
+                    )
+                    .run(replacementId);
+                database
+                    .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                    .run(replacementId);
+            }
         }
     });
 

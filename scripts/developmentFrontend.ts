@@ -1,12 +1,17 @@
 import type { Server } from "bun";
 
 import dashboard from "../index.html";
-import { addForwardedClientHeaders } from "../src/lib/developmentProxyHeaders.ts";
+import {
+    addForwardedClientHeaders,
+    developmentCookieHeader,
+} from "../src/lib/developmentProxyHeaders.ts";
 
-const host = process.env.HOST || "0.0.0.0";
+const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || "5173");
-const apiTarget = process.env.DASHBOARD_API_TARGET || "http://localhost:3100";
+const apiTarget = process.env.DASHBOARD_API_TARGET || "http://127.0.0.1:3101";
 const backendWebSocketTarget = apiTarget.replace(/^http/u, "ws");
+const cookieNamespace =
+    process.env.MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE || "mira_dashboard_dev_5173";
 
 interface WebSocketProxyData {
     backend?: WebSocket;
@@ -34,6 +39,15 @@ async function proxyApi(
     const targetUrl = new URL(`${sourceUrl.pathname}${sourceUrl.search}`, apiTarget);
     const headers = new Headers(request.headers);
     headers.set("host", targetUrl.host);
+    const cookie = developmentCookieHeader(
+        request.headers.get("cookie"),
+        cookieNamespace
+    );
+    if (cookie) {
+        headers.set("cookie", cookie);
+    } else {
+        headers.delete("cookie");
+    }
     const clientAddress = server.requestIP(request)?.address;
     addForwardedClientHeaders(headers, clientAddress, sourceUrl.protocol.slice(0, -1));
     const forwardedOrigin = forwardedBrowserOrigin(request, targetUrl.origin);
@@ -59,7 +73,10 @@ function upgradeWebSocket(
         server.upgrade(request, {
             data: {
                 clientAddress: server.requestIP(request)?.address,
-                cookie: request.headers.get("cookie") || undefined,
+                cookie: developmentCookieHeader(
+                    request.headers.get("cookie"),
+                    cookieNamespace
+                ),
                 origin: forwardedBrowserOrigin(request, new URL(apiTarget).origin),
                 pendingMessages: [],
                 protocol: sourceUrl.protocol.slice(0, -1),

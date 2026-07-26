@@ -1,0 +1,723 @@
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { describe, expect, it, jest } from "bun:test";
+
+import * as developmentStack from "../src/development/developmentStack.ts";
+import * as processModule from "../src/lib/processes.ts";
+import type { JobExecution } from "../src/services/jobExecutionQueue.ts";
+import * as jobExecutionQueue from "../src/services/jobExecutionQueue.ts";
+import * as previewHost from "../src/services/pullRequestPreviewHost.ts";
+import {
+    buildPullRequestPreviewSandboxCommand,
+    getPullRequestPreviewStatus,
+    parsePreviewUnitState,
+    type PullRequestPreviewConfig,
+    resolvePullRequestPreviewConfig,
+    startPullRequestPreview,
+    stopPullRequestPreview,
+} from "../src/services/pullRequestPreviewHost.ts";
+import {
+    prepareAndStartPullRequestPreview,
+    prepareAndStopPullRequestPreview,
+    registerPullRequestPreviewExecutionActions,
+} from "../src/services/pullRequestPreviews.ts";
+import type { PullRequestSummary } from "../src/services/pullRequests.ts";
+import * as pullRequests from "../src/services/pullRequests.ts";
+import * as queuedJobExecution from "../src/services/queuedJobExecution.ts";
+import type {
+    ScheduledJob,
+    ScheduledJobActionContext,
+    ScheduledJobActionHandler,
+} from "../src/services/scheduledJobs.ts";
+import * as scheduledJobs from "../src/services/scheduledJobs.ts";
+
+const COMMIT = "a".repeat(40);
+
+function noOperation(): void {}
+
+function previewRouteRequest(number: string) {
+    return Object.assign(
+        new Request(`https://dashboard.test/api/pull-requests/${number}/preview`, {
+            method: "POST",
+        }),
+        { params: { number } }
+    );
+}
+
+function pausePreviewWorkerClaims(): () => void {
+    return noOperation;
+}
+
+function previewConfig(root: string): PullRequestPreviewConfig {
+    return {
+        allowedAuthors: new Set(["mira-2026", "rajohan"]),
+        backendPort: 3101,
+        bunExecutable: "/home/ubuntu/.bun/bin/bun",
+        dashboardRoot: path.join(root, "dashboard"),
+        frontendPort: 5173,
+        gatewayTokenFile: path.join(root, "preview", "gateway.token"),
+        gatewayUrl: "ws://127.0.0.1:18789",
+        gitCommonDirectory: path.join(root, "dashboard", ".git"),
+        previewRoot: path.join(root, "preview"),
+        stateFile: path.join(root, "preview", "active-preview.json"),
+        unitName: "mira-dashboard-pr-preview.service",
+        worktreeRoot: path.join(root, "worktrees"),
+    };
+}
+
+function previewExecution(
+    id: string,
+    status: "queued" | "success",
+    previewStatus: "running" | "stopped"
+): JobExecution {
+    return {
+        actionKey: "dashboard.preview.start",
+        attempt: status === "queued" ? 0 : 1,
+        availableAt: "2026-07-26T00:00:00.000Z",
+        cancelRequestedAt: undefined,
+        cancellable: true,
+        displayName: "PR preview",
+        finishedAt: status === "success" ? "2026-07-26T00:00:01.000Z" : undefined,
+        heartbeatAt: undefined,
+        id,
+        leaseExpiresAt: undefined,
+        leaseOwner: undefined,
+        message: undefined,
+        output: { preview: { number: 335, status: previewStatus } },
+        payload: { number: 335 },
+        priority: 0,
+        queuedAt: "2026-07-26T00:00:00.000Z",
+        resourceClass: "exclusive",
+        scheduledJobId: undefined,
+        scheduledRunId: undefined,
+        startedAt: status === "success" ? "2026-07-26T00:00:00.500Z" : undefined,
+        status,
+        timeoutMs: 600_000,
+        triggerType: "manual",
+    };
+}
+
+function previewScheduledJob(number: unknown): ScheduledJob {
+    return {
+        actionKey: "dashboard.preview.start",
+        actionPayload: { number },
+        cronExpression: undefined,
+        createdAt: "2026-07-26T00:00:00.000Z",
+        description: "PR preview",
+        disableIntent: undefined,
+        enabled: true,
+        id: "preview",
+        intervalSeconds: 60,
+        isQueued: false,
+        isRunning: false,
+        lastRun: undefined,
+        name: "PR preview",
+        nextRunAt: undefined,
+        resourceClass: "exclusive",
+        scheduleType: "interval",
+        timeOfDay: undefined,
+        timeoutMs: 600_000,
+        updatedAt: "2026-07-26T00:00:00.000Z",
+    };
+}
+
+describe("managed pull request preview", () => {
+    it("resolves a single-slot host contract without accepting ambiguous config", () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-config-"));
+        try {
+            const config = resolvePullRequestPreviewConfig({
+                BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
+                MIRA_DASHBOARD_PREVIEW_BACKEND_PORT: "4101",
+                MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT: "4173",
+                MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
+                MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
+            });
+            expect(config).toMatchObject({
+                backendPort: 4101,
+                frontendPort: 4173,
+                gatewayTokenFile: path.join(root, "state", "gateway.token"),
+                gatewayUrl: "ws://127.0.0.1:18789",
+                previewRoot: path.join(root, "state"),
+                unitName: "mira-dashboard-pr-preview.service",
+            });
+            expect(config.allowedAuthors).toEqual(new Set(["mira-2026", "rajohan"]));
+
+            for (const environment of [
+                {
+                    BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
+                    MIRA_DASHBOARD_PREVIEW_BACKEND_PORT: "5173",
+                    MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT: "5173",
+                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
+                },
+                {
+                    BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
+                    MIRA_DASHBOARD_PREVIEW_GATEWAY_URL: "https://gateway.example/ws",
+                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
+                },
+                {
+                    BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
+                    MIRA_DASHBOARD_PREVIEW_UNIT: "../preview.service",
+                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
+                },
+            ]) {
+                expect(() => resolvePullRequestPreviewConfig(environment)).toThrow();
+            }
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("builds a read-only source sandbox with isolated writable state", () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-sandbox-"));
+        try {
+            const config = {
+                ...previewConfig(root),
+                gatewayTokenFile: path.join(root, "gateway.token"),
+                gatewayUrl: "wss://gateway.example/ws",
+            };
+            const worktreePath = path.join(config.worktreeRoot, "preview-pr-335");
+            const stateRoot = path.join(config.previewRoot, "states", "pr-335");
+            const command = buildPullRequestPreviewSandboxCommand({
+                config,
+                number: 335,
+                publicOrigin: "https://dashboard.example:5173",
+                stateRoot,
+                worktreePath,
+            });
+            expect(command.slice(0, 4)).toEqual([
+                "bwrap",
+                "--unshare-all",
+                "--share-net",
+                "--die-with-parent",
+            ]);
+            for (const value of [
+                "--clearenv",
+                "--ro-bind",
+                "--bind",
+                "/state",
+                "MIRA_DASHBOARD_DEV_STATE_OWNER",
+                "managed-pr-335",
+                "MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE",
+                "/run/mira-dashboard-preview/gateway.token",
+            ]) {
+                expect(command).toContain(value);
+            }
+            expect(command).not.toContain("MIRA_GITHUB_TOKEN");
+            expect(command).not.toContain("OPENCLAW_GATEWAY_TOKEN");
+            expect(command.at(-1)).toBe(
+                path.join(worktreePath, "scripts", "developmentStack.ts")
+            );
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("starts, reuses, updates, reports, and stops one trusted preview slot", async () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-lifecycle-"));
+        const config = {
+            ...previewConfig(root),
+            recentAuthMinutes: "10",
+            sessionIdleMinutes: "60",
+        };
+        const worktreePath = path.join(config.worktreeRoot, "preview-pr-335");
+        let expectedCommit = COMMIT;
+        let isServeEnabled = false;
+        let isUnitActive = false;
+        const commands: string[] = [];
+        mkdirSync(config.dashboardRoot, { recursive: true });
+        mkdirSync(config.gitCommonDirectory, { recursive: true });
+
+        const processSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (executable, arguments_) => {
+                const commandArguments = [...arguments_];
+                commands.push([executable, ...commandArguments].join(" "));
+                if (executable === "tailscale" && commandArguments[0] === "status") {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: JSON.stringify({
+                            Self: { DNSName: "Preview-Node.ts.net." },
+                        }),
+                    };
+                }
+                if (
+                    executable === "tailscale" &&
+                    commandArguments[0] === "serve" &&
+                    commandArguments[1] === "status"
+                ) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: JSON.stringify(
+                            isServeEnabled
+                                ? {
+                                      TCP: { "5173": { HTTPS: true } },
+                                      Web: {
+                                          "preview-node.ts.net:5173": {
+                                              Handlers: {
+                                                  "/": {
+                                                      Proxy: "http://127.0.0.1:5173",
+                                                  },
+                                              },
+                                          },
+                                      },
+                                  }
+                                : {}
+                        ),
+                    };
+                }
+                if (executable === "sudo" && commandArguments.includes("serve")) {
+                    isServeEnabled = !commandArguments.includes("off");
+                }
+                if (executable === "systemd-run") {
+                    isUnitActive = true;
+                }
+                if (executable === "systemctl" && commandArguments.includes("stop")) {
+                    isUnitActive = false;
+                }
+                if (executable === "systemctl" && commandArguments.includes("show")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: isUnitActive
+                            ? "ActiveState=active\nSubState=running\nResult=success\n"
+                            : "ActiveState=inactive\nSubState=dead\nResult=success\n",
+                    };
+                }
+                if (
+                    executable === "git" &&
+                    commandArguments.includes("--show-toplevel")
+                ) {
+                    return { code: 0, stderr: "", stdout: `${worktreePath}\n` };
+                }
+                if (executable === "git" && commandArguments.includes("status")) {
+                    return { code: 0, stderr: "", stdout: "" };
+                }
+                if (
+                    executable === "git" &&
+                    commandArguments.includes("worktree") &&
+                    commandArguments.includes("add")
+                ) {
+                    mkdirSync(path.join(worktreePath, "backend"), {
+                        recursive: true,
+                    });
+                }
+                if (executable === "git" && commandArguments.includes("rev-parse")) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: `${expectedCommit}\n`,
+                    };
+                }
+                return { code: 0, stderr: "", stdout: "" };
+            });
+        const prepareStateSpy = jest
+            .spyOn(developmentStack, "prepareDevelopmentState")
+            .mockReturnValue({
+                database: "created-empty",
+                releases: "empty",
+                workspace: "empty",
+            });
+        const fetchSpy = jest
+            .spyOn(globalThis, "fetch")
+            .mockResolvedValue(new Response("ready"));
+        const protectFromCancellation = jest.fn();
+
+        try {
+            const candidate = {
+                authorLogin: "mira-2026",
+                baseRefName: "main",
+                commitSha: COMMIT,
+                number: 335,
+                title: "Trusted preview",
+            };
+            const running = await startPullRequestPreview(candidate, {
+                config,
+                protectFromCancellation,
+                readGatewayToken: () => "persisted-gateway-token",
+            });
+            expect(running).toMatchObject({
+                commitSha: COMMIT,
+                number: 335,
+                status: "running",
+                url: "https://preview-node.ts.net:5173",
+            });
+            expect(prepareStateSpy).toHaveBeenCalledTimes(1);
+            expect(protectFromCancellation).toHaveBeenCalledTimes(1);
+            expect(fetchSpy).toHaveBeenCalledWith(
+                "http://127.0.0.1:5173/api/health/ready",
+                expect.objectContaining({ signal: expect.any(AbortSignal) })
+            );
+            expect(readFileSync(config.gatewayTokenFile, "utf8")).toBe(
+                "persisted-gateway-token\n"
+            );
+            expect(statSync(config.gatewayTokenFile).mode & 0o777).toBe(0o600);
+            expect(commands).toContain(
+                "sudo -n tailscale serve --bg --https=5173 http://127.0.0.1:5173"
+            );
+            expect(commands.some((command) => command.startsWith("systemd-run "))).toBe(
+                true
+            );
+            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+                number: 335,
+                status: "running",
+            });
+            await expect(
+                startPullRequestPreview(candidate, { config })
+            ).resolves.toMatchObject({
+                commitSha: COMMIT,
+                status: "running",
+            });
+            await expect(
+                startPullRequestPreview(
+                    { ...candidate, number: 336, title: "Other trusted preview" },
+                    { config }
+                )
+            ).rejects.toMatchObject({ statusCode: 409 });
+            await expect(stopPullRequestPreview(336, { config })).rejects.toMatchObject({
+                statusCode: 409,
+            });
+            await expect(
+                stopPullRequestPreview(335, {
+                    config,
+                    protectFromCancellation,
+                })
+            ).resolves.toMatchObject({
+                number: 335,
+                status: "stopped",
+            });
+            expect(isServeEnabled).toBe(false);
+            expect(existsSync(config.gatewayTokenFile)).toBe(false);
+            expect(commands).toContain("sudo -n tailscale serve --https=5173 off");
+
+            expectedCommit = "b".repeat(40);
+            await expect(
+                startPullRequestPreview(
+                    {
+                        ...candidate,
+                        commitSha: expectedCommit,
+                        title: "Updated trusted preview",
+                    },
+                    {
+                        config,
+                        readGatewayToken: () => "rotated-gateway-token",
+                    }
+                )
+            ).resolves.toMatchObject({
+                commitSha: expectedCommit,
+                status: "running",
+            });
+            expect(
+                commands.some((command) =>
+                    command.includes(`checkout --detach ${expectedCommit}`)
+                )
+            ).toBe(true);
+            await stopPullRequestPreview(undefined, { config });
+            expect(isServeEnabled).toBe(false);
+            expect(existsSync(config.gatewayTokenFile)).toBe(false);
+        } finally {
+            processSpy.mockRestore();
+            prepareStateSpy.mockRestore();
+            fetchSpy.mockRestore();
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("queues preview operations and registers guarded worker actions", async () => {
+        const queuedStart = previewExecution("preview-start", "queued", "running");
+        const queuedStop = previewExecution("preview-stop", "queued", "stopped");
+        const completedStart = previewExecution("preview-start", "success", "running");
+        const completedStop = previewExecution("preview-stop", "success", "stopped");
+        const enqueueSpy = jest
+            .spyOn(jobExecutionQueue, "enqueueJobExecution")
+            .mockImplementation((input) =>
+                input.actionKey === "dashboard.preview.start" ? queuedStart : queuedStop
+            );
+        const waitSpy = jest
+            .spyOn(queuedJobExecution, "waitForJobExecution")
+            .mockImplementation(async (id) =>
+                id === queuedStart.id ? completedStart : completedStop
+            );
+        const handlers = new Map<string, ScheduledJobActionHandler>();
+        const registerSpy = jest
+            .spyOn(scheduledJobs, "registerScheduledJobAction")
+            .mockImplementation((actionKey, handler) => {
+                handlers.set(actionKey, handler);
+            });
+        const pullRequest: PullRequestSummary = {
+            additions: 1,
+            author: { login: "mira-2026" },
+            baseRefName: "main",
+            body: "",
+            changedFiles: 1,
+            createdAt: "2026-07-26T00:00:00.000Z",
+            deletions: 0,
+            headRefName: "preview",
+            headRefOid: COMMIT,
+            isDraft: false,
+            latestOpinionatedReviews: { nodes: [] },
+            mergeable: "MERGEABLE",
+            mergeStateStatus: "CLEAN",
+            number: 335,
+            reviewDecision: "APPROVED",
+            title: "Trusted preview",
+            updatedAt: "2026-07-26T00:00:00.000Z",
+            url: "https://github.test/pull/335",
+        };
+        const listSpy = jest
+            .spyOn(pullRequests, "listDashboardPullRequests")
+            .mockResolvedValue([pullRequest]);
+        const startSpy = jest
+            .spyOn(previewHost, "startPullRequestPreview")
+            .mockResolvedValue({ number: 335, status: "running" });
+        const stopSpy = jest
+            .spyOn(previewHost, "stopPullRequestPreview")
+            .mockResolvedValue({ number: 335, status: "stopped" });
+        const statusSpy = jest
+            .spyOn(previewHost, "getPullRequestPreviewStatus")
+            .mockResolvedValue({
+                commitSha: COMMIT,
+                number: 335,
+                status: "running",
+            });
+        const protectFromCancellation = jest.fn();
+        const context: ScheduledJobActionContext = {
+            executionId: "execution",
+            pauseWorkerClaims: pausePreviewWorkerClaims,
+            protectFromCancellation,
+            updateOutput: () => {},
+        };
+
+        try {
+            await expect(prepareAndStartPullRequestPreview(335)).resolves.toEqual({
+                number: 335,
+                status: "running",
+            });
+            await expect(prepareAndStopPullRequestPreview(335)).resolves.toEqual({
+                number: 335,
+                status: "stopped",
+            });
+            await expect(prepareAndStopPullRequestPreview()).resolves.toEqual({
+                number: 335,
+                status: "stopped",
+            });
+            expect(enqueueSpy).toHaveBeenNthCalledWith(
+                1,
+                expect.objectContaining({
+                    actionKey: "dashboard.preview.start",
+                    payload: { number: 335 },
+                    resourceClass: "exclusive",
+                })
+            );
+            expect(enqueueSpy).toHaveBeenNthCalledWith(
+                3,
+                expect.objectContaining({
+                    actionKey: "dashboard.preview.stop",
+                    displayName: "Stop PR preview",
+                    payload: { number: undefined },
+                })
+            );
+            expect(waitSpy).toHaveBeenCalledTimes(3);
+
+            const { pullRequestRoutes } =
+                await import("../src/routes/pullRequestRoutes.ts");
+            const startResponse = await pullRequestRoutes[
+                "/api/pull-requests/:number/preview/start"
+            ].POST(previewRouteRequest("335"));
+            expect(startResponse.status).toBe(200);
+            await expect(startResponse.json()).resolves.toEqual({
+                isOk: true,
+                preview: { number: 335, status: "running" },
+            });
+
+            const stopResponse = await pullRequestRoutes[
+                "/api/pull-requests/:number/preview/stop"
+            ].POST(previewRouteRequest("335"));
+            expect(stopResponse.status).toBe(200);
+            await expect(stopResponse.json()).resolves.toEqual({
+                isOk: true,
+                preview: { number: 335, status: "stopped" },
+            });
+
+            const statusResponse =
+                await pullRequestRoutes["/api/pull-requests/preview"].GET();
+            expect(statusResponse.status).toBe(200);
+            await expect(statusResponse.json()).resolves.toEqual({
+                preview: {
+                    commitSha: COMMIT,
+                    number: 335,
+                    status: "running",
+                },
+            });
+
+            for (const route of [
+                "/api/pull-requests/:number/preview/start",
+                "/api/pull-requests/:number/preview/stop",
+            ] as const) {
+                const invalidResponse = await pullRequestRoutes[route].POST(
+                    previewRouteRequest("invalid")
+                );
+                expect(invalidResponse.status).toBe(400);
+                await expect(invalidResponse.json()).resolves.toEqual({
+                    error: "Invalid pull request number",
+                });
+            }
+
+            waitSpy.mockRejectedValueOnce(
+                Object.assign(new Error("preview startup unavailable"), {
+                    statusCode: 503,
+                })
+            );
+            const failedStartResponse = await pullRequestRoutes[
+                "/api/pull-requests/:number/preview/start"
+            ].POST(previewRouteRequest("335"));
+            expect(failedStartResponse.status).toBe(503);
+            await expect(failedStartResponse.json()).resolves.toEqual({
+                error: "preview startup unavailable",
+            });
+
+            waitSpy.mockRejectedValueOnce(
+                Object.assign(new Error("preview stop unavailable"), {
+                    statusCode: 503,
+                })
+            );
+            const failedStopResponse = await pullRequestRoutes[
+                "/api/pull-requests/:number/preview/stop"
+            ].POST(previewRouteRequest("335"));
+            expect(failedStopResponse.status).toBe(503);
+            await expect(failedStopResponse.json()).resolves.toEqual({
+                error: "preview stop unavailable",
+            });
+
+            statusSpy.mockRejectedValueOnce(
+                Object.assign(new Error("preview status unavailable"), {
+                    statusCode: 503,
+                })
+            );
+            const failedStatusResponse =
+                await pullRequestRoutes["/api/pull-requests/preview"].GET();
+            expect(failedStatusResponse.status).toBe(503);
+            await expect(failedStatusResponse.json()).resolves.toEqual({
+                error: "preview status unavailable",
+            });
+
+            registerPullRequestPreviewExecutionActions();
+            const startHandler = handlers.get("dashboard.preview.start");
+            const stopHandler = handlers.get("dashboard.preview.stop");
+            expect(startHandler).toBeDefined();
+            expect(stopHandler).toBeDefined();
+            if (!startHandler || !stopHandler) {
+                throw new Error("Preview handlers were not registered");
+            }
+            await expect(
+                startHandler(
+                    previewScheduledJob("335"),
+                    new AbortController().signal,
+                    context
+                )
+            ).resolves.toEqual({
+                preview: { number: 335, status: "running" },
+            });
+            expect(startSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    authorLogin: "mira-2026",
+                    commitSha: COMMIT,
+                    number: 335,
+                }),
+                expect.objectContaining({
+                    protectFromCancellation: expect.any(Function),
+                    signal: expect.any(AbortSignal),
+                })
+            );
+            startSpy.mock.calls[0]?.[1]?.protectFromCancellation?.();
+            expect(protectFromCancellation).toHaveBeenCalledTimes(1);
+            await expect(
+                stopHandler(previewScheduledJob(undefined), undefined, context)
+            ).resolves.toEqual({
+                preview: { number: 335, status: "stopped" },
+            });
+            expect(stopSpy).toHaveBeenCalledWith(
+                undefined,
+                expect.objectContaining({
+                    protectFromCancellation: expect.any(Function),
+                })
+            );
+
+            listSpy.mockResolvedValue([]);
+            await expect(
+                startHandler(previewScheduledJob(336), undefined, context)
+            ).rejects.toMatchObject({ statusCode: 404 });
+        } finally {
+            enqueueSpy.mockRestore();
+            waitSpy.mockRestore();
+            registerSpy.mockRestore();
+            listSpy.mockRestore();
+            startSpy.mockRestore();
+            stopSpy.mockRestore();
+            statusSpy.mockRestore();
+        }
+    });
+
+    it("parses unit status and rejects untrusted PR metadata before host work", async () => {
+        expect(
+            parsePreviewUnitState(
+                "ActiveState=active\nSubState=running\nResult=success\n"
+            )
+        ).toEqual({
+            activeState: "active",
+            result: "success",
+            subState: "running",
+        });
+
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-guard-"));
+        const config = previewConfig(root);
+        try {
+            expect(await getPullRequestPreviewStatus(config)).toEqual({
+                status: "stopped",
+            });
+            expect(await stopPullRequestPreview(undefined, { config })).toEqual({
+                status: "stopped",
+            });
+            await expect(
+                startPullRequestPreview(
+                    {
+                        authorLogin: "external",
+                        baseRefName: "main",
+                        commitSha: COMMIT,
+                        number: 335,
+                        title: "Untrusted PR",
+                    },
+                    { config }
+                )
+            ).rejects.toThrow("Pull request author is not allowed to run host previews");
+            await expect(
+                startPullRequestPreview(
+                    {
+                        authorLogin: "mira-2026",
+                        baseRefName: "release",
+                        commitSha: COMMIT,
+                        number: 335,
+                        title: "Wrong base",
+                    },
+                    { config }
+                )
+            ).rejects.toThrow("Only main-targeted pull requests can be previewed");
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+});

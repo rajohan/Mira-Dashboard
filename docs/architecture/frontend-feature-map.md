@@ -10,24 +10,24 @@ cannot infer.
 
 ## Route Map
 
-| Route            | Page                    | Main data source                           |
-| ---------------- | ----------------------- | ------------------------------------------ |
-| `/`              | `Dashboard.tsx`         | health, agents, tasks, jobs, notifications |
-| `/tasks`         | `Tasks.tsx`             | task APIs and TanStack DB collections      |
-| `/agents`        | `Agents.tsx`            | agent metadata/status/history APIs         |
-| `/sessions`      | `Sessions.tsx`          | Gateway session list/actions               |
-| `/chat`          | `Chat.tsx`              | Gateway sessions, `/ws` runtime events     |
-| `/jobs`          | `Jobs.tsx`              | scheduled jobs and run history             |
-| `/reports`       | `Reports.tsx`           | reports list/detail APIs                   |
-| `/notifications` | notification bell/modal | notification APIs                          |
-| `/pull-requests` | `PullRequests.tsx`      | GitHub/PR backend services                 |
-| `/docker`        | `Docker.tsx`            | Docker inventory/updater APIs              |
-| `/files`         | `Files.tsx`             | workspace file APIs                        |
-| `/logs`          | `Logs.tsx`              | log file APIs                              |
-| `/database`      | `Database.tsx`          | Postgres/PgBouncer + Dashboard SQLite      |
-| `/moltbook`      | `Moltbook.tsx`          | Moltbook cache/API data                    |
+| Route            | Page                    | Main data source                            |
+| ---------------- | ----------------------- | ------------------------------------------- |
+| `/`              | `Dashboard.tsx`         | health, agents, tasks, jobs, notifications  |
+| `/tasks`         | `Tasks.tsx`             | task APIs and TanStack DB collections       |
+| `/agents`        | `Agents.tsx`            | agent metadata/status/history APIs          |
+| `/sessions`      | `Sessions.tsx`          | Gateway session list/actions                |
+| `/chat`          | `Chat.tsx`              | Gateway sessions, `/ws` runtime events      |
+| `/jobs`          | `Jobs.tsx`              | scheduled jobs and run history              |
+| `/reports`       | `Reports.tsx`           | reports list/detail APIs                    |
+| `/notifications` | notification bell/modal | notification APIs                           |
+| `/pull-requests` | `PullRequests.tsx`      | GitHub, PR dev, release/deploy services     |
+| `/docker`        | `Docker.tsx`            | Docker inventory/updater APIs               |
+| `/files`         | `Files.tsx`             | workspace file APIs                         |
+| `/logs`          | `Logs.tsx`              | log file APIs                               |
+| `/database`      | `Database.tsx`          | Postgres/PgBouncer + Dashboard SQLite       |
+| `/moltbook`      | `Moltbook.tsx`          | Moltbook cache/API data                     |
 | `/settings`      | `Settings.tsx`          | OpenClaw config and Dashboard security tabs |
-| `/terminal`      | `Terminal.tsx`          | terminal helper APIs                       |
+| `/terminal`      | `Terminal.tsx`          | terminal helper APIs                        |
 
 ## Data Fetching Expectations
 
@@ -127,7 +127,7 @@ frontend gates:
 ```bash
 bun test ./src/test/frontendBehavior.test.tsx --test-name-pattern "<feature>"
 bun run lint:frontend
-bun run build
+bun run build:frontend
 bun run format:check
 git diff --check
 ```

@@ -1,8 +1,33 @@
 import { describe, expect, it } from "bun:test";
 
-import { addForwardedClientHeaders } from "../lib/developmentProxyHeaders.ts";
+import {
+    addForwardedClientHeaders,
+    developmentCookieHeader,
+} from "../lib/developmentProxyHeaders.ts";
 
 describe("development proxy forwarding headers", () => {
+    it("forwards only the isolated dev cookies", () => {
+        expect(
+            developmentCookieHeader(
+                [
+                    "mira_dashboard_session=production",
+                    "mira_dashboard_dev_5173_session=development",
+                    "unrelated=value",
+                    "mira_dashboard_dev_5173_pending_login=pending",
+                ].join("; "),
+                "mira_dashboard_dev_5173"
+            )
+        ).toBe(
+            "mira_dashboard_dev_5173_session=development; mira_dashboard_dev_5173_pending_login=pending"
+        );
+        expect(
+            developmentCookieHeader(
+                "mira_dashboard_session=production",
+                "mira_dashboard_dev_5173"
+            )
+        ).toBeUndefined();
+    });
+
     it("overwrites spoofed identity and fails closed when Bun has no client IP", () => {
         const headers = new Headers({
             "x-forwarded-for": "127.0.0.1",

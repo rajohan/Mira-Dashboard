@@ -3,8 +3,10 @@
 Dashboard runs background jobs from `backend/src/workerStart.ts`. Production
 sets `MIRA_DASHBOARD_EXECUTION_ROLE=web` on the web unit and
 `MIRA_DASHBOARD_EXECUTION_ROLE=worker` on the worker unit. The backward-
-compatible default is `combined`; `MIRA_DASHBOARD_DISABLE_SCHEDULER=1` still
-disables the in-process worker during local development.
+disables the in-process worker when explicitly requested. Ordinary local
+development uses `combined` with `MIRA_DASHBOARD_JOB_PROFILE=isolated`, keeping
+the scheduler/worker active without registering host backup, deploy, Docker,
+exec, log-rotation, PR, or OpenClaw-restart actions.
 
 ## Scheduled Jobs
 

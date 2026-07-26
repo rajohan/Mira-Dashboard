@@ -38,10 +38,10 @@ jobs:
               run: bun run lint:frontend
 
             - name: Build frontend
-              run: bun run build
+              run: bun run build:frontend
 
             - name: Test frontend coverage
-              run: bun run test:coverage
+              run: bun run test:frontend:coverage
 
             - name: Upload frontend coverage artifact
               uses: actions/upload-artifact@v7
@@ -92,12 +92,10 @@ jobs:
               run: bun run lint:backend
 
             - name: Build backend
-              run: bun run build
-              working-directory: backend
+              run: bun run build:backend
 
             - name: Test backend coverage
-              run: bun run test:coverage
-              working-directory: backend
+              run: bun run test:backend:coverage
 
             - name: Prefix backend LCOV paths
               if: always()
