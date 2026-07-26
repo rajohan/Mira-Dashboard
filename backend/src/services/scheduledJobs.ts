@@ -67,6 +67,7 @@ const scheduledJobRuntimeState: {
     isSchedulerTickRunning: boolean;
     isExecutorClaimingPaused: boolean;
     isExecutorTickRunning: boolean;
+    missingCutoverRecoveryWarningKey: string | undefined;
     nextDeploymentCutoverReconcileAt: number;
     workerId: string;
 } = {
@@ -78,6 +79,7 @@ const scheduledJobRuntimeState: {
     isSchedulerTickRunning: false,
     isExecutorClaimingPaused: false,
     isExecutorTickRunning: false,
+    missingCutoverRecoveryWarningKey: undefined,
     nextDeploymentCutoverReconcileAt: 0,
     workerId: "",
 };
@@ -1268,6 +1270,7 @@ function pauseExecutorClaims(): () => void {
 function resetExecutorClaimPause(): void {
     scheduledJobRuntimeState.executorClaimPauseGeneration += 1;
     scheduledJobRuntimeState.isExecutorClaimingPaused = false;
+    scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = undefined;
     scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt = 0;
 }
 
@@ -1290,8 +1293,19 @@ function readSystemdUnitState(unit: string): SystemdUnitState {
         stdout: "pipe",
     });
     const stderr = new TextDecoder().decode(result.stderr).trim();
-    if (stderr || result.exitCode !== 0) {
+    if (result.exitCode !== 0) {
+        console.warn("[ScheduledJobs] systemctl show failed", {
+            exitCode: result.exitCode,
+            stderr,
+            unit,
+        });
         return "unknown";
+    }
+    if (stderr) {
+        console.warn("[ScheduledJobs] systemctl show reported diagnostics", {
+            stderr,
+            unit,
+        });
     }
     const properties = new Map(
         new TextDecoder()
@@ -1356,10 +1370,14 @@ function isDeploymentCutoverReconciliationExpired(
 export function reconcileOrphanedDeploymentCutovers(
     timestamp = nowIso(),
     readGuardianState: DeploymentGuardianStateReader = readDeploymentGuardianState,
-    recoverCutover:
-        | DeploymentCutoverRecoveryHandler
-        | undefined = scheduledJobRuntimeState.deploymentCutoverRecoveryHandler
+    ...recoveryHandlerOverride: [
+        recoverCutover?: DeploymentCutoverRecoveryHandler | undefined,
+    ]
 ): number {
+    const recoverCutover =
+        recoveryHandlerOverride.length === 0
+            ? scheduledJobRuntimeState.deploymentCutoverRecoveryHandler
+            : recoveryHandlerOverride[0];
     const pendingRows = database
         .query(
             `SELECT id, commit_sha AS candidateCommit, updated_at AS updatedAt
@@ -1377,6 +1395,7 @@ export function reconcileOrphanedDeploymentCutovers(
         updatedAt: row.updatedAt,
     }));
     let recovered = 0;
+    const cutoversMissingRecoveryHandler: string[] = [];
     for (const cutover of pending) {
         let state: DeploymentGuardianState = "unknown";
         try {
@@ -1391,7 +1410,11 @@ export function reconcileOrphanedDeploymentCutovers(
             state === "inactive" ||
             (state === "unknown" &&
                 isDeploymentCutoverReconciliationExpired(cutover.updatedAt, timestamp));
-        if (!shouldRecover || !recoverCutover) {
+        if (!shouldRecover) {
+            continue;
+        }
+        if (!recoverCutover) {
+            cutoversMissingRecoveryHandler.push(cutover.id);
             continue;
         }
         try {
@@ -1405,6 +1428,20 @@ export function reconcileOrphanedDeploymentCutovers(
             );
         }
     }
+    const sortedMissingHandlerIds = cutoversMissingRecoveryHandler.toSorted(
+        (left, right) => left.localeCompare(right)
+    );
+    const warningKey = sortedMissingHandlerIds.join(",");
+    if (
+        warningKey &&
+        scheduledJobRuntimeState.missingCutoverRecoveryWarningKey !== warningKey
+    ) {
+        console.warn(
+            "[ScheduledJobs] Cannot recover orphaned deployment cutovers because no recovery handler is registered",
+            { cutoverIds: sortedMissingHandlerIds }
+        );
+    }
+    scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = warningKey || undefined;
     return recovered;
 }
 
@@ -1413,6 +1450,7 @@ export function registerDeploymentCutoverRecoveryHandler(
     didScheduleRecovery: DeploymentCutoverRecoveryHandler
 ): void {
     scheduledJobRuntimeState.deploymentCutoverRecoveryHandler = didScheduleRecovery;
+    scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = undefined;
 }
 
 function hasPendingDeploymentCutover(): boolean {

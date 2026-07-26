@@ -1690,6 +1690,12 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         updatedAt: dateToISOString(new Date()),
         note: "Interrupted release cutover recovered before candidate activation; current verified release remains ready",
     };
+    const activeCandidateRecoveredJob: DeploymentJob = {
+        ...job,
+        status: "isOk",
+        updatedAt: dateToISOString(new Date()),
+        note: "Interrupted release cutover recovered; active candidate passed restart and commit-bound readiness",
+    };
     const script = [
         "sleep 1",
         ...releaseCutoverShellFunctions(),
@@ -1718,7 +1724,11 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         "  NODE_ENV=production \\",
         '  "$bun_executable" "$trusted_lifecycle" "$@"',
         "}",
-        "resolve_trusted_lifecycle",
+        "resolve_trusted_lifecycle || exit 1",
+        'if [ "$current_commit" = "$candidate_commit" ] && restart_services && ready_for_commit "${candidate_commit:0:8}"; then',
+        `  ${deploymentJobUpdateCommand(activeCandidateRecoveredJob)}`,
+        "  exit 0",
+        "fi",
         'if activation_output="$(run_lifecycle activate "$candidate_commit")"; then',
         '  rollback_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.previous.commitSha // empty\')"',
         '  [[ "$rollback_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',

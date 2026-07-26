@@ -1,3 +1,7 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { database } from "../src/database.ts";
@@ -133,7 +137,63 @@ describe("persistent job execution queue", () => {
         ).toEqual({ job_id: deploymentId });
     });
 
-    it("bounds unknown guardian inspection by scheduling rollback recovery", () => {
+    it("warns once when an orphaned cutover has no recovery handler", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    "2026-07-26T03:11:00.000Z",
+                    () => "inactive",
+                    undefined
+                )
+            ).toBe(0);
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    "2026-07-26T03:12:00.000Z",
+                    () => "inactive",
+                    undefined
+                )
+            ).toBe(0);
+            expect(warning).toHaveBeenCalledTimes(1);
+            expect(warning).toHaveBeenCalledWith(
+                "[ScheduledJobs] Cannot recover orphaned deployment cutovers because no recovery handler is registered",
+                { cutoverIds: [deploymentId] }
+            );
+        } finally {
+            warning.mockRestore();
+        }
+    });
+
+    it("bounds an explicit unknown guardian state by scheduling recovery", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const recovery = jest.fn(() => true);
+
+        expect(
+            reconcileOrphanedDeploymentCutovers(
+                "2026-07-26T03:01:00.000Z",
+                () => "unknown",
+                recovery
+            )
+        ).toBe(0);
+        expect(recovery).not.toHaveBeenCalled();
+        expect(
+            reconcileOrphanedDeploymentCutovers(
+                "2026-07-26T03:11:00.000Z",
+                () => "unknown",
+                recovery
+            )
+        ).toBe(1);
+        expect(recovery).toHaveBeenCalledWith({
+            candidateCommit: "c".repeat(40),
+            id: deploymentId,
+            updatedAt: startedAt,
+        });
+    });
+
+    it("bounds guardian inspection failures by scheduling rollback recovery", () => {
         const startedAt = "2026-07-26T03:00:00.000Z";
         const deploymentId = createRestartScheduledDeployment(startedAt);
         const recovery = jest.fn(() => true);
@@ -187,6 +247,49 @@ describe("persistent job execution queue", () => {
                 .prepare("SELECT job_id FROM deployment_lock WHERE job_id = ?")
                 .get(deploymentId)
         ).toEqual({ job_id: deploymentId });
+    });
+
+    it("accepts a loaded active unit when systemctl emits benign diagnostics", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        createRestartScheduledDeployment(startedAt);
+        const fakeBin = mkdtempSync(path.join(tmpdir(), "mira-systemctl-test-"));
+        const systemctl = path.join(fakeBin, "systemctl");
+        const originalPath = process.env.PATH;
+        writeFileSync(
+            systemctl,
+            String.raw`#!/usr/bin/env bash
+printf 'benign diagnostic\n' >&2
+printf 'LoadState=loaded\nActiveState=active\n'
+`
+        );
+        chmodSync(systemctl, 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${originalPath ?? ""}`;
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const recovery = jest.fn(() => true);
+        try {
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    "2026-07-26T03:11:00.000Z",
+                    undefined,
+                    recovery
+                )
+            ).toBe(0);
+            expect(recovery).not.toHaveBeenCalled();
+            expect(warning).toHaveBeenCalledWith(
+                "[ScheduledJobs] systemctl show reported diagnostics",
+                expect.objectContaining({
+                    stderr: "benign diagnostic",
+                })
+            );
+        } finally {
+            warning.mockRestore();
+            if (originalPath === undefined) {
+                delete process.env.PATH;
+            } else {
+                process.env.PATH = originalPath;
+            }
+            rmSync(fakeBin, { force: true, recursive: true });
+        }
     });
 
     it("persists worker progress and structured action failures", async () => {

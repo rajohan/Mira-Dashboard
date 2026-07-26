@@ -194,24 +194,56 @@ systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 Use a commit-bound readiness function; exhausting the loop is a failure:
 
 ```bash
+worker_identity() {
+  local properties active substate pid started
+  properties="$(
+    systemctl --user show mira-dashboard-worker.service \
+      --property=ActiveState \
+      --property=SubState \
+      --property=MainPID \
+      --property=ExecMainStartTimestampMonotonic \
+      --no-pager 2>/dev/null
+  )" || return 1
+  active="$(sed -n 's/^ActiveState=//p' <<<"$properties")"
+  substate="$(sed -n 's/^SubState=//p' <<<"$properties")"
+  pid="$(sed -n 's/^MainPID=//p' <<<"$properties")"
+  started="$(sed -n 's/^ExecMainStartTimestampMonotonic=//p' <<<"$properties")"
+  [[ "$active" == active && "$substate" == running ]] || return 1
+  [[ "$pid:$started" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]] || return 1
+  printf '%s:%s' "$pid" "$started"
+}
+
+readiness_matches() {
+  local expected="$1"
+  local response
+  response="$(curl --fail --silent --show-error \
+    --connect-timeout 2 --max-time 5 \
+    "http://127.0.0.1:${DASHBOARD_PORT}/api/health/ready" || true)"
+  jq --exit-status --arg expected "$expected" \
+    '.status == "isReady"
+     and .checks.release.ready == true
+     and .checks.release.backendCommit == $expected
+     and .checks.release.frontendCommit == $expected
+     and .checks.worker.ready == true' <<<"$response" >/dev/null
+}
+
 ready_for_commit() {
   local full_sha="$1"
   local expected="${full_sha:0:8}"
-  local response
+  local initial_worker_identity current_worker_identity
+  initial_worker_identity=""
   for attempt in {1..30}; do
-    response="$(curl --fail --silent --show-error \
-      --connect-timeout 2 --max-time 5 \
-      "http://127.0.0.1:${DASHBOARD_PORT}/api/health/ready" || true)"
-    if jq --exit-status --arg expected "$expected" \
-      '.status == "isReady"
-       and .checks.release.backendCommit == $expected
-       and .checks.release.frontendCommit == $expected
-       and .checks.worker.ready == true' <<<"$response" >/dev/null; then
-      return 0
+    if readiness_matches "$expected"; then
+      initial_worker_identity="$(worker_identity || true)"
+      [[ -n "$initial_worker_identity" ]] && break
     fi
     sleep 1
   done
-  return 1
+  [[ -n "$initial_worker_identity" ]] || return 1
+  sleep 31
+  current_worker_identity="$(worker_identity || true)"
+  [[ "$current_worker_identity" == "$initial_worker_identity" ]] || return 1
+  readiness_matches "$expected"
 }
 
 recover_legacy_deployment() {
@@ -313,16 +345,26 @@ Normal activation automatically rolls back on restart or commit-bound readiness
 failure. Manual rollback is a failure-only operation:
 
 ```bash
+set -euo pipefail
 RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
 DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+PREVIOUS_RELEASE="$(
+  readlink --canonicalize-existing "$RELEASES_ROOT/previous"
+)"
+PREVIOUS_SHA="$(basename -- "$PREVIOUS_RELEASE")"
+[[ "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]]
+[[ "$PREVIOUS_RELEASE" == "$RELEASES_ROOT/releases/$PREVIOUS_SHA" ]]
+PREVIOUS_LIFECYCLE="$PREVIOUS_RELEASE/backend/dist/releaseLifecycle.js"
+test -f "$PREVIOUS_LIFECYCLE"
+test ! -L "$PREVIOUS_LIFECYCLE"
 env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
   MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
-  bun "$RELEASES_ROOT/current/backend/dist/releaseLifecycle.js" status
+  bun "$PREVIOUS_LIFECYCLE" status
 env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
   MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
-  bun "$RELEASES_ROOT/current/backend/dist/releaseLifecycle.js" rollback
+  bun "$PREVIOUS_LIFECYCLE" rollback
 systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 curl --fail --silent --show-error \
   "http://127.0.0.1:${DASHBOARD_PORT:-3100}/api/health/ready" | jq
