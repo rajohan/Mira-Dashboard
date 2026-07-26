@@ -122,6 +122,19 @@ describe("immutable release deployment", () => {
         }
     });
 
+    it("keeps host-local password reset on the stable production database", () => {
+        const backendPackage = JSON.parse(
+            readFileSync(path.resolve(import.meta.dirname, "../package.json"), "utf8")
+        ) as { scripts?: Record<string, string> };
+        const resetCommand = backendPackage.scripts?.["auth:reset-password"];
+        expect(resetCommand).toContain(
+            "MIRA_DASHBOARD_DB_PATH=${MIRA_DASHBOARD_DB_PATH:-/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db}"
+        );
+        expect(resetCommand).toContain(
+            "--preserve-env=MIRA_DASHBOARD_DB_PATH -- bun dist/resetDashboardPassword.js"
+        );
+    });
+
     it("builds in an isolated worktree and atomically publishes only artifacts", async () => {
         const options = stagingOptions();
         const calls: Array<{

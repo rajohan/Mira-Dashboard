@@ -231,6 +231,9 @@ async function staticResponse(pathname: string): Promise<Response> {
     if (decodedPathname === "/api" || decodedPathname.startsWith("/api/")) {
         return Response.json({ error: "Not found" }, { status: 404 });
     }
+    if (decodedPathname === "/health") {
+        return new Response("Not found", { status: 404 });
+    }
 
     const frontendPath = resolveFrontendPath();
     const indexPath = path.join(frontendPath, "index.html");

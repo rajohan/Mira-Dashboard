@@ -85,11 +85,14 @@ host-local interactive command from an SSH/console TTY:
 
 ```bash
 cd /home/ubuntu/projects/mira-dashboard-releases/current/backend
-bun run auth:reset-password -- --username <username>
+MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+  bun run auth:reset-password -- --username <username>
 ```
 
 The single standalone `--` ends Bun script options; `--username` is passed to
-the reset program. The program reads the new password twice with terminal echo
+the reset program. The package script preserves the explicit stable database
+path through Doppler and defaults to the same production path when it is not
+already set. The program reads the new password twice with terminal echo
 disabled, preserves MFA, revokes every session and pending ceremony, clears
 authentication cooldowns, and appends an audit event. It never accepts password
 material through command arguments or environment variables.
@@ -98,7 +101,8 @@ Only when all registered second factors are also lost, run the deliberate
 break-glass variant:
 
 ```bash
-bun run auth:reset-password -- --username <username> --reset-mfa
+MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+  bun run auth:reset-password -- --username <username> --reset-mfa
 ```
 
 `--reset-mfa` deletes registered WebAuthn credentials, encrypted TOTP factors,

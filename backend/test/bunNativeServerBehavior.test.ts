@@ -335,6 +335,10 @@ describe("Bun-native dashboard backend", () => {
         });
         expect(liveHead).toEqual({ body: undefined, status: 200 });
 
+        const retiredHealth = await fetch(`${state.baseUrl}/health`);
+        expect(retiredHealth.status).toBe(404);
+        expect(await retiredHealth.text()).toBe("Not found");
+
         const bootstrap = await api<{
             hasGatewayToken: boolean;
             isBootstrapRequired: boolean;

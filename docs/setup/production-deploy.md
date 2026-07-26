@@ -198,6 +198,7 @@ ready_for_commit() {
   local response
   for attempt in {1..30}; do
     response="$(curl --fail --silent --show-error \
+      --connect-timeout 2 --max-time 5 \
       "http://127.0.0.1:${DASHBOARD_PORT}/api/health/ready" || true)"
     if jq --exit-status --arg expected "$expected" \
       '.status == "isReady"
