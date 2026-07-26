@@ -8,7 +8,7 @@ import {
     runProcess,
     spawnProcess,
 } from "../lib/processes.ts";
-import { nonEmptyEnvironmentFallback, resolveDashboardPort } from "../lib/values.ts";
+import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
     assertManagedDashboardUnitProperties,
     MANAGED_DASHBOARD_UNITS,
@@ -1511,7 +1511,6 @@ async function scheduleReleaseCutover(
         "dist",
         "releaseLifecycle.js"
     );
-    const readinessUrl = `http://127.0.0.1:${resolveDashboardPort()}/api/health/ready`;
     const lifecycleEnvironment = [
         `MIRA_DASHBOARD_RELEASES_ROOT=${shellQuote(releasesRoot)}`,
         `MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())}`,
@@ -1550,10 +1549,21 @@ async function scheduleReleaseCutover(
 
     const script = [
         "sleep 2",
+        "resolve_dashboard_port() {",
+        '  dashboard_port=$(/usr/local/bin/doppler run --config prd --project rajohan -- /bin/sh -c \'printf "%s" "${PORT:-3100}"\' 2>/dev/null || true)',
+        '  case "$dashboard_port" in',
+        '    ""|*[!0-9]*) dashboard_port=3100 ;;',
+        "  esac",
+        "  if ((10#$dashboard_port < 1 || 10#$dashboard_port > 65535)); then",
+        "    dashboard_port=3100",
+        "  fi",
+        '  printf "%s" "$dashboard_port"',
+        "}",
         "ready_for_commit() {",
         '  expected_commit="$1"',
+        '  dashboard_port="$(resolve_dashboard_port)"',
         "  for attempt in {1..30}; do",
-        `    response=$(/usr/bin/curl --fail --silent --show-error --connect-timeout 2 --max-time 5 ${shellQuote(readinessUrl)} 2>/dev/null || true)`,
+        '    response=$(/usr/bin/curl --fail --silent --show-error --connect-timeout 2 --max-time 5 "http://127.0.0.1:${dashboard_port}/api/health/ready" 2>/dev/null || true)',
         '    if printf "%s" "$response" | /usr/bin/jq --exit-status --arg expected "$expected_commit" \'.status == "isReady" and .checks.release.ready == true and .checks.release.backendCommit == $expected and .checks.release.frontendCommit == $expected and .checks.worker.ready == true\' >/dev/null 2>&1; then',
         "      return 0",
         "    fi",

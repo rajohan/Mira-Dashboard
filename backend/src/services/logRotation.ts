@@ -69,7 +69,7 @@ const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
 const LOG_ROTATION_JOB_ID = "ops.log-rotation";
 const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
 const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
-const ELEVATED_LOG_ROTATION_PRESERVED_ENVIRONMENT = [
+const ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT = [
     "LANG",
     "NODE_ENV",
     "TZ",
@@ -2039,7 +2039,7 @@ function buildElevatedLogRotationCliArguments(
     ].join("\n");
     return [
         "-n",
-        `--preserve-env=${ELEVATED_LOG_ROTATION_PRESERVED_ENVIRONMENT.join(",")}`,
+        `--preserve-env=${ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT.join(",")}`,
         resolveBunExecutable(),
         "--input-type=module",
         "--eval",
@@ -2054,12 +2054,8 @@ function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
     const allowed = [
         "PATH",
         "HOME",
-        "LANG",
-        "NODE_ENV",
-        "TZ",
-        "MIRA_DASHBOARD_DB_PATH",
-        "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE",
-    ];
+        ...ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT,
+    ] as const;
     const environment: NodeJS.ProcessEnv = {};
     // Keep sudo environment preservation narrow: runtime lookup, locale, and state paths.
     for (const key of allowed) {

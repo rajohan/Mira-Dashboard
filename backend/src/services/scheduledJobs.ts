@@ -1251,6 +1251,19 @@ function resetExecutorClaimPause(): void {
     scheduledJobRuntimeState.isExecutorClaimingPaused = false;
 }
 
+function hasPendingDeploymentCutover(): boolean {
+    return Boolean(
+        database
+            .query(
+                `SELECT 1
+                 FROM deployment_jobs
+                 WHERE status = 'restart-scheduled'
+                 LIMIT 1`
+            )
+            .get()
+    );
+}
+
 function executorTick(): void {
     if (
         !scheduledJobRuntimeState.executor ||
@@ -1262,6 +1275,12 @@ function executorTick(): void {
     }
     scheduledJobRuntimeState.isExecutorTickRunning = true;
     try {
+        // The in-memory pause is lost when the deployment restarts this worker.
+        // Keep replacement workers idle until the detached guardian records a
+        // terminal deployment status in the shared database.
+        if (hasPendingDeploymentCutover()) {
+            return;
+        }
         const execution = claimNextJobExecution(
             scheduledJobRuntimeState.workerId,
             executorCapacity

@@ -1938,8 +1938,11 @@ printf 'scheduled\n'
             await import("../src/services/pullRequests.ts");
         const { enqueueJobExecution, getJobExecution } =
             await import("../src/services/jobExecutionQueue.ts");
-        const { registerScheduledJobAction } =
-            await import("../src/services/scheduledJobs.ts");
+        const {
+            registerScheduledJobAction,
+            startScheduledJobExecutor,
+            stopScheduledJobExecutor,
+        } = await import("../src/services/scheduledJobs.ts");
         registerPullRequestExecutionActions();
         registerScheduledJobAction("test.after-deploy", async () => ({}));
         await startTestScheduledExecutor();
@@ -1980,6 +1983,8 @@ printf 'scheduled\n'
                 () => getJobExecution(deploymentExecution.id)?.status === "success",
                 5000
             );
+            await stopScheduledJobExecutor();
+            startScheduledJobExecutor();
             await Bun.sleep(25);
 
             const row = database
@@ -2014,7 +2019,15 @@ printf 'scheduled\n'
                 `mira-dashboard-deploy-${job.id}`
             );
             const restartCommand = await Bun.file(systemdLog).text();
-            expect(restartCommand).toContain("http://127.0.0.1:4310/api/health/ready");
+            expect(restartCommand).toContain(
+                "/usr/local/bin/doppler run --config prd --project rajohan"
+            );
+            expect(restartCommand).toContain(
+                "http://127.0.0.1:${dashboard_port}/api/health/ready"
+            );
+            expect(restartCommand).not.toContain(
+                "http://127.0.0.1:4310/api/health/ready"
+            );
             expect(restartCommand).toContain("--connect-timeout 2 --max-time 5");
             expect(restartCommand).toContain("for attempt in {1..30}");
             expect(restartCommand).toContain(".checks.release.backendCommit");
