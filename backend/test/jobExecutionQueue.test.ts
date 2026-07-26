@@ -77,41 +77,29 @@ function createScheduledTestJob(
     return id;
 }
 
+function createRestartScheduledDeployment(updatedAt: string): string {
+    const deploymentId = `test-orphaned-cutover-${Bun.randomUUIDv7()}`;
+    testDeploymentIds.add(deploymentId);
+    database
+        .prepare(
+            `INSERT INTO deployment_jobs (
+                id, status, started_at, updated_at, note, stdout, stderr
+             ) VALUES (?, 'restart-scheduled', ?, ?, ?, '', '')`
+        )
+        .run(deploymentId, updatedAt, updatedAt, "Waiting for guardian");
+    database
+        .prepare("INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)")
+        .run(deploymentId, updatedAt);
+    return deploymentId;
+}
+
 describe("persistent job execution queue", () => {
     it("fails orphaned detached cutovers before they can pause worker claims", () => {
-        const deploymentId = `test-orphaned-cutover-${Bun.randomUUIDv7()}`;
         const startedAt = "2026-07-26T03:00:00.000Z";
         const recoveredAt = "2026-07-26T03:01:00.000Z";
-        testDeploymentIds.add(deploymentId);
-        database
-            .prepare(
-                `INSERT INTO deployment_jobs (
-                    id, status, started_at, updated_at, note, stdout, stderr
-                 ) VALUES (?, 'restart-scheduled', ?, ?, ?, '', '')`
-            )
-            .run(deploymentId, startedAt, startedAt, "Waiting for guardian");
-        database
-            .prepare(
-                "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
-            )
-            .run(deploymentId, startedAt);
+        const deploymentId = createRestartScheduledDeployment(startedAt);
 
         expect(reconcileOrphanedDeploymentCutovers(recoveredAt, () => "active")).toBe(0);
-        expect(reconcileOrphanedDeploymentCutovers(recoveredAt, () => "unknown")).toBe(0);
-        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
-        try {
-            expect(
-                reconcileOrphanedDeploymentCutovers(recoveredAt, () => {
-                    throw new Error("systemd unavailable");
-                })
-            ).toBe(0);
-            expect(warning).toHaveBeenCalledWith(
-                "[ScheduledJobs] Failed to inspect detached deployment guardian:",
-                expect.any(Error)
-            );
-        } finally {
-            warning.mockRestore();
-        }
         expect(reconcileOrphanedDeploymentCutovers(recoveredAt, () => "inactive")).toBe(
             1
         );
@@ -127,6 +115,50 @@ describe("persistent job execution queue", () => {
             note: "Detached release cutover guardian is no longer active",
             status: "failed",
             updatedAt: recoveredAt,
+        });
+        expect(
+            database
+                .prepare("SELECT job_id FROM deployment_lock WHERE job_id = ?")
+                .get(deploymentId)
+        ).toBeNull();
+    });
+
+    it("bounds claim pauses when the guardian state cannot be confirmed", () => {
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        const deploymentId = createRestartScheduledDeployment(startedAt);
+
+        expect(
+            reconcileOrphanedDeploymentCutovers(
+                "2026-07-26T03:01:00.000Z",
+                () => "unknown"
+            )
+        ).toBe(0);
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            expect(
+                reconcileOrphanedDeploymentCutovers("2026-07-26T03:11:00.000Z", () => {
+                    throw new Error("systemd unavailable");
+                })
+            ).toBe(1);
+            expect(warning).toHaveBeenCalledWith(
+                "[ScheduledJobs] Failed to inspect detached deployment guardian:",
+                expect.any(Error)
+            );
+        } finally {
+            warning.mockRestore();
+        }
+        expect(
+            database
+                .prepare(
+                    `SELECT status, updated_at AS updatedAt, note
+                     FROM deployment_jobs
+                     WHERE id = ?`
+                )
+                .get(deploymentId)
+        ).toEqual({
+            note: "Detached release cutover guardian could not be confirmed within ten minutes",
+            status: "failed",
+            updatedAt: "2026-07-26T03:11:00.000Z",
         });
         expect(
             database

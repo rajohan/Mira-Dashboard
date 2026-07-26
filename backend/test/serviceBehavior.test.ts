@@ -1898,8 +1898,8 @@ fi
             String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> ${JSON.stringify(systemctlLog)}
-if [[ "$*" == "--user is-active mira-dashboard-deploy-"*".service" ]]; then
-  printf 'active\n'
+if [[ "$*" == "--user show mira-dashboard-deploy-"*".service --property=ActiveState --property=LoadState --no-pager" ]]; then
+  printf 'LoadState=loaded\nActiveState=active\n'
   exit 0
 fi
 if [[ "$*" != *"--user show"* ]]; then
@@ -2020,7 +2020,7 @@ printf 'scheduled\n'
                 "show mira-dashboard.service"
             );
             await expect(Bun.file(systemctlLog).text()).resolves.toContain(
-                `--user is-active mira-dashboard-deploy-${job.id}.service`
+                `--user show mira-dashboard-deploy-${job.id}.service --property=ActiveState --property=LoadState --no-pager`
             );
             await expect(Bun.file(systemdLog).text()).resolves.toContain(
                 `mira-dashboard-deploy-${job.id}`

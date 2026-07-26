@@ -574,8 +574,8 @@ describe("immutable release deployment", () => {
             runReleaseDeploymentCommand(["stage"], options.releasesRoot)
         ).rejects.toThrow("stage requires a commit SHA");
         await expect(
-            runReleaseDeploymentCommand(["prune", "1"], options.releasesRoot)
-        ).rejects.toThrow("retention must be between 2 and 20");
+            runReleaseDeploymentCommand(["prune", "2"], options.releasesRoot)
+        ).rejects.toThrow("retention must be between 3 and 20");
         await expect(
             runReleaseDeploymentCommand(["prune", "3", "extra"], options.releasesRoot)
         ).rejects.toThrow("unexpected arguments");

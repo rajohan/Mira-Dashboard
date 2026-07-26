@@ -391,8 +391,8 @@ describe("Dashboard immutable release manager", () => {
             retained: [SECOND_COMMIT, FIRST_COMMIT],
             warnings: [],
         });
-        await expect(runReleaseLifecycleCommand(["prune", "1"], root)).rejects.toThrow(
-            "retention must be between 2 and 20"
+        await expect(runReleaseLifecycleCommand(["prune", "2"], root)).rejects.toThrow(
+            "retention must be between 3 and 20"
         );
         await expect(
             runReleaseLifecycleCommand(["prune", "3", "extra"], root)
@@ -893,14 +893,14 @@ describe("Dashboard immutable release manager", () => {
 
     it("validates release retention bounds", async () => {
         const root = temporaryReleasesRoot();
-        await expect(pruneDashboardReleases(1, root)).rejects.toThrow(
-            "retention must be between 2 and 20"
+        await expect(pruneDashboardReleases(2, root)).rejects.toThrow(
+            "retention must be between 3 and 20"
         );
         await expect(pruneDashboardReleases(21, root)).rejects.toThrow(
-            "retention must be between 2 and 20"
+            "retention must be between 3 and 20"
         );
         await expect(pruneDashboardReleases(NaN, root)).rejects.toThrow(
-            "retention must be between 2 and 20"
+            "retention must be between 3 and 20"
         );
     });
 });

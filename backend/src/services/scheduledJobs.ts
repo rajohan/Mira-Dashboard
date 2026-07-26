@@ -34,6 +34,7 @@ const executorTickMs = 1000;
 const executorHeartbeatMs = 1000;
 const executorCapacity = 1;
 const deploymentCutoverReconcileIntervalMs = 5000;
+const deploymentCutoverMaximumUnknownMs = 10 * 60 * 1000;
 const interruptedHandlerGraceMs = 30_000;
 const RELEASE_COMMIT_PATTERN = /^(?:[\da-f]{8,40}|development)$/u;
 const DEPLOYMENT_GUARDIAN_UNIT_PREFIX = "mira-dashboard-deploy-";
@@ -1264,22 +1265,57 @@ function readDeploymentGuardianState(jobId: string): DeploymentGuardianState {
         cmd: [
             "systemctl",
             "--user",
-            "is-active",
+            "show",
             `${DEPLOYMENT_GUARDIAN_UNIT_PREFIX}${jobId}.service`,
+            "--property=ActiveState",
+            "--property=LoadState",
+            "--no-pager",
         ],
         env: process.env,
         stderr: "pipe",
         stdin: "ignore",
         stdout: "pipe",
     });
-    const state = new TextDecoder().decode(result.stdout).trim();
-    if (["active", "activating", "deactivating", "reloading"].includes(state)) {
+    const stderr = new TextDecoder().decode(result.stderr).trim();
+    if (stderr || result.exitCode !== 0) {
+        return "unknown";
+    }
+    const properties = new Map(
+        new TextDecoder()
+            .decode(result.stdout)
+            .trim()
+            .split("\n")
+            .map((line) => {
+                const separator = line.indexOf("=");
+                return separator === -1
+                    ? [line, ""]
+                    : [line.slice(0, separator), line.slice(separator + 1)];
+            })
+    );
+    if (properties.get("LoadState") !== "loaded") {
+        return "unknown";
+    }
+    const state = properties.get("ActiveState");
+    if (state && ["active", "activating", "deactivating", "reloading"].includes(state)) {
         return "active";
     }
-    if (["inactive", "failed", "unknown"].includes(state)) {
+    if (state && ["inactive", "failed"].includes(state)) {
         return "inactive";
     }
     return "unknown";
+}
+
+function isDeploymentCutoverReconciliationExpired(
+    updatedAt: string,
+    timestamp: string
+): boolean {
+    const updatedAtMs = Date.parse(updatedAt);
+    const timestampMs = Date.parse(timestamp);
+    return (
+        !Number.isFinite(updatedAtMs) ||
+        !Number.isFinite(timestampMs) ||
+        timestampMs - updatedAtMs >= deploymentCutoverMaximumUnknownMs
+    );
 }
 
 export function reconcileOrphanedDeploymentCutovers(
@@ -1288,32 +1324,32 @@ export function reconcileOrphanedDeploymentCutovers(
 ): number {
     const pending = database
         .query(
-            `SELECT id
+            `SELECT id, updated_at AS updatedAt
              FROM deployment_jobs
              WHERE status = 'restart-scheduled'`
         )
-        .all() as Array<{ id: string }>;
-    const failOrphanedCutover = database.transaction((jobId: string) => {
+        .all() as Array<{ id: string; updatedAt: string }>;
+    const failOrphanedCutover = database.transaction((jobId: string, note: string) => {
         const result = database
-            .prepare(
+            .query(
                 `UPDATE deployment_jobs
-                 SET status = 'failed',
-                     updated_at = ?,
-                     note = 'Detached release cutover guardian is no longer active'
-                 WHERE id = ?
-                   AND status = 'restart-scheduled'`
+                     SET status = 'failed',
+                         updated_at = ?,
+                         note = ?
+                     WHERE id = ?
+                       AND status = 'restart-scheduled'`
             )
-            .run(timestamp, jobId);
+            .run(timestamp, note, jobId);
         if (result.changes === 1) {
             database
-                .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
+                .query("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
                 .run(jobId);
         }
         return result.changes;
     });
     let recovered = 0;
-    for (const { id } of pending) {
-        let state: DeploymentGuardianState;
+    for (const { id, updatedAt } of pending) {
+        let state: DeploymentGuardianState = "unknown";
         try {
             state = readGuardianState(id);
         } catch (error) {
@@ -1321,10 +1357,20 @@ export function reconcileOrphanedDeploymentCutovers(
                 "[ScheduledJobs] Failed to inspect detached deployment guardian:",
                 error
             );
-            continue;
         }
         if (state === "inactive") {
-            recovered += failOrphanedCutover(id);
+            recovered += failOrphanedCutover(
+                id,
+                "Detached release cutover guardian is no longer active"
+            );
+        } else if (
+            state === "unknown" &&
+            isDeploymentCutoverReconciliationExpired(updatedAt, timestamp)
+        ) {
+            recovered += failOrphanedCutover(
+                id,
+                "Detached release cutover guardian could not be confirmed within ten minutes"
+            );
         }
     }
     return recovered;

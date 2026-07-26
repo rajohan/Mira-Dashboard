@@ -1203,8 +1203,8 @@ export async function pruneDashboardReleases(
     retainCount = 3,
     releasesRoot = resolveDashboardReleasesRoot()
 ): Promise<DashboardReleaseRetentionResult> {
-    if (!Number.isSafeInteger(retainCount) || retainCount < 2 || retainCount > 20) {
-        throw new TypeError("Managed release retention must be between 2 and 20");
+    if (!Number.isSafeInteger(retainCount) || retainCount < 3 || retainCount > 20) {
+        throw new TypeError("Managed release retention must be between 3 and 20");
     }
 
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
