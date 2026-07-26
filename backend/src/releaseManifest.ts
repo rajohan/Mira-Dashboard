@@ -26,7 +26,7 @@ const RELEASE_STATIC_ARTIFACTS = [
     "bun.lock",
     "package.json",
 ] as const;
-const FORMAT_2_REQUIRED_RELEASE_ARTIFACTS = [
+const REQUIRED_RELEASE_ARTIFACTS = [
     ...RELEASE_STATIC_ARTIFACTS,
     "backend/dist/build-identity.json",
     "backend/dist/databasePreflight.js",
@@ -37,11 +37,6 @@ const FORMAT_2_REQUIRED_RELEASE_ARTIFACTS = [
     "dist/build-identity.json",
     "dist/index.html",
 ] as const;
-// Format 1 remains readable only for the first managed cutover and its rollback
-// window. Remove this compatibility list once current/previous cannot reference v1.
-const FORMAT_1_REQUIRED_RELEASE_ARTIFACTS = FORMAT_2_REQUIRED_RELEASE_ARTIFACTS.filter(
-    (artifactPath) => artifactPath !== "backend/dist/releaseLifecycle.js"
-);
 const MAX_BUILD_IDENTITY_BYTES = 4096;
 const RUNTIME_RELEASE_VERIFICATION_CACHE_MS = 15_000;
 const SHA_256_PATTERN = /^[\da-f]{64}$/u;
@@ -65,11 +60,11 @@ export interface DashboardReleaseManifest {
         backendCommit: string;
         frontendCommit: string;
     };
-    formatVersion: 1 | 2;
+    formatVersion: 2;
     schema: {
         maximumCompatible: number;
-        migrations?: DatabaseMigrationIdentity[];
-        migrationInventorySha256?: string;
+        migrations: DatabaseMigrationIdentity[];
+        migrationInventorySha256: string;
         migrationRegistrySha256: string;
         minimumCompatible: number;
         target: number;
@@ -512,16 +507,14 @@ function parseMigrationIdentity(value: unknown): DatabaseMigrationIdentity {
     };
 }
 
-function parseSchema(
-    value: unknown,
-    formatVersion: DashboardReleaseManifest["formatVersion"]
-): DashboardReleaseManifest["schema"] {
+function parseSchema(value: unknown): DashboardReleaseManifest["schema"] {
     const expectedKeys = [
         "maximumCompatible",
+        "migrations",
+        "migrationInventorySha256",
         "migrationRegistrySha256",
         "minimumCompatible",
         "target",
-        ...(formatVersion === 2 ? ["migrations", "migrationInventorySha256"] : []),
     ];
     if (!isPlainRecord(value) || !hasExactKeys(value, expectedKeys)) {
         throw new TypeError("Release manifest schema declaration is invalid");
@@ -539,30 +532,25 @@ function parseSchema(
     ) {
         throw new TypeError("Release manifest schema range is invalid");
     }
-    const migrations =
-        formatVersion === 2 && Array.isArray(value.migrations)
-            ? value.migrations.map((migration) => parseMigrationIdentity(migration))
-            : undefined;
+    const migrations = Array.isArray(value.migrations)
+        ? value.migrations.map((migration) => parseMigrationIdentity(migration))
+        : undefined;
     // This digest proves only that a foreign manifest is internally consistent.
     // Runtime and release-manager validation bind it to local code and live history.
     if (
-        formatVersion === 2 &&
-        (!migrations ||
-            migrations.length !== (target as number) ||
-            migrations.some((migration, index) => migration.version !== index + 1) ||
-            typeof value.migrationInventorySha256 !== "string" ||
-            !SHA_256_PATTERN.test(value.migrationInventorySha256) ||
-            value.migrationInventorySha256 !==
-                databaseMigrationInventorySha256(migrations))
+        !migrations ||
+        migrations.length !== (target as number) ||
+        migrations.some((migration, index) => migration.version !== index + 1) ||
+        typeof value.migrationInventorySha256 !== "string" ||
+        !SHA_256_PATTERN.test(value.migrationInventorySha256) ||
+        value.migrationInventorySha256 !== databaseMigrationInventorySha256(migrations)
     ) {
         throw new TypeError("Release manifest migration inventory is invalid");
     }
     return {
         maximumCompatible: maximumCompatible as number,
-        ...(migrations && { migrations }),
-        ...(formatVersion === 2 && {
-            migrationInventorySha256: value.migrationInventorySha256 as string,
-        }),
+        migrations,
+        migrationInventorySha256: value.migrationInventorySha256 as string,
         migrationRegistrySha256: value.migrationRegistrySha256,
         minimumCompatible: minimumCompatible as number,
         target: target as number,
@@ -583,8 +571,7 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
             "formatVersion",
             "schema",
         ]) ||
-        (value.formatVersion !== 1 &&
-            value.formatVersion !== RELEASE_MANIFEST_FORMAT_VERSION) ||
+        value.formatVersion !== RELEASE_MANIFEST_FORMAT_VERSION ||
         typeof value.commitSha !== "string" ||
         typeof value.commitShort !== "string" ||
         typeof value.commitTitle !== "string" ||
@@ -620,10 +607,9 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
         artifactPaths.some(
             (artifactPath_, index) => artifactPath_ !== sortedArtifactPaths[index]
         ) ||
-        (value.formatVersion === 1
-            ? FORMAT_1_REQUIRED_RELEASE_ARTIFACTS
-            : FORMAT_2_REQUIRED_RELEASE_ARTIFACTS
-        ).some((requiredPath) => !artifactPaths.includes(requiredPath))
+        REQUIRED_RELEASE_ARTIFACTS.some(
+            (requiredPath) => !artifactPaths.includes(requiredPath)
+        )
     ) {
         throw new TypeError("Release manifest artifact inventory is invalid");
     }
@@ -640,7 +626,7 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
             frontendCommit: value.components.frontendCommit as string,
         },
         formatVersion: value.formatVersion,
-        schema: parseSchema(value.schema, value.formatVersion),
+        schema: parseSchema(value.schema),
     };
 }
 
@@ -774,12 +760,8 @@ export async function loadRuntimeReleaseIdentity(
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum &&
             manifest.schema.maximumCompatible ===
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum &&
-            // Format v1 has no migration inventory, so readiness cannot bind it to
-            // local migration identities. Remove this branch after the first
-            // managed-cutover rollback window no longer contains a v1 release.
-            (manifest.formatVersion === 1 ||
-                manifest.schema.migrationInventorySha256 ===
-                    databaseMigrationInventorySha256()) &&
+            manifest.schema.migrationInventorySha256 ===
+                databaseMigrationInventorySha256() &&
             manifest.schema.migrationRegistrySha256 === databaseMigrationRegistrySha256();
         return {
             artifactCount: manifest.artifacts.length,

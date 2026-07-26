@@ -30,6 +30,7 @@ import {
     isReleaseTransitionLockAvailable,
     loadManagedRelease,
     managedReleasePath,
+    pruneDashboardReleases,
     readDashboardReleaseState,
     RELEASE_TRANSITION_LOCK_FILE_NAME,
     RELEASE_TRANSITION_LOCK_PROGRAM,
@@ -48,6 +49,7 @@ const temporaryRoots: string[] = [];
 const FIRST_COMMIT = "a".repeat(40);
 const SECOND_COMMIT = "b".repeat(40);
 const THIRD_COMMIT = "c".repeat(40);
+const FOURTH_COMMIT = "d".repeat(40);
 const TEST_FUTURE_MIGRATIONS: DatabaseMigrationIdentity[] = [
     {
         checksum: "7".repeat(64),
@@ -382,7 +384,17 @@ describe("Dashboard immutable release manager", () => {
             },
             root,
         });
-        expect(status.current).not.toHaveProperty("manifest");
+        expect(status).not.toHaveProperty("current.manifest");
+        await expect(runReleaseLifecycleCommand(["prune"], root)).resolves.toEqual({
+            removed: [],
+            retained: [SECOND_COMMIT, FIRST_COMMIT],
+        });
+        await expect(runReleaseLifecycleCommand(["prune", "1"], root)).rejects.toThrow(
+            "retention must be between 2 and 20"
+        );
+        await expect(
+            runReleaseLifecycleCommand(["prune", "3", "extra"], root)
+        ).rejects.toThrow("unexpected arguments");
         await expect(
             runReleaseLifecycleCommand(["rollback", FIRST_COMMIT], root)
         ).rejects.toThrow("takes no commit SHA");
@@ -812,6 +824,51 @@ describe("Dashboard immutable release manager", () => {
 
         await expect(rollbackDashboardRelease(root, SCHEMA_6_OPTIONS)).rejects.toThrow(
             "requires two distinct releases"
+        );
+    });
+
+    it("prunes old releases while preserving current and previous", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await createManagedRelease(root, THIRD_COMMIT);
+        await createManagedRelease(root, FOURTH_COMMIT);
+        await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(THIRD_COMMIT, root, SCHEMA_6_OPTIONS);
+        const interruptedRetirementPath = path.join(
+            root,
+            "releases",
+            `.retired-${"e".repeat(40)}-00000000-0000-4000-8000-000000000000`
+        );
+        mkdirSync(interruptedRetirementPath);
+        writeFileSync(path.join(interruptedRetirementPath, "stale"), "stale\n");
+
+        const result = await pruneDashboardReleases(3, root);
+
+        expect(result).toEqual({
+            removed: [FIRST_COMMIT],
+            retained: [FOURTH_COMMIT, THIRD_COMMIT, SECOND_COMMIT],
+        });
+        expect(existsSync(managedReleasePath(root, FIRST_COMMIT))).toBe(false);
+        expect(existsSync(managedReleasePath(root, SECOND_COMMIT))).toBe(true);
+        expect(existsSync(managedReleasePath(root, THIRD_COMMIT))).toBe(true);
+        expect(existsSync(managedReleasePath(root, FOURTH_COMMIT))).toBe(true);
+        expect(existsSync(interruptedRetirementPath)).toBe(false);
+        const state = await readDashboardReleaseState(root);
+        expect(state.current?.commitSha).toBe(THIRD_COMMIT);
+        expect(state.previous?.commitSha).toBe(SECOND_COMMIT);
+    });
+
+    it("validates release retention bounds", async () => {
+        const root = temporaryReleasesRoot();
+        await expect(pruneDashboardReleases(1, root)).rejects.toThrow(
+            "retention must be between 2 and 20"
+        );
+        await expect(pruneDashboardReleases(21, root)).rejects.toThrow(
+            "retention must be between 2 and 20"
+        );
+        await expect(pruneDashboardReleases(NaN, root)).rejects.toThrow(
+            "retention must be between 2 and 20"
         );
     });
 });

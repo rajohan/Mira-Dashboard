@@ -6,11 +6,16 @@ Wants=network-online.target
 [Service]
 Type=simple
 UMask=0077
-WorkingDirectory=/home/ubuntu/projects/mira-dashboard/backend
+WorkingDirectory=/home/ubuntu/projects/mira-dashboard-releases/current/backend
 Environment=NODE_ENV=production
 Environment=MIRA_DASHBOARD_EXECUTION_ROLE=web
 Environment=MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1
 Environment=MIRA_DASHBOARD_JOB_SCOPE_OWNER=mira-dashboard.service
+Environment=MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+Environment=MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock
+Environment=MIRA_DASHBOARD_OPENCLAW_HOME=/home/ubuntu/projects/mira-dashboard-state/openclaw-client
+Environment=MIRA_DASHBOARD_RELEASE_ROOT=/home/ubuntu/projects/mira-dashboard-releases/current
+Environment=MIRA_DASHBOARD_RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
 ExecStart=/usr/local/bin/doppler run --config prd --project rajohan -- /home/ubuntu/.bun/bin/bun dist/serverStart.js
 Restart=on-failure
 RestartSec=5

@@ -60,22 +60,11 @@ Use only when Raymond wants to re-run bootstrap.
 
 ```bash
 set -euo pipefail
-backend_dir=/home/ubuntu/projects/mira-dashboard/backend
-configured_db_path="$(
-  cd "$backend_dir"
-  /usr/local/bin/doppler run --config prd --project rajohan -- \
-    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
-)"
-if [[ -z "$configured_db_path" ]]; then
-  db_path="$backend_dir/data/mira-dashboard.db"
-elif [[ "$configured_db_path" = /* ]]; then
-  db_path="$configured_db_path"
-else
-  db_path="$backend_dir/$configured_db_path"
-fi
+backend_dir=/home/ubuntu/projects/mira-dashboard-releases/current/backend
+db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
 cd "$backend_dir"
 /usr/local/bin/doppler run --config prd --project rajohan -- \
-  bun run db:preflight
+  env MIRA_DASHBOARD_DB_PATH="$db_path" bun run db:preflight
 sqlite3 -cmd ".timeout 5000" "$db_path" "DELETE FROM auth_sessions; DELETE FROM users;"
 sqlite3 -cmd ".timeout 5000" "$db_path" "PRAGMA integrity_check;"
 curl http://127.0.0.1:3100/api/auth/bootstrap
@@ -84,7 +73,8 @@ curl http://127.0.0.1:3100/api/auth/bootstrap
 To force Gateway token entry during bootstrap too:
 
 ```bash
-sqlite3 data/mira-dashboard.db "DELETE FROM app_config WHERE key='gateway_token';"
+db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+sqlite3 "$db_path" "DELETE FROM app_config WHERE key='gateway_token';"
 ```
 
 ## Reset A Forgotten Dashboard Password
@@ -94,7 +84,7 @@ watched by the web service, or unauthenticated reset endpoint. Use the
 host-local interactive command from an SSH/console TTY:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
+cd /home/ubuntu/projects/mira-dashboard-releases/current/backend
 bun run auth:reset-password -- --username <username>
 ```
 
@@ -119,8 +109,9 @@ recovery codes offline.
 ## Inspect Gateway Token Metadata Without Printing It
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
-sqlite3 data/mira-dashboard.db "SELECT key, length(value), updated_at FROM app_config WHERE key='gateway_token';"
+db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+sqlite3 "$db_path" \
+  "SELECT key, length(value), updated_at FROM app_config WHERE key='gateway_token';"
 ```
 
 Do not print token values. A current row must contain a versioned encrypted
@@ -166,11 +157,14 @@ and [New VPS setup](../setup/new-vps.md#provision-local-openclaw-api-callers).
 
 Symptom: browser shows `Frontend Not Built` or `/` returns 503.
 
-```bash
-cd /home/ubuntu/projects/mira-dashboard
-bun run build
-systemctl --user restart mira-dashboard.service
-```
+The managed deploy executor verifies `dist/index.html`, every declared frontend
+artifact, and both component identities before activation. Do not build inside
+the control checkout or active release. Inspect `/api/health/ready`, both unit
+logs, and the managed `current`/`previous` state, then use the automatic/manual
+release rollback procedure in
+[Production deploy](../setup/production-deploy.md#rollback). An incomplete
+release must be restaged from its exact Git commit rather than repaired in
+place.
 
 ## SQLite Locked
 
@@ -194,38 +188,24 @@ is compatible with its schema. Never overwrite the live database or remove
 `-wal`/`-shm` while either Dashboard process is running.
 
 1. Confirm the execution queue is idle and record the absolute snapshot path.
-2. In one shell invocation, resolve the configured database path, verify the
-   snapshot, stop worker then web, preserve the current SQLite files, install
-   and validate the standalone snapshot, and only then start web and worker:
+2. In one shell invocation, use the managed production database path, verify
+   the snapshot, stop worker then web, preserve the current SQLite files,
+   install and validate the standalone snapshot, and only then start web and
+   worker:
 
 ```bash
 set -euo pipefail
-backend_dir=/home/ubuntu/projects/mira-dashboard/backend
 backup_path=/absolute/path/to/selected/mira-dashboard-....db
-configured_db_path="$(
-  cd "$backend_dir"
-  /usr/local/bin/doppler run --config prd --project rajohan -- \
-    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
-)"
-if [[ -z "$configured_db_path" ]]; then
-  db_path="$backend_dir/data/mira-dashboard.db"
-elif [[ "$configured_db_path" = /* ]]; then
-  db_path="$configured_db_path"
-else
-  db_path="$backend_dir/$configured_db_path"
-fi
+db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
 test -f "$backup_path"
 test "$(sqlite3 -readonly "$backup_path" "PRAGMA quick_check;")" = "ok"
 has_migration_history="$(
   sqlite3 -readonly "$backup_path" \
     "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = 'schema_migrations';"
 )"
-if [[ "$has_migration_history" = "1" ]]; then
-  sqlite3 -readonly "$backup_path" \
-    "SELECT version, name FROM schema_migrations ORDER BY version;"
-else
-  printf '%s\n' "Legacy snapshot without schema_migrations; pair it with pre-lifecycle code."
-fi
+test "$has_migration_history" = "1"
+sqlite3 -readonly "$backup_path" \
+  "SELECT version, name FROM schema_migrations ORDER BY version;"
 systemctl --user stop mira-dashboard-worker.service
 systemctl --user stop mira-dashboard.service
 db_dir="$(dirname "$db_path")"
@@ -295,9 +275,11 @@ Inspect the `database.maintenance` job on Jobs and the Database page's attention
 list. A manual deploy preflight can create and restore-verify a fresh snapshot:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
+cd /home/ubuntu/projects/mira-dashboard-releases/current/backend
 /usr/local/bin/doppler run --config prd --project rajohan -- \
-  bun run db:preflight
+  env \
+    MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+    bun run db:preflight
 ```
 
 “Reusable space” is SQLite freelist capacity that can be reused by future

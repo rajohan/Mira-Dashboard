@@ -8,6 +8,15 @@ Default path:
 backend/data/mira-dashboard.db
 ```
 
+That default is for development. Production units set:
+
+```text
+/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+```
+
+The `-wal`/`-shm` sidecars and `backups/` directory stay below the same
+persistent state root, outside the control checkout and immutable releases.
+
 Override:
 
 ```bash
@@ -62,40 +71,40 @@ edit a released migration. Add the next numbered file instead.
 
 ## Tables
 
-| Table                              | Purpose                                                               | Lifecycle                                                                |
-| ---------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `schema_migrations`                | Applied migration versions and immutable checksums.                   | Immutable audit history; never age-pruned.                               |
-| `audit_events`                     | Redacted request and privileged job lifecycle audit trail.            | Triggers reject update, delete, and replacement. No automatic pruning.   |
-| `users`                            | Dashboard auth users and explicit MFA-enabled timestamp.              | Authoritative records; removed only by explicit auth flows.              |
-| `auth_sessions`                    | Hashed-validator sessions with idle, MFA, elevation, and device state. | Removed after idle/absolute expiry or explicit revocation.               |
-| `auth_pending_logins`              | Hashed-validator password-first MFA handoffs.                          | Five-minute expiry; consumed on success or bounded failures.             |
-| `auth_webauthn_challenges`         | Session/pending-bound registration and assertion challenges.          | Five-minute expiry; atomically consumed by verification.                 |
-| `user_totp_factors`                | Named TOTP factors with encrypted seeds and replay state.              | Unconfirmed setup expires; confirmed factors require explicit removal.   |
-| `user_webauthn_credentials`        | Named WebAuthn public keys, counters, transports, and device state.     | Retained until explicit removal; multiple backup keys are supported.     |
-| `user_recovery_codes`              | One-time recovery selectors and password-hashed validators.            | Consumed once; replaced as one set on rotation.                          |
-| `auth_rate_limit_buckets`          | Hashed account/failure buckets and progressive cooldown state.         | Cleared on success; stale state removed after 24 hours.                  |
-| `app_config`                       | Small persistent config, currently including an encrypted `gateway_token` envelope. | Keyed upsert or explicit removal; naturally bounded.          |
-| `tasks`                            | Local task records.                                                   | Done tasks are removed after 365 idle days.                              |
-| `task_events`                      | Audit/event records for task changes.                                 | Follows old done tasks; otherwise at most 5,000 rows per task.           |
-| `task_updates`                     | Markdown progress updates on tasks.                                   | Follows old done tasks; otherwise at most 5,000 rows per task.           |
-| `notifications`                    | Notification bell items, including report links and ops alerts.       | Read: 14 days/300 rows; unread retained; report links follow reports.    |
-| `reports`                          | Daily briefs, daily summaries, heartbeats, and custom reports.        | 365 days and at most 5,000 rows.                                         |
-| `cache_entries`                    | Cache refresh state and cached provider data.                         | Fixed producer keys updated in place.                                    |
-| `quota_alert_state`                | Notification arming state for quota thresholds.                       | Finite provider/bucket keys updated in place.                            |
-| `openclaw_alert_state`             | Notification arming state for OpenClaw update alerts.                 | Singleton row.                                                           |
-| `agent_task_history`               | Agent current/completed task history.                                 | Completed: 90 days/10,000 rows; active rows retained.                    |
-| `deployment_jobs`                  | Dashboard deploy job state/output.                                    | Non-active: 90 days/500 rows; active rows retained.                      |
-| `deployment_lock`                  | Single active deployment lock.                                        | Singleton removed when the owning deploy releases it.                    |
-| `scheduled_jobs`                   | Dashboard-local scheduled job definitions.                            | Reconciled against registered actions; explicit operator state retained. |
-| `scheduled_job_runs`               | Scheduled job run history.                                            | Completed: 90 days/20,000 rows; active rows retained.                    |
-| `scheduled_job_execution_policies` | Resource class and timeout for each Dashboard job.                    | One row per job; cascades when the job is removed.                       |
-| `openclaw_cron_job_metadata`       | Disable intent and Dashboard metadata for OpenClaw cron jobs.         | Keyed operator intent; removed explicitly when intent is cleared.        |
-| `job_executions`                   | Persistent execution queue with leases, heartbeats, and cancellation. | Terminal: 90 days/20,000 rows; queued/running rows retained.             |
-| `job_workers`                      | Worker capacity and liveness heartbeats.                              | Stale heartbeats removed after 24 hours.                                 |
-| `chat_runtime_snapshots`           | Durable OpenClaw chat replay/session snapshots.                       | Per-scope live cap plus global 30-day/200-row maintenance safety net.    |
-| `chat_runtime_snapshot_events`     | Ordered durable replay events for those snapshots.                    | Follows retained snapshots; orphan rows are removed.                     |
-| `docker_managed_services`          | Docker updater managed service inventory.                             | Reconciled with current Compose inventory.                               |
-| `docker_update_events`             | Docker updater event history.                                         | 180 days and at most 5,000 rows.                                         |
+| Table                              | Purpose                                                                             | Lifecycle                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `schema_migrations`                | Applied migration versions and immutable checksums.                                 | Immutable audit history; never age-pruned.                               |
+| `audit_events`                     | Redacted request and privileged job lifecycle audit trail.                          | Triggers reject update, delete, and replacement. No automatic pruning.   |
+| `users`                            | Dashboard auth users and explicit MFA-enabled timestamp.                            | Authoritative records; removed only by explicit auth flows.              |
+| `auth_sessions`                    | Hashed-validator sessions with idle, MFA, elevation, and device state.              | Removed after idle/absolute expiry or explicit revocation.               |
+| `auth_pending_logins`              | Hashed-validator password-first MFA handoffs.                                       | Five-minute expiry; consumed on success or bounded failures.             |
+| `auth_webauthn_challenges`         | Session/pending-bound registration and assertion challenges.                        | Five-minute expiry; atomically consumed by verification.                 |
+| `user_totp_factors`                | Named TOTP factors with encrypted seeds and replay state.                           | Unconfirmed setup expires; confirmed factors require explicit removal.   |
+| `user_webauthn_credentials`        | Named WebAuthn public keys, counters, transports, and device state.                 | Retained until explicit removal; multiple backup keys are supported.     |
+| `user_recovery_codes`              | One-time recovery selectors and password-hashed validators.                         | Consumed once; replaced as one set on rotation.                          |
+| `auth_rate_limit_buckets`          | Hashed account/failure buckets and progressive cooldown state.                      | Cleared on success; stale state removed after 24 hours.                  |
+| `app_config`                       | Small persistent config, currently including an encrypted `gateway_token` envelope. | Keyed upsert or explicit removal; naturally bounded.                     |
+| `tasks`                            | Local task records.                                                                 | Done tasks are removed after 365 idle days.                              |
+| `task_events`                      | Audit/event records for task changes.                                               | Follows old done tasks; otherwise at most 5,000 rows per task.           |
+| `task_updates`                     | Markdown progress updates on tasks.                                                 | Follows old done tasks; otherwise at most 5,000 rows per task.           |
+| `notifications`                    | Notification bell items, including report links and ops alerts.                     | Read: 14 days/300 rows; unread retained; report links follow reports.    |
+| `reports`                          | Daily briefs, daily summaries, heartbeats, and custom reports.                      | 365 days and at most 5,000 rows.                                         |
+| `cache_entries`                    | Cache refresh state and cached provider data.                                       | Fixed producer keys updated in place.                                    |
+| `quota_alert_state`                | Notification arming state for quota thresholds.                                     | Finite provider/bucket keys updated in place.                            |
+| `openclaw_alert_state`             | Notification arming state for OpenClaw update alerts.                               | Singleton row.                                                           |
+| `agent_task_history`               | Agent current/completed task history.                                               | Completed: 90 days/10,000 rows; active rows retained.                    |
+| `deployment_jobs`                  | Dashboard deploy job state/output.                                                  | Non-active: 90 days/500 rows; active rows retained.                      |
+| `deployment_lock`                  | Single active deployment lock.                                                      | Singleton removed when the owning deploy releases it.                    |
+| `scheduled_jobs`                   | Dashboard-local scheduled job definitions.                                          | Reconciled against registered actions; explicit operator state retained. |
+| `scheduled_job_runs`               | Scheduled job run history.                                                          | Completed: 90 days/20,000 rows; active rows retained.                    |
+| `scheduled_job_execution_policies` | Resource class and timeout for each Dashboard job.                                  | One row per job; cascades when the job is removed.                       |
+| `openclaw_cron_job_metadata`       | Disable intent and Dashboard metadata for OpenClaw cron jobs.                       | Keyed operator intent; removed explicitly when intent is cleared.        |
+| `job_executions`                   | Persistent execution queue with leases, heartbeats, and cancellation.               | Terminal: 90 days/20,000 rows; queued/running rows retained.             |
+| `job_workers`                      | Worker capacity and liveness heartbeats.                                            | Stale heartbeats removed after 24 hours.                                 |
+| `chat_runtime_snapshots`           | Durable OpenClaw chat replay/session snapshots.                                     | Per-scope live cap plus global 30-day/200-row maintenance safety net.    |
+| `chat_runtime_snapshot_events`     | Ordered durable replay events for those snapshots.                                  | Follows retained snapshots; orphan rows are removed.                     |
+| `docker_managed_services`          | Docker updater managed service inventory.                                           | Reconciled with current Compose inventory.                               |
+| `docker_update_events`             | Docker updater event history.                                                       | 180 days and at most 5,000 rows.                                         |
 
 TOTP seeds and the persisted OpenClaw Gateway token are verifiable secrets and
 therefore cannot be one-way hashed. Dashboard encrypts them with versioned
@@ -142,7 +151,9 @@ schema enforces append-only history. Any future archive/retention design must
 arrive through a reviewed forward migration that preserves required audit
 history.
 
-Snapshots live beside the database under `data/backups/` by default:
+Snapshots live below `dirname(MIRA_DASHBOARD_DB_PATH)/backups/`. This is
+`backend/data/backups/` in development and
+`/home/ubuntu/projects/mira-dashboard-state/backups/` in production:
 
 | Kind            | Maximum age | Maximum count |
 | --------------- | ----------- | ------------- |
@@ -156,16 +167,11 @@ committed data may still be in `-wal`.
 
 ## Useful Inspection Commands
 
-Run production inspection through Doppler so the command resolves the same
-`MIRA_DASHBOARD_DB_PATH` value as the services:
+Use the same explicit path as the managed production units:
 
 ```bash
 set -euo pipefail
-cd /home/ubuntu/projects/mira-dashboard/backend
-db_path="$(
-  /usr/local/bin/doppler run --config prd --project rajohan -- \
-    sh -c 'realpath -m -- "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}"'
-)"
+db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
 sqlite3 -readonly "$db_path" ".tables"
 sqlite3 -readonly "$db_path" "PRAGMA integrity_check;"
 sqlite3 -readonly "$db_path" \
@@ -191,22 +197,11 @@ Use this only when Raymond explicitly wants to re-run setup.
 
 ```bash
 set -euo pipefail
-backend_dir=/home/ubuntu/projects/mira-dashboard/backend
-configured_db_path="$(
-  cd "$backend_dir"
-  /usr/local/bin/doppler run --config prd --project rajohan -- \
-    sh -c 'printf "%s" "${MIRA_DASHBOARD_DB_PATH-}"'
-)"
-if [[ -z "$configured_db_path" ]]; then
-  db_path="$backend_dir/data/mira-dashboard.db"
-elif [[ "$configured_db_path" = /* ]]; then
-  db_path="$configured_db_path"
-else
-  db_path="$backend_dir/$configured_db_path"
-fi
+backend_dir=/home/ubuntu/projects/mira-dashboard-releases/current/backend
+db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
 cd "$backend_dir"
 /usr/local/bin/doppler run --config prd --project rajohan -- \
-  bun run db:preflight
+  env MIRA_DASHBOARD_DB_PATH="$db_path" bun run db:preflight
 sqlite3 -cmd ".timeout 5000" "$db_path" "DELETE FROM auth_sessions; DELETE FROM users; DELETE FROM app_config WHERE key='gateway_token';"
 sqlite3 -cmd ".timeout 5000" "$db_path" "PRAGMA integrity_check;"
 curl http://127.0.0.1:3100/api/auth/bootstrap

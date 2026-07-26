@@ -144,6 +144,17 @@ describe("database test safety guard", () => {
         }
     );
 
+    it("refuses the production state database path while running tests", async () => {
+        const { exitCode, stderr } = await importDatabaseInChild(
+            "/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db"
+        );
+
+        expect(exitCode).not.toBe(0);
+        expect(stderr).toContain(
+            "Refusing to open non-temporary Dashboard test database"
+        );
+    });
+
     nonTemporaryTest(
         "refuses preflight access to a non-temporary database while running tests",
         async () => {

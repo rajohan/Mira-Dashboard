@@ -68,7 +68,22 @@ const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
 const LOG_ROTATION_JOB_ID = "ops.log-rotation";
 const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
 const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
-const logRotationLockFile = DEFAULT_LOCK_FILE;
+function resolveLogRotationLockFile(): string {
+    const configured =
+        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE?.trim() || DEFAULT_LOCK_FILE;
+    if (
+        configured.includes("\0") ||
+        !path.isAbsolute(configured) ||
+        path.resolve(configured) === path.parse(path.resolve(configured)).root
+    ) {
+        throw new TypeError(
+            "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE must be an absolute non-root path"
+        );
+    }
+    return path.resolve(configured);
+}
+
+const logRotationLockFile = resolveLogRotationLockFile();
 
 type ExecFileRunner = (
     file: string,
@@ -2031,9 +2046,17 @@ function buildElevatedLogRotationCliArguments(
 }
 
 function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
-    const allowed = ["PATH", "HOME", "LANG", "NODE_ENV", "TZ", "MIRA_DASHBOARD_DB_PATH"];
+    const allowed = [
+        "PATH",
+        "HOME",
+        "LANG",
+        "NODE_ENV",
+        "TZ",
+        "MIRA_DASHBOARD_DB_PATH",
+        "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE",
+    ];
     const environment: NodeJS.ProcessEnv = {};
-    // Keep sudo -E narrow: only runtime lookup, home/locale, mode, and database path.
+    // Keep sudo -E narrow: only runtime lookup, home/locale, mode, and stable state paths.
     for (const key of allowed) {
         if (process.env[key] !== undefined) {
             environment[key] = process.env[key];

@@ -6,6 +6,7 @@ import {
     mkdtempSync,
     readdirSync,
     readFileSync,
+    readlinkSync,
     rmSync,
     symlinkSync,
     utimesSync,
@@ -17,8 +18,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
-import { database, sqlNullable } from "../src/database.ts";
+import { database, getMiraDatabasePath, sqlNullable } from "../src/database.ts";
 import * as processModule from "../src/lib/processes.ts";
+import {
+    ensureDashboardReleaseLayout,
+    managedReleasePath,
+} from "../src/releaseManager.ts";
+import { writeReleaseManifest } from "../src/releaseManifest.ts";
 
 const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
@@ -39,6 +45,66 @@ function createTemporaryRoot(prefix: string): string {
         rmSync(root, { force: true, recursive: true });
     });
     return root;
+}
+
+async function createDeploymentReleaseFixture(
+    releaseRoot: string,
+    commitSha: string,
+    commitTitle: string
+): Promise<void> {
+    mkdirSync(path.join(releaseRoot, "backend", "config"), { recursive: true });
+    mkdirSync(path.join(releaseRoot, "backend", "dist"), { recursive: true });
+    mkdirSync(path.join(releaseRoot, "dist", "assets"), { recursive: true });
+    writeFileSync(path.join(releaseRoot, "package.json"), "{}\n");
+    writeFileSync(path.join(releaseRoot, "bun.lock"), "root-lock\n");
+    writeFileSync(path.join(releaseRoot, "backend", "package.json"), "{}\n");
+    writeFileSync(path.join(releaseRoot, "backend", "bun.lock"), "backend-lock\n");
+    writeFileSync(
+        path.join(releaseRoot, "backend", "config", "log-rotation.json"),
+        '{"jobs":[]}\n'
+    );
+    writeFileSync(path.join(releaseRoot, "dist", "index.html"), "<main>ready</main>\n");
+    writeFileSync(
+        path.join(releaseRoot, "dist", "assets", "app.js"),
+        `export const commit = "${commitSha}";\n`
+    );
+    writeFileSync(
+        path.join(releaseRoot, "not-a-release-artifact.txt"),
+        "must not publish\n"
+    );
+    for (const component of ["frontend", "backend"] as const) {
+        const componentRoot =
+            component === "frontend"
+                ? path.join(releaseRoot, "dist")
+                : path.join(releaseRoot, "backend", "dist");
+        writeFileSync(
+            path.join(componentRoot, "build-identity.json"),
+            `${JSON.stringify({
+                bunVersion: Bun.version,
+                commitSha,
+                component,
+                formatVersion: 1,
+            })}\n`
+        );
+    }
+    for (const entrypoint of [
+        "databasePreflight",
+        "releaseLifecycle",
+        "resetDashboardPassword",
+        "serverStart",
+        "workerStart",
+    ]) {
+        writeFileSync(
+            path.join(releaseRoot, "backend", "dist", `${entrypoint}.js`),
+            `export const commit = "${commitSha}";\n`
+        );
+    }
+    await writeReleaseManifest({
+        builtAt: new Date("2026-07-26T02:00:00.000Z"),
+        commitSha,
+        commitTitle,
+        releaseRoot,
+    });
 }
 
 function readableUtf8Stream(value: string): ReadableStream<Uint8Array> {
@@ -1810,17 +1876,43 @@ describe("backend service behavior", () => {
         }
     });
 
-    it("runs deploy latest build flow against an isolated checkout", async () => {
+    it("publishes and activates an immutable release before detached cutover", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE");
         const fakeRoot = createTemporaryRoot("mira-pr-deploy-root-");
         const fakeBin = createTemporaryRoot("mira-pr-deploy-bin-");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const releasesRoot = path.join(fakeRoot, "managed-releases");
+        const candidateTemplate = path.join(fakeRoot, "candidate-template");
+        const openClawHome = path.join(fakeRoot, "state", "openclaw-client");
+        const logRotationLockFile = path.join(fakeRoot, "state", "log-rotation.lock");
+        const oldCommit = "c".repeat(40);
+        const candidateCommit = "d".repeat(40);
         const gitLog = path.join(fakeRoot, "git.log");
         const bunLog = path.join(fakeRoot, "bun.log");
+        const systemctlLog = path.join(fakeRoot, "systemctl.log");
         const systemdLog = path.join(fakeRoot, "systemd.log");
-        mkdirSync(path.join(fakeRoot, "backend", "node_modules"), { recursive: true });
-        mkdirSync(path.join(fakeRoot, "node_modules"), { recursive: true });
+        mkdirSync(path.join(fakeRoot, "backend"), { recursive: true });
+        mkdirSync(worktreeRoot);
+        mkdirSync(path.dirname(openClawHome), { recursive: true });
+        mkdirSync(candidateTemplate);
+        await createDeploymentReleaseFixture(
+            candidateTemplate,
+            candidateCommit,
+            "Deployable dashboard commit"
+        );
+        await ensureDashboardReleaseLayout(releasesRoot);
+        const oldReleasePath = managedReleasePath(releasesRoot, oldCommit);
+        await createDeploymentReleaseFixture(
+            oldReleasePath,
+            oldCommit,
+            "Previous dashboard commit"
+        );
+        symlinkSync(`releases/${oldCommit}`, path.join(releasesRoot, "current"), "dir");
         writeFileSync(
             path.join(fakeBin, "git"),
             String.raw`#!/usr/bin/env bash
@@ -1831,15 +1923,20 @@ if [[ "$*" == "rev-parse --show-toplevel" ]]; then
 elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
   printf 'main\n'
 elif [[ "$*" == "rev-parse --short HEAD" ]]; then
-  printf 'def5678\n'
+  printf '%s\n' ${JSON.stringify(candidateCommit.slice(0, 8))}
+elif [[ "$*" == "rev-parse HEAD" ]]; then
+  printf '%s\n' ${JSON.stringify(candidateCommit)}
 elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
   printf 'origin/main\n'
 elif [[ "$*" == "status --short" ]]; then
   printf ''
 elif [[ "$*" == "fetch --prune origin" || "$*" == "checkout main" || "$*" == "pull --ff-only origin main" ]]; then
   printf ''
-elif [[ "$*" == "log -1 --pretty=%s" ]]; then
-  printf 'Deployable dashboard commit\n'
+elif [[ "$1 $2 $3" == "worktree add --detach" ]]; then
+  mkdir -p "$4"
+  cp -a ${JSON.stringify(`${candidateTemplate}/.`)} "$4/"
+elif [[ "$1 $2 $3" == "worktree remove --force" ]]; then
+  rm -rf "$4"
 else
   echo "unexpected git args: $*" >&2
   exit 2
@@ -1860,6 +1957,26 @@ fi
 `
         );
         writeFileSync(
+            path.join(fakeBin, "systemctl"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(systemctlLog)}
+if [[ "$*" != *"--user show"* ]]; then
+  echo "unexpected systemctl args: $*" >&2
+  exit 2
+fi
+if [[ "$*" == *"mira-dashboard-worker.service"* ]]; then
+  entrypoint="dist/workerStart.js"
+else
+  entrypoint="dist/serverStart.js"
+fi
+printf '%s\n' \
+  'Environment=NODE_ENV=production MIRA_DASHBOARD_DB_PATH=${getMiraDatabasePath()} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${releasesRoot}/current MIRA_DASHBOARD_RELEASES_ROOT=${releasesRoot}' \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run -- bun $entrypoint ; }" \
+  'WorkingDirectory=${releasesRoot}/current/backend'
+`
+        );
+        writeFileSync(
             path.join(fakeBin, "systemd-run"),
             String.raw`#!/usr/bin/env bash
 set -euo pipefail
@@ -1869,10 +1986,14 @@ printf 'scheduled\n'
         );
         chmodSync(path.join(fakeBin, "git"), 0o755);
         chmodSync(path.join(fakeBin, "bun"), 0o755);
+        chmodSync(path.join(fakeBin, "systemctl"), 0o755);
         chmodSync(path.join(fakeBin, "systemd-run"), 0o755);
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
-        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
+        process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openClawHome;
+        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = logRotationLockFile;
 
         const { registerPullRequestExecutionActions, startDeployLatest } =
             await import("../src/services/pullRequests.ts");
@@ -1933,19 +2054,22 @@ printf 'scheduled\n'
                 status: string;
             };
             expect(row).toEqual({
-                commit_sha: "def5678",
+                commit_sha: candidateCommit.slice(0, 8),
                 commit_title: "Deployable dashboard commit",
-                note: "Build passed. Restart + health check scheduled",
+                note: "Immutable release published. Atomic restart and rollback check scheduled",
                 status: "restart-scheduled",
             });
             await expect(Bun.file(gitLog).text()).resolves.toContain(
                 "pull --ff-only origin main"
             );
             await expect(Bun.file(bunLog).text()).resolves.toContain(
-                `${fakeRoot}|install --frozen-lockfile`
+                `${worktreeRoot}/release-${candidateCommit.slice(0, 12)}-`
             );
             await expect(Bun.file(bunLog).text()).resolves.toContain(
-                `${fakeRoot}|run deploy:prepare`
+                "|run deploy:prepare"
+            );
+            await expect(Bun.file(systemctlLog).text()).resolves.toContain(
+                "show mira-dashboard.service"
             );
             await expect(Bun.file(systemdLog).text()).resolves.toContain(
                 `mira-dashboard-deploy-${job.id}`
@@ -1953,13 +2077,31 @@ printf 'scheduled\n'
             const restartCommand = await Bun.file(systemdLog).text();
             expect(restartCommand).toContain("/api/health/ready");
             expect(restartCommand).toContain("--connect-timeout 2 --max-time 5");
-            expect(restartCommand).toContain("for attempt in {1..20}");
-            expect(restartCommand).not.toContain('"workerOnline":true');
+            expect(restartCommand).toContain("for attempt in {1..30}");
+            expect(restartCommand).toContain(".checks.release.backendCommit");
+            expect(restartCommand).toContain("releaseLifecycle.js");
+            expect(restartCommand).toContain("rollback");
+            expect(restartCommand).toContain("prune 3");
             expect(restartCommand).not.toContain("/api/job-executions");
-            expect(existsSync(path.join(fakeRoot, "node_modules"))).toBe(false);
-            expect(existsSync(path.join(fakeRoot, "backend", "node_modules"))).toBe(
-                false
+            expect(readlinkSync(path.join(releasesRoot, "current"))).toBe(
+                `releases/${candidateCommit}`
             );
+            expect(readlinkSync(path.join(releasesRoot, "previous"))).toBe(
+                `releases/${oldCommit}`
+            );
+            const publishedReleasePath = managedReleasePath(
+                releasesRoot,
+                candidateCommit
+            );
+            expect(
+                readFileSync(
+                    path.join(publishedReleasePath, "release-manifest.json"),
+                    "utf8"
+                )
+            ).toContain(candidateCommit);
+            expect(
+                existsSync(path.join(publishedReleasePath, "not-a-release-artifact.txt"))
+            ).toBe(false);
             expect(getJobExecution(deploymentExecution.id)).toMatchObject({
                 cancellable: false,
                 status: "success",

@@ -1,4 +1,3 @@
-import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import { database, getMiraDatabasePath, sqlNullable } from "../database.ts";
@@ -10,6 +9,18 @@ import {
     spawnProcess,
 } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
+import {
+    assertManagedDashboardUnitProperties,
+    MANAGED_DASHBOARD_UNITS,
+    managedDashboardUnitContract,
+    stageDashboardRelease,
+} from "../releaseDeployment.ts";
+import {
+    activateDashboardRelease,
+    readDashboardReleaseState,
+    resolveDashboardReleasesRoot,
+    rollbackDashboardRelease,
+} from "../releaseManager.ts";
 import {
     enqueueJobExecution,
     type JobExecution,
@@ -1450,42 +1461,102 @@ try {
     ].join(" ");
 }
 
-/** Performs schedule restart health check. */
-async function scheduleRestartHealthCheck(
+async function assertManagedDashboardServiceContract(
+    signal?: AbortSignal
+): Promise<void> {
+    const contract = managedDashboardUnitContract();
+    for (const unit of Object.keys(MANAGED_DASHBOARD_UNITS) as Array<
+        keyof typeof MANAGED_DASHBOARD_UNITS
+    >) {
+        const { stdout } = await runCommand(
+            "systemctl",
+            [
+                "--user",
+                "show",
+                unit,
+                "--property=Environment",
+                "--property=ExecStart",
+                "--property=WorkingDirectory",
+            ],
+            { signal, timeoutMs: 30_000 }
+        );
+        assertManagedDashboardUnitProperties(unit, stdout, contract);
+    }
+}
+
+/** Schedules detached service restart, commit-bound readiness, and rollback. */
+async function scheduleReleaseCutover(
     job: DeploymentJob,
+    rollbackCommit: string,
     signal?: AbortSignal
 ): Promise<CommandResult> {
+    if (!job.commit || !/^[\da-f]{8}$/u.test(job.commit)) {
+        throw new TypeError("Release cutover requires an eight-character commit");
+    }
+    if (!/^[\da-f]{8}$/u.test(rollbackCommit)) {
+        throw new TypeError(
+            "Release cutover requires an eight-character rollback commit"
+        );
+    }
+    const releasesRoot = resolveDashboardReleasesRoot();
+    const releaseRoot = path.join(releasesRoot, "current");
+    const lifecycleCommand = path.join(
+        releaseRoot,
+        "backend",
+        "dist",
+        "releaseLifecycle.js"
+    );
     const okJob: DeploymentJob = {
         ...job,
         status: "isOk",
         updatedAt: dateToISOString(new Date()),
-        note: "Restarted web and worker services. Health checks passed",
+        note: "Atomic release activated. Web, worker, and commit readiness passed",
     };
-    const failedJob: DeploymentJob = {
+    const okWithRetentionWarningJob: DeploymentJob = {
+        ...okJob,
+        note: "Atomic release activated and ready; release retention cleanup failed",
+    };
+    const rolledBackJob: DeploymentJob = {
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: "Restart was triggered, but health check failed",
+        note: `Release readiness failed; automatic rollback restored ${rollbackCommit}`,
+    };
+    const rollbackFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: `Release readiness failed and automatic rollback to ${rollbackCommit} failed`,
     };
 
     const script = [
         "sleep 2",
-        "restart_status=0",
-        `systemctl --user restart ${DASHBOARD_SERVICES.join(" ")} || restart_status=$?`,
-        "health_status=1",
-        'if [ "$restart_status" -eq 0 ]; then',
-        "  for attempt in {1..20}; do",
-        "    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:3100/api/health/ready >/dev/null; then",
-        "      health_status=0",
-        "      break",
+        "ready_for_commit() {",
+        '  expected_commit="$1"',
+        "  for attempt in {1..30}; do",
+        "    response=$(/usr/bin/curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:3100/api/health/ready 2>/dev/null || true)",
+        '    if printf "%s" "$response" | /usr/bin/jq --exit-status --arg expected "$expected_commit" \'.status == "isReady" and .checks.release.ready == true and .checks.release.backendCommit == $expected and .checks.release.frontendCommit == $expected and .checks.worker.ready == true\' >/dev/null 2>&1; then',
+        "      return 0",
         "    fi",
         "    sleep 1",
         "  done",
-        "fi",
-        `if [ "$restart_status" -eq 0 ] && [ "$health_status" -eq 0 ]; then`,
-        `  ${deploymentJobUpdateCommand(okJob)}`,
+        "  return 1",
+        "}",
+        "restart_services() {",
+        `  /usr/bin/systemctl --user restart ${DASHBOARD_SERVICES.join(" ")}`,
+        "}",
+        `if restart_services && ready_for_commit ${shellQuote(job.commit)}; then`,
+        `  if MIRA_DASHBOARD_RELEASES_ROOT=${shellQuote(releasesRoot)} MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())} NODE_ENV=production ${shellQuote(resolveBunExecutable())} ${shellQuote(lifecycleCommand)} prune 3; then`,
+        `    ${deploymentJobUpdateCommand(okJob)}`,
+        "  else",
+        `    ${deploymentJobUpdateCommand(okWithRetentionWarningJob)}`,
+        "  fi",
         "else",
-        `  ${deploymentJobUpdateCommand(failedJob)}`,
+        `  if MIRA_DASHBOARD_RELEASES_ROOT=${shellQuote(releasesRoot)} MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())} NODE_ENV=production ${shellQuote(resolveBunExecutable())} ${shellQuote(lifecycleCommand)} rollback && restart_services && ready_for_commit ${shellQuote(rollbackCommit)}; then`,
+        `    ${deploymentJobUpdateCommand(rolledBackJob)}`,
+        "  else",
+        `    ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
+        "  fi",
         "fi",
     ].join("\n");
 
@@ -1494,7 +1565,7 @@ async function scheduleRestartHealthCheck(
         [
             "--user",
             `--unit=mira-dashboard-deploy-${job.id}`,
-            "--description=Mira Dashboard deploy restart + health check",
+            "--description=Mira Dashboard atomic release cutover",
             "/bin/bash",
             "-lc",
             script,
@@ -1510,61 +1581,87 @@ async function runDeploymentJob(
 ): Promise<boolean> {
     let currentJob = job;
     const dashboardRoot = getDashboardRoot();
+    const releasesRoot = resolveDashboardReleasesRoot();
     try {
         currentJob = refreshDeploymentHeartbeat(currentJob);
         await syncMain(signal);
         currentJob = refreshDeploymentHeartbeat(currentJob);
-
+        await assertManagedDashboardServiceContract(signal);
         currentJob = refreshDeploymentHeartbeat(currentJob);
-        await rm(path.join(dashboardRoot, "node_modules"), {
-            force: true,
-            recursive: true,
-        });
-        await runCommand("bun", ["install", "--frozen-lockfile"], {
+        const currentState = await readDashboardReleaseState(releasesRoot);
+        if (!currentState.current) {
+            throw new Error(
+                "Managed deployment requires a current release from the one-time production cutover"
+            );
+        }
+        currentJob = refreshDeploymentHeartbeat(currentJob);
+        const { stdout: commitSha } = await runCommand("git", ["rev-parse", "HEAD"], {
             signal,
-            timeoutMs: 180_000,
+            timeoutMs: 30_000,
         });
-        currentJob = refreshDeploymentHeartbeat(currentJob);
-        await rm(path.join(dashboardRoot, "backend", "node_modules"), {
-            force: true,
-            recursive: true,
-        });
-        await runCommand("bun", ["install", "--frozen-lockfile"], {
-            cwd: path.join(dashboardRoot, "backend"),
+        const expectedCommit = commitSha.trim();
+        const candidate = await stageDashboardRelease(expectedCommit, {
+            commandRunner: async (command, arguments_, options) =>
+                runCommand(command, [...arguments_], {
+                    cwd: options.cwd,
+                    environment: options.environment,
+                    signal: options.signal,
+                    timeoutMs: options.timeoutMs,
+                }),
+            databasePath: getMiraDatabasePath(),
+            onProgress: () => {
+                currentJob = refreshDeploymentHeartbeat(currentJob);
+            },
+            releasesRoot,
             signal,
-            timeoutMs: 120_000,
+            sourceRoot: dashboardRoot,
+            worktreeRoot: getDashboardWorktreeRoot(),
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
-        await runCommand("bun", ["run", "deploy:prepare"], {
-            signal,
-            timeoutMs: 12 * 60 * 1000,
-        });
-        currentJob = refreshDeploymentHeartbeat(currentJob);
-        const { stdout: commit } = await runCommand(
-            "git",
-            ["rev-parse", "--short", "HEAD"],
-            {
-                signal,
-                timeoutMs: 30_000,
+        const activated = await activateDashboardRelease(expectedCommit, releasesRoot);
+        const didActivateNewRelease = currentState.current.commitSha !== expectedCommit;
+        if (
+            activated.current?.commitSha !== expectedCommit ||
+            !activated.previous ||
+            activated.previous.commitSha === expectedCommit
+        ) {
+            if (didActivateNewRelease) {
+                await rollbackDashboardRelease(releasesRoot);
             }
-        );
-        const { stdout: commitTitle } = await runCommand(
-            "git",
-            ["log", "-1", "--pretty=%s"],
-            { signal, timeoutMs: 30_000 }
-        );
-        currentJob = refreshDeploymentHeartbeat(currentJob);
+            throw new Error(
+                "Managed release activation did not preserve a distinct rollback release"
+            );
+        }
 
-        const restartScheduled: DeploymentJob = {
-            ...currentJob,
-            status: "restart-scheduled",
-            updatedAt: dateToISOString(new Date()),
-            commit: commit.trim(),
-            commitTitle: commitTitle.trim(),
-            note: "Build passed. Restart + health check scheduled",
-        };
-        writeDeploymentJob(restartScheduled);
-        await scheduleRestartHealthCheck(restartScheduled, signal);
+        try {
+            const restartScheduled: DeploymentJob = {
+                ...currentJob,
+                status: "restart-scheduled",
+                updatedAt: dateToISOString(new Date()),
+                commit: candidate.manifest.commitShort,
+                commitTitle: candidate.manifest.commitTitle,
+                note: "Immutable release published. Atomic restart and rollback check scheduled",
+            };
+            writeDeploymentJob(restartScheduled);
+            await scheduleReleaseCutover(
+                restartScheduled,
+                activated.previous.manifest.commitShort,
+                signal
+            );
+        } catch (error) {
+            if (didActivateNewRelease) {
+                try {
+                    await rollbackDashboardRelease(releasesRoot);
+                } catch (rollbackError) {
+                    throw new AggregateError(
+                        [error, rollbackError],
+                        "Deployment scheduling failed and release-link rollback also failed",
+                        { cause: rollbackError }
+                    );
+                }
+            }
+            throw error;
+        }
         return true;
     } catch (error) {
         const failed: DeploymentJob = {

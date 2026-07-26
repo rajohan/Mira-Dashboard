@@ -617,7 +617,6 @@ openclaw status
 Do not print Gateway token values while debugging. Inspect length/metadata only:
 
 ```bash
-cd backend
-sqlite3 "${MIRA_DASHBOARD_DB_PATH:-data/mira-dashboard.db}" \
+sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
   "SELECT key, length(value), updated_at FROM app_config WHERE key='gateway_token';"
 ```

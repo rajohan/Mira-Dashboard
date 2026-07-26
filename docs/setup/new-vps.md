@@ -43,43 +43,83 @@ cd backend
 bun install --frozen-lockfile
 ```
 
-## Build Frontend And Backend
+Create the managed runtime roots:
 
-Build the frontend from the repository root:
+```bash
+install -d -m 0755 \
+  /home/ubuntu/projects/mira-dashboard-worktrees \
+  /home/ubuntu/projects/mira-dashboard-releases
+install -d -m 0700 /home/ubuntu/projects/mira-dashboard-state
+```
+
+## Publish The Initial Managed Release
+
+Build, preflight, checksum, and publish the checked-out commit from an isolated
+worktree:
 
 ```bash
 cd /home/ubuntu/projects/mira-dashboard
-bun run build
+RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
+DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+OPENCLAW_CLIENT_HOME=/home/ubuntu/projects/mira-dashboard-state/openclaw-client
+LOG_ROTATION_LOCK=/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock
+CANDIDATE_SHA="$(git rev-parse HEAD)"
+
+# A new host has no live database to preflight yet. Initialize and migrate the
+# empty state database once from this exact checked-out candidate.
+(
+  cd backend
+  env \
+    MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+    NODE_ENV=production \
+    bun -e '
+      const { database } = await import("./src/database.ts");
+      try {
+        const result = database.query("PRAGMA quick_check").get();
+        if (!result || Object.values(result)[0] !== "ok") {
+          throw new Error("Fresh Dashboard database failed quick_check");
+        }
+      } finally {
+        database.close();
+      }
+    '
+)
+
+env \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  MIRA_DASHBOARD_OPENCLAW_HOME="$OPENCLAW_CLIENT_HOME" \
+  MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE="$LOG_ROTATION_LOCK" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun backend/src/releaseDeployment.ts stage "$CANDIDATE_SHA"
 ```
 
-Build the backend from its own package directory:
+Activate it before installing/starting the managed systemd units:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
-bun run build
+RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
+DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+CANDIDATE_SHA="$(git rev-parse HEAD)"
+env \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun backend/src/releaseLifecycle.ts activate "$CANDIDATE_SHA"
 ```
 
-Return to the repository root and create the checksummed runtime manifest:
-
-```bash
-cd /home/ubuntu/projects/mira-dashboard
-bun run release:manifest
-```
-
-The frontend build writes to `dist/`, the backend build writes to
-`backend/dist/`, and `release:manifest` binds both outputs to the checked-out
-commit. A fresh host may not have a Dashboard database yet, so this first build
-uses `release:manifest` directly instead of the normal database-aware
-`deploy:prepare`; first startup creates and migrates the database.
+The one-shot initialization creates the fresh database in WAL mode and applies
+the immutable migration registry. The staging command then installs frozen
+dependencies, runs the normal database-aware `deploy:prepare`, and atomically
+publishes only manifest-declared artifacts.
+The control checkout is not a production runtime directory. See
+[Production deploy](production-deploy.md) for the release/state layout,
+automatic rollback, retention, and recovery contract.
 
 ## Configure Secrets
 
-Dashboard reads production secrets through Doppler:
-
-```bash
-cd /home/ubuntu/projects/mira-dashboard/backend
-doppler run --config prd --project rajohan -- bun dist/serverStart.js
-```
+Dashboard reads production secrets through Doppler project/config
+`rajohan/prd`. Do not start `serverStart.js` manually to test them; the managed
+systemd units below own the only production web and worker processes.
 
 See [Secrets and environment](secrets-and-env.md) for the full list. The
 minimum production setup normally needs:
@@ -218,7 +258,7 @@ Healthy response shape:
         "release": {
             "backendCommit": "12345678",
             "frontendCommit": "12345678",
-            "manifestFormatVersion": 1,
+            "manifestFormatVersion": 2,
             "ready": true,
             "source": "manifest"
         },

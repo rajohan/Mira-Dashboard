@@ -1,238 +1,295 @@
 # Production Deploy
 
-Dashboard production runs from:
+Production separates source control, immutable code, and persistent state:
+
+| Purpose                                           | Path                                              |
+| ------------------------------------------------- | ------------------------------------------------- |
+| Control checkout and deployment scripts           | `/home/ubuntu/projects/mira-dashboard`            |
+| Temporary detached build worktrees                | `/home/ubuntu/projects/mira-dashboard-worktrees/` |
+| Immutable releases and `current`/`previous` links | `/home/ubuntu/projects/mira-dashboard-releases`   |
+| Persistent production state                       | `/home/ubuntu/projects/mira-dashboard-state`      |
+
+Web and worker execute from:
 
 ```text
-/home/ubuntu/projects/mira-dashboard
+/home/ubuntu/projects/mira-dashboard-releases/current/backend
 ```
 
-The service runs from the backend directory:
+`current` and `previous` are atomic relative symlinks to full-SHA directories
+below `mira-dashboard-releases/releases/`. Production never builds in, writes
+to, or executes backend code from the control checkout.
+
+## Persistent State
+
+Mutable state is deliberately outside both Git and every release:
+
+| State                              | Stable path                                                    |
+| ---------------------------------- | -------------------------------------------------------------- |
+| SQLite database                    | `/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db` |
+| SQLite WAL and shared-memory files | next to the database                                           |
+| Restore-verified SQLite backups    | `/home/ubuntu/projects/mira-dashboard-state/backups/`          |
+| Dashboard Gateway device identity  | `/home/ubuntu/projects/mira-dashboard-state/openclaw-client/`  |
+| Log-rotation lock                  | `/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock` |
+
+The backup directory is derived from `dirname(MIRA_DASHBOARD_DB_PATH)`, so
+pre-deploy and pre-migration snapshots automatically stay under the state root.
+Kopia mounts `/home/ubuntu/projects` as its projects source; the separate state
+directory remains in that backup scope.
+
+`backend/config/log-rotation.json` is not mutable state. It is versioned
+application configuration, is listed in every release manifest, and is copied
+and checksum-verified with the other immutable release artifacts.
+
+Both managed units set the stable paths explicitly:
 
 ```text
-/home/ubuntu/projects/mira-dashboard/backend
+MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+MIRA_DASHBOARD_OPENCLAW_HOME=/home/ubuntu/projects/mira-dashboard-state/openclaw-client
+MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock
+MIRA_DASHBOARD_RELEASE_ROOT=/home/ubuntu/projects/mira-dashboard-releases/current
+MIRA_DASHBOARD_RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
 ```
 
-## Deployment Model
+The OpenClaw home preserves the signed Gateway device identity across releases.
+Secrets remain in Doppler `rajohan/prd`; tracked unit files contain no secret
+values.
 
-This is a single-host service:
+## Normal Deployment
 
-- frontend assets are built into `dist/`;
-- backend TypeScript is built into `backend/dist/`;
-- `mira-dashboard.service` runs the HTTP/WebSocket process from
-  `bun dist/serverStart.js` through Doppler;
-- `mira-dashboard-worker.service` runs the persistent scheduler/executor from
-  `bun dist/workerStart.js` through Doppler;
-- SQLite state lives under `backend/data/` unless `MIRA_DASHBOARD_DB_PATH` is set.
-- both units use `UMask=0077`; startup enforces `0700` on the SQLite directory
-  and `0600` on database/sidecar files.
+The Dashboard worker owns the deployment:
 
-Both tracked units preserve the production environment contract by launching
-through Doppler project/config `rajohan/prd`. Auth and origin settings such as
-`MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`,
-`MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY`,
-`MIRA_DASHBOARD_WEBAUTHN_RP_ID`,
-`MIRA_DASHBOARD_WEBAUTHN_ORIGINS`, and
-`MIRA_DASHBOARD_ALLOWED_ORIGINS` remain owned by Doppler. Do not duplicate their
-values in unit files.
+1. Require a clean control checkout and fast-forward `main`.
+2. Create a detached build worktree below
+   `/home/ubuntu/projects/mira-dashboard-worktrees/`.
+3. Install frozen frontend and backend dependencies.
+4. Run `deploy:prepare` against the stable production database.
+5. Verify the release manifest, component identities, schema contract, and
+   every checksummed artifact.
+6. Copy only declared artifacts to a hidden directory and atomically publish
+   it as `releases/<full-sha>`.
+7. Atomically switch `current`; retain the old release as `previous`.
+8. Restart web and worker.
+9. Require `/api/health/ready` to report the exact expected frontend/backend
+   commit and a fresh worker heartbeat from that commit.
+10. On failure, switch back to `previous`, restart both units, verify the old
+    commit, and mark the deployment failed.
+11. On success, retain `current`, `previous`, and one additional newest
+    verified release.
 
-There is no container image for the Dashboard service today.
+The executor fails closed unless both units already run from managed
+`current/backend` with the exact stable state paths. A deployment never modifies
+the running release.
 
-## Prepare Deployment
+## One-Time Managed Cutover
 
-Install both dependency sets:
+Run this once after the atomic-executor change has been merged and built by the
+old in-place deployment. The Jobs queue must be idle. PR #333 is the known-good
+format-2 bootstrap release.
+
+### 1. Stage both releases while the old services remain online
+
+The existing database is still below the control checkout during this step.
+Staging is read-safe and creates a restore-verified pre-deploy backup.
+Run all four cutover sections in the same interactive shell so the validated
+path and commit variables remain available.
 
 ```bash
 cd /home/ubuntu/projects/mira-dashboard
-git pull --ff-only
-bun install --frozen-lockfile
-cd backend
-bun install --frozen-lockfile
-cd ..
-/usr/local/bin/doppler run --config prd --project rajohan -- \
-  bun run deploy:prepare
+git switch main
+git pull --ff-only origin main
+
+RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
+OLD_STATE_ROOT=/home/ubuntu/projects/mira-dashboard/backend/data
+STATE_ROOT=/home/ubuntu/projects/mira-dashboard-state
+OLD_DATABASE_PATH="$OLD_STATE_ROOT/mira-dashboard.db"
+OLD_OPENCLAW_CLIENT_HOME="$OLD_STATE_ROOT/openclaw-client"
+OLD_LOG_ROTATION_LOCK="$OLD_STATE_ROOT/log-rotation.lock"
+DATABASE_PATH="$STATE_ROOT/mira-dashboard.db"
+OPENCLAW_CLIENT_HOME="$STATE_ROOT/openclaw-client"
+LOG_ROTATION_LOCK="$STATE_ROOT/log-rotation.lock"
+BOOTSTRAP_SHA=4aca68e0cffed68c42a630c4221e11e725ab294b
+CANDIDATE_SHA="$(git rev-parse HEAD)"
+
+env \
+  MIRA_DASHBOARD_DB_PATH="$OLD_DATABASE_PATH" \
+  MIRA_DASHBOARD_OPENCLAW_HOME="$OLD_OPENCLAW_CLIENT_HOME" \
+  MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE="$OLD_LOG_ROTATION_LOCK" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun backend/src/releaseDeployment.ts stage "$BOOTSTRAP_SHA"
+env \
+  MIRA_DASHBOARD_DB_PATH="$OLD_DATABASE_PATH" \
+  MIRA_DASHBOARD_OPENCLAW_HOME="$OLD_OPENCLAW_CLIENT_HOME" \
+  MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE="$OLD_LOG_ROTATION_LOCK" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun backend/src/releaseDeployment.ts stage "$CANDIDATE_SHA"
 ```
 
-`deploy:prepare` builds the frontend and backend, runs `db:preflight`, and
-writes the checksummed release manifest before service restart. Keep ordinary
-`build` commands side-effect free; use this combined command for every
-supported manual or Dashboard-driven deploy so the database and release gates
-cannot be skipped accidentally.
+### 2. Stop both units and atomically move persistent state
 
-## Install Or Refresh Units
-
-After building, install the tracked resource-limited units:
+Keep copies of the installed pre-cutover units for the recovery procedure.
+Both source and destination are below `/home/ubuntu/projects`, so `mv` is a
+same-filesystem directory rename rather than a live database copy.
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
+CUTOVER_UNIT_BACKUP="$(mktemp -d)"
+cp --preserve=mode,timestamps \
+  /home/ubuntu/.config/systemd/user/mira-dashboard.service \
+  "$CUTOVER_UNIT_BACKUP/mira-dashboard.service"
+cp --preserve=mode,timestamps \
+  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service \
+  "$CUTOVER_UNIT_BACKUP/mira-dashboard-worker.service"
+
+systemctl --user stop mira-dashboard-worker.service mira-dashboard.service
+test -d "$OLD_STATE_ROOT"
+test ! -e "$STATE_ROOT"
+mv --no-target-directory "$OLD_STATE_ROOT" "$STATE_ROOT"
+test -f "$DATABASE_PATH"
+```
+
+Do not leave a compatibility symlink at `backend/data`. Production units use
+the new absolute paths and development retains its normal local `backend/data`
+default.
+
+### 3. Activate the bootstrap and install managed units
+
+```bash
+env \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  MIRA_DASHBOARD_OPENCLAW_HOME="$OPENCLAW_CLIENT_HOME" \
+  MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE="$LOG_ROTATION_LOCK" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun backend/src/releaseLifecycle.ts activate "$BOOTSTRAP_SHA"
+
 install -m 0644 systemd/mira-dashboard.service \
   /home/ubuntu/.config/systemd/user/mira-dashboard.service
 install -m 0644 systemd/mira-dashboard-worker.service \
   /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
 systemctl --user daemon-reload
+systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 ```
 
-For the first split-process rollout, restart the web unit with its explicit
-`web` role before starting the worker. This avoids overlapping the legacy
-combined scheduler with the dedicated worker:
+Use a commit-bound readiness function; exhausting the loop is a failure:
 
 ```bash
-systemctl --user restart mira-dashboard.service
-systemctl --user enable --now mira-dashboard-worker.service
-```
-
-## Restart
-
-Always tell Raymond before restarting OpenClaw Gateway. Dashboard restart is
-safe after a merged/deployed Dashboard change. A web-only restart does not
-interrupt queued/running actions. Before restarting the worker, verify the Jobs
-queue is idle or explicitly accept that its active action will be cancelled:
-
-```bash
-systemctl --user restart mira-dashboard.service
-systemctl --user restart mira-dashboard-worker.service
-systemctl --user status mira-dashboard.service --no-pager
-systemctl --user status mira-dashboard-worker.service --no-pager
-```
-
-Logs:
-
-```bash
-journalctl --user -u mira-dashboard.service -n 120 --no-pager
-journalctl --user -u mira-dashboard-worker.service -n 120 --no-pager
-```
-
-## Smoke Test
-
-```bash
-wait_for_dashboard_ready() {
-  for attempt in {1..20}; do
-    if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
-      http://127.0.0.1:3100/api/health/ready >/dev/null; then
+ready_for_commit() {
+  local full_sha="$1"
+  local expected="${full_sha:0:8}"
+  local response
+  for attempt in {1..30}; do
+    response="$(curl --fail --silent --show-error \
+      http://127.0.0.1:3100/api/health/ready || true)"
+    if jq --exit-status --arg expected "$expected" \
+      '.status == "isReady"
+       and .checks.release.backendCommit == $expected
+       and .checks.release.frontendCommit == $expected
+       and .checks.worker.ready == true' <<<"$response" >/dev/null; then
       return 0
     fi
     sleep 1
   done
   return 1
 }
-wait_for_dashboard_ready
-curl http://127.0.0.1:3100/api/auth/bootstrap
+
+ready_for_commit "$BOOTSTRAP_SHA"
 ```
 
-Every other API route requires a valid Dashboard session or an explicitly
-allowed minimum-scope bearer credential. Direct loopback is not an
-authentication mechanism. A tokenless local check should therefore fail:
+If bootstrap readiness fails, stop both units, restore the saved unit files,
+move the state directory back, reload systemd, and restart the old deployment:
 
 ```bash
-test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
-  http://127.0.0.1:3100/api/cache/heartbeat)" = "401"
+systemctl --user stop mira-dashboard-worker.service mira-dashboard.service
+install -m 0644 "$CUTOVER_UNIT_BACKUP/mira-dashboard.service" \
+  /home/ubuntu/.config/systemd/user/mira-dashboard.service
+install -m 0644 "$CUTOVER_UNIT_BACKUP/mira-dashboard-worker.service" \
+  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
+mv --no-target-directory "$STATE_ROOT" "$OLD_STATE_ROOT"
+systemctl --user daemon-reload
+systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 ```
 
-### Scoped Automation Rollout
+Investigate before retrying. Do not continue to candidate activation.
 
-The release removes direct-loopback bypass code. Provision and migrate local
-callers before restarting into this version:
+### 4. Activate and verify the candidate
 
-1. In an untracked privileged shell, generate a separate validator per
-   automation identity. Store only its SHA-256 hash plus minimum scopes in
-   `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS`. Never generate it through Dashboard
-   Terminal or another tracked exec path.
-2. Keep the full validator only in the caller's secret store. Do not put it in
-   a prompt, command argument, transcript, unit file, or the same configuration
-   surface as its hash.
-   On this host, use the four `0600` files under
-   `/home/ubuntu/.config/mira-dashboard/automation/` through
-   `/home/ubuntu/projects/mira-dashboard/scripts/miraDashboardApi.ts`.
-3. Migrate and smoke-test every caller against the currently running
-   scoped-credential-compatible release:
-    - heartbeat: `cache:read`, `reports:write`;
-    - task tracking: `agents:write`, `tasks:read`, and `tasks:write`;
-    - daily summary: `cache:read`, `reports:write`;
-    - daily brief: `cache:read`, `reports:write`, `tasks:read`.
-4. Confirm allowed and intentionally denied calls have the expected automation
-   actor and scope in `/api/audit-events`.
-5. Deploy this release, restart the web unit, verify every scoped caller again,
-   and confirm tokenless loopback returns `401`.
+```bash
+env \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun "$RELEASES_ROOT/releases/$BOOTSTRAP_SHA/backend/dist/releaseLifecycle.js" \
+  activate "$CANDIDATE_SHA"
+systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
+```
 
-The OpenClaw heartbeat must retain its dedicated
-`cache:read`/`reports:write` credential.
-Task/report credentials must not be reused for heartbeat.
+Require `ready_for_commit "$CANDIDATE_SHA"`. If it fails:
 
-For an authenticated browser session, also verify:
+```bash
+env \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun "$RELEASES_ROOT/releases/$CANDIDATE_SHA/backend/dist/releaseLifecycle.js" \
+  rollback
+systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
+ready_for_commit "$BOOTSTRAP_SHA"
+```
 
-- a pre-v6 session is rejected and a fresh login succeeds;
-- first bootstrap still accepts username, password, and Gateway token, then
-  stores the Gateway token only as an encrypted envelope and directs the
-  operator to **Settings → Dashboard** for MFA enrollment;
-- two named security keys can be registered and one can authenticate while the
-  other remains offline;
-- TOTP and one-time recovery each complete a test verification;
-- privileged actions require fresh second-factor verification;
-- structured OpenClaw config is masked and raw reveal requires recent MFA;
-- header/WebSocket status is connected;
-- Jobs shows the execution queue and the worker becomes idle after startup seeds;
-- Dashboard page cards load;
-- Reports page loads recent reports;
-- Notifications bell loads without global chat/tool errors.
+Do not complete the cutover unless the restored bootstrap is ready. After a
+successful candidate check:
+
+```bash
+env \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun "$RELEASES_ROOT/current/backend/dist/releaseLifecycle.js" prune 3
+gio trash -- "$CUTOVER_UNIT_BACKUP"
+```
+
+## Restart And Smoke Test
+
+Normal deploys schedule their own restart. For manual recovery, first confirm
+no action is running, then:
+
+```bash
+systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
+systemctl --user status mira-dashboard.service --no-pager
+systemctl --user status mira-dashboard-worker.service --no-pager
+journalctl --user -u mira-dashboard.service -n 120 --no-pager
+journalctl --user -u mira-dashboard-worker.service -n 120 --no-pager
+curl --fail --silent --show-error \
+  http://127.0.0.1:3100/api/health/ready | jq
+```
+
+Direct loopback is transport, not authentication. Tokenless protected API calls
+must still return `401`.
 
 ## Rollback
 
-Rollback is git-based:
+Normal activation automatically rolls back on restart or commit-bound readiness
+failure. Manual rollback is a failure-only operation:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
-git log --oneline -n 10
-git switch main
-git reset --hard <known-good-sha>
-if ! bun -e 'const packageJson = await Bun.file("package.json").json(); process.exit(typeof packageJson.scripts?.["deploy:prepare"] === "string" ? 0 : 1)'; then
-  echo "Rollback target predates the supported deploy contract" >&2
-  exit 1
-fi
-bun install --frozen-lockfile
-(cd backend && bun install --frozen-lockfile)
-if test -f scripts/writeReleaseManifest.ts; then
-  release_health_path=/api/health/ready
-else
-  # One-time bootstrap rollback to the pre-manifest release.
-  release_health_path=/api/health
-fi
-/usr/local/bin/doppler run --config prd --project rajohan -- \
-  bun run deploy:prepare
-install -m 0644 systemd/mira-dashboard.service \
-  /home/ubuntu/.config/systemd/user/mira-dashboard.service
-install -m 0644 systemd/mira-dashboard-worker.service \
-  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
-systemctl --user daemon-reload
-systemctl --user restart mira-dashboard.service
-systemctl --user restart mira-dashboard-worker.service
-wait_for_dashboard_ready() {
-  for attempt in {1..20}; do
-    if test "$release_health_path" = "/api/health"; then
-      if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
-        "http://127.0.0.1:3100${release_health_path}" |
-        grep -Fq '"workerOnline":true'; then
-        return 0
-      fi
-    elif curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
-      "http://127.0.0.1:3100${release_health_path}" >/dev/null; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
-}
-wait_for_dashboard_ready
+RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
+DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun "$RELEASES_ROOT/current/backend/dist/releaseLifecycle.js" status
+env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  bun "$RELEASES_ROOT/current/backend/dist/releaseLifecycle.js" rollback
+systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
+curl --fail --silent --show-error \
+  http://127.0.0.1:3100/api/health/ready | jq
 ```
 
-The conditional health target exists only for the first rollback across the
-manifest-contract cutover. Manifest-aware releases always regenerate their
-ignored manifest through `deploy:prepare` and verify `/api/health/ready`.
-
-Rollback targets older than the split-worker/database-preflight contract are
-deliberately unsupported. This private single-operator service keeps a supported
-known-good release instead of retaining an untested legacy activation path.
-
-Do not use `git reset --hard` casually in normal work. It is a rollback
-procedure for production incidents after an explicit decision.
+Git reset and rebuilding in the control checkout are not production rollback
+mechanisms.
 
 ## SQLite Deploy Lifecycle
 
@@ -240,270 +297,90 @@ SQLite schema changes are numbered, immutable migrations recorded in
 `schema_migrations`. Build/deploy preflight:
 
 1. requires the live database to be in WAL mode;
-2. rejects unknown migration versions, gaps, names, or checksum drift;
+2. rejects unknown versions, gaps, names, or checksum drift;
 3. creates a WAL-consistent `pre-deploy` backup with `VACUUM INTO`;
-4. copies that snapshot to an isolated restore location, requires
-   `PRAGMA quick_check = ok` plus valid migration history, and applies every
-   pending migration to the disposable copy;
+4. restores that snapshot in isolation, requires `PRAGMA quick_check = ok`,
+   validates history, and applies pending migrations to the disposable copy;
 5. applies bounded backup retention.
 
 On restart, web and worker independently validate history. `BEGIN IMMEDIATE`
-serializes pending migrations and the second process revalidates after waiting
-for the first. The process holding that writer lock creates a separate
-restore-verified `pre-migration` backup through a read-only connection before
-running migration SQL, so no other writer can commit between the rollback
-snapshot and the migration.
-
-The first deployment that introduces this lifecycle cannot make the
-already-running old worker call the new preflight command. Its new startup path
-therefore creates the verified `pre-migration` backup before adopting the
-legacy schema. Subsequent Dashboard deploys run both protections.
+serializes pending migrations. The process holding the writer lock creates a
+separate restore-verified `pre-migration` backup before running migration SQL.
 
 Do not copy only the main `.db` file while Dashboard is running. WAL mode may
 hold committed writes in the `-wal` sidecar until a checkpoint.
 
 Code rollback and data rollback are separate decisions. A code rollback may use
 the migrated database only when the older code is schema-compatible. Otherwise
-stop both Dashboard units and restore the selected matching snapshot using the
+stop both units and restore the matching snapshot using the
 [SQLite restore runbook](../operations/runbooks.md#restore-dashboard-sqlite).
 
-### Schema Compatibility And Release Rollback Contract
+### Schema Compatibility
 
-Classify every future migration before release:
+Classify every migration before release:
 
-- **expand/backward-compatible:** the previous retained release can safely read
-  and write the migrated schema. An immutable release manager may switch code
-  back without restoring data;
-- **contract/incompatible:** older code cannot safely use the resulting schema
-  or data semantics. Automatic code-only rollback must be blocked.
+- **expand/backward-compatible:** `previous` can safely use the migrated schema;
+- **contract/incompatible:** older code cannot safely use the new schema or
+  data semantics, so automatic code-only rollback is blocked.
 
-Prefer expand/migrate/contract across separate releases. Add new structures
-first, deploy code that tolerates both representations, backfill with a bounded
-and resumable job, then remove the old representation only after the previous
-release has left the rollback window. The contract migration gets a new
-forward-only version; released migration files are never edited.
+Prefer expand/migrate/contract across separate releases. If an incompatible
+change cannot be phased, use a coordinated code-and-data cutover:
 
-If an incompatible change cannot be phased, treat activation as a coordinated
-code-and-data cutover. This procedure becomes executable only after the final
-deploy integration has switched both systemd units and the executor to the
-managed `current` link; incompatible cutovers are unsupported while production
-still uses the in-place checkout:
+1. require an idle execution queue;
+2. stop both units;
+3. rerun candidate preflight and record its fresh verified snapshot;
+4. activate with `--coordinated-schema-cutover`;
+5. start both units and require commit/schema readiness;
+6. on failure, stop both units, restore the recorded snapshot, switch code back,
+   and only then restart.
 
-1. run the candidate's production preflight, then record the release SHA,
-   supported schema range, and preflight result in the deployment record;
-2. stop both Dashboard units for the cutover and verify the execution queue is
-   idle;
-3. rerun the candidate's database preflight against the stable production
-   database, require restore verification, and record the newly created
-   `pre-deploy` snapshot; do not reuse the snapshot from step 1 because writes
-   may have committed before the units stopped;
-4. activate the immutable release with the explicit
-   `--coordinated-schema-cutover` flag;
-5. start both units through the managed `current` link, migrate forward on
-   startup, and run readiness against the new release and schema;
-6. on failure, stop both units, restore the snapshot recorded in step 3,
-   switch the `current` release link back, and only then restart.
-
-The migration runner intentionally has no destructive down-migration path.
-Unknown newer migration versions make older code fail closed. A future release
-manager must therefore read the release/schema compatibility declaration before
-offering or automatically performing rollback; it must never start an
-incompatible older release against a newer live database.
+The migration runner has no destructive down-migration path. Unknown newer
+migrations make older code fail closed.
 
 ## Release Manifest Contract
 
-`bun run deploy:prepare` builds frontend and backend, completes the verified
-SQLite preflight, and writes an ignored `release-manifest.json` in the release
-root. The manifest is the release identity source when `NODE_ENV=production`;
-Git is only a development/test fallback.
+`bun run deploy:prepare` builds frontend and backend, performs verified SQLite
+preflight, and writes `release-manifest.json`. Format version 2 is the only
+supported release format. It records:
 
-Manifest format version 2 records:
-
-- the full and eight-character Git commit plus commit title and build time;
-- the Bun version used for the build;
-- matching frontend/backend commit identities emitted inside both build trees;
-- the target, minimum-compatible, and maximum-compatible SQLite schema;
-- a checksum of the immutable migration registry;
-- the ordered migration identities and their inventory digest;
-- the SHA-256 and byte length of every frontend/backend build artifact plus
-  both package manifests, Bun lockfiles, and the default runtime log-rotation
-  configuration.
-
-Format version 1 remains readable only for the first managed cutover and its
-rollback window because the currently deployed release predates the migration
-inventory and lifecycle artifact. Remove v1 support once neither `current` nor
-`previous` can reference that release; all newly built releases are format v2.
-
-The backend bundle also embeds its full build commit. Runtime readiness requires
-that embedded commit, both build-identity files, and the release manifest to
-agree. Running `release:manifest` against ignored output left behind by another
-checkout therefore fails instead of relabeling stale code.
+- full/short Git identity, title, build time, and Bun version;
+- matching frontend/backend build identities;
+- target and compatible SQLite schema range;
+- immutable migration identities and registry/inventory digests;
+- SHA-256 and byte length for every frontend/backend artifact, package
+  manifest, Bun lockfile, and `backend/config/log-rotation.json`.
 
 Manifest creation and verification reject absolute/traversal paths, symlinks,
 hard-linked files, special files, unsorted/duplicate inventories, checksum
-drift, and undeclared runtime artifacts. The schema compatibility range is an
-explicit code constant. Adding a future migration without reviewing that range
-fails the release contract.
+drift, and undeclared runtime artifacts. Runtime readiness requires the embedded
+backend commit, both build identities, and manifest to agree.
 
-The release lifecycle layer validates immutable directories named by full Git
-SHA under `/home/ubuntu/projects/mira-dashboard-releases/releases/`. This is the
-production default; a deliberately configured `MIRA_DASHBOARD_RELEASES_ROOT`
-overrides it. Run lifecycle commands from a known format-v2 release with the
-same Doppler production environment as the services so schema checks always
-inspect the live Dashboard database. Do not invoke the lifecycle CLI through
-`current`: the first managed rollback may point `current` at the retained
-format-v1 release, which does not contain that artifact. Record and retain the
-first format-v2 release SHA as the management release until the v1 rollback
-window closes.
-
-Set `DATABASE_PATH` to the exact stable absolute
-`MIRA_DASHBOARD_DB_PATH` used by both production units, including when that
-value normally comes from Doppler. Passing it after Doppler injection prevents
-an immutable release from redirecting SQLite state or silently inspecting a
-different configured database:
-
-```bash
-RELEASES_ROOT="/home/ubuntu/projects/mira-dashboard-releases"
-DATABASE_PATH="/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db"
-LIFECYCLE_RELEASE_SHA="REPLACE_WITH_RETAINED_FORMAT_2_SHA"
-CANDIDATE_RELEASE_SHA="REPLACE_WITH_CANDIDATE_FULL_SHA"
-LIFECYCLE_CLI="$RELEASES_ROOT/releases/$LIFECYCLE_RELEASE_SHA/backend/dist/releaseLifecycle.js"
-test -f "$LIFECYCLE_CLI"
-test -f "$DATABASE_PATH"
-
-# Inspect the current slots before activation.
-doppler run --config prd --project rajohan -- \
-  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  bun "$LIFECYCLE_CLI" status
-
-# Activate only after preflight succeeds.
-doppler run --config prd --project rajohan -- \
-  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA"
-```
-
-If production uses a non-default release root, replace `RELEASES_ROOT` with
-that explicit absolute path. Likewise, replace `DATABASE_PATH` with the exact
-path configured for the services. Passing both through `env` after Doppler
-injection ensures the lifecycle process, shell-resolved CLI, and live database
-always refer to the same production state.
-
-Rollback is a separate, failure-only operation. Do not run it as part of the
-normal activation sequence:
-
-```bash
-doppler run --config prd --project rajohan -- \
-  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  bun "$LIFECYCLE_CLI" rollback
-```
-
-`current` and `previous` are relative links inside the release root. Link
-replacement uses same-directory temporary symlinks, atomic rename, and a
-directory fsync, then re-verifies the linked release before committing the
-transition. Activation verifies every artifact, both component build
-identities, the exact manifest/directory SHA, the host Bun version, the actual
-live SQLite schema, and the previous release's rollback window. Rollback also
-checks the live schema rather than assuming it was downgraded by a code-only
-rollback.
-
-The lifecycle CLI changes release links only; an already-running process keeps
-executing the physical release it started from. After the final systemd
-cutover, every activation and rollback must therefore restart both units and
-verify release readiness before reporting success:
-
-```bash
-systemctl --user restart mira-dashboard-worker.service
-systemctl --user restart mira-dashboard.service
-curl --fail --silent --show-error http://127.0.0.1:3100/api/health/ready
-```
-
-The final deploy executor owns this sequence and automatically runs the same
-restart/readiness checks after switching back on failure. The commands above
-are the required manual fallback, not an optional post-deploy check.
-
-Normal activation refuses a schema target outside the current release's rollback
-window. After the final systemd/executor cutover, the exceptional snapshot-backed
-procedure above runs the candidate command only after preflight succeeds, both
-services are stopped, their `WorkingDirectory`/`ExecStart` resolve through the
-managed `current` link, and the queue is idle:
-
-```bash
-doppler run --config prd --project rajohan -- \
-  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA" \
-  --coordinated-schema-cutover
-```
-
-The flag is rejected for ordinary compatible releases. It permits the candidate
-startup migration across the incompatible boundary, but it does not permit
-automatic code-only rollback afterward; restore the recorded matching snapshot
-before switching back.
-
-Every status read, activation, rollback, and interrupted-transition recovery is
-serialized by a kernel-owned `flock` held on an open descriptor. The kernel
-releases the lock if the lifecycle process exits, so stale PID metadata and PID
-reuse cannot block recovery. A durable transition journal is written before
-either link changes. Status takes a shared lock and remains observational; it
-fails clearly when a journal requires recovery. The next exclusive activation
-or rollback restores the recorded pre-transition slots. Successful transitions
-verify both final slots and remove only the exact journal inode they inspected,
-so an interruption cannot discard the known-good rollback target.
-
-The Dashboard executor still uses the in-place transition flow until the final
-deploy integration performs the controlled systemd cutover to these links.
-That cutover must set both units' stable state paths explicitly before changing
-their working directories:
-
-```ini
-[Service]
-Environment=MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db
-Environment=MIRA_DASHBOARD_OPENCLAW_HOME=/home/ubuntu/projects/mira-dashboard/backend/data/openclaw-client
-```
-
-The OpenClaw home value preserves the existing signed Gateway device identity
-at
-`backend/data/openclaw-client/.openclaw/identity/device.json`. Leaving it unset
-would derive a different path below each SHA-specific working directory.
+Release link transitions use a kernel-owned `flock`, atomic same-directory
+symlink replacement, directory fsync, and a durable recovery journal. Every
+status read, activation, rollback, and interrupted-transition recovery verifies
+the managed release and live schema contract.
 
 ## Health Signals
 
-Deployment health is split by purpose:
+- `GET /api/health/live` proves the web process can answer.
+- `GET /api/health/ready` requires a valid release identity, compatible
+  accessible SQLite schema, built frontend, and a fresh worker heartbeat from
+  the exact release commit. It returns HTTP 503 with `status: "notReady"` when
+  an activation check fails.
+- `GET /api/health/diagnostics` adds the authenticated readiness breakdown and
+  session count.
 
-- `GET /api/health/live` proves that the web process can answer requests.
-- `GET /api/health/ready` requires a valid release identity,
-  current/accessible SQLite schema, built frontend, and a fresh worker heartbeat
-  from the exact manifest commit.
-  Concurrent probes share one artifact scan, and a completed result is reused
-  for at most 15 seconds before the checksummed inventory is verified again.
-  This readiness route returns HTTP 503 with `status: "notReady"` when an
-  internal activation check fails.
-- `GET /api/health/diagnostics` returns the readiness breakdown plus session
-  count and requires an authenticated Dashboard session.
-- `GET /api/health` is a temporary compatibility adapter for the pre-readiness
-  deploy executor. It returns 503 unless the full readiness contract passes and
-  retains `workerOnline` only until the atomic executor cutover is complete.
+There is no legacy `/health` or `/api/health` route. Production activation and
+automatic rollback use `/api/health/ready`.
 
-Gateway connectivity is reported as an external dependency but deliberately
-does not fail release readiness: rolling Dashboard code back cannot repair an
-OpenClaw Gateway outage. Production activation and automatic rollback must use
-`/api/health/ready`.
+Gateway connectivity is reported as an external dependency but does not fail
+release readiness: rolling Dashboard code back cannot repair a Gateway outage.
 
 Important failures:
 
-- `dependencies.gatewayConnected: false` in authenticated diagnostics: check
-  OpenClaw Gateway service and Gateway token.
-- `checks.worker.ready: false`: the worker heartbeat is stale or queue telemetry is
-  unavailable; check both Dashboard and worker service logs.
-- HTTP `503 Frontend Not Built`: build root frontend with `bun run build`.
-- `Unauthorized` on API routes: auth/session or cookie issue.
-- `database is locked`: another process is holding SQLite; retry after
-  background jobs settle, then inspect both service logs. Dashboard uses a
-  five-second SQLite busy timeout and requires WAL mode.
+- `dependencies.gatewayConnected: false`: check Gateway service and token.
+- `checks.worker.ready: false`: inspect worker heartbeat and both unit logs.
+- HTTP `503 Frontend Not Built`: the release is incomplete and must not activate.
+- `Unauthorized`: inspect Dashboard session or scoped automation credentials.
+- `database is locked`: wait for background work, then inspect both service
+  logs; production requires WAL mode and uses a five-second busy timeout.

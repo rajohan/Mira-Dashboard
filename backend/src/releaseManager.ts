@@ -29,6 +29,8 @@ const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const RELEASE_TRANSITION_FORMAT_VERSION = 1;
 const RELEASE_TRANSITION_JOURNAL_FILE_NAME = ".release-transition.json";
 export const RELEASE_TRANSITION_LOCK_FILE_NAME = ".release-transition.lock";
+const RETIRED_RELEASE_DIRECTORY_PATTERN =
+    /^\.retired-[\da-f]{40}-[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
 const MAX_RELEASE_TRANSITION_FILE_BYTES = 4096;
 export const RELEASE_TRANSITION_LOCK_PROGRAM = "/usr/bin/flock";
 
@@ -51,6 +53,11 @@ export interface DashboardReleaseState {
     current?: ManagedDashboardRelease;
     previous?: ManagedDashboardRelease;
     root: string;
+}
+
+export interface DashboardReleaseRetentionResult {
+    removed: string[];
+    retained: string[];
 }
 
 export interface DashboardReleaseManagerOptions {
@@ -397,6 +404,17 @@ function releaseDirectoryIdentity(stat: fs.BigIntStats): string {
     return [stat.dev, stat.ino, stat.ctimeNs, stat.birthtimeNs].join(":");
 }
 
+function isSameReleaseDirectoryInode(
+    left: fs.BigIntStats,
+    right: fs.BigIntStats
+): boolean {
+    return (
+        left.dev === right.dev &&
+        left.ino === right.ino &&
+        left.birthtimeNs === right.birthtimeNs
+    );
+}
+
 function releaseManifestIdentity(manifest: DashboardReleaseManifest): string {
     const canonicalManifest = {
         artifacts: manifest.artifacts
@@ -630,12 +648,6 @@ function assertReleaseMigrationHistoryCompatible(
     action: "Activation" | "Rollback"
 ): void {
     const expectedMigrations = release.schema.migrations;
-    if (!expectedMigrations) {
-        // Only temporary format-v1 manifests omit migration identities. They stay
-        // readable for the first managed cutover rollback window, but cannot bind
-        // activation or rollback to the exact applied migration history.
-        return;
-    }
     for (const actual of liveState.migrations.slice(0, release.schema.target)) {
         const expected = expectedMigrations[actual.version - 1];
         if (
@@ -1193,5 +1205,113 @@ export async function rollbackDashboardRelease(
                 activeRelease
             );
         });
+    });
+}
+
+export async function pruneDashboardReleases(
+    retainCount = 3,
+    releasesRoot = resolveDashboardReleasesRoot()
+): Promise<DashboardReleaseRetentionResult> {
+    if (!Number.isSafeInteger(retainCount) || retainCount < 2 || retainCount > 20) {
+        throw new TypeError("Managed release retention must be between 2 and 20");
+    }
+
+    const layout = await ensureDashboardReleaseLayout(releasesRoot);
+    return withReleaseTransitionLock(layout, "exclusive", async () => {
+        await recoverInterruptedReleaseTransition(layout);
+        const state = await readDashboardReleaseStateFromLayout(layout);
+        const protectedCommits = new Set(
+            [state.current?.commitSha, state.previous?.commitSha].filter(
+                (commitSha): commitSha is string => commitSha !== undefined
+            )
+        );
+        const entries = await fsp.readdir(layout.releasesPath, {
+            withFileTypes: true,
+        });
+        let hasFilesystemChanges = false;
+        const releases: ManagedDashboardRelease[] = [];
+        for (const entry of entries) {
+            if (RETIRED_RELEASE_DIRECTORY_PATTERN.test(entry.name)) {
+                if (!entry.isDirectory() || entry.isSymbolicLink()) {
+                    throw new TypeError(
+                        `Retired release entry must be a real directory: ${entry.name}`
+                    );
+                }
+                await fsp.rm(path.join(layout.releasesPath, entry.name), {
+                    recursive: true,
+                });
+                hasFilesystemChanges = true;
+                continue;
+            }
+            if (!RELEASE_COMMIT_SHA_PATTERN.test(entry.name)) {
+                continue;
+            }
+            if (!entry.isDirectory() || entry.isSymbolicLink()) {
+                throw new TypeError(
+                    `Managed release entry must be a real directory: ${entry.name}`
+                );
+            }
+            releases.push(await loadManagedReleaseFromLayout(layout, entry.name));
+        }
+
+        const newestFirst = releases.toSorted((left, right) => {
+            const builtAtComparison = right.manifest.builtAt.localeCompare(
+                left.manifest.builtAt
+            );
+            return builtAtComparison || right.commitSha.localeCompare(left.commitSha);
+        });
+        const retained = new Set(protectedCommits);
+        for (const release of newestFirst) {
+            if (retained.size >= retainCount) {
+                break;
+            }
+            retained.add(release.commitSha);
+        }
+
+        const removed: string[] = [];
+        for (const release of newestFirst.toReversed()) {
+            if (retained.has(release.commitSha)) {
+                continue;
+            }
+            const currentStat = await fsp.lstat(release.path, { bigint: true });
+            if (
+                !currentStat.isDirectory() ||
+                currentStat.isSymbolicLink() ||
+                releaseDirectoryIdentity(currentStat) !== release.directoryIdentity
+            ) {
+                throw new Error(
+                    `Managed release changed before retention cleanup: ${release.commitSha}`
+                );
+            }
+            const retiredPath = path.join(
+                layout.releasesPath,
+                `.retired-${release.commitSha}-${randomUUID()}`
+            );
+            await fsp.rename(release.path, retiredPath);
+            await syncDirectory(layout.releasesPath);
+            const retiredStat = await fsp.lstat(retiredPath, { bigint: true });
+            if (
+                !retiredStat.isDirectory() ||
+                retiredStat.isSymbolicLink() ||
+                !isSameReleaseDirectoryInode(currentStat, retiredStat)
+            ) {
+                throw new Error(
+                    `Managed release changed during retention cleanup: ${release.commitSha}`
+                );
+            }
+            await fsp.rm(retiredPath, { recursive: true });
+            hasFilesystemChanges = true;
+            removed.push(release.commitSha);
+        }
+        if (hasFilesystemChanges) {
+            await syncDirectory(layout.releasesPath);
+        }
+
+        return {
+            removed,
+            retained: newestFirst
+                .filter((release) => retained.has(release.commitSha))
+                .map((release) => release.commitSha),
+        };
     });
 }
