@@ -356,39 +356,52 @@ format-v1 release, which does not contain that artifact. Record and retain the
 first format-v2 release SHA as the management release until the v1 rollback
 window closes.
 
-Pass the service's stable absolute database path after Doppler injection;
-changing into an immutable release must not redirect SQLite state into that
-release:
+Set `DATABASE_PATH` to the exact stable absolute
+`MIRA_DASHBOARD_DB_PATH` used by both production units, including when that
+value normally comes from Doppler. Passing it after Doppler injection prevents
+an immutable release from redirecting SQLite state or silently inspecting a
+different configured database:
 
 ```bash
 RELEASES_ROOT="/home/ubuntu/projects/mira-dashboard-releases"
+DATABASE_PATH="/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db"
 LIFECYCLE_RELEASE_SHA="REPLACE_WITH_RETAINED_FORMAT_2_SHA"
 CANDIDATE_RELEASE_SHA="REPLACE_WITH_CANDIDATE_FULL_SHA"
 LIFECYCLE_CLI="$RELEASES_ROOT/releases/$LIFECYCLE_RELEASE_SHA/backend/dist/releaseLifecycle.js"
 test -f "$LIFECYCLE_CLI"
+test -f "$DATABASE_PATH"
 
+# Inspect the current slots before activation.
 doppler run --config prd --project rajohan -- \
   env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
   bun "$LIFECYCLE_CLI" status
-doppler run --config prd --project rajohan -- \
-  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
-  bun "$LIFECYCLE_CLI" rollback
 
+# Activate only after preflight succeeds.
 doppler run --config prd --project rajohan -- \
   env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
   bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA"
 ```
 
 If production uses a non-default release root, replace `RELEASES_ROOT` with
-that explicit absolute path. Passing it through `env` after Doppler injection
-ensures the lifecycle process and the shell-resolved CLI always use the same
-release tree.
+that explicit absolute path. Likewise, replace `DATABASE_PATH` with the exact
+path configured for the services. Passing both through `env` after Doppler
+injection ensures the lifecycle process, shell-resolved CLI, and live database
+always refer to the same production state.
+
+Rollback is a separate, failure-only operation. Do not run it as part of the
+normal activation sequence:
+
+```bash
+doppler run --config prd --project rajohan -- \
+  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  bun "$LIFECYCLE_CLI" rollback
+```
 
 `current` and `previous` are relative links inside the release root. Link
 replacement uses same-directory temporary symlinks, atomic rename, and a
@@ -424,7 +437,7 @@ managed `current` link, and the queue is idle:
 doppler run --config prd --project rajohan -- \
   env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
-  MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
   bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA" \
   --coordinated-schema-cutover
 ```

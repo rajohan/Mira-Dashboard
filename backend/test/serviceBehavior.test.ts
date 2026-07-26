@@ -4028,11 +4028,7 @@ fi
                 if (joined.includes("wal-g backup-list")) {
                     return { code: 0, stderr: "", stdout: "[]" };
                 }
-                return {
-                    code: 2,
-                    stderr: `Unexpected backup command: ${joined}`,
-                    stdout: "",
-                };
+                throw new Error(`Unexpected backup command: ${joined}`);
             });
 
         try {
@@ -4102,11 +4098,7 @@ fi
                 if (joined.includes("wal-g backup-list")) {
                     return { code: 0, stderr: "", stdout: "[]" };
                 }
-                return {
-                    code: 2,
-                    stderr: `Unexpected backup command: ${joined}`,
-                    stdout: "",
-                };
+                throw new Error(`Unexpected backup command: ${joined}`);
             });
 
         try {
