@@ -109,6 +109,8 @@ export type {
 } from "./useOpsActions";
 export { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./useOpsActions";
 export type {
+    DashboardReleaseStatus,
+    DashboardReleaseSummary,
     DeploymentJob,
     ProductionCheckoutStatus,
     PullRequestSummary,
@@ -120,11 +122,13 @@ export {
     pullRequestKeys,
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useDashboardReleaseStatus,
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
     usePullRequests,
     useRejectPullRequest,
+    useRollbackDashboard,
     useUpdatePullRequestBranch,
 } from "./usePullRequests";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";

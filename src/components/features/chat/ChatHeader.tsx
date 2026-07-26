@@ -84,12 +84,15 @@ export function ChatHeader({
         <div className="border-b border-primary-700 pb-2 sm:pb-3">
             <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center">
                         <p className="text-xs wrap-break-word text-primary-400 sm:truncate sm:text-sm">
                             {formatHeaderStatus(selectedSession, referenceTime)}
                         </p>
                         {selectedSession ? (
-                            <>
+                            <div
+                                className="flex flex-wrap items-center gap-1.5"
+                                data-testid="chat-session-badges"
+                            >
                                 <Badge
                                     aria-label={`Model: ${selectedSession.model || "Unknown"}`}
                                     className="whitespace-nowrap"
@@ -114,7 +117,7 @@ export function ChatHeader({
                                     <Gauge aria-hidden="true" className="size-3.5" />
                                     {selectedChatSpeedLabel(selectedSession)}
                                 </Badge>
-                            </>
+                            </div>
                         ) : undefined}
                     </div>
                 </div>

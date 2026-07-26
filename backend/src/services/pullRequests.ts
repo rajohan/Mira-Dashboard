@@ -17,6 +17,7 @@ import {
 } from "../releaseDeployment.ts";
 import {
     assertDashboardReleaseHostRuntimeCompatible,
+    type ManagedDashboardRelease,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
 } from "../releaseManager.ts";
@@ -181,6 +182,28 @@ interface DeploymentJob {
     stderr?: string;
 }
 
+/** Represents one immutable Dashboard release exposed to the operator UI. */
+export interface DashboardReleaseSummary {
+    builtAt: string;
+    commitSha: string;
+    commitTitle: string;
+    schema: {
+        maximumCompatible: number;
+        minimumCompatible: number;
+        target: number;
+    };
+}
+
+/** Represents the active and immediately rollback-capable release slots. */
+export interface DashboardReleaseStatus {
+    current?: DashboardReleaseSummary;
+    previous?: DashboardReleaseSummary;
+    rollback: {
+        available: boolean;
+        reason?: string;
+    };
+}
+
 /** Represents production checkout status. */
 interface ProductionCheckoutStatus {
     root: string;
@@ -189,6 +212,7 @@ interface ProductionCheckoutStatus {
     branch: string;
     expectedBranch: string;
     head: string;
+    headCommit: string;
     upstream?: string;
     isClean: boolean;
     isProductionRoot: boolean;
@@ -349,7 +373,7 @@ function readDeploymentLockExecution(
              WHERE json_valid(payload_json)
                AND (
                    (
-                       action_key = 'dashboard.deploy'
+                       action_key IN ('dashboard.deploy', 'dashboard.rollback')
                        AND json_extract(payload_json, '$.deploymentId') = ?
                    )
                    OR (
@@ -363,7 +387,7 @@ function readDeploymentLockExecution(
         .get(lockOwner, lockOwner) as DeploymentLockExecutionRow | undefined;
 }
 
-/** Releases the active deploy lock if it still belongs to the given job. */
+/** Releases the active release lock if it still belongs to the given job. */
 function releaseDeploymentLock(jobId: string): void {
     try {
         database
@@ -379,7 +403,10 @@ function cleanupTerminatedDeploymentExecution(
     timestamp: string,
     note: string
 ): void {
-    if (execution.actionKey === "dashboard.deploy") {
+    if (
+        execution.actionKey === "dashboard.deploy" ||
+        execution.actionKey === "dashboard.rollback"
+    ) {
         const deploymentId = execution.payload.deploymentId;
         if (typeof deploymentId !== "string" || deploymentId.trim() === "") {
             return;
@@ -414,7 +441,9 @@ function cleanupQueuedDeploymentCancellation(
     cleanupTerminatedDeploymentExecution(
         execution,
         timestamp,
-        "Deploy cancelled before execution"
+        execution.actionKey === "dashboard.rollback"
+            ? "Rollback cancelled before execution"
+            : "Deploy cancelled before execution"
     );
 }
 
@@ -422,9 +451,13 @@ function cleanupExpiredDeploymentExecution(execution: JobExecution): void {
     cleanupTerminatedDeploymentExecution(
         execution,
         execution.finishedAt ?? dateToISOString(new Date()),
-        execution.status === "cancelled"
-            ? "Deploy cancelled after its worker lease expired"
-            : "Deploy failed after its worker lease expired"
+        execution.actionKey === "dashboard.rollback"
+            ? execution.status === "cancelled"
+                ? "Rollback cancelled after its worker lease expired"
+                : "Rollback failed after its worker lease expired"
+            : execution.status === "cancelled"
+              ? "Deploy cancelled after its worker lease expired"
+              : "Deploy failed after its worker lease expired"
     );
 }
 
@@ -432,6 +465,10 @@ function cleanupExpiredDeploymentExecution(execution: JobExecution): void {
 export function registerPullRequestJobLifecycleHandlers(): void {
     registerQueuedJobCancellationHandler(
         "dashboard.deploy",
+        cleanupQueuedDeploymentCancellation
+    );
+    registerQueuedJobCancellationHandler(
+        "dashboard.rollback",
         cleanupQueuedDeploymentCancellation
     );
     registerQueuedJobCancellationHandler(
@@ -444,6 +481,10 @@ export function registerPullRequestJobLifecycleHandlers(): void {
     );
     registerExpiredJobExecutionHandler(
         "dashboard.deploy",
+        cleanupExpiredDeploymentExecution
+    );
+    registerExpiredJobExecutionHandler(
+        "dashboard.rollback",
         cleanupExpiredDeploymentExecution
     );
     registerExpiredJobExecutionHandler("github.merge", cleanupExpiredDeploymentExecution);
@@ -461,7 +502,9 @@ function ensureNoActiveDeployment(): void {
         const activeJob = readDeploymentJob(activeJobId);
         const lockExecution = readDeploymentLockExecution(activeJobId);
         if (lockExecution?.status === "queued" || lockExecution?.status === "running") {
-            throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
+            throw new Error(
+                `Dashboard release action already in progress (${activeJobId})`
+            );
         }
         if (lockExecution && activeJob?.status === "building") {
             writeDeploymentJob({
@@ -475,21 +518,25 @@ function ensureNoActiveDeployment(): void {
         }
         if (!activeJob) {
             if (!lockExecution && !isDeploymentLockStale(activeLock)) {
-                throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
+                throw new Error(
+                    `Dashboard release action already in progress (${activeJobId})`
+                );
             }
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         } else if (
             ACTIVE_DEPLOYMENT_STATUSES.has(activeJob.status) &&
             !isDeploymentJobStale(activeJob)
         ) {
-            throw new Error(`Dashboard deploy already in progress (${activeJob.id})`);
+            throw new Error(
+                `Dashboard release action already in progress (${activeJob.id})`
+            );
         } else {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         }
     }
 }
 
-/** Acquires the active deploy lock for a new deployment job. */
+/** Acquires the active release lock for a deployment or rollback job. */
 function acquireDeploymentLock(jobId: string): void {
     ensureNoActiveDeployment();
     try {
@@ -500,7 +547,7 @@ function acquireDeploymentLock(jobId: string): void {
             .run(jobId, dateToISOString(new Date()));
     } catch (error) {
         if (error instanceof Error && /constraint/i.test(error.message)) {
-            throw new Error("Dashboard deploy already in progress", {
+            throw new Error("Dashboard release action already in progress", {
                 cause: error,
             });
         }
@@ -513,7 +560,7 @@ function refreshDeploymentLockOwner(jobId: string): void {
         .prepare("UPDATE deployment_lock SET updated_at = ? WHERE id = 1 AND job_id = ?")
         .run(dateToISOString(new Date()), jobId);
     if (result.changes !== 1) {
-        throw new Error("Dashboard deploy lock ownership was lost");
+        throw new Error("Dashboard release lock ownership was lost");
     }
 }
 
@@ -550,6 +597,45 @@ export function readDeploymentJobs(): DeploymentJob[] {
             )
             .all(RECENT_DEPLOYMENTS_LIMIT) as unknown as DeploymentJobRow[]
     ).map((row) => mapDeploymentJob(row));
+}
+
+function dashboardReleaseSummary(
+    release: ManagedDashboardRelease
+): DashboardReleaseSummary {
+    return {
+        builtAt: release.manifest.builtAt,
+        commitSha: release.commitSha,
+        commitTitle: release.manifest.commitTitle,
+        schema: {
+            maximumCompatible: release.manifest.schema.maximumCompatible,
+            minimumCompatible: release.manifest.schema.minimumCompatible,
+            target: release.manifest.schema.target,
+        },
+    };
+}
+
+/** Reads the managed production release slots without exposing host paths. */
+export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatus> {
+    const state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
+    const current = state.current ? dashboardReleaseSummary(state.current) : undefined;
+    const previous = state.previous ? dashboardReleaseSummary(state.previous) : undefined;
+    const isRollbackAvailable =
+        current !== undefined &&
+        previous !== undefined &&
+        current.commitSha !== previous.commitSha;
+
+    return {
+        current,
+        previous,
+        rollback: {
+            available: isRollbackAvailable,
+            ...(!isRollbackAvailable && {
+                reason: current
+                    ? "No distinct previous release is available"
+                    : "No active managed release is available",
+            }),
+        },
+    };
 }
 
 /** Performs trim output. */
@@ -1302,7 +1388,7 @@ export async function getProductionCheckoutStatus(
                 signal,
                 timeoutMs: 30_000,
             }),
-            runCommand("git", ["rev-parse", "--short", "HEAD"], {
+            runCommand("git", ["rev-parse", "HEAD"], {
                 signal,
                 timeoutMs: 30_000,
             }),
@@ -1338,7 +1424,8 @@ export async function getProductionCheckoutStatus(
         worktreeRoot: dashboardWorktreeRoot,
         branch: currentBranch,
         expectedBranch: DEFAULT_BASE,
-        head: head.trim(),
+        head: head.trim().slice(0, 8),
+        headCommit: head.trim(),
         upstream,
         isClean,
         isProductionRoot,
@@ -1660,6 +1747,99 @@ async function scheduleReleaseCutover(
     );
 }
 
+/** Schedules a detached current/previous swap with readiness-bound restoration. */
+async function scheduleReleaseRollback(
+    job: DeploymentJob,
+    targetCommit: string,
+    originalCommit: string,
+    signal?: AbortSignal
+): Promise<CommandResult> {
+    if (
+        !job.commit ||
+        !/^[\da-f]{40}$/u.test(job.commit) ||
+        job.commit !== targetCommit
+    ) {
+        throw new TypeError("Release rollback requires its matching full target SHA");
+    }
+    if (originalCommit === targetCommit || !/^[\da-f]{40}$/u.test(originalCommit)) {
+        throw new TypeError(
+            "Release rollback requires a distinct full original release SHA"
+        );
+    }
+
+    const releasesRoot = resolveDashboardReleasesRoot();
+    const lifecycleCommand = path.join(
+        releasesRoot,
+        "releases",
+        originalCommit,
+        "backend",
+        "dist",
+        "releaseLifecycle.js"
+    );
+    const lifecycleEnvironment = releaseLifecycleInvocation(
+        releasesRoot,
+        lifecycleCommand
+    );
+    const targetShort = targetCommit.slice(0, 8);
+    const originalShort = originalCommit.slice(0, 8);
+    const okJob: DeploymentJob = {
+        ...job,
+        status: "isOk",
+        updatedAt: dateToISOString(new Date()),
+        note: `Atomic rollback activated ${targetShort}. Web, worker, and commit readiness passed`,
+    };
+    const restoredJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: `Rollback target failed readiness; original release ${originalShort} was restored automatically`,
+    };
+    const restorationFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: `Rollback target failed readiness and restoration of ${originalShort} failed`,
+    };
+    const transitionFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Atomic rollback failed before restart; current release was left unchanged",
+    };
+
+    const script = [
+        "sleep 2",
+        ...releaseCutoverShellFunctions(),
+        `if ${lifecycleEnvironment} rollback; then`,
+        `  if restart_services && ready_for_commit ${shellQuote(targetShort)}; then`,
+        `    ${deploymentJobUpdateCommand(okJob)}`,
+        "  else",
+        `    if ${lifecycleEnvironment} rollback && restart_services && ready_for_commit ${shellQuote(originalShort)}; then`,
+        `      ${deploymentJobUpdateCommand(restoredJob)}`,
+        "    else",
+        `      ${deploymentJobUpdateCommand(restorationFailedJob)}`,
+        "    fi",
+        "  fi",
+        "else",
+        `  ${deploymentJobUpdateCommand(transitionFailedJob)}`,
+        "fi",
+    ].join("\n");
+
+    return runCommand(
+        "systemd-run",
+        [
+            "--user",
+            "--collect",
+            `--unit=mira-dashboard-deploy-${job.id}`,
+            "--description=Mira Dashboard atomic release rollback",
+            "/bin/bash",
+            "-lc",
+            script,
+        ],
+        { signal, timeoutMs: 30_000 }
+    );
+}
+
 function didScheduleOrphanedReleaseCutoverRecovery(
     cutover: OrphanedDeploymentCutover
 ): boolean {
@@ -1811,9 +1991,7 @@ async function runDeploymentJob(
         currentJob = refreshDeploymentHeartbeat(currentJob);
         const currentState = await readDashboardReleaseState(releasesRoot);
         if (!currentState.current) {
-            throw new Error(
-                "Managed deployment requires a current release from the one-time production cutover"
-            );
+            throw new Error("Managed deployment requires an active current release");
         }
         currentJob = refreshDeploymentHeartbeat(currentJob);
         const { stdout: commitSha } = await runCommand("git", ["rev-parse", "HEAD"], {
@@ -1873,6 +2051,65 @@ async function runDeploymentJob(
             status: "failed",
             updatedAt: dateToISOString(new Date()),
             note: errorMessage(error, "Deploy failed"),
+        };
+        try {
+            writeDeploymentJob(failed);
+        } finally {
+            releaseDeploymentLock(job.id);
+        }
+        return false;
+    }
+}
+
+/** Validates and schedules a managed rollback after the API has returned its job. */
+async function runRollbackJob(
+    job: DeploymentJob,
+    signal?: AbortSignal
+): Promise<boolean> {
+    let currentJob = job;
+    const releasesRoot = resolveDashboardReleasesRoot();
+    try {
+        currentJob = refreshDeploymentHeartbeat(currentJob);
+        await assertManagedDashboardServiceContract(signal);
+        currentJob = refreshDeploymentHeartbeat(currentJob);
+        const state = await readDashboardReleaseState(releasesRoot);
+        if (!state.current || !state.previous) {
+            throw new Error(
+                "Managed release rollback requires active current and previous releases"
+            );
+        }
+        if (!job.commit || state.previous.commitSha !== job.commit) {
+            throw new Error(
+                "Rollback target changed before execution; refresh release status and try again"
+            );
+        }
+        if (state.current.commitSha === state.previous.commitSha) {
+            throw new Error("Managed release rollback requires two distinct releases");
+        }
+        assertDashboardReleaseHostRuntimeCompatible(state.previous);
+
+        const restartScheduled: DeploymentJob = {
+            ...currentJob,
+            status: "restart-scheduled",
+            updatedAt: dateToISOString(new Date()),
+            commit: state.previous.commitSha,
+            commitTitle: state.previous.manifest.commitTitle,
+            note: "Verified rollback target. Detached atomic rollback and readiness check scheduled",
+        };
+        writeDeploymentJob(restartScheduled);
+        await scheduleReleaseRollback(
+            restartScheduled,
+            state.previous.commitSha,
+            state.current.commitSha,
+            signal
+        );
+        return true;
+    } catch (error) {
+        const failed: DeploymentJob = {
+            ...currentJob,
+            status: "failed",
+            updatedAt: dateToISOString(new Date()),
+            note: errorMessage(error, "Rollback failed"),
         };
         try {
             writeDeploymentJob(failed);
@@ -1975,6 +2212,67 @@ export function startDeployLatest(lockHeldBy?: string): DeploymentJob {
 /** Queues a direct deploy; production validation is owned by the worker action. */
 export async function prepareAndStartDeployLatest(): Promise<DeploymentJob> {
     return startDeployLatest();
+}
+
+/** Validates the current release slots and queues an atomic rollback. */
+export async function prepareAndStartRollback(): Promise<DeploymentJob> {
+    registerPullRequestJobLifecycleHandlers();
+    const now = dateToISOString(new Date());
+    const deploymentId = Bun.randomUUIDv7();
+    let job: DeploymentJob | undefined;
+    acquireDeploymentLock(deploymentId);
+    try {
+        const state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
+        if (!state.current || !state.previous) {
+            throw Object.assign(
+                new Error(
+                    "Managed release rollback requires active current and previous releases"
+                ),
+                { statusCode: 409 }
+            );
+        }
+        if (state.current.commitSha === state.previous.commitSha) {
+            throw Object.assign(
+                new Error("Managed release rollback requires two distinct releases"),
+                { statusCode: 409 }
+            );
+        }
+        assertDashboardReleaseHostRuntimeCompatible(state.previous);
+
+        job = {
+            id: deploymentId,
+            status: "building",
+            startedAt: now,
+            updatedAt: now,
+            commit: state.previous.commitSha,
+            commitTitle: state.previous.manifest.commitTitle,
+            note: `Rollback to ${state.previous.commitSha.slice(0, 8)} queued`,
+        };
+        writeDeploymentJob(job);
+        enqueueJobExecution({
+            actionKey: "dashboard.rollback",
+            displayName: `Roll back Mira Dashboard to ${state.previous.commitSha.slice(0, 8)}`,
+            payload: { deploymentId: job.id },
+            resourceClass: "exclusive",
+            timeoutMs: 15 * 60 * 1000,
+        });
+        return job;
+    } catch (error) {
+        releaseDeploymentLock(deploymentId);
+        if (job) {
+            try {
+                writeDeploymentJob({
+                    ...job,
+                    note: errorMessage(error, "Dashboard rollback failed to queue"),
+                    status: "failed",
+                    updatedAt: dateToISOString(new Date()),
+                });
+            } catch {
+                // Preserve the original rollback validation or queue error.
+            }
+        }
+        throw error;
+    }
 }
 
 interface PullRequestApprovalExecutionOptions {
@@ -2238,7 +2536,7 @@ async function executePullRequestMerge(
     return { result };
 }
 
-/** Registers every mutating GitHub/deploy action exclusively in the worker. */
+/** Registers every mutating GitHub/release action exclusively in the worker. */
 export function registerPullRequestExecutionActions(): void {
     registerPullRequestJobLifecycleHandlers();
     registerDeploymentCutoverRecoveryHandler(didScheduleOrphanedReleaseCutoverRecovery);
@@ -2259,6 +2557,30 @@ export function registerPullRequestExecutionActions(): void {
         const isSuccess = await runDeploymentJob(deployment, signal);
         if (!isSuccess) {
             throw new ScheduledJobActionError("Dashboard deploy failed", {
+                deploymentId,
+            });
+        }
+        const resumeWorkerClaims = context.pauseWorkerClaims();
+        resumeWorkerClaimsWhenDeploymentRestartSettles(deploymentId, resumeWorkerClaims);
+        return { deploymentId };
+    });
+    registerScheduledJobAction("dashboard.rollback", async (job, signal, context) => {
+        const deploymentId = job.actionPayload.deploymentId;
+        if (typeof deploymentId !== "string" || deploymentId.trim() === "") {
+            throw Object.assign(new Error("Deployment id is missing"), {
+                statusCode: 400,
+            });
+        }
+        const deployment = readDeploymentJob(deploymentId);
+        if (!deployment) {
+            throw Object.assign(new Error("Deployment job not found"), {
+                statusCode: 404,
+            });
+        }
+        context.protectFromCancellation();
+        const isSuccess = await runRollbackJob(deployment, signal);
+        if (!isSuccess) {
+            throw new ScheduledJobActionError("Dashboard rollback failed", {
                 deploymentId,
             });
         }

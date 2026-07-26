@@ -12,6 +12,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
+import { ProductionReleasesCard } from "../components/features/pullRequests/ProductionReleasesCard";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -20,6 +21,7 @@ import { LoadingState } from "../components/ui/LoadingState";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import type {
+    DashboardReleaseSummary,
     DeploymentJob,
     ProductionCheckoutStatus,
     PullRequestSummary,
@@ -28,11 +30,13 @@ import type {
 import {
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useDashboardReleaseStatus,
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
     usePullRequests,
     useRejectPullRequest,
+    useRollbackDashboard,
     useUpdatePullRequestBranch,
 } from "../hooks";
 import { formatDate } from "../utils/format";
@@ -44,11 +48,12 @@ type PendingAction =
     | { type: "merge-deploy"; pr: PullRequestSummary }
     | { type: "review-approve"; pr: PullRequestSummary }
     | { type: "reject"; pr: PullRequestSummary }
+    | { release: DashboardReleaseSummary; type: "rollback" }
     | { type: "deploy" };
 type PendingActionType = Exclude<PendingAction, undefined>["type"];
 type UnhandledPendingActionType = Exclude<
     PendingActionType,
-    "deploy" | "merge" | "merge-deploy" | "reject" | "review-approve"
+    "deploy" | "merge" | "merge-deploy" | "reject" | "review-approve" | "rollback"
 >;
 
 const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends never
@@ -401,6 +406,9 @@ function actionLabel(action: Exclude<PendingAction, undefined>) {
         case "deploy": {
             return `Deploy latest ${DEFAULT_BASE}`;
         }
+        case "rollback": {
+            return `Roll back to ${action.release.commitSha.slice(0, 8)}`;
+        }
     }
 }
 
@@ -411,7 +419,7 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
             return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not deploy.`;
         }
         case "merge-deploy": {
-            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a service restart, and run a health check.`;
+            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync ${DEFAULT_BASE}, publish an immutable release, atomically activate it, restart web and worker, and verify commit-bound readiness. A failed release is rolled back automatically.`;
         }
         case "review-approve": {
             return `Approve PR #${action.pr.number}: ${action.pr.title}?\n\nThis approves the PR on GitHub. It does not merge or deploy.`;
@@ -420,7 +428,10 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
         }
         case "deploy": {
-            return `Deploy latest ${DEFAULT_BASE}?\n\nThis will sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a mira-dashboard.service restart, and run a health check.`;
+            return `Deploy latest ${DEFAULT_BASE}?\n\nThis will sync ${DEFAULT_BASE}, publish an immutable release, atomically activate it, restart web and worker, and verify commit-bound readiness. A failed release is rolled back automatically.`;
+        }
+        case "rollback": {
+            return `Roll back to ${action.release.commitSha.slice(0, 8)}: ${action.release.commitTitle}?\n\nThis atomically swaps the active and previous releases, restarts web and worker, and verifies commit-bound readiness. If the rollback target fails, the current release is restored automatically.`;
         }
     }
 }
@@ -531,10 +542,10 @@ function PullRequestCard({
 function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
     return (
         <Card variant="bordered" className="h-fit space-y-3">
-            <CardTitle className="text-base">Recent deploys</CardTitle>
+            <CardTitle className="text-base">Recent release jobs</CardTitle>
             {deployments.length === 0 ? (
                 <p className="text-sm text-primary-400">
-                    No dashboard deploy jobs recorded yet.
+                    No dashboard release jobs recorded yet.
                 </p>
             ) : (
                 <div className="space-y-2">
@@ -596,11 +607,14 @@ export function PullRequests() {
     const { data: deployments = [] } = usePullRequestDeployments();
     const { data: productionCheckout, error: productionCheckoutError } =
         useProductionCheckout();
+    const { data: releaseStatus, error: releaseStatusError } =
+        useDashboardReleaseStatus();
     const approvePullRequest = useApprovePullRequest();
     const approvePullRequestReview = useApprovePullRequestReview();
     const rejectPullRequest = useRejectPullRequest();
     const updatePullRequestBranch = useUpdatePullRequestBranch();
     const deployDashboard = useDeployDashboard();
+    const rollbackDashboard = useRollbackDashboard();
     const [pendingAction, setPendingAction] = useState<PendingAction>(undefined);
     const [lastResult, setLastResult] = useState<string | undefined>(undefined);
     const [actionError, setActionError] = useState<string | undefined>(undefined);
@@ -609,7 +623,8 @@ export function PullRequests() {
         approvePullRequestReview.isPending ||
         rejectPullRequest.isPending ||
         updatePullRequestBranch.isPending ||
-        deployDashboard.isPending;
+        deployDashboard.isPending ||
+        rollbackDashboard.isPending;
     const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
     const productionActionBlockedMessage = isProductionActionBlocked
         ? checkoutMessage(productionCheckout, productionCheckoutError ?? undefined)
@@ -666,6 +681,15 @@ export function PullRequests() {
                 case "deploy": {
                     const result = await deployDashboard.mutateAsync();
                     setLastResult(result?.deployment?.note ?? "Deploy scheduled");
+                    break;
+                }
+
+                case "rollback": {
+                    const result = await rollbackDashboard.mutateAsync();
+                    setLastResult(
+                        result?.deployment?.note ??
+                            `Rollback to ${action.release.commitSha.slice(0, 8)} scheduled`
+                    );
                     break;
                 }
             }
@@ -856,6 +880,17 @@ export function PullRequests() {
                     </Card>
                 ) : undefined}
 
+                <ProductionReleasesCard
+                    baseBranch={DEFAULT_BASE}
+                    checkout={productionCheckout}
+                    error={releaseStatusError ?? undefined}
+                    isActionPending={isActionPending}
+                    onRollback={(release) => {
+                        setPendingAction({ release, type: "rollback" });
+                    }}
+                    release={releaseStatus}
+                />
+
                 <Card variant="bordered" className="space-y-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <div>
@@ -998,7 +1033,10 @@ export function PullRequests() {
                         confirmLabel={actionLabel(pendingAction)}
                         confirmLoadingLabel="Working"
                         loading={isActionPending}
-                        danger={pendingAction.type === "reject"}
+                        danger={
+                            pendingAction.type === "reject" ||
+                            pendingAction.type === "rollback"
+                        }
                         onCancel={() => {
                             if (isActionPending) {
                                 return;

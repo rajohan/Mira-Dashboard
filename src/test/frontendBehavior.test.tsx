@@ -147,11 +147,13 @@ import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "../hooks/useOpsActio
 import {
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useDashboardReleaseStatus,
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
     usePullRequests,
     useRejectPullRequest,
+    useRollbackDashboard,
     useUpdatePullRequestBranch,
 } from "../hooks/usePullRequests";
 import { hasQuotaStatus, useQuotas } from "../hooks/useQuotas";
@@ -897,6 +899,14 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(screen.getByTitle("Worker online")).toBeInTheDocument();
             expect(screen.getByText("WK")).toBeInTheDocument();
             expect(screen.getByText("v2026.6.9")).toBeInTheDocument();
+            const mobileStatus = screen.getByRole("button", {
+                name: /System status: .+\. Open details/u,
+            });
+            await userEvent.click(mobileStatus);
+            expect(screen.getByText("System status")).toBeInTheDocument();
+            expect(screen.getByText("WebSocket")).toBeInTheDocument();
+            expect(screen.getByText("Backend")).toBeInTheDocument();
+            expect(screen.getByText("Worker")).toBeInTheDocument();
 
             const readyHealth = queryClient.getQueryData<HealthResponse>(["health"]);
             expect(readyHealth).toBeDefined();
@@ -3116,6 +3126,34 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 }
 
+                if (url === "/api/pull-requests/releases" && method === "GET") {
+                    return Response.json({
+                        release: {
+                            current: {
+                                builtAt: "2026-06-23T08:00:00.000Z",
+                                commitSha: "a".repeat(40),
+                                commitTitle: "Current release",
+                                schema: {
+                                    maximumCompatible: 31,
+                                    minimumCompatible: 1,
+                                    target: 31,
+                                },
+                            },
+                            previous: {
+                                builtAt: "2026-06-22T08:00:00.000Z",
+                                commitSha: "b".repeat(40),
+                                commitTitle: "Previous release",
+                                schema: {
+                                    maximumCompatible: 31,
+                                    minimumCompatible: 1,
+                                    target: 31,
+                                },
+                            },
+                            rollback: { available: true },
+                        },
+                    });
+                }
+
                 throw new Error(`Unexpected hook API call: ${method} ${url}`);
             }
         );
@@ -3264,6 +3302,11 @@ describe("Mira Dashboard frontend behavior", () => {
         const production = renderHookWithQueryClient(() => useProductionCheckout());
         await waitFor(() =>
             expect(production.result.current.data?.isSafeForDeploy).toBe(true)
+        );
+
+        const releases = renderHookWithQueryClient(() => useDashboardReleaseStatus());
+        await waitFor(() =>
+            expect(releases.result.current.data?.previous?.commitSha).toBe("b".repeat(40))
         );
     });
 
@@ -4577,6 +4620,18 @@ describe("Mira Dashboard frontend behavior", () => {
                     });
                 }
 
+                if (url === "/api/pull-requests/releases/rollback" && method === "POST") {
+                    return Response.json({
+                        isOk: true,
+                        deployment: {
+                            id: "rollback-1",
+                            status: "building",
+                            startedAt: "2026-06-23T08:00:00.000Z",
+                            updatedAt: "2026-06-23T08:00:00.000Z",
+                        },
+                    });
+                }
+
                 throw new Error(`Unexpected pull request API call: ${method} ${url}`);
             }
         );
@@ -4617,6 +4672,11 @@ describe("Mira Dashboard frontend behavior", () => {
         const deploy = renderHookWithQueryClient(() => useDeployDashboard());
         await expect(deploy.result.current.mutateAsync()).resolves.toMatchObject({
             deployment: { id: "deploy-2" },
+        });
+
+        const rollback = renderHookWithQueryClient(() => useRollbackDashboard());
+        await expect(rollback.result.current.mutateAsync()).resolves.toMatchObject({
+            deployment: { id: "rollback-1" },
         });
     });
 

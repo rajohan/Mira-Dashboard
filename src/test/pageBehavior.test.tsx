@@ -1733,6 +1733,34 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
+    if (url === "/api/pull-requests/releases") {
+        return Response.json({
+            release: {
+                current: {
+                    builtAt: "2026-06-24T08:00:00.000Z",
+                    commitSha: "abc12345".repeat(5),
+                    commitTitle: "Current dashboard release",
+                    schema: {
+                        maximumCompatible: 31,
+                        minimumCompatible: 1,
+                        target: 31,
+                    },
+                },
+                previous: {
+                    builtAt: "2026-06-23T08:00:00.000Z",
+                    commitSha: "def45678".repeat(5),
+                    commitTitle: "Previous dashboard release",
+                    schema: {
+                        maximumCompatible: 31,
+                        minimumCompatible: 1,
+                        target: 31,
+                    },
+                },
+                rollback: { available: true },
+            },
+        });
+    }
+
     if (method === "POST" && url === "/api/pull-requests/190/approve") {
         expect(parseRequestBody(init)).toEqual({ deploy: false });
         return Response.json({
@@ -1769,6 +1797,19 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 status: "restart-scheduled",
                 updatedAt: "2026-06-24T08:15:00.000Z",
                 note: "Deploy scheduled",
+            },
+        });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/releases/rollback") {
+        return Response.json({
+            isOk: true,
+            deployment: {
+                id: "rollback-1",
+                commit: "def45678".repeat(5),
+                status: "building",
+                updatedAt: "2026-06-24T08:16:00.000Z",
+                note: "Rollback to def45678 queued",
             },
         });
     }
@@ -2747,6 +2788,8 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText("Expand backend coverage")).toBeInTheDocument();
             expect(screen.getByText("Bump dashboard dependency")).toBeInTheDocument();
             expect(screen.getByText("Deploy dashboard")).toBeInTheDocument();
+            expect(screen.getByText("Current dashboard release")).toBeInTheDocument();
+            expect(screen.getByText("Previous dashboard release")).toBeInTheDocument();
         });
         expect(screen.getAllByText("1 PR")).toHaveLength(2);
         expect(screen.getByText("Coverage body")).toBeInTheDocument();
@@ -2772,6 +2815,17 @@ describe("Mira Dashboard pages", () => {
         );
         await waitFor(() => {
             expect(screen.getByText("Deploy scheduled")).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole("button", { name: "Roll back to def45678" }));
+        expect(
+            screen.getByRole("heading", { name: "Roll back to def45678" })
+        ).toBeInTheDocument();
+        await user.click(
+            screen.getAllByRole("button", { name: "Roll back to def45678" }).at(-1)!
+        );
+        await waitFor(() => {
+            expect(screen.getByText("Rollback to def45678 queued")).toBeInTheDocument();
         });
 
         await user.click(screen.getAllByRole("button", { name: "Merge only" })[0]!);

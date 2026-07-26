@@ -1,9 +1,11 @@
 import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
+    getDashboardReleaseStatus,
     getProductionCheckoutStatus,
     listDashboardPullRequests,
     prepareAndStartDeployLatest,
+    prepareAndStartRollback,
     readDeploymentJobs,
     runPullRequestApproval,
     runPullRequestBranchUpdate,
@@ -112,6 +114,27 @@ export const pullRequestRoutes = {
         GET: () => {
             try {
                 return json({ deployments: readDeploymentJobs() });
+            } catch (error) {
+                return routeError(error);
+            }
+        },
+    },
+    "/api/pull-requests/releases": {
+        GET: async () => {
+            try {
+                return json({ release: await getDashboardReleaseStatus() });
+            } catch (error) {
+                return routeError(error);
+            }
+        },
+    },
+    "/api/pull-requests/releases/rollback": {
+        POST: async () => {
+            try {
+                return json({
+                    deployment: await prepareAndStartRollback(),
+                    isOk: true,
+                });
             } catch (error) {
                 return routeError(error);
             }

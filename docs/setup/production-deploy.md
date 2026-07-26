@@ -86,243 +86,6 @@ The executor fails closed unless both units already run from managed
 `current/backend` with the exact stable state paths. A deployment never modifies
 the running release.
 
-## One-Time Managed Cutover
-
-Run this once immediately after the atomic-executor change has been merged into
-the control checkout. Do **not** use the old in-place deploy executor for this
-change. The old services stay online while the merged control-checkout scripts
-stage the managed releases. The Jobs queue must be idle. PR #333 is the
-known-good format-2 bootstrap release.
-
-### 1. Stage both releases while the old services remain online
-
-The existing database is still below the control checkout during this step.
-Staging is read-safe and creates a restore-verified pre-deploy backup.
-Run all four cutover sections in the same interactive shell so the validated
-path and commit variables remain available.
-
-```bash
-cd /home/ubuntu/projects/mira-dashboard
-git switch main
-git pull --ff-only origin main
-
-RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
-WORKTREE_ROOT=/home/ubuntu/projects/mira-dashboard-worktrees
-OLD_STATE_ROOT=/home/ubuntu/projects/mira-dashboard/backend/data
-STATE_ROOT=/home/ubuntu/projects/mira-dashboard-state
-OLD_DATABASE_PATH="$OLD_STATE_ROOT/mira-dashboard.db"
-OLD_OPENCLAW_CLIENT_HOME="$OLD_STATE_ROOT/openclaw-client"
-OLD_LOG_ROTATION_LOCK="$OLD_STATE_ROOT/log-rotation.lock"
-DATABASE_PATH="$STATE_ROOT/mira-dashboard.db"
-OPENCLAW_CLIENT_HOME="$STATE_ROOT/openclaw-client"
-LOG_ROTATION_LOCK="$STATE_ROOT/log-rotation.lock"
-BOOTSTRAP_SHA=4aca68e0cffed68c42a630c4221e11e725ab294b
-CANDIDATE_SHA="$(git rev-parse HEAD)"
-DASHBOARD_PORT="$(
-  /usr/local/bin/doppler run --config prd --project rajohan -- \
-    /bin/sh -c 'printf "%s" "${PORT:-3100}"'
-)"
-DASHBOARD_PORT="$(
-  printf '%s' "$DASHBOARD_PORT" |
-    sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
-)"
-if ! [[ "$DASHBOARD_PORT" =~ ^[0-9]+$ ]] ||
-  (( DASHBOARD_PORT < 1 || DASHBOARD_PORT > 65535 )); then
-  DASHBOARD_PORT=3100
-fi
-install --directory --mode=0700 "$WORKTREE_ROOT"
-
-env \
-  MIRA_DASHBOARD_DB_PATH="$OLD_DATABASE_PATH" \
-  MIRA_DASHBOARD_OPENCLAW_HOME="$OLD_OPENCLAW_CLIENT_HOME" \
-  MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE="$OLD_LOG_ROTATION_LOCK" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  bun backend/src/releaseDeployment.ts stage "$BOOTSTRAP_SHA"
-env \
-  MIRA_DASHBOARD_DB_PATH="$OLD_DATABASE_PATH" \
-  MIRA_DASHBOARD_OPENCLAW_HOME="$OLD_OPENCLAW_CLIENT_HOME" \
-  MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE="$OLD_LOG_ROTATION_LOCK" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  bun backend/src/releaseDeployment.ts stage "$CANDIDATE_SHA"
-```
-
-### 2. Stop both units and atomically move persistent state
-
-Keep copies of the installed pre-cutover units for the recovery procedure.
-Both source and destination are below `/home/ubuntu/projects`, so `mv` is a
-same-filesystem directory rename rather than a live database copy.
-
-```bash
-CUTOVER_UNIT_BACKUP="$(mktemp -d)"
-cp --preserve=mode,timestamps \
-  /home/ubuntu/.config/systemd/user/mira-dashboard.service \
-  "$CUTOVER_UNIT_BACKUP/mira-dashboard.service"
-cp --preserve=mode,timestamps \
-  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service \
-  "$CUTOVER_UNIT_BACKUP/mira-dashboard-worker.service"
-
-systemctl --user stop mira-dashboard-worker.service mira-dashboard.service
-test -d "$OLD_STATE_ROOT"
-test ! -e "$STATE_ROOT"
-mv --no-target-directory "$OLD_STATE_ROOT" "$STATE_ROOT"
-test -f "$DATABASE_PATH"
-```
-
-Do not leave a compatibility symlink at `backend/data`. Production units use
-the new absolute paths and development retains its normal local `backend/data`
-default.
-
-### 3. Activate the bootstrap and install managed units
-
-```bash
-env \
-  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  MIRA_DASHBOARD_OPENCLAW_HOME="$OPENCLAW_CLIENT_HOME" \
-  MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE="$LOG_ROTATION_LOCK" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  bun backend/src/releaseLifecycle.ts activate "$BOOTSTRAP_SHA"
-
-install -m 0644 systemd/mira-dashboard.service \
-  /home/ubuntu/.config/systemd/user/mira-dashboard.service
-install -m 0644 systemd/mira-dashboard-worker.service \
-  /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service
-systemctl --user daemon-reload
-systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
-```
-
-Use a commit-bound readiness function; exhausting the loop is a failure:
-
-```bash
-worker_identity() {
-  local properties active substate pid started
-  properties="$(
-    systemctl --user show mira-dashboard-worker.service \
-      --property=ActiveState \
-      --property=SubState \
-      --property=MainPID \
-      --property=ExecMainStartTimestampMonotonic \
-      --no-pager 2>/dev/null
-  )" || return 1
-  active="$(sed -n 's/^ActiveState=//p' <<<"$properties")"
-  substate="$(sed -n 's/^SubState=//p' <<<"$properties")"
-  pid="$(sed -n 's/^MainPID=//p' <<<"$properties")"
-  started="$(sed -n 's/^ExecMainStartTimestampMonotonic=//p' <<<"$properties")"
-  [[ "$active" == active && "$substate" == running ]] || return 1
-  [[ "$pid:$started" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]] || return 1
-  printf '%s:%s' "$pid" "$started"
-}
-
-readiness_matches() {
-  local expected="$1"
-  local response
-  response="$(curl --fail --silent --show-error \
-    --connect-timeout 2 --max-time 5 \
-    "http://127.0.0.1:${DASHBOARD_PORT}/api/health/ready" || true)"
-  jq --exit-status --arg expected "$expected" \
-    '.status == "isReady"
-     and .checks.release.ready == true
-     and .checks.release.backendCommit == $expected
-     and .checks.release.frontendCommit == $expected
-     and .checks.worker.ready == true' <<<"$response" >/dev/null
-}
-
-ready_for_commit() {
-  local full_sha="$1"
-  local expected="${full_sha:0:8}"
-  local initial_worker_identity current_worker_identity
-  initial_worker_identity=""
-  for attempt in {1..30}; do
-    if readiness_matches "$expected"; then
-      initial_worker_identity="$(worker_identity || true)"
-      [[ -n "$initial_worker_identity" ]] && break
-    fi
-    sleep 1
-  done
-  [[ -n "$initial_worker_identity" ]] || return 1
-  sleep 31
-  current_worker_identity="$(worker_identity || true)"
-  [[ "$current_worker_identity" == "$initial_worker_identity" ]] || return 1
-  readiness_matches "$expected"
-}
-
-recover_legacy_deployment() {
-  systemctl --user stop \
-    mira-dashboard-worker.service mira-dashboard.service || return 1
-  install -m 0644 "$CUTOVER_UNIT_BACKUP/mira-dashboard.service" \
-    /home/ubuntu/.config/systemd/user/mira-dashboard.service || return 1
-  install -m 0644 "$CUTOVER_UNIT_BACKUP/mira-dashboard-worker.service" \
-    /home/ubuntu/.config/systemd/user/mira-dashboard-worker.service || return 1
-  mv --no-target-directory "$STATE_ROOT" "$OLD_STATE_ROOT" || return 1
-  systemctl --user daemon-reload || return 1
-  systemctl --user restart \
-    mira-dashboard-worker.service mira-dashboard.service
-}
-
-if ! ready_for_commit "$BOOTSTRAP_SHA"; then
-  echo "Bootstrap readiness failed; restoring the legacy deployment" >&2
-  if ! recover_legacy_deployment; then
-    echo "Legacy deployment recovery also failed; manual recovery is required" >&2
-  fi
-  exit 1
-fi
-```
-
-Any failed bootstrap check now runs recovery and exits nonzero. Investigate
-before retrying; never continue to candidate activation after this branch.
-
-### 4. Activate and verify the candidate
-
-```bash
-if ! env \
-  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  bun "$RELEASES_ROOT/releases/$BOOTSTRAP_SHA/backend/dist/releaseLifecycle.js" \
-  activate "$CANDIDATE_SHA"; then
-  echo "Candidate activation failed; bootstrap remains active" >&2
-  exit 1
-fi
-systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
-```
-
-```bash
-if ! ready_for_commit "$CANDIDATE_SHA"; then
-  echo "Candidate readiness failed; rolling back to bootstrap" >&2
-  if ! env \
-    MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-    MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-    NODE_ENV=production \
-    bun "$RELEASES_ROOT/releases/$BOOTSTRAP_SHA/backend/dist/releaseLifecycle.js" \
-    rollback; then
-    echo "Candidate rollback failed; manual recovery is required" >&2
-    exit 1
-  fi
-  systemctl --user restart \
-    mira-dashboard-worker.service mira-dashboard.service
-  if ! ready_for_commit "$BOOTSTRAP_SHA"; then
-    echo "Bootstrap was restored but did not become ready" >&2
-    exit 1
-  fi
-  echo "Bootstrap restored; investigate candidate failure before retrying" >&2
-  exit 1
-fi
-```
-
-The failure branch always exits nonzero, including after a verified rollback.
-After a successful candidate check:
-
-```bash
-env \
-  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  bun "$RELEASES_ROOT/current/backend/dist/releaseLifecycle.js" prune 3
-gio trash -- "$CUTOVER_UNIT_BACKUP"
-```
-
 ## Restart And Smoke Test
 
 Normal deploys schedule their own restart. For manual recovery, first confirm
@@ -344,32 +107,74 @@ must still return `401`.
 ## Rollback
 
 Normal activation automatically rolls back on restart or commit-bound readiness
-failure. Manual rollback is a failure-only operation:
+failure. The preferred manual path is **Pull requests → Production releases →
+Roll back**, which uses the same exclusive release lock, persistent job,
+detached guardian, web/worker restart, commit-bound readiness, and automatic
+restoration of the original release if the rollback target fails.
+
+Use the host-local fallback below only when the Dashboard UI is unavailable.
+First confirm no deployment or rollback action is running:
 
 ```bash
 set -euo pipefail
 RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
 DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
-PREVIOUS_RELEASE="$(
-  readlink --canonicalize-existing "$RELEASES_ROOT/previous"
+CURRENT_RELEASE="$(
+  readlink --canonicalize-existing "$RELEASES_ROOT/current"
 )"
-PREVIOUS_SHA="$(basename -- "$PREVIOUS_RELEASE")"
-[[ "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]]
-[[ "$PREVIOUS_RELEASE" == "$RELEASES_ROOT/releases/$PREVIOUS_SHA" ]]
-PREVIOUS_LIFECYCLE="$PREVIOUS_RELEASE/backend/dist/releaseLifecycle.js"
-test -f "$PREVIOUS_LIFECYCLE"
-test ! -L "$PREVIOUS_LIFECYCLE"
+CURRENT_SHA="$(basename -- "$CURRENT_RELEASE")"
+[[ "$CURRENT_SHA" =~ ^[0-9a-f]{40}$ ]]
+[[ "$CURRENT_RELEASE" == "$RELEASES_ROOT/releases/$CURRENT_SHA" ]]
+CURRENT_LIFECYCLE="$CURRENT_RELEASE/backend/dist/releaseLifecycle.js"
+test -f "$CURRENT_LIFECYCLE"
+test ! -L "$CURRENT_LIFECYCLE"
+STATUS="$(
+  env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+    MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+    NODE_ENV=production \
+    bun "$CURRENT_LIFECYCLE" status
+)"
+TARGET_SHA="$(jq --raw-output '.previous.commitSha // empty' <<<"$STATUS")"
+[[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+[[ "$TARGET_SHA" != "$CURRENT_SHA" ]]
+
+ready_for_commit() {
+  local expected="${1:0:8}"
+  local response
+  for attempt in {1..30}; do
+    response="$(
+      curl --fail --silent --show-error \
+        --connect-timeout 2 --max-time 5 \
+        "http://127.0.0.1:${DASHBOARD_PORT:-3100}/api/health/ready" || true
+    )"
+    if jq --exit-status --arg expected "$expected" \
+      '.status == "isReady"
+       and .checks.release.ready == true
+       and .checks.release.backendCommit == $expected
+       and .checks.release.frontendCommit == $expected
+       and .checks.worker.ready == true' <<<"$response" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
   MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
-  bun "$PREVIOUS_LIFECYCLE" status
-env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
-  bun "$PREVIOUS_LIFECYCLE" rollback
+  bun "$CURRENT_LIFECYCLE" rollback
 systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
-curl --fail --silent --show-error \
-  "http://127.0.0.1:${DASHBOARD_PORT:-3100}/api/health/ready" | jq
+if ! ready_for_commit "$TARGET_SHA"; then
+  echo "Rollback target failed readiness; restoring $CURRENT_SHA" >&2
+  env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+    MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+    NODE_ENV=production \
+    bun "$CURRENT_LIFECYCLE" rollback
+  systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
+  ready_for_commit "$CURRENT_SHA"
+  exit 1
+fi
 ```
 
 Git reset and rebuilding in the control checkout are not production rollback
