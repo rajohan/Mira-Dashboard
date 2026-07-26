@@ -250,26 +250,6 @@ exit 2
     chmodSync(binaryPath, 0o755);
 }
 
-function writeRunningWalgPreflightDocker(binaryPath: string): void {
-    writeFileSync(
-        binaryPath,
-        String.raw`#!/usr/bin/env bash
-set -euo pipefail
-if [[ "$*" == *"pgrep -f"* ]]; then
-  printf '23456\n'
-  exit 0
-fi
-if [[ "$*" == "exec walg wal-g backup-list --detail --json" ]]; then
-  printf '[]\n'
-  exit 0
-fi
-echo "unexpected docker args: $*" >&2
-exit 2
-`
-    );
-    chmodSync(binaryPath, 0o755);
-}
-
 function writeFakeOpenClaw(binaryPath: string): void {
     writeFileSync(
         binaryPath,
@@ -4028,10 +4008,6 @@ fi
     });
 
     it("records and clears WAL-G needs-attention state when container preflight detects a running process", async () => {
-        rememberEnvironment("PATH");
-        const fakeBin = createTemporaryRoot("mira-backup-walg-running-bin-");
-        writeRunningWalgPreflightDocker(path.join(fakeBin, "docker"));
-        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const {
             clearPersistedBackupAttention,
             getCurrentBackupJob,
@@ -4040,12 +4016,26 @@ fi
             registerBackupScheduledJobs,
             startManualBackup,
         } = await import("../src/services/backups.ts");
-        const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
+        const { runScheduledJob, stopScheduledJobExecutor } =
+            await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("pgrep -f")) {
+                    return { code: 0, stderr: "", stdout: "23456\n" };
+                }
+                if (joined.includes("wal-g backup-list")) {
+                    return { code: 0, stderr: "", stdout: "[]" };
+                }
+                throw new Error(`Unexpected backup command: ${joined}`);
+            });
 
         try {
             registerBackupScheduledJobs();
+            const scheduledRun = runScheduledJob("backup.walg");
             await startTestScheduledExecutor();
-            await expect(runScheduledJob("backup.walg")).resolves.toMatchObject({
+            await expect(scheduledRun).resolves.toMatchObject({
                 output: {
                     backup: {
                         code: 130,
@@ -4082,18 +4072,16 @@ fi
             expect(getCurrentBackupJob("walg")).toBeUndefined();
             expect(getPersistedBackupJob("walg")).toBeUndefined();
         } finally {
+            await stopScheduledJobExecutor();
+            runProcessSpy.mockRestore();
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
                 .run();
             database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
         }
-    });
+    }, 10_000);
 
     it("clears persisted backup attention without in-memory worker state", async () => {
-        rememberEnvironment("PATH");
-        const fakeBin = createTemporaryRoot("mira-backup-persisted-clear-bin-");
-        writeFakeDocker(path.join(fakeBin, "docker"));
-        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         const {
             clearPersistedBackupAttention,
             getCurrentBackupJob,
@@ -4101,8 +4089,17 @@ fi
             queueManualBackup,
             registerBackupScheduledJobs,
         } = await import("../src/services/backups.ts");
-        const { enqueueScheduledJob, runScheduledJob } =
+        const { enqueueScheduledJob, runScheduledJob, stopScheduledJobExecutor } =
             await import("../src/services/scheduledJobs.ts");
+        const runProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (_command, arguments_) => {
+                const joined = arguments_.join(" ");
+                if (joined.includes("wal-g backup-list")) {
+                    return { code: 0, stderr: "", stdout: "[]" };
+                }
+                throw new Error(`Unexpected backup command: ${joined}`);
+            });
 
         try {
             registerBackupScheduledJobs();
@@ -4143,8 +4140,9 @@ fi
                 "WALG backup needs attention"
             );
 
+            const scheduledRun = runScheduledJob("backup.walg");
             await startTestScheduledExecutor();
-            await expect(runScheduledJob("backup.walg")).resolves.toMatchObject({
+            await expect(scheduledRun).resolves.toMatchObject({
                 output: { backup },
                 status: "failed",
             });
@@ -4171,12 +4169,14 @@ fi
             ).toEqual({ cancellable: 0, status: "success" });
             expect(getPersistedBackupJob("walg")).toBeUndefined();
         } finally {
+            await stopScheduledJobExecutor();
+            runProcessSpy.mockRestore();
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
                 .run();
             database.prepare("DELETE FROM scheduled_jobs WHERE id LIKE 'backup.%'").run();
         }
-    });
+    }, 10_000);
 
     it("reports recovered backup failures instead of stale running snapshots", async () => {
         const { getPersistedBackupJob, registerBackupScheduledJobs } =

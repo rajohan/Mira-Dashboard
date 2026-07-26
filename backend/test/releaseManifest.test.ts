@@ -12,15 +12,18 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "bun:test";
 
+import { databaseMigrationIdentities } from "../src/databaseMigrations/index.ts";
 import {
     createReleaseManifest,
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
+    databaseMigrationInventorySha256,
     getRuntimeReleaseIdentity,
     invalidateRuntimeReleaseIdentityCache,
     loadReleaseManifest,
     loadRuntimeReleaseIdentity,
     parseReleaseManifest,
     RELEASE_MANIFEST_FILE_NAME,
+    RELEASE_MANIFEST_FORMAT_VERSION,
     requireRunnableReleaseCommit,
     verifyReleaseArtifacts,
     writeReleaseManifest,
@@ -71,6 +74,10 @@ function temporaryReleaseRoot(): string {
     writeTestBuildIdentities(root);
     writeFileSync(
         path.join(root, "backend", "dist", "databasePreflight.js"),
+        "export {};\n"
+    );
+    writeFileSync(
+        path.join(root, "backend", "dist", "releaseLifecycle.js"),
         "export {};\n"
     );
     writeFileSync(
@@ -179,9 +186,11 @@ describe("Dashboard release manifest", () => {
                 backendCommit: "aaaaaaaa",
                 frontendCommit: "aaaaaaaa",
             },
-            formatVersion: 1,
+            formatVersion: RELEASE_MANIFEST_FORMAT_VERSION,
             schema: {
                 maximumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+                migrations: databaseMigrationIdentities(),
+                migrationInventorySha256: databaseMigrationInventorySha256(),
                 minimumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum,
                 target: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target,
             },
@@ -191,6 +200,7 @@ describe("Dashboard release manifest", () => {
             "backend/config/log-rotation.json",
             "backend/dist/build-identity.json",
             "backend/dist/databasePreflight.js",
+            "backend/dist/releaseLifecycle.js",
             "backend/dist/resetDashboardPassword.js",
             "backend/dist/serverStart.js",
             "backend/dist/workerStart.js",
@@ -219,6 +229,46 @@ describe("Dashboard release manifest", () => {
         expect(
             readFileSync(path.join(root, RELEASE_MANIFEST_FILE_NAME), "utf8")
         ).toEndWith("\n");
+    });
+
+    it("keeps deployed version 1 manifests readable during the format transition", async () => {
+        const root = temporaryReleaseRoot();
+        const manifest = await createReleaseManifest(manifestOptions(root));
+        rmSync(path.join(root, "backend", "dist", "releaseLifecycle.js"));
+        const legacySchema = {
+            maximumCompatible: manifest.schema.maximumCompatible,
+            migrationRegistrySha256: manifest.schema.migrationRegistrySha256,
+            minimumCompatible: manifest.schema.minimumCompatible,
+            target: manifest.schema.target,
+        };
+
+        const legacyManifest = parseReleaseManifest({
+            ...manifest,
+            artifacts: manifest.artifacts.filter(
+                (artifact) => artifact.path !== "backend/dist/releaseLifecycle.js"
+            ),
+            formatVersion: 1,
+            schema: legacySchema,
+        });
+        writeFileSync(
+            path.join(root, RELEASE_MANIFEST_FILE_NAME),
+            `${JSON.stringify(legacyManifest, undefined, 2)}\n`
+        );
+
+        expect(await loadReleaseManifest(root)).toMatchObject({
+            formatVersion: 1,
+            schema: legacySchema,
+        });
+        await expect(
+            verifyReleaseArtifacts(root, legacyManifest)
+        ).resolves.toBeUndefined();
+        await expect(
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
+        ).resolves.toMatchObject({
+            manifestFormatVersion: 1,
+            ready: true,
+            source: "manifest",
+        });
     });
 
     it("refuses to write a manifest larger than the loader accepts", async () => {
@@ -292,6 +342,19 @@ describe("Dashboard release manifest", () => {
                 },
             })
         ).toThrow("Release manifest schema range is invalid");
+        expect(() =>
+            parseReleaseManifest({
+                ...manifest,
+                schema: {
+                    ...manifest.schema,
+                    migrations: manifest.schema.migrations?.map((migration, index) =>
+                        index === 0
+                            ? { ...migration, checksum: "f".repeat(64) }
+                            : migration
+                    ),
+                },
+            })
+        ).toThrow("Release manifest migration inventory is invalid");
     });
 
     it("requires the default runtime log-rotation configuration", async () => {
@@ -428,6 +491,34 @@ describe("Dashboard release manifest", () => {
             ready: false,
             source: "manifest",
         });
+
+        const changedMigrations = manifest.schema.migrations?.map((migration, index) =>
+            index === 0 ? { ...migration, checksum: "f".repeat(64) } : migration
+        );
+        writeFileSync(
+            path.join(root, RELEASE_MANIFEST_FILE_NAME),
+            `${JSON.stringify(
+                {
+                    ...manifest,
+                    schema: {
+                        ...manifest.schema,
+                        migrations: changedMigrations,
+                        migrationInventorySha256: databaseMigrationInventorySha256(
+                            changedMigrations ?? []
+                        ),
+                    },
+                },
+                undefined,
+                2
+            )}\n`
+        );
+        await expect(
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
+        ).resolves.toMatchObject({
+            issue: "manifest-code-mismatch",
+            ready: false,
+            source: "manifest",
+        });
     });
 
     it("rejects a manifest built by another Bun runtime", async () => {
@@ -448,7 +539,7 @@ describe("Dashboard release manifest", () => {
         await expect(
             loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
-            issue: "manifest-code-mismatch",
+            issue: "build-identity-invalid",
             ready: false,
             source: "manifest",
         });

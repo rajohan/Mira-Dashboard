@@ -3427,17 +3427,19 @@ describe("OpenClaw chat bridge", () => {
                 { runId: providerRunId },
                 requestBoundary
             );
+
+            expect(
+                new Set(
+                    bridge
+                        .snapshot(MAIN)
+                        .events.map(
+                            (event) => (event.payload as { runId?: string }).runId
+                        )
+                )
+            ).toEqual(new Set([provisionalRunId, providerRunId]));
         } finally {
             dateNow.mockRestore();
         }
-
-        expect(
-            new Set(
-                bridge
-                    .snapshot(MAIN)
-                    .events.map((event) => (event.payload as { runId?: string }).runId)
-            )
-        ).toEqual(new Set([provisionalRunId, providerRunId]));
     });
 
     it("does not promote a hydrated provisional run across a new send boundary", () => {

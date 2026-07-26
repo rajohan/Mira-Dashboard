@@ -4,14 +4,18 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { getBackendBuildCommit } from "./buildIdentity.ts";
-import { databaseMigrations } from "./databaseMigrations/index.ts";
+import {
+    databaseMigrationIdentities,
+    type DatabaseMigrationIdentity,
+    databaseMigrations,
+} from "./databaseMigrations/index.ts";
 import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
 
 export { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
 
 export const RELEASE_MANIFEST_FILE_NAME = "release-manifest.json";
-export const RELEASE_MANIFEST_FORMAT_VERSION = 1;
+export const RELEASE_MANIFEST_FORMAT_VERSION = 2;
 
 const MAX_RELEASE_MANIFEST_BYTES = 256 * 1024;
 const RELEASE_ARTIFACT_DIRECTORIES = ["dist", "backend/dist"] as const;
@@ -22,16 +26,22 @@ const RELEASE_STATIC_ARTIFACTS = [
     "bun.lock",
     "package.json",
 ] as const;
-const REQUIRED_RELEASE_ARTIFACTS = [
+const FORMAT_2_REQUIRED_RELEASE_ARTIFACTS = [
     ...RELEASE_STATIC_ARTIFACTS,
     "backend/dist/build-identity.json",
     "backend/dist/databasePreflight.js",
+    "backend/dist/releaseLifecycle.js",
     "backend/dist/resetDashboardPassword.js",
     "backend/dist/serverStart.js",
     "backend/dist/workerStart.js",
     "dist/build-identity.json",
     "dist/index.html",
 ] as const;
+// Format 1 remains readable only for the first managed cutover and its rollback
+// window. Remove this compatibility list once current/previous cannot reference v1.
+const FORMAT_1_REQUIRED_RELEASE_ARTIFACTS = FORMAT_2_REQUIRED_RELEASE_ARTIFACTS.filter(
+    (artifactPath) => artifactPath !== "backend/dist/releaseLifecycle.js"
+);
 const MAX_BUILD_IDENTITY_BYTES = 4096;
 const RUNTIME_RELEASE_VERIFICATION_CACHE_MS = 15_000;
 const SHA_256_PATTERN = /^[\da-f]{64}$/u;
@@ -55,9 +65,11 @@ export interface DashboardReleaseManifest {
         backendCommit: string;
         frontendCommit: string;
     };
-    formatVersion: 1;
+    formatVersion: 1 | 2;
     schema: {
         maximumCompatible: number;
+        migrations?: DatabaseMigrationIdentity[];
+        migrationInventorySha256?: string;
         migrationRegistrySha256: string;
         minimumCompatible: number;
         target: number;
@@ -69,7 +81,11 @@ export interface RuntimeReleaseIdentity {
     backendCommit: string;
     commitSha?: string;
     frontendCommit: string;
-    issue?: "manifest-code-mismatch" | "manifest-invalid" | "manifest-missing";
+    issue?:
+        | "build-identity-invalid"
+        | "manifest-code-mismatch"
+        | "manifest-invalid"
+        | "manifest-missing";
     manifestFormatVersion?: number;
     ready: boolean;
     schema?: DashboardReleaseManifest["schema"];
@@ -150,6 +166,18 @@ export function databaseMigrationRegistrySha256(): string {
     return sha256(serialized);
 }
 
+export function databaseMigrationInventorySha256(
+    migrations: readonly DatabaseMigrationIdentity[] = databaseMigrationIdentities()
+): string {
+    const serialized = migrations
+        .map(
+            (migration) =>
+                `${migration.version}\0${migration.name}\0${migration.checksum}`
+        )
+        .join("\0");
+    return sha256(serialized);
+}
+
 function isSafeArtifactPath(value: string): boolean {
     if (
         !value ||
@@ -181,6 +209,25 @@ function artifactPath(releaseRoot: string, relativePath: string): string {
     return path.join(releaseRoot, ...relativePath.split("/"));
 }
 
+async function assertArtifactAncestorsReal(
+    releaseRoot: string,
+    relativePath: string,
+    shouldIncludeLeaf = false
+): Promise<void> {
+    const segments = relativePath.split("/");
+    const directorySegments = shouldIncludeLeaf ? segments : segments.slice(0, -1);
+    let currentPath = releaseRoot;
+    for (const segment of directorySegments) {
+        currentPath = path.join(currentPath, segment);
+        const stat = await fsp.lstat(currentPath);
+        if (!stat.isDirectory() || stat.isSymbolicLink()) {
+            throw new TypeError(
+                `Release artifact path must not traverse symlinks: ${relativePath}`
+            );
+        }
+    }
+}
+
 async function readRegularFileNoFollow(filePath: string): Promise<Buffer> {
     const file = await fsp.open(
         filePath,
@@ -201,6 +248,7 @@ async function collectArtifactDirectory(
     releaseRoot: string,
     relativeDirectory: string
 ): Promise<string[]> {
+    await assertArtifactAncestorsReal(releaseRoot, relativeDirectory, true);
     const absoluteDirectory = artifactPath(
         releaseRoot,
         `${relativeDirectory}/placeholder`
@@ -258,6 +306,7 @@ async function releaseArtifact(
     releaseRoot: string,
     relativePath: string
 ): Promise<ReleaseManifestArtifact> {
+    await assertArtifactAncestorsReal(releaseRoot, relativePath);
     const content = await readRegularFileNoFollow(
         artifactPath(releaseRoot, relativePath)
     );
@@ -309,6 +358,7 @@ async function loadComponentBuildIdentity(
         component === "backend"
             ? "backend/dist/build-identity.json"
             : "dist/build-identity.json";
+    await assertArtifactAncestorsReal(releaseRoot, relativePath);
     const content = await readRegularFileNoFollow(
         artifactPath(releaseRoot, relativePath)
     );
@@ -337,6 +387,38 @@ async function loadComponentBuildIdentity(
     };
 }
 
+function assertComponentBuildIdentities(
+    builds: ComponentBuildIdentity[],
+    commitSha: string,
+    bunVersion: string,
+    expectedIdentity: "release manifest" | "release source"
+): void {
+    for (const build of builds) {
+        if (build.commitSha !== commitSha || build.bunVersion !== bunVersion) {
+            throw new Error(
+                `${build.component} build identity does not match the ${expectedIdentity}`
+            );
+        }
+    }
+}
+
+export async function verifyReleaseBuildIdentities(
+    releaseRoot: string,
+    manifest: DashboardReleaseManifest
+): Promise<void> {
+    const realReleaseRoot = await fsp.realpath(releaseRoot);
+    const builds = await Promise.all([
+        loadComponentBuildIdentity(realReleaseRoot, "backend"),
+        loadComponentBuildIdentity(realReleaseRoot, "frontend"),
+    ]);
+    assertComponentBuildIdentities(
+        builds,
+        manifest.commitSha,
+        manifest.bunVersion,
+        "release manifest"
+    );
+}
+
 export async function createReleaseManifest(
     options: CreateReleaseManifestOptions
 ): Promise<DashboardReleaseManifest> {
@@ -353,13 +435,12 @@ export async function createReleaseManifest(
         loadComponentBuildIdentity(releaseRoot, "backend"),
         loadComponentBuildIdentity(releaseRoot, "frontend"),
     ]);
-    for (const build of [backendBuild, frontendBuild]) {
-        if (build.commitSha !== commitSha || build.bunVersion !== bunVersion) {
-            throw new Error(
-                `${build.component} build identity does not match the release source`
-            );
-        }
-    }
+    assertComponentBuildIdentities(
+        [backendBuild, frontendBuild],
+        commitSha,
+        bunVersion,
+        "release source"
+    );
 
     const artifactPaths = await listReleaseArtifactPaths(releaseRoot);
     const artifacts: ReleaseManifestArtifact[] = [];
@@ -381,6 +462,8 @@ export async function createReleaseManifest(
         formatVersion: RELEASE_MANIFEST_FORMAT_VERSION,
         schema: {
             maximumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+            migrations: databaseMigrationIdentities(),
+            migrationInventorySha256: databaseMigrationInventorySha256(),
             migrationRegistrySha256: databaseMigrationRegistrySha256(),
             minimumCompatible: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum,
             target: DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.target,
@@ -409,16 +492,38 @@ function parseArtifact(value: unknown): ReleaseManifestArtifact {
     };
 }
 
-function parseSchema(value: unknown): DashboardReleaseManifest["schema"] {
+function parseMigrationIdentity(value: unknown): DatabaseMigrationIdentity {
     if (
         !isPlainRecord(value) ||
-        !hasExactKeys(value, [
-            "maximumCompatible",
-            "migrationRegistrySha256",
-            "minimumCompatible",
-            "target",
-        ])
+        !hasExactKeys(value, ["checksum", "name", "version"]) ||
+        !Number.isSafeInteger(value.version) ||
+        (value.version as number) <= 0 ||
+        typeof value.name !== "string" ||
+        !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value.name) ||
+        typeof value.checksum !== "string" ||
+        !SHA_256_PATTERN.test(value.checksum)
     ) {
+        throw new TypeError("Release manifest migration identity is invalid");
+    }
+    return {
+        checksum: value.checksum,
+        name: value.name,
+        version: value.version as number,
+    };
+}
+
+function parseSchema(
+    value: unknown,
+    formatVersion: DashboardReleaseManifest["formatVersion"]
+): DashboardReleaseManifest["schema"] {
+    const expectedKeys = [
+        "maximumCompatible",
+        "migrationRegistrySha256",
+        "minimumCompatible",
+        "target",
+        ...(formatVersion === 2 ? ["migrations", "migrationInventorySha256"] : []),
+    ];
+    if (!isPlainRecord(value) || !hasExactKeys(value, expectedKeys)) {
         throw new TypeError("Release manifest schema declaration is invalid");
     }
     const { maximumCompatible, minimumCompatible, target } = value;
@@ -434,8 +539,30 @@ function parseSchema(value: unknown): DashboardReleaseManifest["schema"] {
     ) {
         throw new TypeError("Release manifest schema range is invalid");
     }
+    const migrations =
+        formatVersion === 2 && Array.isArray(value.migrations)
+            ? value.migrations.map((migration) => parseMigrationIdentity(migration))
+            : undefined;
+    // This digest proves only that a foreign manifest is internally consistent.
+    // Runtime and release-manager validation bind it to local code and live history.
+    if (
+        formatVersion === 2 &&
+        (!migrations ||
+            migrations.length !== (target as number) ||
+            migrations.some((migration, index) => migration.version !== index + 1) ||
+            typeof value.migrationInventorySha256 !== "string" ||
+            !SHA_256_PATTERN.test(value.migrationInventorySha256) ||
+            value.migrationInventorySha256 !==
+                databaseMigrationInventorySha256(migrations))
+    ) {
+        throw new TypeError("Release manifest migration inventory is invalid");
+    }
     return {
         maximumCompatible: maximumCompatible as number,
+        ...(migrations && { migrations }),
+        ...(formatVersion === 2 && {
+            migrationInventorySha256: value.migrationInventorySha256 as string,
+        }),
         migrationRegistrySha256: value.migrationRegistrySha256,
         minimumCompatible: minimumCompatible as number,
         target: target as number,
@@ -456,7 +583,8 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
             "formatVersion",
             "schema",
         ]) ||
-        value.formatVersion !== RELEASE_MANIFEST_FORMAT_VERSION ||
+        (value.formatVersion !== 1 &&
+            value.formatVersion !== RELEASE_MANIFEST_FORMAT_VERSION) ||
         typeof value.commitSha !== "string" ||
         typeof value.commitShort !== "string" ||
         typeof value.commitTitle !== "string" ||
@@ -492,9 +620,10 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
         artifactPaths.some(
             (artifactPath_, index) => artifactPath_ !== sortedArtifactPaths[index]
         ) ||
-        REQUIRED_RELEASE_ARTIFACTS.some(
-            (requiredPath) => !artifactPaths.includes(requiredPath)
-        )
+        (value.formatVersion === 1
+            ? FORMAT_1_REQUIRED_RELEASE_ARTIFACTS
+            : FORMAT_2_REQUIRED_RELEASE_ARTIFACTS
+        ).some((requiredPath) => !artifactPaths.includes(requiredPath))
     ) {
         throw new TypeError("Release manifest artifact inventory is invalid");
     }
@@ -510,8 +639,8 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
             backendCommit: value.components.backendCommit as string,
             frontendCommit: value.components.frontendCommit as string,
         },
-        formatVersion: RELEASE_MANIFEST_FORMAT_VERSION,
-        schema: parseSchema(value.schema),
+        formatVersion: value.formatVersion,
+        schema: parseSchema(value.schema, value.formatVersion),
     };
 }
 
@@ -618,8 +747,25 @@ export async function loadRuntimeReleaseIdentity(
     backendBuildCommit = getBackendBuildCommit()
 ): Promise<RuntimeReleaseIdentity> {
     try {
-        const manifest = await loadReleaseManifest(releaseRoot);
-        await verifyReleaseArtifacts(releaseRoot, manifest);
+        const realReleaseRoot = await fsp.realpath(releaseRoot);
+        const manifest = await loadReleaseManifest(realReleaseRoot);
+        await verifyReleaseArtifacts(realReleaseRoot, manifest);
+        try {
+            await verifyReleaseBuildIdentities(realReleaseRoot, manifest);
+        } catch (error) {
+            console.warn("[ReleaseManifest] Build identity verification failed:", error);
+            return {
+                artifactCount: manifest.artifacts.length,
+                backendCommit: manifest.components.backendCommit,
+                commitSha: manifest.commitSha,
+                frontendCommit: manifest.components.frontendCommit,
+                issue: "build-identity-invalid",
+                manifestFormatVersion: manifest.formatVersion,
+                ready: false,
+                schema: manifest.schema,
+                source: "manifest",
+            };
+        }
         const isManifestMatchesCode =
             manifest.commitSha === backendBuildCommit &&
             manifest.bunVersion === Bun.version &&
@@ -628,6 +774,12 @@ export async function loadRuntimeReleaseIdentity(
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum &&
             manifest.schema.maximumCompatible ===
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum &&
+            // Format v1 has no migration inventory, so readiness cannot bind it to
+            // local migration identities. Remove this branch after the first
+            // managed-cutover rollback window no longer contains a v1 release.
+            (manifest.formatVersion === 1 ||
+                manifest.schema.migrationInventorySha256 ===
+                    databaseMigrationInventorySha256()) &&
             manifest.schema.migrationRegistrySha256 === databaseMigrationRegistrySha256();
         return {
             artifactCount: manifest.artifacts.length,

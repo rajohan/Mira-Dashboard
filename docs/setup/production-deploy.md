@@ -284,16 +284,25 @@ release has left the rollback window. The contract migration gets a new
 forward-only version; released migration files are never edited.
 
 If an incompatible change cannot be phased, treat activation as a coordinated
-code-and-data cutover:
+code-and-data cutover. This procedure becomes executable only after the final
+deploy integration has switched both systemd units and the executor to the
+managed `current` link; incompatible cutovers are unsupported while production
+still uses the in-place checkout:
 
-1. record the release SHA, supported schema range, and selected verified
-   pre-deploy/pre-migration snapshot in the release manifest;
+1. run the candidate's production preflight, then record the release SHA,
+   supported schema range, and preflight result in the deployment record;
 2. stop both Dashboard units for the cutover and verify the execution queue is
    idle;
-3. activate the immutable release and migrate forward;
-4. run readiness against the new release and schema;
-5. on failure, stop both units, restore the matching snapshot, switch the
-   `current` release link back, and only then restart.
+3. rerun the candidate's database preflight against the stable production
+   database, require restore verification, and record the newly created
+   `pre-deploy` snapshot; do not reuse the snapshot from step 1 because writes
+   may have committed before the units stopped;
+4. activate the immutable release with the explicit
+   `--coordinated-schema-cutover` flag;
+5. start both units through the managed `current` link, migrate forward on
+   startup, and run readiness against the new release and schema;
+6. on failure, stop both units, restore the snapshot recorded in step 3,
+   switch the `current` release link back, and only then restart.
 
 The migration runner intentionally has no destructive down-migration path.
 Unknown newer migration versions make older code fail closed. A future release
@@ -308,16 +317,22 @@ SQLite preflight, and writes an ignored `release-manifest.json` in the release
 root. The manifest is the release identity source when `NODE_ENV=production`;
 Git is only a development/test fallback.
 
-Manifest format version 1 records:
+Manifest format version 2 records:
 
 - the full and eight-character Git commit plus commit title and build time;
 - the Bun version used for the build;
 - matching frontend/backend commit identities emitted inside both build trees;
 - the target, minimum-compatible, and maximum-compatible SQLite schema;
 - a checksum of the immutable migration registry;
+- the ordered migration identities and their inventory digest;
 - the SHA-256 and byte length of every frontend/backend build artifact plus
   both package manifests, Bun lockfiles, and the default runtime log-rotation
   configuration.
+
+Format version 1 remains readable only for the first managed cutover and its
+rollback window because the currently deployed release predates the migration
+inventory and lifecycle artifact. Remove v1 support once neither `current` nor
+`previous` can reference that release; all newly built releases are format v2.
 
 The backend bundle also embeds its full build commit. Runtime readiness requires
 that embedded commit, both build-identity files, and the release manifest to
@@ -330,10 +345,133 @@ drift, and undeclared runtime artifacts. The schema compatibility range is an
 explicit code constant. Adding a future migration without reviewing that range
 fails the release contract.
 
-The current in-place executor generates this manifest as a transition step. The
-immutable release manager must verify it before activation and compare the live
-schema with the previous release's declared range before offering code-only
+The release lifecycle layer validates immutable directories named by full Git
+SHA under `/home/ubuntu/projects/mira-dashboard-releases/releases/`. This is the
+production default; a deliberately configured `MIRA_DASHBOARD_RELEASES_ROOT`
+overrides it. Run lifecycle commands from a known format-v2 release with the
+same Doppler production environment as the services so schema checks always
+inspect the live Dashboard database. Do not invoke the lifecycle CLI through
+`current`: the first managed rollback may point `current` at the retained
+format-v1 release, which does not contain that artifact. Record and retain the
+first format-v2 release SHA as the management release until the v1 rollback
+window closes.
+
+Set `DATABASE_PATH` to the exact stable absolute
+`MIRA_DASHBOARD_DB_PATH` used by both production units, including when that
+value normally comes from Doppler. Passing it after Doppler injection prevents
+an immutable release from redirecting SQLite state or silently inspecting a
+different configured database:
+
+```bash
+RELEASES_ROOT="/home/ubuntu/projects/mira-dashboard-releases"
+DATABASE_PATH="/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db"
+LIFECYCLE_RELEASE_SHA="REPLACE_WITH_RETAINED_FORMAT_2_SHA"
+CANDIDATE_RELEASE_SHA="REPLACE_WITH_CANDIDATE_FULL_SHA"
+LIFECYCLE_CLI="$RELEASES_ROOT/releases/$LIFECYCLE_RELEASE_SHA/backend/dist/releaseLifecycle.js"
+test -f "$LIFECYCLE_CLI"
+test -f "$DATABASE_PATH"
+
+# Inspect the current slots before activation.
+doppler run --config prd --project rajohan -- \
+  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  bun "$LIFECYCLE_CLI" status
+
+# Activate only after preflight succeeds.
+doppler run --config prd --project rajohan -- \
+  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA"
+```
+
+If production uses a non-default release root, replace `RELEASES_ROOT` with
+that explicit absolute path. Likewise, replace `DATABASE_PATH` with the exact
+path configured for the services. Passing both through `env` after Doppler
+injection ensures the lifecycle process, shell-resolved CLI, and live database
+always refer to the same production state.
+
+Rollback is a separate, failure-only operation. Do not run it as part of the
+normal activation sequence:
+
+```bash
+doppler run --config prd --project rajohan -- \
+  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  bun "$LIFECYCLE_CLI" rollback
+```
+
+`current` and `previous` are relative links inside the release root. Link
+replacement uses same-directory temporary symlinks, atomic rename, and a
+directory fsync, then re-verifies the linked release before committing the
+transition. Activation verifies every artifact, both component build
+identities, the exact manifest/directory SHA, the host Bun version, the actual
+live SQLite schema, and the previous release's rollback window. Rollback also
+checks the live schema rather than assuming it was downgraded by a code-only
 rollback.
+
+The lifecycle CLI changes release links only; an already-running process keeps
+executing the physical release it started from. After the final systemd
+cutover, every activation and rollback must therefore restart both units and
+verify release readiness before reporting success:
+
+```bash
+systemctl --user restart mira-dashboard-worker.service
+systemctl --user restart mira-dashboard.service
+curl --fail --silent --show-error http://127.0.0.1:3100/api/health/ready
+```
+
+The final deploy executor owns this sequence and automatically runs the same
+restart/readiness checks after switching back on failure. The commands above
+are the required manual fallback, not an optional post-deploy check.
+
+Normal activation refuses a schema target outside the current release's rollback
+window. After the final systemd/executor cutover, the exceptional snapshot-backed
+procedure above runs the candidate command only after preflight succeeds, both
+services are stopped, their `WorkingDirectory`/`ExecStart` resolve through the
+managed `current` link, and the queue is idle:
+
+```bash
+doppler run --config prd --project rajohan -- \
+  env MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
+  NODE_ENV=production \
+  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
+  bun "$LIFECYCLE_CLI" activate "$CANDIDATE_RELEASE_SHA" \
+  --coordinated-schema-cutover
+```
+
+The flag is rejected for ordinary compatible releases. It permits the candidate
+startup migration across the incompatible boundary, but it does not permit
+automatic code-only rollback afterward; restore the recorded matching snapshot
+before switching back.
+
+Every status read, activation, rollback, and interrupted-transition recovery is
+serialized by a kernel-owned `flock` held on an open descriptor. The kernel
+releases the lock if the lifecycle process exits, so stale PID metadata and PID
+reuse cannot block recovery. A durable transition journal is written before
+either link changes. Status takes a shared lock and remains observational; it
+fails clearly when a journal requires recovery. The next exclusive activation
+or rollback restores the recorded pre-transition slots. Successful transitions
+verify both final slots and remove only the exact journal inode they inspected,
+so an interruption cannot discard the known-good rollback target.
+
+The Dashboard executor still uses the in-place transition flow until the final
+deploy integration performs the controlled systemd cutover to these links.
+That cutover must set both units' stable state paths explicitly before changing
+their working directories:
+
+```ini
+[Service]
+Environment=MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard/backend/data/mira-dashboard.db
+Environment=MIRA_DASHBOARD_OPENCLAW_HOME=/home/ubuntu/projects/mira-dashboard/backend/data/openclaw-client
+```
+
+The OpenClaw home value preserves the existing signed Gateway device identity
+at
+`backend/data/openclaw-client/.openclaw/identity/device.json`. Leaving it unset
+would derive a different path below each SHA-specific working directory.
 
 ## Health Signals
 

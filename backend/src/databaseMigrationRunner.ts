@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
 
 import {
-    type DatabaseMigration,
+    type DatabaseMigrationIdentity,
+    databaseMigrationIdentity,
     databaseMigrations,
 } from "./databaseMigrations/index.ts";
 import { DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY } from "./databaseSchemaCompatibility.ts";
@@ -31,12 +32,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at TEXT NOT NULL
 ) STRICT
 `;
-
-function migrationChecksum(migration: DatabaseMigration): string {
-    return new Bun.CryptoHasher("sha256")
-        .update(`${migration.version}\0${migration.name}\0${migration.sql}`)
-        .digest("hex");
-}
 
 function assertMigrationRegistry(): void {
     for (const [index, migration] of databaseMigrations.entries()) {
@@ -77,6 +72,47 @@ function appliedMigrationRows(database: Database): AppliedMigrationRow[] {
         .all() as AppliedMigrationRow[];
 }
 
+/**
+ * Reads structurally valid history for release compatibility checks.
+ *
+ * Well-formed unknown migrations are intentionally allowed and the local registry
+ * is not asserted or compared here. validateDatabaseMigrationHistory owns full
+ * validation against the running code's registry.
+ */
+export function readAppliedDatabaseMigrationHistory(
+    database: Database,
+    maximumCompatibleVersion: number
+): DatabaseMigrationIdentity[] {
+    if (!Number.isSafeInteger(maximumCompatibleVersion) || maximumCompatibleVersion < 0) {
+        throw new TypeError("Invalid maximum compatible SQLite schema version");
+    }
+    const appliedRows = appliedMigrationRows(database);
+    for (const [index, row] of appliedRows.entries()) {
+        const expectedVersion = index + 1;
+        if (row.version !== expectedVersion) {
+            throw new Error(
+                `SQLite migration history is not contiguous at version ${expectedVersion}`
+            );
+        }
+        const knownMigration = databaseMigrations[index];
+        if (
+            row.version > maximumCompatibleVersion ||
+            (!knownMigration &&
+                (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.name) ||
+                    !/^[\da-f]{64}$/u.test(row.checksum)))
+        ) {
+            throw new Error(
+                `Database contains incompatible SQLite migration version ${row.version}`
+            );
+        }
+    }
+    return appliedRows.map(({ checksum, name, version }) => ({
+        checksum,
+        name,
+        version,
+    }));
+}
+
 export function validateDatabaseMigrationHistory(
     database: Database,
     maximumCompatibleVersion: number = DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum
@@ -88,25 +124,13 @@ export function validateDatabaseMigrationHistory(
     ) {
         throw new TypeError("Invalid maximum compatible SQLite schema version");
     }
-    const appliedRows = appliedMigrationRows(database);
+    const appliedRows = readAppliedDatabaseMigrationHistory(
+        database,
+        maximumCompatibleVersion
+    );
     for (const [index, row] of appliedRows.entries()) {
-        const expectedVersion = index + 1;
-        if (row.version !== expectedVersion) {
-            throw new Error(
-                `SQLite migration history is not contiguous at version ${expectedVersion}`
-            );
-        }
         const expected = databaseMigrations[index];
         if (!expected) {
-            if (
-                row.version > maximumCompatibleVersion ||
-                !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.name) ||
-                !/^[\da-f]{64}$/u.test(row.checksum)
-            ) {
-                throw new Error(
-                    `Database contains incompatible SQLite migration version ${row.version}`
-                );
-            }
             continue;
         }
         if (row.name !== expected.name) {
@@ -114,7 +138,7 @@ export function validateDatabaseMigrationHistory(
                 `SQLite migration ${row.version} name mismatch: expected ${expected.name}, got ${row.name}`
             );
         }
-        const expectedChecksum = migrationChecksum(expected);
+        const expectedChecksum = databaseMigrationIdentity(expected).checksum;
         if (row.checksum !== expectedChecksum) {
             throw new Error(
                 `SQLite migration ${row.version} checksum mismatch for ${row.name}`
@@ -197,7 +221,7 @@ function applyPendingDatabaseMigrations(
                 .run(
                     migration.version,
                     migration.name,
-                    migrationChecksum(migration),
+                    databaseMigrationIdentity(migration).checksum,
                     new Date().toISOString()
                 );
             applied.push(migration.version);
