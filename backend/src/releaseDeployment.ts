@@ -78,6 +78,21 @@ export interface ManagedDashboardUnitContract {
 
 type ManagedDashboardUnitName = keyof typeof MANAGED_DASHBOARD_UNITS;
 
+function managedReleaseEnvironment(
+    contract: ManagedDashboardUnitContract,
+    releaseRoot: string
+): NodeJS.ProcessEnv {
+    return {
+        ...process.env,
+        MIRA_DASHBOARD_DB_PATH: contract.databasePath,
+        MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE: contract.logRotationLockFile,
+        MIRA_DASHBOARD_OPENCLAW_HOME: contract.openClawHome,
+        MIRA_DASHBOARD_RELEASE_ROOT: releaseRoot,
+        MIRA_DASHBOARD_RELEASES_ROOT: contract.releasesRoot,
+        NODE_ENV: "production",
+    };
+}
+
 function assertFullCommitSha(commitSha: string): string {
     if (!RELEASE_COMMIT_SHA_PATTERN.test(commitSha)) {
         throw new TypeError("Release staging requires a full lowercase Git SHA");
@@ -382,12 +397,31 @@ export async function stageDashboardRelease(
         options.releasesRoot ?? resolveDashboardReleasesRoot(),
         "Dashboard releases root"
     );
+    const commandRunner = options.commandRunner ?? defaultCommandRunner;
+    const contract = managedDashboardUnitContract(
+        releasesRoot,
+        options.databasePath ??
+            process.env.MIRA_DASHBOARD_DB_PATH ??
+            DEFAULT_DASHBOARD_DATABASE_PATH,
+        options.openClawHome
+    );
+    let existingRelease: ManagedDashboardRelease | undefined;
     try {
-        return await loadManagedRelease(releasesRoot, expectedCommit);
+        existingRelease = await loadManagedRelease(releasesRoot, expectedCommit);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
             throw error;
         }
+    }
+    if (existingRelease) {
+        options.onProgress?.("Preflighting existing immutable release");
+        await commandRunner("bun", ["dist/databasePreflight.js"], {
+            cwd: path.join(existingRelease.path, "backend"),
+            environment: managedReleaseEnvironment(contract, existingRelease.path),
+            signal: options.signal,
+            timeoutMs: 120_000,
+        });
+        return existingRelease;
     }
 
     const sourceRoot = resolveAbsoluteNonRootPath(
@@ -400,27 +434,11 @@ export async function stageDashboardRelease(
     );
     await assertRealDirectory(sourceRoot, "Dashboard source root");
     await assertRealDirectory(worktreeRoot, "Dashboard worktree root");
-    const commandRunner = options.commandRunner ?? defaultCommandRunner;
     const worktreePath = path.join(
         worktreeRoot,
         `release-${expectedCommit.slice(0, 12)}-${randomUUID()}`
     );
-    const contract = managedDashboardUnitContract(
-        releasesRoot,
-        options.databasePath ??
-            process.env.MIRA_DASHBOARD_DB_PATH ??
-            DEFAULT_DASHBOARD_DATABASE_PATH,
-        options.openClawHome
-    );
-    const environment: NodeJS.ProcessEnv = {
-        ...process.env,
-        MIRA_DASHBOARD_DB_PATH: contract.databasePath,
-        MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE: contract.logRotationLockFile,
-        MIRA_DASHBOARD_OPENCLAW_HOME: contract.openClawHome,
-        MIRA_DASHBOARD_RELEASE_ROOT: worktreePath,
-        MIRA_DASHBOARD_RELEASES_ROOT: contract.releasesRoot,
-        NODE_ENV: "production",
-    };
+    const environment = managedReleaseEnvironment(contract, worktreePath);
     let isWorktreeCreated = false;
     let stagedRelease: ManagedDashboardRelease | undefined;
     let stagingError: unknown;

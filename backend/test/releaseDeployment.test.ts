@@ -211,7 +211,7 @@ describe("immutable release deployment", () => {
         expect([...buildReleaseRoots][0]).toStartWith(`${options.worktreeRoot}/release-`);
     });
 
-    it("reuses an already verified immutable release without running commands", async () => {
+    it("reruns database preflight when reusing a verified immutable release", async () => {
         const options = stagingOptions();
         const buildRoot = path.join(options.worktreeRoot, "prepared");
         mkdirSync(buildRoot);
@@ -240,14 +240,50 @@ describe("immutable release deployment", () => {
             commandRunner: initialRunner,
         });
 
+        const calls: Array<{
+            arguments_: readonly string[];
+            command: string;
+            cwd: string;
+            databasePath: string | undefined;
+            releaseRoot: string | undefined;
+        }> = [];
         const reused = await stageDashboardRelease(COMMIT_SHA, {
             ...options,
-            commandRunner: async () => {
-                throw new Error("command runner should not be called");
+            commandRunner: async (command, arguments_, commandOptions) => {
+                calls.push({
+                    arguments_,
+                    command,
+                    cwd: commandOptions.cwd,
+                    databasePath: commandOptions.environment.MIRA_DASHBOARD_DB_PATH,
+                    releaseRoot: commandOptions.environment.MIRA_DASHBOARD_RELEASE_ROOT,
+                });
+                return { stderr: "", stdout: "" };
             },
         });
 
         expect(reused.commitSha).toBe(COMMIT_SHA);
+        expect(calls).toEqual([
+            {
+                arguments_: ["dist/databasePreflight.js"],
+                command: "bun",
+                cwd: path.join(reused.path, "backend"),
+                databasePath: options.databasePath,
+                releaseRoot: reused.path,
+            },
+        ]);
+        await expect(
+            stageDashboardRelease(COMMIT_SHA, {
+                ...options,
+                commandRunner: async () => {
+                    throw Object.assign(
+                        new Error("database preflight executable missing"),
+                        {
+                            code: "ENOENT",
+                        }
+                    );
+                },
+            })
+        ).rejects.toThrow("database preflight executable missing");
     });
 
     it("accepts a concurrently published copy of the same verified release", async () => {

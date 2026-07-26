@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { database } from "../src/database.ts";
 import {
@@ -24,6 +24,7 @@ import {
 import { waitForJobExecution } from "../src/services/queuedJobExecution.ts";
 import {
     enqueueScheduledJob,
+    reconcileOrphanedDeploymentCutovers,
     recoverOrphanedScheduledJobRuns,
     registerScheduledJobAction,
     removeScheduledJobsNotInAction,
@@ -36,6 +37,7 @@ import {
 
 const testJobIds = new Set<string>();
 const testExecutionIds = new Set<string>();
+const testDeploymentIds = new Set<string>();
 
 afterEach(async () => {
     await stopScheduledJobExecutor();
@@ -46,8 +48,15 @@ afterEach(async () => {
         database.prepare("DELETE FROM scheduled_job_runs WHERE job_id = ?").run(jobId);
         database.prepare("DELETE FROM scheduled_jobs WHERE id = ?").run(jobId);
     }
+    for (const deploymentId of testDeploymentIds) {
+        database
+            .prepare("DELETE FROM deployment_lock WHERE job_id = ?")
+            .run(deploymentId);
+        database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(deploymentId);
+    }
     testExecutionIds.clear();
     testJobIds.clear();
+    testDeploymentIds.clear();
 });
 
 function createScheduledTestJob(
@@ -69,6 +78,63 @@ function createScheduledTestJob(
 }
 
 describe("persistent job execution queue", () => {
+    it("fails orphaned detached cutovers before they can pause worker claims", () => {
+        const deploymentId = `test-orphaned-cutover-${Bun.randomUUIDv7()}`;
+        const startedAt = "2026-07-26T03:00:00.000Z";
+        const recoveredAt = "2026-07-26T03:01:00.000Z";
+        testDeploymentIds.add(deploymentId);
+        database
+            .prepare(
+                `INSERT INTO deployment_jobs (
+                    id, status, started_at, updated_at, note, stdout, stderr
+                 ) VALUES (?, 'restart-scheduled', ?, ?, ?, '', '')`
+            )
+            .run(deploymentId, startedAt, startedAt, "Waiting for guardian");
+        database
+            .prepare(
+                "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+            )
+            .run(deploymentId, startedAt);
+
+        expect(reconcileOrphanedDeploymentCutovers(recoveredAt, () => "active")).toBe(0);
+        expect(reconcileOrphanedDeploymentCutovers(recoveredAt, () => "unknown")).toBe(0);
+        const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            expect(
+                reconcileOrphanedDeploymentCutovers(recoveredAt, () => {
+                    throw new Error("systemd unavailable");
+                })
+            ).toBe(0);
+            expect(warning).toHaveBeenCalledWith(
+                "[ScheduledJobs] Failed to inspect detached deployment guardian:",
+                expect.any(Error)
+            );
+        } finally {
+            warning.mockRestore();
+        }
+        expect(reconcileOrphanedDeploymentCutovers(recoveredAt, () => "inactive")).toBe(
+            1
+        );
+        expect(
+            database
+                .prepare(
+                    `SELECT status, updated_at AS updatedAt, note
+                     FROM deployment_jobs
+                     WHERE id = ?`
+                )
+                .get(deploymentId)
+        ).toEqual({
+            note: "Detached release cutover guardian is no longer active",
+            status: "failed",
+            updatedAt: recoveredAt,
+        });
+        expect(
+            database
+                .prepare("SELECT job_id FROM deployment_lock WHERE job_id = ?")
+                .get(deploymentId)
+        ).toBeNull();
+    });
+
     it("persists worker progress and structured action failures", async () => {
         const actionKey = `test.worker-${Bun.randomUUIDv7()}`;
         registerScheduledJobAction(actionKey, async (_job, _signal, context) => {

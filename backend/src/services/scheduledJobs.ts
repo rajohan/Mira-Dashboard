@@ -33,8 +33,10 @@ const latestRunsJobIdChunkSize = 900;
 const executorTickMs = 1000;
 const executorHeartbeatMs = 1000;
 const executorCapacity = 1;
+const deploymentCutoverReconcileIntervalMs = 5000;
 const interruptedHandlerGraceMs = 30_000;
 const RELEASE_COMMIT_PATTERN = /^(?:[\da-f]{8,40}|development)$/u;
+const DEPLOYMENT_GUARDIAN_UNIT_PREFIX = "mira-dashboard-deploy-";
 const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
 const interruptedHandlerSettled = new WeakMap<
     ScheduledJobInterruptionError,
@@ -51,6 +53,7 @@ const scheduledJobRuntimeState: {
     isSchedulerTickRunning: boolean;
     isExecutorClaimingPaused: boolean;
     isExecutorTickRunning: boolean;
+    nextDeploymentCutoverReconcileAt: number;
     workerId: string;
 } = {
     scheduler: undefined,
@@ -60,8 +63,12 @@ const scheduledJobRuntimeState: {
     isSchedulerTickRunning: false,
     isExecutorClaimingPaused: false,
     isExecutorTickRunning: false,
+    nextDeploymentCutoverReconcileAt: 0,
     workerId: "",
 };
+
+type DeploymentGuardianState = "active" | "inactive" | "unknown";
+type DeploymentGuardianStateReader = (jobId: string) => DeploymentGuardianState;
 
 export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
 export type ScheduledJobRunStatus =
@@ -1249,9 +1256,92 @@ function pauseExecutorClaims(): () => void {
 function resetExecutorClaimPause(): void {
     scheduledJobRuntimeState.executorClaimPauseGeneration += 1;
     scheduledJobRuntimeState.isExecutorClaimingPaused = false;
+    scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt = 0;
+}
+
+function readDeploymentGuardianState(jobId: string): DeploymentGuardianState {
+    const result = Bun.spawnSync({
+        cmd: [
+            "systemctl",
+            "--user",
+            "is-active",
+            `${DEPLOYMENT_GUARDIAN_UNIT_PREFIX}${jobId}.service`,
+        ],
+        env: process.env,
+        stderr: "pipe",
+        stdin: "ignore",
+        stdout: "pipe",
+    });
+    const state = new TextDecoder().decode(result.stdout).trim();
+    if (["active", "activating", "deactivating", "reloading"].includes(state)) {
+        return "active";
+    }
+    if (["inactive", "failed", "unknown"].includes(state)) {
+        return "inactive";
+    }
+    return "unknown";
+}
+
+export function reconcileOrphanedDeploymentCutovers(
+    timestamp = nowIso(),
+    readGuardianState: DeploymentGuardianStateReader = readDeploymentGuardianState
+): number {
+    const pending = database
+        .query(
+            `SELECT id
+             FROM deployment_jobs
+             WHERE status = 'restart-scheduled'`
+        )
+        .all() as Array<{ id: string }>;
+    const failOrphanedCutover = database.transaction((jobId: string) => {
+        const result = database
+            .prepare(
+                `UPDATE deployment_jobs
+                 SET status = 'failed',
+                     updated_at = ?,
+                     note = 'Detached release cutover guardian is no longer active'
+                 WHERE id = ?
+                   AND status = 'restart-scheduled'`
+            )
+            .run(timestamp, jobId);
+        if (result.changes === 1) {
+            database
+                .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
+                .run(jobId);
+        }
+        return result.changes;
+    });
+    let recovered = 0;
+    for (const { id } of pending) {
+        let state: DeploymentGuardianState;
+        try {
+            state = readGuardianState(id);
+        } catch (error) {
+            console.warn(
+                "[ScheduledJobs] Failed to inspect detached deployment guardian:",
+                error
+            );
+            continue;
+        }
+        if (state === "inactive") {
+            recovered += failOrphanedCutover(id);
+        }
+    }
+    return recovered;
 }
 
 function hasPendingDeploymentCutover(): boolean {
+    const now = Date.now();
+    if (now >= scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt) {
+        scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt =
+            now + deploymentCutoverReconcileIntervalMs;
+        const recovered = reconcileOrphanedDeploymentCutovers();
+        if (recovered > 0) {
+            console.warn("[ScheduledJobs] Recovered orphaned deployment cutovers", {
+                recovered,
+            });
+        }
+    }
     return Boolean(
         database
             .query(

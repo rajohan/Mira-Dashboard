@@ -1277,7 +1277,12 @@ export async function pruneDashboardReleases(
                     : -1;
             }
             if (left.publishedAtNs === right.publishedAtNs) {
-                return 0;
+                // Once the build and filesystem publication timestamps tie,
+                // the SHA is a deterministic fallback rather than a recency signal.
+                if (left.release.commitSha === right.release.commitSha) {
+                    return 0;
+                }
+                return left.release.commitSha < right.release.commitSha ? 1 : -1;
             }
             return left.publishedAtNs < right.publishedAtNs ? 1 : -1;
         });

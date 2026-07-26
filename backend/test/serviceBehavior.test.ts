@@ -1898,6 +1898,10 @@ fi
             String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> ${JSON.stringify(systemctlLog)}
+if [[ "$*" == "--user is-active mira-dashboard-deploy-"*".service" ]]; then
+  printf 'active\n'
+  exit 0
+fi
 if [[ "$*" != *"--user show"* ]]; then
   echo "unexpected systemctl args: $*" >&2
   exit 2
@@ -2015,6 +2019,9 @@ printf 'scheduled\n'
             await expect(Bun.file(systemctlLog).text()).resolves.toContain(
                 "show mira-dashboard.service"
             );
+            await expect(Bun.file(systemctlLog).text()).resolves.toContain(
+                `--user is-active mira-dashboard-deploy-${job.id}.service`
+            );
             await expect(Bun.file(systemdLog).text()).resolves.toContain(
                 `mira-dashboard-deploy-${job.id}`
             );
@@ -2022,6 +2029,7 @@ printf 'scheduled\n'
             expect(restartCommand).toContain(
                 "/usr/local/bin/doppler run --config prd --project rajohan"
             );
+            expect(restartCommand).toContain("/usr/bin/sed");
             expect(restartCommand).toContain(
                 "http://127.0.0.1:${dashboard_port}/api/health/ready"
             );
