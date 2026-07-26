@@ -351,10 +351,10 @@ function runIfTableExists(
 
 function scrubDevelopmentDatabase(databasePath: string): void {
     const database = new Database(databasePath);
-    database.run("PRAGMA foreign_keys = ON");
-    database.run("PRAGMA busy_timeout = 5000");
-    database.run("BEGIN IMMEDIATE");
     try {
+        database.run("PRAGMA foreign_keys = ON");
+        database.run("PRAGMA busy_timeout = 5000");
+        database.run("BEGIN IMMEDIATE");
         runIfTableExists(
             database,
             "auth_webauthn_challenges",

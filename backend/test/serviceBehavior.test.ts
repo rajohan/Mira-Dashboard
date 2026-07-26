@@ -1717,6 +1717,23 @@ describe("backend service behavior", () => {
                 error: "Rollback target commit is required",
             });
 
+            const nullBodyResponse = await pullRequestRoutes[
+                "/api/pull-requests/releases/rollback"
+            ].POST(
+                new Request(
+                    "https://dashboard.test/api/pull-requests/releases/rollback",
+                    {
+                        body: "null",
+                        headers: { "Content-Type": "application/json" },
+                        method: "POST",
+                    }
+                )
+            );
+            expect(nullBodyResponse.status).toBe(400);
+            await expect(nullBodyResponse.json()).resolves.toMatchObject({
+                error: "Rollback target commit is required",
+            });
+
             rmSync(path.join(releasesRoot, "previous"));
             await expect(getDashboardReleaseStatus()).resolves.toMatchObject({
                 previous: undefined,

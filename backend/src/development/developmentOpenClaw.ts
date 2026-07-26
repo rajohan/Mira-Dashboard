@@ -38,7 +38,7 @@ const SENSITIVE_WORKSPACE_FILE_NAMES = new Set([
     "secrets.yml",
 ]);
 const SENSITIVE_AGENT_CONFIG_KEY =
-    /(?:^|[._-])(?:api[._-]?key|credential|credentials|password|secret|secrets|token)(?:$|[._-])/iu;
+    /(?:^|[._-])(?:api[._-]?keys?|credentials?|passwords?|secrets?|tokens?)(?:$|[._-]|\d)/iu;
 
 export type DevelopmentWorkspaceState = "copied" | "empty" | "reused";
 
@@ -127,7 +127,7 @@ function readOpenClawConfigSource(filePath: string): string {
                 content,
                 bytesRead,
                 content.length - bytesRead,
-                undefined
+                bytesRead
             );
             if (chunkLength === 0) break;
             bytesRead += chunkLength;

@@ -164,8 +164,8 @@ export const pullRequestRoutes = {
     "/api/pull-requests/releases/rollback": {
         POST: async (request: Request) => {
             try {
-                const body = await readJson<{ targetCommit?: unknown }>(request);
-                if (typeof body.targetCommit !== "string") {
+                const body = await readJson<{ targetCommit?: unknown } | null>(request);
+                if (typeof body?.targetCommit !== "string") {
                     return json(
                         { error: "Rollback target commit is required" },
                         { status: 400 }

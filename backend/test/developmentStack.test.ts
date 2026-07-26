@@ -251,8 +251,12 @@ describe("development stack", () => {
             JSON.stringify({
                 agents: {
                     defaults: {
+                        apiKeys: ["must-not-copy"],
+                        authToken2: "must-not-copy",
                         gatewayToken: "must-not-copy",
                         model: { primary: "codex" },
+                        passwords: ["must-not-copy"],
+                        tokens: ["must-not-copy"],
                         workspace: "/production/workspace",
                     },
                     list: [{ default: true, id: "main" }],
