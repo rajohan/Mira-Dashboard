@@ -18,6 +18,10 @@ import {
 } from "../development/developmentStack.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
+import {
+    isPullRequestPreviewAuthorAllowed,
+    resolvePullRequestPreviewAllowedAuthors,
+} from "./pullRequestPreviewPolicy.ts";
 
 const PREVIEW_UNIT = "mira-dashboard-pr-preview.service";
 const PREVIEW_RECORD_FILE = "active-preview.json";
@@ -78,6 +82,7 @@ export interface PullRequestPreviewConfig {
     recentAuthMinutes?: string;
     releaseSource?: string;
     sessionIdleMinutes?: string;
+    sourceWebAuthnRpId?: string;
     stateFile: string;
     unitName: string;
     workspaceSource?: string;
@@ -120,6 +125,11 @@ interface TailscaleServeStatus {
             Handlers?: Record<string, { Proxy?: string }>;
         }
     >;
+}
+
+interface PreviewTailscaleRoute {
+    enabled: boolean;
+    url: string;
 }
 
 interface CommandOptions {
@@ -255,17 +265,9 @@ export function resolvePullRequestPreviewConfig(
             "MIRA_DASHBOARD_PREVIEW_UNIT must be a valid .service unit name"
         );
     }
-    const allowedAuthors = new Set(
-        (environment.MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS || "mira-2026,rajohan")
-            .split(",")
-            .map((author) => author.trim().toLowerCase())
-            .filter(Boolean)
+    const allowedAuthors = resolvePullRequestPreviewAllowedAuthors(
+        environment.MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS
     );
-    if (allowedAuthors.size === 0) {
-        throw new TypeError(
-            "MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS must contain at least one author"
-        );
-    }
     const openClawSourceRoot = optionalAbsoluteNonRootPath(
         "MIRA_DASHBOARD_PREVIEW_OPENCLAW_SOURCE_ROOT",
         environment.MIRA_DASHBOARD_PREVIEW_OPENCLAW_SOURCE_ROOT?.trim() ||
@@ -310,6 +312,10 @@ export function resolvePullRequestPreviewConfig(
         sessionIdleMinutes: optionalEnvironmentValue(
             "MIRA_DASHBOARD_SESSION_IDLE_MINUTES",
             environment.MIRA_DASHBOARD_SESSION_IDLE_MINUTES
+        ),
+        sourceWebAuthnRpId: optionalEnvironmentValue(
+            "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
+            environment.MIRA_DASHBOARD_WEBAUTHN_RP_ID
         ),
         stateFile: path.join(previewRoot, PREVIEW_RECORD_FILE),
         unitName,
@@ -427,17 +433,29 @@ function readPreviewRecord(
     if (!isRealRegularFile(config.stateFile)) {
         throw new Error("Dashboard preview state must be a real regular file");
     }
-    const content = readFileSync(config.stateFile, "utf8");
-    if (Buffer.byteLength(content) > 256 * 1024) {
-        throw new Error("Dashboard preview state is too large");
-    }
     try {
+        const content = readFileSync(config.stateFile, "utf8");
+        if (Buffer.byteLength(content) > 256 * 1024) {
+            throw new Error("Dashboard preview state is too large");
+        }
         return previewRecordFromJson(JSON.parse(content) as unknown);
     } catch (error) {
-        throw new Error(
-            `Dashboard preview state is invalid: ${errorMessage(error, "invalid state")}`,
-            { cause: error }
+        const quarantinePath = path.join(
+            config.previewRoot,
+            `active-preview.corrupt-${Date.now()}-${Bun.randomUUIDv7()}.json`
         );
+        try {
+            renameSync(config.stateFile, quarantinePath);
+            chmodSync(quarantinePath, 0o600);
+            console.error(
+                `[PullRequestPreview] Quarantined invalid state at ${quarantinePath}: ${errorMessage(error, "invalid state")}`
+            );
+        } catch (quarantineError) {
+            console.error(
+                `[PullRequestPreview] Invalid state could not be quarantined: ${errorMessage(error, "invalid state")}. ${errorMessage(quarantineError, "quarantine failed")}`
+            );
+        }
+        return undefined;
     }
 }
 
@@ -661,10 +679,10 @@ function tailscaleDnsName(status: TailscaleStatus): string {
     return dnsName.toLowerCase();
 }
 
-async function ensureTailscaleServe(
+async function inspectTailscaleServe(
     config: PullRequestPreviewConfig,
     signal?: AbortSignal
-): Promise<{ created: boolean; url: string }> {
+): Promise<PreviewTailscaleRoute> {
     const [status, serveStatus] = await Promise.all([
         runJsonCommand<TailscaleStatus>("tailscale", ["status", "--json"], {
             signal,
@@ -688,17 +706,58 @@ async function ensureTailscaleServe(
             { statusCode: 409 }
         );
     }
-    if (!hasHttpsListener) {
-        await runCommand(
-            "sudo",
-            ["-n", "tailscale", "serve", "--bg", `--https=${port}`, proxyTarget],
-            { signal }
-        );
-    }
     return {
-        created: !hasHttpsListener,
+        enabled: hasHttpsListener,
         url: `https://${dnsName}:${port}`,
     };
+}
+
+async function enableTailscaleServe(
+    config: PullRequestPreviewConfig,
+    expectedUrl: string,
+    signal?: AbortSignal
+): Promise<void> {
+    const current = await inspectTailscaleServe(config, signal);
+    if (current.url !== expectedUrl) {
+        throw new Error("Tailscale MagicDNS hostname changed during preview startup");
+    }
+    if (current.enabled) {
+        throw Object.assign(
+            new Error(
+                `Tailscale Serve port ${config.frontendPort} became active during preview startup`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    await runCommand(
+        "sudo",
+        [
+            "-n",
+            "tailscale",
+            "serve",
+            "--bg",
+            `--https=${config.frontendPort}`,
+            `http://127.0.0.1:${config.frontendPort}`,
+        ],
+        { signal }
+    );
+    try {
+        const enabled = await inspectTailscaleServe(config, signal);
+        if (!enabled.enabled || enabled.url !== expectedUrl) {
+            throw new Error("Tailscale Serve did not expose the ready preview service");
+        }
+    } catch (error) {
+        try {
+            await disableOwnedTailscaleServe(config, true);
+        } catch (cleanupError) {
+            throw new AggregateError(
+                [error, cleanupError],
+                "Tailscale Serve activation failed and its route could not be removed",
+                { cause: cleanupError }
+            );
+        }
+        throw error;
+    }
 }
 
 async function disableOwnedTailscaleServe(
@@ -759,6 +818,9 @@ async function preparePreviewState(
         MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: publicOrigin,
         MIRA_DASHBOARD_DEV_STATE_OWNER: `managed-pr-${number}`,
         MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
+        ...(config.sourceWebAuthnRpId && {
+            MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID: config.sourceWebAuthnRpId,
+        }),
         ...(config.openClawConfigSource && {
             MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE: config.openClawConfigSource,
         }),
@@ -1041,13 +1103,50 @@ function publicPreviewStatus(
     };
 }
 
-/** Reads the active single-slot PR preview without mutating host state. */
+/** Reads the active preview and reconciles resources left by a stopped unit. */
 export async function getPullRequestPreviewStatus(
     config = resolvePullRequestPreviewConfig()
 ): Promise<PullRequestPreviewStatus> {
     const record = readPreviewRecord(config);
     if (!record) return { status: "stopped" };
-    return publicPreviewStatus(record, await previewUnitState(config));
+    const unitState = await previewUnitState(config);
+    if (
+        unitState &&
+        record.status === "running" &&
+        ["failed", "inactive"].includes(unitState.activeState || "")
+    ) {
+        const cleanupErrors: string[] = [];
+        let isTailscaleServeOwned = record.ownsTailscaleServe;
+        try {
+            removeMaterializedGatewayToken(config);
+        } catch (error) {
+            cleanupErrors.push(errorMessage(error, "token cleanup failed"));
+        }
+        try {
+            await disableOwnedTailscaleServe(config, isTailscaleServeOwned);
+            isTailscaleServeOwned = false;
+        } catch (error) {
+            cleanupErrors.push(errorMessage(error, "Serve cleanup failed"));
+        }
+        const reconciledRecord: PullRequestPreviewRecord = {
+            ...record,
+            ...(cleanupErrors.length > 0 && {
+                message: `Preview stopped outside the managed workflow. Cleanup: ${cleanupErrors.join(". ")}`,
+            }),
+            ownsTailscaleServe: isTailscaleServeOwned,
+            status:
+                cleanupErrors.length > 0
+                    ? "failed"
+                    : lifecycleFromUnit(unitState, record.status),
+            updatedAt: new Date().toISOString(),
+        };
+        writePreviewRecord(config, reconciledRecord);
+        return publicPreviewStatus(
+            reconciledRecord,
+            cleanupErrors.length > 0 ? undefined : unitState
+        );
+    }
+    return publicPreviewStatus(record, unitState);
 }
 
 async function stopUnit(config: PullRequestPreviewConfig): Promise<void> {
@@ -1071,19 +1170,19 @@ async function waitForPreviewReady(
         if (signal?.aborted) {
             throw new DOMException("Preview startup aborted", "AbortError");
         }
-        try {
-            const response = await fetch(healthUrl, {
-                signal: AbortSignal.timeout(2000),
-            });
-            if (response.ok) return;
-        } catch {
-            // The watched frontend/backend pair is still starting.
-        }
         const state = await previewUnitState(config);
         if (state && ["failed", "inactive"].includes(state.activeState || "")) {
             throw new Error(
                 `Preview service stopped during startup (${state.result || state.activeState})`
             );
+        }
+        try {
+            const response = await fetch(healthUrl, {
+                signal: AbortSignal.timeout(2000),
+            });
+            if (response.ok && state?.activeState === "active") return;
+        } catch {
+            // The watched frontend/backend pair is still starting.
         }
         await Bun.sleep(PREVIEW_READY_POLL_MS);
     }
@@ -1110,8 +1209,7 @@ function validatePreviewPullRequest(
         );
     }
     if (
-        !pullRequest.authorLogin ||
-        !config.allowedAuthors.has(pullRequest.authorLogin.toLowerCase())
+        !isPullRequestPreviewAuthorAllowed(pullRequest.authorLogin, config.allowedAuthors)
     ) {
         throw Object.assign(
             new Error("Pull request author is not allowed to run host previews"),
@@ -1146,7 +1244,6 @@ export async function startPullRequestPreview(
     const pullRequest = validatePreviewPullRequest(candidate, config);
     const { number } = pullRequest;
     ensureRealDirectory(config.previewRoot);
-    const existingRecord = readPreviewRecord(config);
     const current = await getPullRequestPreviewStatus(config);
     if (
         ["running", "starting", "stopping"].includes(current.status) &&
@@ -1166,11 +1263,23 @@ export async function startPullRequestPreview(
     ) {
         return current;
     }
+    const existingRecord = readPreviewRecord(config);
     const timestamp = new Date().toISOString();
-    const tailscaleServe = await ensureTailscaleServe(config, signal);
-    const publicOrigin = tailscaleServe.url;
-    const ownsTailscaleServe =
-        tailscaleServe.created || existingRecord?.ownsTailscaleServe === true;
+    const tailscaleRoute = await inspectTailscaleServe(config, signal);
+    if (tailscaleRoute.enabled && existingRecord?.ownsTailscaleServe !== true) {
+        throw Object.assign(
+            new Error(
+                `Tailscale Serve port ${config.frontendPort} is active outside the managed preview`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    let isTailscaleServeOwned = existingRecord?.ownsTailscaleServe === true;
+    if (isTailscaleServeOwned && tailscaleRoute.enabled) {
+        await disableOwnedTailscaleServe(config, true);
+        isTailscaleServeOwned = false;
+    }
+    const publicOrigin = tailscaleRoute.url;
     const worktreePath = previewWorktreePath(config, number);
     const startingRecord: PullRequestPreviewRecord = {
         backendPort: config.backendPort,
@@ -1178,7 +1287,7 @@ export async function startPullRequestPreview(
         formatVersion: PREVIEW_RECORD_FORMAT_VERSION,
         frontendPort: config.frontendPort,
         number,
-        ownsTailscaleServe,
+        ownsTailscaleServe: false,
         status: "starting",
         title: pullRequest.title,
         updatedAt: timestamp,
@@ -1210,9 +1319,12 @@ export async function startPullRequestPreview(
         options.protectFromCancellation?.();
         await startPreviewUnit(config, sandboxCommand, signal);
         await waitForPreviewReady(config, signal);
+        await enableTailscaleServe(config, publicOrigin, signal);
+        isTailscaleServeOwned = true;
         const startedAt = new Date().toISOString();
         const runningRecord: PullRequestPreviewRecord = {
             ...startingRecord,
+            ownsTailscaleServe: isTailscaleServeOwned,
             startedAt,
             status: "running",
             updatedAt: startedAt,
@@ -1233,7 +1345,7 @@ export async function startPullRequestPreview(
         }
         let didCleanupRoute = false;
         try {
-            await disableOwnedTailscaleServe(config, ownsTailscaleServe);
+            await disableOwnedTailscaleServe(config, isTailscaleServeOwned);
             didCleanupRoute = true;
         } catch (cleanupError) {
             cleanupErrors.push(errorMessage(cleanupError, "Serve cleanup failed"));
@@ -1245,7 +1357,7 @@ export async function startPullRequestPreview(
                 cleanupErrors.length > 0
                     ? `${startupMessage}. Cleanup: ${cleanupErrors.join(". ")}`
                     : startupMessage,
-            ownsTailscaleServe: ownsTailscaleServe && !didCleanupRoute,
+            ownsTailscaleServe: isTailscaleServeOwned && !didCleanupRoute,
             status: "failed",
             updatedAt: new Date().toISOString(),
         };

@@ -1,3 +1,7 @@
+.eslintcache
+backend/data
+coverage
+data
 dist
 node_modules
 *.min.js

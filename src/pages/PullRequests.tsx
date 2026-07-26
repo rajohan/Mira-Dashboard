@@ -56,7 +56,7 @@ type PendingAction =
     | { type: "merge-deploy"; pr: PullRequestSummary }
     | { type: "review-approve"; pr: PullRequestSummary }
     | { type: "preview-start"; pr: PullRequestSummary }
-    | { type: "preview-stop"; pr: PullRequestSummary }
+    | { number: number; title?: string; type: "preview-stop" }
     | { type: "reject"; pr: PullRequestSummary }
     | { release: DashboardReleaseSummary; type: "rollback" }
     | { type: "deploy" };
@@ -82,7 +82,6 @@ const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
-const PREVIEW_AUTHORS = new Set([MIRA_AUTHOR, DEFAULT_REVIEWER_AUTHOR]);
 const ACTIVE_PREVIEW_STATUSES = new Set<PullRequestPreviewStatus["status"]>([
     "running",
     "starting",
@@ -457,7 +456,8 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
             return `Run PR #${action.pr.number} in dev: ${action.pr.title}?\n\nThis runs the trusted PR over Tailscale HTTPS with hot reload, an isolated Dashboard database, a writable workspace snapshot, and an isolated scheduler/worker without host or backup jobs. It connects to the live production Gateway so chat and session changes can affect production data. The dev environment stops automatically after four hours.`;
         }
         case "preview-stop": {
-            return `Stop PR dev for #${action.pr.number}: ${action.pr.title}?\n\nIts isolated database, workspace snapshot, and worktree are kept for a faster later restart.`;
+            const title = action.title ? `: ${action.title}` : "";
+            return `Stop PR dev for #${action.number}${title}?\n\nIts isolated database, workspace snapshot, and worktree are kept for a faster later restart.`;
         }
         case "reject": {
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
@@ -676,6 +676,13 @@ export function PullRequests() {
     const deployBlockedReasonId = productionActionBlockedMessage
         ? "deploy-checkout-disabled-reason"
         : undefined;
+    const previewStopTarget =
+        previewStatus?.number === undefined
+            ? undefined
+            : {
+                  number: previewStatus.number,
+                  title: previewStatus.title,
+              };
     const miraPullRequests = pullRequests.filter((pr) => isMiraPullRequest(pr));
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
 
@@ -728,9 +735,9 @@ export function PullRequests() {
 
                 case "preview-stop": {
                     await stopPullRequestPreview.mutateAsync({
-                        number: action.pr.number,
+                        number: action.number,
                     });
-                    setLastResult(`PR #${action.pr.number} dev stopped`);
+                    setLastResult(`PR #${action.number} dev stopped`);
                     break;
                 }
 
@@ -768,10 +775,7 @@ export function PullRequests() {
 
     /** Renders trusted PR dev controls for an eligible pull request. */
     function renderPullRequestPreviewActions(pr: PullRequestSummary) {
-        const author = pr.author?.login;
-        if (!author || pr.baseRefName !== DEFAULT_BASE || !PREVIEW_AUTHORS.has(author)) {
-            return;
-        }
+        if (pr.previewEligible !== true) return;
         const isPreviewSlotActive =
             previewStatus !== undefined &&
             ACTIVE_PREVIEW_STATUSES.has(previewStatus.status);
@@ -842,7 +846,13 @@ export function PullRequests() {
                 {hasPullRequestPreviewSlot && previewStatus.status !== "stopped" ? (
                     <Button
                         variant="secondary"
-                        onClick={() => setPendingAction({ pr, type: "preview-stop" })}
+                        onClick={() =>
+                            setPendingAction({
+                                number: pr.number,
+                                title: pr.title,
+                                type: "preview-stop",
+                            })
+                        }
                         disabled={isActionPending || isPreviewTransitionInProgress}
                     >
                         <Square className="size-4" />
@@ -1036,6 +1046,17 @@ export function PullRequests() {
 
                 <PullRequestPreviewCard
                     error={previewStatusError ?? undefined}
+                    isStopPending={isActionPending}
+                    onStop={
+                        previewStopTarget === undefined
+                            ? undefined
+                            : () => {
+                                  setPendingAction({
+                                      ...previewStopTarget,
+                                      type: "preview-stop",
+                                  });
+                              }
+                    }
                     preview={previewStatus}
                 />
 

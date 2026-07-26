@@ -24,6 +24,7 @@ export interface PullRequestSummary {
     headRefOid?: string;
     mergeable?: string;
     mergeStateStatus?: string;
+    previewEligible?: boolean;
     reviewDecision?: string;
     reviewerApproved?: boolean;
     canReviewerApprove?: boolean;

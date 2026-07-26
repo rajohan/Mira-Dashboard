@@ -108,10 +108,13 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                return json({
-                    isOk: true,
-                    preview: await prepareAndStartPullRequestPreview(number),
-                });
+                return json(
+                    {
+                        isOk: true,
+                        preview: await prepareAndStartPullRequestPreview(number),
+                    },
+                    { status: 202 }
+                );
             } catch (error) {
                 return routeError(error, "PR preview startup failed");
             }

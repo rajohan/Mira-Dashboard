@@ -275,6 +275,7 @@ describe("development stack", () => {
                 MIRA_DASHBOARD_DEV_RELEASES_SOURCE: releaseSource,
                 MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
                 MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE: workspaceSource,
+                MIRA_DASHBOARD_WEBAUTHN_RP_ID: "dashboard.example",
             },
             root
         );
@@ -294,6 +295,11 @@ describe("development stack", () => {
                         .all()
                 )
             ).toBe('[{"id":1,"mfa_enabled_at":"now"},{"id":2,"mfa_enabled_at":null}]');
+            expect(
+                snapshot
+                    .query("SELECT COUNT(*) AS count FROM user_webauthn_credentials")
+                    .get()
+            ).toEqual({ count: 1 });
             for (const tableName of [
                 "auth_webauthn_challenges",
                 "auth_sessions",
@@ -411,6 +417,52 @@ describe("development stack", () => {
             } else {
                 process.env.MIRA_GITHUB_TOKEN = originalGitHubToken;
             }
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("disables copied MFA when the development WebAuthn RP differs", () => {
+        const root = temporaryRoot("mira-development-rp-snapshot-");
+        const sourceDatabase = path.join(root, "production.db");
+        const stateRoot = path.join(root, "state");
+        createSnapshotSource(sourceDatabase);
+        mkdirSync(path.join(root, ".openclaw", "workspace"), { recursive: true });
+        mkdirSync(path.join(root, "projects", "mira-dashboard-releases"), {
+            recursive: true,
+        });
+        writeFileSync(path.join(root, ".openclaw", "openclaw.json"), "{}");
+        const config = resolveDevelopmentStackConfig(
+            {
+                HOME: root,
+                MIRA_DASHBOARD_DEV_DB_SOURCE: sourceDatabase,
+                MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: "http://localhost:5173",
+                MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
+                MIRA_DASHBOARD_WEBAUTHN_RP_ID: "dashboard.example",
+            },
+            root
+        );
+
+        try {
+            expect(prepareDevelopmentState(config).database).toBe("snapshot-created");
+            const snapshot = new Database(config.databasePath, { readonly: true });
+            try {
+                expect(
+                    snapshot
+                        .query("SELECT id, mfa_enabled_at FROM users ORDER BY id")
+                        .all()
+                ).toEqual([
+                    { id: 1, mfa_enabled_at: SQL_NULL },
+                    { id: 2, mfa_enabled_at: SQL_NULL },
+                ]);
+                expect(
+                    snapshot
+                        .query("SELECT COUNT(*) AS count FROM user_webauthn_credentials")
+                        .get()
+                ).toEqual({ count: 0 });
+            } finally {
+                snapshot.close();
+            }
+        } finally {
             rmSync(root, { force: true, recursive: true });
         }
     });

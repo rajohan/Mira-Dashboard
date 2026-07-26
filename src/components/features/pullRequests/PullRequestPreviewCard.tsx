@@ -1,8 +1,9 @@
-import { ExternalLink, MonitorPlay } from "lucide-react";
+import { ExternalLink, MonitorPlay, Square } from "lucide-react";
 
 import type { PullRequestPreviewStatus } from "../../../hooks";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
+import { Button } from "../../ui/Button";
 import { Card, CardTitle } from "../../ui/Card";
 
 function previewVariant(status: PullRequestPreviewStatus["status"]) {
@@ -46,9 +47,13 @@ function previewLabel(status: PullRequestPreviewStatus["status"]): string {
 /** Renders the global single-slot trusted PR development status. */
 export function PullRequestPreviewCard({
     error,
+    isStopPending = false,
+    onStop,
     preview,
 }: {
     error?: Error;
+    isStopPending?: boolean;
+    onStop?: () => void;
     preview: PullRequestPreviewStatus | undefined;
 }) {
     const status = preview?.status ?? "stopped";
@@ -71,6 +76,17 @@ export function PullRequestPreviewCard({
                     <Badge variant={error ? "error" : previewVariant(status)}>
                         {error ? "Status unavailable" : previewLabel(status)}
                     </Badge>
+                    {hasPreview && status !== "stopped" && onStop ? (
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={onStop}
+                            disabled={isStopPending || status === "stopping"}
+                        >
+                            <Square className="size-3.5" />
+                            Stop dev
+                        </Button>
+                    ) : undefined}
                 </div>
             </div>
 

@@ -1,4 +1,8 @@
-import { enqueueJobExecution, type JobExecution } from "./jobExecutionQueue.ts";
+import {
+    enqueueJobExecution,
+    type JobExecution,
+    listJobExecutions,
+} from "./jobExecutionQueue.ts";
 import {
     getPullRequestPreviewStatus as readPullRequestPreviewStatus,
     type PullRequestPreviewCandidate,
@@ -117,15 +121,61 @@ function previewFromExecution(execution: JobExecution): PullRequestPreviewStatus
     return parsePullRequestPreviewStatus(output.preview);
 }
 
-/** Reads the current single-slot preview state without changing host state. */
+/** Reads the current preview state, including queued lifecycle transitions. */
 export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewStatus> {
-    return readPullRequestPreviewStatus();
+    const preview = await readPullRequestPreviewStatus();
+    const activeExecution = listJobExecutions(200).find(
+        (execution) =>
+            ["queued", "running"].includes(execution.status) &&
+            ["dashboard.preview.start", "dashboard.preview.stop"].includes(
+                execution.actionKey
+            )
+    );
+    if (!activeExecution) return preview;
+
+    const value = activeExecution.payload.number;
+    const number = value === undefined ? preview.number : executionPreviewNumber(value);
+    const isSamePreview = number !== undefined && preview.number === number;
+    return {
+        ...(isSamePreview && preview),
+        ...(number !== undefined && { number }),
+        status:
+            activeExecution.actionKey === "dashboard.preview.start"
+                ? "starting"
+                : "stopping",
+        updatedAt: activeExecution.startedAt || activeExecution.queuedAt,
+    };
 }
 
 /** Queues one managed preview startup in the dedicated production worker. */
 export async function prepareAndStartPullRequestPreview(
     number: number
 ): Promise<PullRequestPreviewStatus> {
+    const candidate = await findPullRequest(number);
+    const current = await getPullRequestPreviewStatus();
+    if (
+        ["running", "starting", "stopping"].includes(current.status) &&
+        current.number !== number
+    ) {
+        throw Object.assign(
+            new Error(
+                `PR #${current.number} already owns the preview slot; stop it first`
+            ),
+            { statusCode: 409 }
+        );
+    }
+    if (
+        current.status === "running" &&
+        current.number === number &&
+        current.commitSha === candidate.commitSha
+    ) {
+        return current;
+    }
+    if (["starting", "stopping"].includes(current.status)) {
+        throw Object.assign(new Error("PR preview is already changing state"), {
+            statusCode: 409,
+        });
+    }
     const execution = enqueueJobExecution({
         actionKey: "dashboard.preview.start",
         displayName: `Start PR #${number} preview`,
@@ -133,11 +183,13 @@ export async function prepareAndStartPullRequestPreview(
         resourceClass: "exclusive",
         timeoutMs: PREVIEW_START_TIMEOUT_MS,
     });
-    return previewFromExecution(
-        await waitForJobExecution(execution.id, {
-            timeoutMs: PREVIEW_START_TIMEOUT_MS + PREVIEW_WAIT_GRACE_MS,
-        })
-    );
+    return {
+        commitSha: candidate.commitSha,
+        number,
+        status: "starting",
+        title: candidate.title,
+        updatedAt: execution.queuedAt,
+    };
 }
 
 /** Queues a managed preview stop in the dedicated production worker. */

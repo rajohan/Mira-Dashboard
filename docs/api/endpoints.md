@@ -246,7 +246,7 @@ upstream download metadata.
 | `POST` | `/api/pull-requests/:number/review-approval` | Queues review approval.                                    |
 | `POST` | `/api/pull-requests/:number/update-branch`   | Queues branch update.                                      |
 | `GET`  | `/api/pull-requests/preview`                 | Reads the single managed PR-dev slot.                      |
-| `POST` | `/api/pull-requests/:number/preview/start`   | Starts/updates trusted PR dev in the managed slot.         |
+| `POST` | `/api/pull-requests/:number/preview/start`   | Validates and queues trusted PR dev (`202 Starting`).      |
 | `POST` | `/api/pull-requests/:number/preview/stop`    | Stops PR dev while retaining isolated state.               |
 | `POST` | `/api/pull-requests/deploy`                  | Queues an atomic deploy of latest `main`.                  |
 | `GET`  | `/api/pull-requests/deployments`             | Lists deploy and rollback jobs.                            |

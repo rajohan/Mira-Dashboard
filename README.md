@@ -73,10 +73,12 @@ connects to the live OpenClaw Gateway, so chat and session changes can affect
 production data. Production host, backup, config, cron, destructive session,
 and PR actions remain blocked.
 
-Only the Gateway token and production auth timing values are selected from
-Doppler (`rajohan` / `prd`) at runtime. No secret values are stored in scripts
-or tracked files. See [Local development](docs/development/local-dev.md) for
-state paths, reset commands, and the trusted PR-dev flow.
+Only the Gateway token, production auth timing values, and non-secret WebAuthn
+RP ID are selected from Doppler (`rajohan` / `prd`) at runtime. The RP ID is
+used to discard incompatible copied WebAuthn credentials for local development.
+No secret values are stored in scripts or tracked files. See
+[Local development](docs/development/local-dev.md) for state paths, reset
+commands, and the trusted PR-dev flow.
 
 ## Verification commands
 

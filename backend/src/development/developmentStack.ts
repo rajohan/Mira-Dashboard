@@ -29,6 +29,8 @@ const DEVELOPMENT_STATE_MARKER = ".mira-dashboard-development-state.json";
 const DEVELOPMENT_SECRET_FILE = ".secret-encryption-key";
 const RELEASE_SHA_PATTERN = /^[\da-f]{40}$/u;
 const HOST_PATTERN = /^(?:localhost|[\da-f:.]+|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$/iu;
+const RP_ID_PATTERN =
+    /^(?:localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*)$/u;
 const DEFAULT_FRONTEND_PORT = 5173;
 const DEFAULT_BACKEND_PORT = 3101;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
@@ -69,6 +71,7 @@ export interface DevelopmentStackConfig {
     repositoryRoot: string;
     rpId: string;
     secretEncryptionKeyPath: string;
+    sourceWebAuthnRpId?: string;
     stateOwner: string;
     stateRoot: string;
     workspaceSource?: string;
@@ -198,6 +201,18 @@ function normalizedGatewayUrl(value: string | undefined): string | undefined {
     return gatewayUrl.href;
 }
 
+function normalizedOptionalRpId(
+    name: string,
+    value: string | undefined
+): string | undefined {
+    const rpId = value?.trim().toLowerCase();
+    if (!rpId) return undefined;
+    if (rpId.length > 253 || !RP_ID_PATTERN.test(rpId) || isIP(rpId)) {
+        throw new TypeError(`${name} must be a stable DNS relying-party id`);
+    }
+    return rpId;
+}
+
 /** Resolves one isolated frontend/backend development stack. */
 export function resolveDevelopmentStackConfig(
     environment: Record<string, string | undefined>,
@@ -289,6 +304,11 @@ export function resolveDevelopmentStackConfig(
         repositoryRoot: resolvedRepoRoot,
         rpId: publicOrigin.hostname.toLowerCase(),
         secretEncryptionKeyPath: path.join(stateRoot, DEVELOPMENT_SECRET_FILE),
+        sourceWebAuthnRpId: normalizedOptionalRpId(
+            "MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID",
+            environment.MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID ||
+                environment.MIRA_DASHBOARD_WEBAUTHN_RP_ID
+        ),
         stateOwner: configuredStateOwner(
             environment.MIRA_DASHBOARD_DEV_STATE_OWNER,
             "local-dashboard-dev"
@@ -349,7 +369,10 @@ function runIfTableExists(
     }
 }
 
-function scrubDevelopmentDatabase(databasePath: string): void {
+function scrubDevelopmentDatabase(
+    databasePath: string,
+    shouldPreserveWebAuthnCredentials: boolean
+): void {
     const database = new Database(databasePath);
     try {
         database.run("PRAGMA foreign_keys = ON");
@@ -372,6 +395,13 @@ function scrubDevelopmentDatabase(databasePath: string): void {
             "user_recovery_codes",
             "DELETE FROM user_recovery_codes"
         );
+        if (!shouldPreserveWebAuthnCredentials) {
+            runIfTableExists(
+                database,
+                "user_webauthn_credentials",
+                "DELETE FROM user_webauthn_credentials"
+            );
+        }
         if (
             hasTable(database, "users") &&
             hasTable(database, "user_webauthn_credentials")
@@ -439,7 +469,11 @@ function scrubDevelopmentDatabase(databasePath: string): void {
     }
 }
 
-function createDevelopmentDatabaseSnapshot(sourcePath: string, targetPath: string): void {
+function createDevelopmentDatabaseSnapshot(
+    sourcePath: string,
+    targetPath: string,
+    shouldPreserveWebAuthnCredentials: boolean
+): void {
     if (!isRealRegularFile(sourcePath)) {
         throw new Error(
             `MIRA_DASHBOARD_DEV_DB_SOURCE must be a real regular file: ${sourcePath}`
@@ -458,7 +492,7 @@ function createDevelopmentDatabaseSnapshot(sourcePath: string, targetPath: strin
             source.close();
         }
         chmodSync(stagingPath, 0o600);
-        scrubDevelopmentDatabase(stagingPath);
+        scrubDevelopmentDatabase(stagingPath, shouldPreserveWebAuthnCredentials);
         renameSync(stagingPath, targetPath);
     } catch (error) {
         rmSync(stagingPath, { force: true });
@@ -660,7 +694,11 @@ export function prepareDevelopmentState(
         }
         database = "reused";
     } else if (config.databaseSource) {
-        createDevelopmentDatabaseSnapshot(config.databaseSource, config.databasePath);
+        createDevelopmentDatabaseSnapshot(
+            config.databaseSource,
+            config.databasePath,
+            config.sourceWebAuthnRpId === config.rpId
+        );
         database = "snapshot-created";
     } else {
         database = "created-empty";

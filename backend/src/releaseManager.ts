@@ -76,6 +76,15 @@ export interface DashboardReleaseManagerOptions {
     transitionLockWaitMs?: number;
 }
 
+export interface DashboardReleaseRollbackExpectation {
+    currentCommitSha: string;
+    targetCommitSha: string;
+}
+
+export interface DashboardReleaseRollbackOptions extends DashboardReleaseManagerOptions {
+    expected?: DashboardReleaseRollbackExpectation;
+}
+
 export interface DashboardReleasePublicationOptions {
     onTransitionLockContention?: () => void;
 }
@@ -1195,17 +1204,23 @@ async function executeReleaseTransition(
 }
 
 export async function readDashboardReleaseState(
-    releasesRoot = resolveDashboardReleasesRoot()
+    releasesRoot = resolveDashboardReleasesRoot(),
+    options: Pick<DashboardReleaseManagerOptions, "transitionLockWaitMs"> = {}
 ): Promise<DashboardReleaseState> {
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
-    return withReleaseTransitionLock(layout, "shared", async () => {
-        if (await readReleaseTransitionJournal(layout)) {
-            throw new Error(
-                "Managed release status requires activate or rollback to recover an interrupted transition"
-            );
-        }
-        return readDashboardReleaseStateFromLayout(layout);
-    });
+    return withReleaseTransitionLock(
+        layout,
+        "shared",
+        async () => {
+            if (await readReleaseTransitionJournal(layout)) {
+                throw new Error(
+                    "Managed release status requires activate or rollback to recover an interrupted transition"
+                );
+            }
+            return readDashboardReleaseStateFromLayout(layout);
+        },
+        options.transitionLockWaitMs
+    );
 }
 
 export async function activateDashboardRelease(
@@ -1297,8 +1312,18 @@ export async function activateDashboardRelease(
 
 export async function rollbackDashboardRelease(
     releasesRoot = resolveDashboardReleasesRoot(),
-    options: DashboardReleaseManagerOptions = {}
+    options: DashboardReleaseRollbackOptions = {}
 ): Promise<DashboardReleaseState> {
+    const expectation = options.expected;
+    if (expectation) {
+        assertReleaseCommitSha(expectation.currentCommitSha);
+        assertReleaseCommitSha(expectation.targetCommitSha);
+        if (expectation.currentCommitSha === expectation.targetCommitSha) {
+            throw new TypeError(
+                "Managed release rollback expectation requires distinct releases"
+            );
+        }
+    }
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
     return withReleaseTransitionLock(
         layout,
@@ -1312,6 +1337,15 @@ export async function rollbackDashboardRelease(
             if (state.current.commitSha === state.previous.commitSha) {
                 throw new Error(
                     "Managed release rollback requires two distinct releases"
+                );
+            }
+            if (
+                expectation &&
+                (state.current.commitSha !== expectation.currentCommitSha ||
+                    state.previous.commitSha !== expectation.targetCommitSha)
+            ) {
+                throw new Error(
+                    "Managed release rollback slots changed before the guarded transition"
                 );
             }
 

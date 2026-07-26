@@ -150,15 +150,18 @@ The Database page probes Postgres/PgBouncer using these values:
 
 `bun run dev` and `bun run dev:remote` select only
 `OPENCLAW_GATEWAY_TOKEN`, `MIRA_DASHBOARD_SESSION_IDLE_MINUTES`, and
-`MIRA_DASHBOARD_RECENT_AUTH_MINUTES` from Doppler `rajohan/prd`. The explicit
-backend child environment forwards the two auth timing values unchanged and
-does not inherit other provider or host credentials.
+`MIRA_DASHBOARD_RECENT_AUTH_MINUTES`, plus the non-secret
+`MIRA_DASHBOARD_WEBAUTHN_RP_ID`, from Doppler `rajohan/prd`. The explicit backend
+child environment forwards the two auth timing values unchanged, uses the
+production RP ID only to decide whether copied WebAuthn public credentials are
+compatible, and does not inherit other provider or host credentials.
 
 | Variable                                      | Default                                             | Purpose                                                                          |
 | --------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `MIRA_DASHBOARD_DEV_FRONTEND_PORT`            | `5173`                                              | Frontend hot-reload port.                                                        |
 | `MIRA_DASHBOARD_DEV_BACKEND_PORT`             | `3101`                                              | Backend restart-on-change port.                                                  |
 | `MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN`            | `http://localhost:5173`                             | Cookie/WebAuthn origin; remote dev derives the Tailscale HTTPS origin.           |
+| `MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID`    | production `MIRA_DASHBOARD_WEBAUTHN_RP_ID`          | Source snapshot RP used to retain or remove copied WebAuthn public credentials.  |
 | `MIRA_DASHBOARD_DEV_STATE_ROOT`               | `~/projects/mira-dashboard-dev-state/local`         | Owner-only isolated development state.                                           |
 | `MIRA_DASHBOARD_DEV_DB_SOURCE`                | `~/projects/mira-dashboard-state/mira-dashboard.db` | Production database used only to create a scrubbed WAL-consistent snapshot.      |
 | `MIRA_DASHBOARD_DEV_RELEASES_SOURCE`          | `~/projects/mira-dashboard-releases`                | Managed releases copied into isolated state.                                     |

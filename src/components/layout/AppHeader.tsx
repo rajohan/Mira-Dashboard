@@ -162,7 +162,8 @@ export function AppHeader({
                                                   : "text-primary-400"
                                         }
                                     >
-                                        {workerStatus.label} {workerStatus.symbol}
+                                        {workerStatus.label.replace(/^Worker /u, "")}{" "}
+                                        {workerStatus.symbol}
                                     </span>
                                 </div>
                                 {hasVersionMismatch ? (

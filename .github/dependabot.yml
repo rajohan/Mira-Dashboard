@@ -1,92 +1,92 @@
 version: 2
 
 updates:
-  - package-ecosystem: "bun"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-      timezone: "Europe/Oslo"
-    open-pull-requests-limit: 5
-    labels:
-      - "type: dependencies"
-      - "area: frontend"
-    commit-message:
-      prefix: "deps"
-    ignore:
-      # TypeScript 7 is already used for builds through @typescript/native.
-      # Keep TypeScript 6 available for typescript-eslint's compiler API.
-      - dependency-name: "typescript"
-        update-types:
-          - "version-update:semver-major"
-    groups:
-      frontend-major:
-        patterns:
-          - "*"
-        update-types:
-          - "major"
-      frontend-minor-and-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
+    - package-ecosystem: "bun"
+      directory: "/"
+      schedule:
+          interval: "weekly"
+          day: "monday"
+          time: "06:00"
+          timezone: "Europe/Oslo"
+      open-pull-requests-limit: 5
+      labels:
+          - "type: dependencies"
+          - "area: frontend"
+      commit-message:
+          prefix: "deps"
+      ignore:
+          # TypeScript 7 is already used for builds through @typescript/native.
+          # Keep TypeScript 6 available for typescript-eslint's compiler API.
+          - dependency-name: "typescript"
+            update-types:
+                - "version-update:semver-major"
+      groups:
+          frontend-major:
+              patterns:
+                  - "*"
+              update-types:
+                  - "major"
+          frontend-minor-and-patch:
+              patterns:
+                  - "*"
+              update-types:
+                  - "minor"
+                  - "patch"
 
-  - package-ecosystem: "bun"
-    directory: "/backend"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:15"
-      timezone: "Europe/Oslo"
-    open-pull-requests-limit: 5
-    labels:
-      - "type: dependencies"
-      - "area: backend"
-    commit-message:
-      prefix: "deps"
-    ignore:
-      # TypeScript 7 is already used for builds through @typescript/native.
-      # Keep TypeScript 6 available for typescript-eslint's compiler API.
-      - dependency-name: "typescript"
-        update-types:
-          - "version-update:semver-major"
-    groups:
-      backend-major:
-        patterns:
-          - "*"
-        update-types:
-          - "major"
-      backend-minor-and-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
+    - package-ecosystem: "bun"
+      directory: "/backend"
+      schedule:
+          interval: "weekly"
+          day: "monday"
+          time: "06:15"
+          timezone: "Europe/Oslo"
+      open-pull-requests-limit: 5
+      labels:
+          - "type: dependencies"
+          - "area: backend"
+      commit-message:
+          prefix: "deps"
+      ignore:
+          # TypeScript 7 is already used for builds through @typescript/native.
+          # Keep TypeScript 6 available for typescript-eslint's compiler API.
+          - dependency-name: "typescript"
+            update-types:
+                - "version-update:semver-major"
+      groups:
+          backend-major:
+              patterns:
+                  - "*"
+              update-types:
+                  - "major"
+          backend-minor-and-patch:
+              patterns:
+                  - "*"
+              update-types:
+                  - "minor"
+                  - "patch"
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:30"
-      timezone: "Europe/Oslo"
-    open-pull-requests-limit: 4
-    labels:
-      - "type: dependencies"
-      - "area: ci"
-    commit-message:
-      prefix: "ci"
-    groups:
-      github-actions-major:
-        patterns:
-          - "*"
-        update-types:
-          - "major"
-      github-actions-minor-and-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
+    - package-ecosystem: "github-actions"
+      directory: "/"
+      schedule:
+          interval: "weekly"
+          day: "monday"
+          time: "06:30"
+          timezone: "Europe/Oslo"
+      open-pull-requests-limit: 4
+      labels:
+          - "type: dependencies"
+          - "area: ci"
+      commit-message:
+          prefix: "ci"
+      groups:
+          github-actions-major:
+              patterns:
+                  - "*"
+              update-types:
+                  - "major"
+          github-actions-minor-and-patch:
+              patterns:
+                  - "*"
+              update-types:
+                  - "minor"
+                  - "patch"

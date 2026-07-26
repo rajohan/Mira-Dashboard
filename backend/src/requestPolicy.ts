@@ -417,6 +417,30 @@ function didWriteRequestAudit(
     }
 }
 
+function auditedForbiddenResponse(
+    actor: AuditActor,
+    request: Request,
+    requestId: string,
+    routePath: string,
+    automationScope: AutomationScope | undefined,
+    payload: Record<string, string>,
+    persistAuditEvent: typeof writeAuditEvent
+): Response {
+    const didRecordDenial = didWriteRequestAudit(
+        actor,
+        "denied",
+        request,
+        requestId,
+        routePath,
+        403,
+        automationScope,
+        persistAuditEvent
+    );
+    return didRecordDenial
+        ? json(payload, { status: 403 })
+        : json({ error: "Audit trail unavailable" }, { status: 503 });
+}
+
 function secureHandler(
     routePath: string,
     handler: BunHandler | Response,
@@ -460,22 +484,14 @@ function secureHandler(
                 automationPrincipal &&
                 (!automationScope || !automationPrincipal.scopes.has(automationScope))
             ) {
-                const didRecordDenial = didWriteRequestAudit(
+                return auditedForbiddenResponse(
                     requestActor(undefined, automationPrincipal),
-                    "denied",
                     request,
                     requestIdentifier,
                     routePath,
-                    403,
                     automationScope,
-                    persistAuditEvent
-                );
-                if (!didRecordDenial) {
-                    return json({ error: "Audit trail unavailable" }, { status: 503 });
-                }
-                return json(
                     { error: "Automation credential scope denied" },
-                    { status: 403 }
+                    persistAuditEvent
                 );
             }
             const isAuditedMutationRequest = isAuditedMutation(
@@ -497,24 +513,16 @@ function secureHandler(
                 : undefined;
             const actor = requestActor(user, automationPrincipal);
             if (isApi && isDevelopmentHostMutationBlocked(request)) {
-                const didRecordDenial = didWriteRequestAudit(
+                return auditedForbiddenResponse(
                     actor,
-                    "denied",
                     request,
                     requestIdentifier,
                     routePath,
-                    403,
                     automationScope,
-                    persistAuditEvent
-                );
-                if (!didRecordDenial) {
-                    return json({ error: "Audit trail unavailable" }, { status: 503 });
-                }
-                return json(
                     {
                         error: "Host-control actions are disabled in Dashboard dev",
                     },
-                    { status: 403 }
+                    persistAuditEvent
                 );
             }
             const isPrivilegedRequest =
@@ -524,20 +532,12 @@ function secureHandler(
                 session &&
                 (!session.mfaEnabled || !hasRecentMfaVerification(session))
             ) {
-                const didRecordDenial = didWriteRequestAudit(
+                return auditedForbiddenResponse(
                     actor,
-                    "denied",
                     request,
                     requestIdentifier,
                     routePath,
-                    403,
                     automationScope,
-                    persistAuditEvent
-                );
-                if (!didRecordDenial) {
-                    return json({ error: "Audit trail unavailable" }, { status: 503 });
-                }
-                return json(
                     {
                         code: session.mfaEnabled
                             ? "step_up_required"
@@ -546,7 +546,7 @@ function secureHandler(
                             ? "Recent MFA verification is required"
                             : "Multi-factor authentication must be enabled",
                     },
-                    { status: 403 }
+                    persistAuditEvent
                 );
             }
             const isMutation = isAuditedMutationRequest || isPrivilegedRequest;

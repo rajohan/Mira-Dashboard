@@ -25,17 +25,50 @@ interface DevelopmentTailscaleStatus {
     proxyTarget: string;
 }
 
+const COMMAND_TIMEOUT_MS = 15_000;
+const COMMAND_FORCE_KILL_GRACE_MS = 2000;
+
 async function commandOutput(command: string[]): Promise<string> {
     const process_ = Bun.spawn(command, {
         stderr: "pipe",
         stdin: "ignore",
         stdout: "pipe",
     });
-    const [exitCode, stderr, stdout] = await Promise.all([
-        process_.exited,
-        new Response(process_.stderr).text(),
-        new Response(process_.stdout).text(),
-    ]);
+    let didTimeout = false;
+    let forceKillTimer: Timer | undefined;
+    const timeout = setTimeout(() => {
+        didTimeout = true;
+        try {
+            process_.kill("SIGTERM");
+        } catch {
+            // The command may already have exited at the timeout boundary.
+        }
+        forceKillTimer = setTimeout(() => {
+            try {
+                process_.kill("SIGKILL");
+            } catch {
+                // The command may have exited during the force-kill grace period.
+            }
+        }, COMMAND_FORCE_KILL_GRACE_MS);
+        forceKillTimer.unref();
+    }, COMMAND_TIMEOUT_MS);
+    timeout.unref();
+    let exitCode: number;
+    let stderr: string;
+    let stdout: string;
+    try {
+        [exitCode, stderr, stdout] = await Promise.all([
+            process_.exited,
+            new Response(process_.stderr).text(),
+            new Response(process_.stdout).text(),
+        ]);
+    } finally {
+        clearTimeout(timeout);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+    }
+    if (didTimeout) {
+        throw new Error(`${command[0]} timed out after ${COMMAND_TIMEOUT_MS}ms`);
+    }
     if (exitCode !== 0) {
         throw new Error(
             `${command[0]} exited ${exitCode}: ${stderr.trim() || stdout.trim()}`
@@ -167,7 +200,15 @@ async function main(): Promise<number> {
         return await runDevelopmentStack(config);
     } finally {
         if (route.didCreate) {
-            await disableDevelopmentServe(port);
+            try {
+                await disableDevelopmentServe(port);
+            } catch (error) {
+                console.error(
+                    `Failed to remove the temporary Tailscale Serve route: ${
+                        error instanceof Error ? error.message : "unknown error"
+                    }`
+                );
+            }
         }
     }
 }

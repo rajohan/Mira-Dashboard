@@ -30,6 +30,7 @@ const eslintConfig = defineConfig(
             "dist/**",
             "build/**",
             "coverage/**",
+            "data/**",
             "*.log",
             "*.tsbuildinfo",
             ".DS_Store",

@@ -2,9 +2,11 @@ import {
     existsSync,
     mkdirSync,
     mkdtempSync,
+    readdirSync,
     readFileSync,
     rmSync,
     statSync,
+    writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -151,6 +153,16 @@ describe("managed pull request preview", () => {
                 unitName: "mira-dashboard-pr-preview.service",
             });
             expect(config.allowedAuthors).toEqual(new Set(["mira-2026", "rajohan"]));
+            expect(() =>
+                resolvePullRequestPreviewConfig({
+                    BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
+                    MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS: " , ",
+                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
+                })
+            ).toThrow(
+                "MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS must contain at least one author"
+            );
 
             for (const environment of [
                 {
@@ -221,6 +233,32 @@ describe("managed pull request preview", () => {
                 path.join(worktreePath, "scripts", "developmentStack.ts")
             );
         } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("quarantines an invalid preview record instead of blocking the dev slot", async () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-corrupt-state-"));
+        const config = previewConfig(root);
+        mkdirSync(config.previewRoot, { recursive: true });
+        writeFileSync(config.stateFile, "{not-json\n", { mode: 0o600 });
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+            await expect(getPullRequestPreviewStatus(config)).resolves.toEqual({
+                status: "stopped",
+            });
+            expect(existsSync(config.stateFile)).toBe(false);
+            expect(
+                readdirSync(config.previewRoot).filter((entry) =>
+                    entry.startsWith("active-preview.corrupt-")
+                )
+            ).toHaveLength(1);
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.stringContaining("Quarantined invalid state")
+            );
+        } finally {
+            errorSpy.mockRestore();
             rmSync(root, { force: true, recursive: true });
         }
     });
@@ -372,6 +410,13 @@ describe("managed pull request preview", () => {
             expect(commands.some((command) => command.startsWith("systemd-run "))).toBe(
                 true
             );
+            expect(
+                commands.findIndex((command) => command.startsWith("systemd-run "))
+            ).toBeLessThan(
+                commands.findIndex((command) =>
+                    command.startsWith("sudo -n tailscale serve --bg --https=5173")
+                )
+            );
             await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
                 number: 335,
                 status: "running",
@@ -404,6 +449,12 @@ describe("managed pull request preview", () => {
             expect(existsSync(config.gatewayTokenFile)).toBe(false);
             expect(commands).toContain("sudo -n tailscale serve --https=5173 off");
 
+            isServeEnabled = true;
+            await expect(
+                startPullRequestPreview(candidate, { config })
+            ).rejects.toMatchObject({ statusCode: 409 });
+            isServeEnabled = false;
+
             expectedCommit = "b".repeat(40);
             await expect(
                 startPullRequestPreview(
@@ -426,7 +477,11 @@ describe("managed pull request preview", () => {
                     command.includes(`checkout --detach ${expectedCommit}`)
                 )
             ).toBe(true);
-            await stopPullRequestPreview(undefined, { config });
+            isUnitActive = false;
+            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+                number: 335,
+                status: "stopped",
+            });
             expect(isServeEnabled).toBe(false);
             expect(existsSync(config.gatewayTokenFile)).toBe(false);
         } finally {
@@ -447,6 +502,9 @@ describe("managed pull request preview", () => {
             .mockImplementation((input) =>
                 input.actionKey === "dashboard.preview.start" ? queuedStart : queuedStop
             );
+        const executionsSpy = jest
+            .spyOn(jobExecutionQueue, "listJobExecutions")
+            .mockReturnValue([]);
         const waitSpy = jest
             .spyOn(queuedJobExecution, "waitForJobExecution")
             .mockImplementation(async (id) =>
@@ -489,11 +547,12 @@ describe("managed pull request preview", () => {
             .mockResolvedValue({ number: 335, status: "stopped" });
         const statusSpy = jest
             .spyOn(previewHost, "getPullRequestPreviewStatus")
-            .mockResolvedValue({
-                commitSha: COMMIT,
-                number: 335,
-                status: "running",
-            });
+            .mockResolvedValue({ status: "stopped" });
+        const runningPreview = {
+            commitSha: COMMIT,
+            number: 335,
+            status: "running" as const,
+        };
         const protectFromCancellation = jest.fn();
         const context: ScheduledJobActionContext = {
             executionId: "execution",
@@ -503,9 +562,19 @@ describe("managed pull request preview", () => {
         };
 
         try {
-            await expect(prepareAndStartPullRequestPreview(335)).resolves.toEqual({
+            await expect(prepareAndStartPullRequestPreview(335)).resolves.toMatchObject({
+                commitSha: COMMIT,
                 number: 335,
+                status: "starting",
+                title: "Trusted preview",
+                updatedAt: expect.any(String),
+            });
+            statusSpy.mockResolvedValueOnce({
+                number: 334,
                 status: "running",
+            });
+            await expect(prepareAndStartPullRequestPreview(335)).rejects.toMatchObject({
+                statusCode: 409,
             });
             await expect(prepareAndStopPullRequestPreview(335)).resolves.toEqual({
                 number: 335,
@@ -531,17 +600,23 @@ describe("managed pull request preview", () => {
                     payload: { number: undefined },
                 })
             );
-            expect(waitSpy).toHaveBeenCalledTimes(3);
+            expect(waitSpy).toHaveBeenCalledTimes(2);
 
             const { pullRequestRoutes } =
                 await import("../src/routes/pullRequestRoutes.ts");
             const startResponse = await pullRequestRoutes[
                 "/api/pull-requests/:number/preview/start"
             ].POST(previewRouteRequest("335"));
-            expect(startResponse.status).toBe(200);
-            await expect(startResponse.json()).resolves.toEqual({
+            expect(startResponse.status).toBe(202);
+            await expect(startResponse.json()).resolves.toMatchObject({
                 isOk: true,
-                preview: { number: 335, status: "running" },
+                preview: {
+                    commitSha: COMMIT,
+                    number: 335,
+                    status: "starting",
+                    title: "Trusted preview",
+                    updatedAt: expect.any(String),
+                },
             });
 
             const stopResponse = await pullRequestRoutes[
@@ -553,14 +628,17 @@ describe("managed pull request preview", () => {
                 preview: { number: 335, status: "stopped" },
             });
 
+            statusSpy.mockResolvedValue(runningPreview);
+            executionsSpy.mockReturnValueOnce([queuedStart]);
             const statusResponse =
                 await pullRequestRoutes["/api/pull-requests/preview"].GET();
             expect(statusResponse.status).toBe(200);
-            await expect(statusResponse.json()).resolves.toEqual({
+            await expect(statusResponse.json()).resolves.toMatchObject({
                 preview: {
                     commitSha: COMMIT,
                     number: 335,
-                    status: "running",
+                    status: "starting",
+                    updatedAt: queuedStart.queuedAt,
                 },
             });
 
@@ -577,7 +655,7 @@ describe("managed pull request preview", () => {
                 });
             }
 
-            waitSpy.mockRejectedValueOnce(
+            listSpy.mockRejectedValueOnce(
                 Object.assign(new Error("preview startup unavailable"), {
                     statusCode: 503,
                 })
@@ -663,6 +741,7 @@ describe("managed pull request preview", () => {
             ).rejects.toMatchObject({ statusCode: 404 });
         } finally {
             enqueueSpy.mockRestore();
+            executionsSpy.mockRestore();
             waitSpy.mockRestore();
             registerSpy.mockRestore();
             listSpy.mockRestore();

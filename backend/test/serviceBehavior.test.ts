@@ -1946,7 +1946,8 @@ printf 'scheduled\n'
             expect(guardian).toContain(
                 `${releasesRoot}/releases/${currentCommit}/backend/dist/releaseLifecycle.js`
             );
-            expect(guardian).toContain(" rollback");
+            expect(guardian).toContain(`rollback '${currentCommit}' '${previousCommit}'`);
+            expect(guardian).toContain(`rollback '${previousCommit}' '${currentCommit}'`);
             expect(guardian).toContain(
                 `ready_for_commit '${previousCommit.slice(0, 8)}'`
             );
@@ -2505,7 +2506,9 @@ printf 'scheduled\n'
             expect(restartCommand.indexOf(`activate '${candidateCommit}'`)).toBeLessThan(
                 restartCommand.indexOf("if restart_services")
             );
-            expect(restartCommand).toContain("rollback");
+            expect(restartCommand).toContain(
+                `rollback '${candidateCommit}' '${oldCommit}'`
+            );
             expect(restartCommand).toContain("prune 3");
             expect(restartCommand).not.toContain("/api/job-executions");
             expect(readlinkSync(path.join(releasesRoot, "current"))).toBe(
@@ -2572,7 +2575,7 @@ printf 'scheduled\n'
                 )
             );
             expect(recoveryCommand).toContain(
-                "run_lifecycle rollback && restart_services"
+                'run_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
             );
             expect(
                 database

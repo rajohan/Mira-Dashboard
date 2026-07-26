@@ -11,7 +11,7 @@ const port = Number(process.env.PORT || "5173");
 const apiTarget = process.env.DASHBOARD_API_TARGET || "http://127.0.0.1:3101";
 const backendWebSocketTarget = apiTarget.replace(/^http/u, "ws");
 const cookieNamespace =
-    process.env.MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE || "mira_dashboard_dev_5173";
+    process.env.MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE || `mira_dashboard_dev_${port}`;
 
 interface WebSocketProxyData {
     backend?: WebSocket;

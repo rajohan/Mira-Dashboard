@@ -73,10 +73,14 @@ changes made while testing remain available.
 
 The database snapshot removes active sessions and pending logins, WebAuthn
 challenges, TOTP/recovery secrets, the persisted Gateway token, deployment/job
-runtime state, and chat replay snapshots. Existing Dashboard users, password
-hashes, and WebAuthn public credentials remain available. Cache refresh and
-SQLite maintenance jobs retain their enabled state and schedule. Backup,
-Docker, deploy, workspace-sync, and log-rotation jobs are forced disabled.
+runtime state, and chat replay snapshots. Existing Dashboard users and password
+hashes remain available. WebAuthn public credentials remain available only when
+the source and development relying-party IDs match. For a different RP, such as
+the default `localhost`, the snapshot removes incompatible credentials and
+disables MFA so password login and local factor enrollment remain possible.
+Cache refresh and SQLite maintenance jobs retain their enabled state and
+schedule. Backup, Docker, deploy, workspace-sync, and log-rotation jobs are
+forced disabled.
 
 The workspace copy rejects symlinks and excludes Git metadata, credential/secret
 directories, private-key names, `.env` files, and token/secret files. Safe
@@ -130,17 +134,20 @@ the frontend proxy strips non-dev Dashboard cookies before forwarding requests.
 
 The Pull requests page exposes one shared **PR dev** slot:
 
-- only PRs targeting `main` from the configured trusted-author allowlist can
-  start;
-- dependencies install with frozen lockfiles and lifecycle scripts disabled;
-- source and Git metadata are read-only inside a Bubblewrap sandbox;
-- state is stored under
-  `/home/ubuntu/projects/mira-dashboard-preview-state/managed/states/pr-<number>/`;
-- Tailscale provides HTTPS;
-- a transient user unit enforces CPU, IO, memory, task, and four-hour runtime
-  limits;
-- stop removes the owned Tailscale route and materialized Gateway-token file,
+- Only PRs targeting `main` from the configured trusted-author allowlist can
+  start.
+- Dependencies install with frozen lockfiles and lifecycle scripts disabled.
+- Source and Git metadata are read-only inside a Bubblewrap sandbox.
+- State is stored under
+  `/home/ubuntu/projects/mira-dashboard-preview-state/managed/states/pr-<number>/`.
+- Tailscale publishes HTTPS only after the managed frontend/backend pair is
+  locally ready.
+- A transient user unit enforces CPU, IO, memory, task, and four-hour runtime
+  limits.
+- Stop removes the owned Tailscale route and materialized Gateway-token file,
   while keeping the worktree and isolated state for a faster restart.
+- Status reconciliation performs the same route/token cleanup if the transient
+  unit exits or reaches its four-hour limit.
 
 The production backend decrypts its persisted Gateway token only when starting
 trusted PR dev. It atomically writes an owner-only `0600` file outside the
@@ -186,6 +193,10 @@ bun run test:frontend:coverage
 bun run test:backend:coverage
 bun run format:check
 ```
+
+During development, `bun run test:changed` runs only frontend and backend tests
+affected by uncommitted changes. Run the full test and coverage commands before
+push.
 
 Use Bun, keep backend imports on `.ts`, reuse shared frontend components, and do
 not commit generated state, build output, database files, environment files, or

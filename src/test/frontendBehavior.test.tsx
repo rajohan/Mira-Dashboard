@@ -929,7 +929,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 });
             });
             await waitFor(() => {
-                expect(screen.getByText(/Worker offline/u)).toBeInTheDocument();
+                expect(screen.getByText(/Offline ○/u)).toBeInTheDocument();
             });
 
             const healthQuery = queryClient
@@ -943,9 +943,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 });
             });
             await waitFor(() => {
-                expect(
-                    screen.getByText(/Worker status unavailable/u)
-                ).toBeInTheDocument();
+                expect(screen.getByText(/status unavailable \?/u)).toBeInTheDocument();
             });
 
             await userEvent.click(screen.getByLabelText("Open navigation menu"));

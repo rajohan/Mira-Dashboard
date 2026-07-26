@@ -190,14 +190,14 @@ assert_no_active_release_action
 env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
   MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
-  bun "$CURRENT_LIFECYCLE" rollback
+  bun "$CURRENT_LIFECYCLE" rollback "$CURRENT_SHA" "$TARGET_SHA"
 systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 if ! ready_for_commit "$TARGET_SHA"; then
   echo "Rollback target failed readiness. Restoring $CURRENT_SHA" >&2
   env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
     MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
     NODE_ENV=production \
-    bun "$CURRENT_LIFECYCLE" rollback
+    bun "$CURRENT_LIFECYCLE" rollback "$TARGET_SHA" "$CURRENT_SHA"
   systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
   ready_for_commit "$CURRENT_SHA"
   exit 1

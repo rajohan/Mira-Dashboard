@@ -29,6 +29,10 @@ import {
     registerQueuedJobCancellationHandler,
 } from "./jobExecutionQueue.ts";
 import {
+    isPullRequestPreviewAuthorAllowed,
+    resolvePullRequestPreviewAllowedAuthors,
+} from "./pullRequestPreviewPolicy.ts";
+import {
     successfulJobExecutionOutput,
     waitForJobExecution,
 } from "./queuedJobExecution.ts";
@@ -70,6 +74,7 @@ const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
 const PUBLIC_PR_CACHE_MS = 2 * 60 * 1000;
+const PUBLIC_PR_FAILURE_CACHE_MS = 30_000;
 const PUBLIC_GITHUB_API_TIMEOUT_MS = 15_000;
 const DEPLOYMENT_RESTART_STATUS_POLL_MS = 1000;
 const DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS = 2 * 60 * 1000;
@@ -81,6 +86,7 @@ const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
 const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
 const publicPullRequestCache: {
+    failure?: { expiresAt: number; message: string };
     value?: { expiresAt: number; pullRequests: PullRequestSummary[] };
 } = {};
 
@@ -151,6 +157,7 @@ export interface PullRequestSummary {
     headRefOid?: string;
     mergeable?: string;
     mergeStateStatus?: string;
+    previewEligible?: boolean;
     reviewDecision?: string;
     reviewerApproved?: boolean;
     canReviewerApprove?: boolean;
@@ -781,11 +788,19 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
     const rest = { ...pr };
     delete rest.latestOpinionatedReviews;
     delete rest.reviews;
+    const previewAllowedAuthors = resolvePullRequestPreviewAllowedAuthors(
+        process.env.MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS
+    );
 
     return {
         ...rest,
-        reviewerApproved: isPullRequestReviewApproved(pr),
         canReviewerApprove: canReviewerApprove(pr),
+        previewEligible:
+            pr.baseRefName === DEFAULT_BASE &&
+            isPullRequestPreviewAuthorAllowed(pr.author?.login, previewAllowedAuthors) &&
+            typeof pr.headRefOid === "string" &&
+            FULL_COMMIT_SHA_PATTERN.test(pr.headRefOid),
+        reviewerApproved: isPullRequestReviewApproved(pr),
     };
 }
 
@@ -866,34 +881,52 @@ async function listPublicDashboardPullRequests(): Promise<PullRequestSummary[]> 
     if (cachedPullRequests && cachedPullRequests.expiresAt > now) {
         return cachedPullRequests.pullRequests;
     }
-    const response = await fetch(
-        `https://api.github.com/repos/${DASHBOARD_REPO}/pulls?state=open&base=${DEFAULT_BASE}&per_page=100`,
-        {
-            headers: {
-                Accept: "application/vnd.github+json",
-                "User-Agent": "Mira-Dashboard-development-preview",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            signal: AbortSignal.timeout(PUBLIC_GITHUB_API_TIMEOUT_MS),
-        }
-    );
-    if (!response.ok) {
-        throw new Error(
-            `GitHub public pull request request failed with status ${response.status}`
+    const cachedFailure = publicPullRequestCache.failure;
+    if (cachedFailure && cachedFailure.expiresAt > now) {
+        throw new Error(cachedFailure.message);
+    }
+    try {
+        const response = await fetch(
+            `https://api.github.com/repos/${DASHBOARD_REPO}/pulls?state=open&base=${DEFAULT_BASE}&per_page=100`,
+            {
+                headers: {
+                    Accept: "application/vnd.github+json",
+                    "User-Agent": "Mira-Dashboard-development-preview",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                signal: AbortSignal.timeout(PUBLIC_GITHUB_API_TIMEOUT_MS),
+            }
         );
+        if (!response.ok) {
+            throw new Error(
+                `GitHub public pull request request failed with status ${response.status}`
+            );
+        }
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        if (contentLength > MAX_BUFFER) {
+            throw new Error("GitHub public pull request response was too large");
+        }
+        const pullRequests = parsePublicGithubPullRequests(
+            await readBoundedJsonResponse(response, MAX_BUFFER)
+        );
+        publicPullRequestCache.value = {
+            expiresAt: now + PUBLIC_PR_CACHE_MS,
+            pullRequests,
+        };
+        publicPullRequestCache.failure = undefined;
+        return pullRequests;
+    } catch (error) {
+        if (cachedPullRequests) {
+            cachedPullRequests.expiresAt = now + PUBLIC_PR_FAILURE_CACHE_MS;
+            return cachedPullRequests.pullRequests;
+        }
+        const message = errorMessage(error, "GitHub public pull request request failed");
+        publicPullRequestCache.failure = {
+            expiresAt: now + PUBLIC_PR_FAILURE_CACHE_MS,
+            message,
+        };
+        throw new Error(message, { cause: error });
     }
-    const contentLength = Number(response.headers.get("content-length") || 0);
-    if (contentLength > MAX_BUFFER) {
-        throw new Error("GitHub public pull request response was too large");
-    }
-    const pullRequests = parsePublicGithubPullRequests(
-        await readBoundedJsonResponse(response, MAX_BUFFER)
-    );
-    publicPullRequestCache.value = {
-        expiresAt: now + PUBLIC_PR_CACHE_MS,
-        pullRequests,
-    };
-    return pullRequests;
 }
 
 /** Performs run command. */
@@ -1799,16 +1832,22 @@ async function scheduleReleaseCutover(
     rollbackCommit: string,
     signal?: AbortSignal
 ): Promise<CommandResult> {
-    if (!job.commit || !/^[\da-f]{40}$/u.test(job.commit)) {
+    if (!job.commit || !FULL_COMMIT_SHA_PATTERN.test(job.commit)) {
         throw new TypeError("Release cutover requires a full candidate commit");
     }
-    if (!/^[\da-f]{40}$/u.test(candidateCommit) || candidateCommit !== job.commit) {
+    if (
+        !FULL_COMMIT_SHA_PATTERN.test(candidateCommit) ||
+        candidateCommit !== job.commit
+    ) {
         throw new TypeError("Release cutover requires the matching full candidate SHA");
     }
-    if (!/^[\da-f]{40}$/u.test(preActivationCommit)) {
+    if (!FULL_COMMIT_SHA_PATTERN.test(preActivationCommit)) {
         throw new TypeError("Release cutover requires a full pre-activation commit");
     }
-    if (rollbackCommit === candidateCommit || !/^[\da-f]{40}$/u.test(rollbackCommit)) {
+    if (
+        rollbackCommit === candidateCommit ||
+        !FULL_COMMIT_SHA_PATTERN.test(rollbackCommit)
+    ) {
         throw new TypeError("Release cutover requires a distinct full rollback commit");
     }
     const releasesRoot = resolveDashboardReleasesRoot();
@@ -1866,7 +1905,7 @@ async function scheduleReleaseCutover(
         `      ${deploymentJobUpdateCommand(okWithRetentionWarningJob)}`,
         "    fi",
         "  else",
-        `    if ${lifecycleEnvironment} rollback && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
+        `    if ${lifecycleEnvironment} rollback ${shellQuote(candidateCommit)} ${shellQuote(rollbackCommit)} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
         `      ${deploymentJobUpdateCommand(rolledBackJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
@@ -1901,12 +1940,15 @@ async function scheduleReleaseRollback(
 ): Promise<CommandResult> {
     if (
         !job.commit ||
-        !/^[\da-f]{40}$/u.test(job.commit) ||
+        !FULL_COMMIT_SHA_PATTERN.test(job.commit) ||
         job.commit !== targetCommit
     ) {
         throw new TypeError("Release rollback requires its matching full target SHA");
     }
-    if (originalCommit === targetCommit || !/^[\da-f]{40}$/u.test(originalCommit)) {
+    if (
+        originalCommit === targetCommit ||
+        !FULL_COMMIT_SHA_PATTERN.test(originalCommit)
+    ) {
         throw new TypeError(
             "Release rollback requires a distinct full original release SHA"
         );
@@ -1955,11 +1997,11 @@ async function scheduleReleaseRollback(
     const script = [
         "sleep 2",
         ...releaseCutoverShellFunctions(),
-        `if ${lifecycleEnvironment} rollback; then`,
+        `if ${lifecycleEnvironment} rollback ${shellQuote(originalCommit)} ${shellQuote(targetCommit)}; then`,
         `  if restart_services && ready_for_commit ${shellQuote(targetShort)}; then`,
         `    ${deploymentJobUpdateCommand(okJob)}`,
         "  else",
-        `    if ${lifecycleEnvironment} rollback && restart_services && ready_for_commit ${shellQuote(originalShort)}; then`,
+        `    if ${lifecycleEnvironment} rollback ${shellQuote(targetCommit)} ${shellQuote(originalCommit)} && restart_services && ready_for_commit ${shellQuote(originalShort)}; then`,
         `      ${deploymentJobUpdateCommand(restoredJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(restorationFailedJob)}`,
@@ -1995,7 +2037,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
     const candidateCommit = cutover.candidateCommit ?? job.commit;
     if (
         !candidateCommit ||
-        !/^[\da-f]{40}$/u.test(candidateCommit) ||
+        !FULL_COMMIT_SHA_PATTERN.test(candidateCommit) ||
         job.commit !== candidateCommit
     ) {
         throw new Error(
@@ -2067,7 +2109,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         '  rollback_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.previous.commitSha // empty\')"',
         '  [[ "$rollback_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
         '  [ "$rollback_commit" != "$candidate_commit" ] || exit 1',
-        '  if run_lifecycle rollback && restart_services && ready_for_commit "${rollback_commit:0:8}"; then',
+        '  if run_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services && ready_for_commit "${rollback_commit:0:8}"; then',
         `    ${deploymentJobUpdateCommand(rolledBackJob)}`,
         "  else",
         "    exit 1",

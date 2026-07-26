@@ -113,6 +113,7 @@ describe("backend service utilities", () => {
                 headRefName: "mira/preview",
                 headRefOid: commitSha,
                 number: 335,
+                previewEligible: true,
                 reviewerApproved: false,
                 statusCheckRollup: [],
             }),
