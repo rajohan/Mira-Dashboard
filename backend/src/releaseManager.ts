@@ -75,6 +75,10 @@ export interface DashboardReleaseManagerOptions {
     schemaCutoverMode?: "coordinated";
 }
 
+export interface DashboardReleasePublicationOptions {
+    onTransitionLockContention?: () => void;
+}
+
 export interface DashboardLiveSchemaState {
     migrations: DatabaseMigrationIdentity[];
     version: number;
@@ -683,7 +687,9 @@ export function assertReleaseCanOpenLiveSchema(
     }
 }
 
-function assertHostRuntimeCompatible(release: ManagedDashboardRelease): void {
+export function assertDashboardReleaseHostRuntimeCompatible(
+    release: ManagedDashboardRelease
+): void {
     if (release.manifest.bunVersion !== Bun.version) {
         throw new Error(
             `Release ${release.commitSha} requires Bun ${release.manifest.bunVersion}; host runs ${Bun.version}`
@@ -970,7 +976,8 @@ export function assertReleaseTransitionLockCommandSucceeded(
 async function acquireReleaseTransitionLock(
     layout: DashboardReleaseLayout,
     lockMode: "exclusive" | "shared",
-    waitTimeoutMs = 0
+    waitTimeoutMs = 0,
+    onContention?: () => void
 ): Promise<fs.promises.FileHandle> {
     const deadline = Date.now() + waitTimeoutMs;
     while (true) {
@@ -993,6 +1000,7 @@ async function acquireReleaseTransitionLock(
         }
         await lockFile.close();
         if (result.status === 75 && Date.now() < deadline) {
+            onContention?.();
             await Bun.sleep(
                 Math.min(RELEASE_TRANSITION_LOCK_RETRY_MS, deadline - Date.now())
             );
@@ -1010,9 +1018,15 @@ async function withReleaseTransitionLock<T>(
     layout: DashboardReleaseLayout,
     lockMode: "exclusive" | "shared",
     transition: () => Promise<T>,
-    waitTimeoutMs = 0
+    waitTimeoutMs = 0,
+    onContention?: () => void
 ): Promise<T> {
-    const lockFile = await acquireReleaseTransitionLock(layout, lockMode, waitTimeoutMs);
+    const lockFile = await acquireReleaseTransitionLock(
+        layout,
+        lockMode,
+        waitTimeoutMs,
+        onContention
+    );
     let result: T | undefined;
     let transitionError: unknown;
     try {
@@ -1045,7 +1059,8 @@ async function withReleaseTransitionLock<T>(
 export async function publishVerifiedDashboardRelease(
     buildRoot: string,
     commitSha: string,
-    releasesRoot = resolveDashboardReleasesRoot()
+    releasesRoot = resolveDashboardReleasesRoot(),
+    options: DashboardReleasePublicationOptions = {}
 ): Promise<ManagedDashboardRelease> {
     assertReleaseCommitSha(commitSha);
     const layout = await ensureDashboardReleaseLayout(releasesRoot);
@@ -1143,7 +1158,8 @@ export async function publishVerifiedDashboardRelease(
             }
             return loadManagedReleaseFromLayout(layout, commitSha);
         },
-        RELEASE_PUBLICATION_LOCK_WAIT_MS
+        RELEASE_PUBLICATION_LOCK_WAIT_MS,
+        options.onTransitionLockContention
     );
 }
 
@@ -1200,7 +1216,7 @@ export async function activateDashboardRelease(
     return withReleaseTransitionLock(layout, "exclusive", async () => {
         await recoverInterruptedReleaseTransition(layout);
         const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
-        assertHostRuntimeCompatible(candidate);
+        assertDashboardReleaseHostRuntimeCompatible(candidate);
         const state = await readActivationReleaseStateFromLayout(layout);
         if (state.current) {
             assertReleaseActivationCompatible(
@@ -1284,7 +1300,7 @@ export async function rollbackDashboardRelease(
 
         const activeRelease = state.current;
         const rollbackRelease = state.previous;
-        assertHostRuntimeCompatible(rollbackRelease);
+        assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
         const maximumInspectableSchemaVersion = Math.max(
             DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
             activeRelease.manifest.schema.maximumCompatible,

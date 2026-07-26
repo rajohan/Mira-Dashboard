@@ -26,6 +26,7 @@ import {
 import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
 import {
     activateDashboardRelease,
+    assertDashboardReleaseHostRuntimeCompatible,
     assertReleaseTransitionLockCommandSucceeded,
     ensureDashboardReleaseLayout,
     isReleaseTransitionLockAvailable,
@@ -106,6 +107,19 @@ function holdTransitionLock(releasesRoot: string): number {
         throw new Error("Test release transition lock did not become ready");
     }
     return lockFileDescriptor;
+}
+
+async function throwWhenPromiseSettles(
+    promise: Promise<unknown>,
+    message: string
+): Promise<never> {
+    await promise;
+    throw new Error(message);
+}
+
+async function throwAfterDelay(milliseconds: number, message: string): Promise<never> {
+    await Bun.sleep(milliseconds);
+    throw new Error(message);
 }
 
 function temporaryReleasesRoot(): string {
@@ -287,13 +301,30 @@ describe("Dashboard immutable release manager", () => {
         await createReleaseFixture(buildRoot, FIRST_COMMIT);
         await readDashboardReleaseState(releasesRoot);
         const lockFileDescriptor = holdTransitionLock(releasesRoot);
+        const { promise: lockContention, resolve: didReachLockContention } =
+            Promise.withResolvers<void>();
         const publication = publishVerifiedDashboardRelease(
             buildRoot,
             FIRST_COMMIT,
-            releasesRoot
+            releasesRoot,
+            {
+                onTransitionLockContention: () => {
+                    didReachLockContention();
+                },
+            }
         );
         try {
-            await Bun.sleep(100);
+            await Promise.race([
+                lockContention,
+                throwWhenPromiseSettles(
+                    publication,
+                    "Release publication completed before waiting for the held transition lock"
+                ),
+                throwAfterDelay(
+                    2000,
+                    "Release publication did not reach transition-lock contention"
+                ),
+            ]);
             expect(
                 readdirSync(path.join(releasesRoot, "releases")).filter((entry) =>
                     entry.startsWith(".staging-")
@@ -552,6 +583,10 @@ describe("Dashboard immutable release manager", () => {
 
         const runtimeRoot = temporaryReleasesRoot();
         await createManagedRelease(runtimeRoot, FIRST_COMMIT, FIRST_COMMIT, "0.0.0");
+        const incompatibleRelease = await loadManagedRelease(runtimeRoot, FIRST_COMMIT);
+        expect(() =>
+            assertDashboardReleaseHostRuntimeCompatible(incompatibleRelease)
+        ).toThrow("requires Bun 0.0.0");
         await expect(
             activateDashboardRelease(FIRST_COMMIT, runtimeRoot, SCHEMA_6_OPTIONS)
         ).rejects.toThrow("requires Bun 0.0.0");
@@ -737,6 +772,39 @@ describe("Dashboard immutable release manager", () => {
         expect(recovered.current?.commitSha).toBe(SECOND_COMMIT);
         expect(recovered.previous?.commitSha).toBe(FIRST_COMMIT);
         expect(existsSync(path.join(root, RELEASE_TRANSITION_LOCK_FILE_NAME))).toBe(true);
+        expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
+    });
+
+    it("recovers a journal when current changed before previous was linked", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        writeFileSync(
+            path.join(root, ".release-transition.json"),
+            `${JSON.stringify({
+                after: {
+                    current: SECOND_COMMIT,
+                    previous: FIRST_COMMIT,
+                },
+                before: {
+                    current: FIRST_COMMIT,
+                    previous: false,
+                },
+                formatVersion: 1,
+                operation: "activate",
+            })}\n`
+        );
+        rmSync(path.join(root, "current"));
+        symlinkSync(`releases/${SECOND_COMMIT}`, path.join(root, "current"), "dir");
+
+        const recovered = await activateDashboardRelease(
+            SECOND_COMMIT,
+            root,
+            SCHEMA_6_OPTIONS
+        );
+        expect(recovered.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(recovered.previous?.commitSha).toBe(FIRST_COMMIT);
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
     });
 

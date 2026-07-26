@@ -16,6 +16,7 @@ import {
     stageDashboardRelease,
 } from "../releaseDeployment.ts";
 import {
+    assertDashboardReleaseHostRuntimeCompatible,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
 } from "../releaseManager.ts";
@@ -1703,12 +1704,18 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         `candidate_commit=${shellQuote(candidateCommit)}`,
         `bun_executable=${shellQuote(resolveBunExecutable())}`,
         "resolve_trusted_lifecycle() {",
+        '  candidate_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/releases/$candidate_commit") || return 1',
+        '  [ "$candidate_release" = "$releases_root/releases/$candidate_commit" ] || return 1',
         '  current_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/current") || return 1',
         '  current_commit="$(/usr/bin/basename -- "$current_release")"',
         '  [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || return 1',
         '  [ "$current_release" = "$releases_root/releases/$current_commit" ] || return 1',
         '  if [ "$current_commit" = "$candidate_commit" ]; then',
-        '    trusted_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous") || return 1',
+        '    if [ -e "$releases_root/previous" ] || [ -L "$releases_root/previous" ]; then',
+        '      trusted_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous") || return 1',
+        "    else",
+        '      trusted_release="$candidate_release"',
+        "    fi",
         "  else",
         '    trusted_release="$current_release"',
         "  fi",
@@ -1725,11 +1732,13 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         '  "$bun_executable" "$trusted_lifecycle" "$@"',
         "}",
         "resolve_trusted_lifecycle || exit 1",
-        'if [ "$current_commit" = "$candidate_commit" ] && restart_services && ready_for_commit "${candidate_commit:0:8}"; then',
-        `  ${deploymentJobUpdateCommand(activeCandidateRecoveredJob)}`,
-        "  exit 0",
-        "fi",
         'if activation_output="$(run_lifecycle activate "$candidate_commit")"; then',
+        '  activation_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
+        '  [ "$activation_commit" = "$candidate_commit" ] || exit 1',
+        '  if restart_services && ready_for_commit "${candidate_commit:0:8}"; then',
+        `    ${deploymentJobUpdateCommand(activeCandidateRecoveredJob)}`,
+        "    exit 0",
+        "  fi",
         '  rollback_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.previous.commitSha // empty\')"',
         '  [[ "$rollback_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
         '  [ "$rollback_commit" != "$candidate_commit" ] || exit 1',
@@ -1839,6 +1848,7 @@ async function runDeploymentJob(
                 "Managed deployment requires a distinct verified rollback release"
             );
         }
+        assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
 
         const restartScheduled: DeploymentJob = {
             ...currentJob,

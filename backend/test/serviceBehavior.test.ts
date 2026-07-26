@@ -2100,16 +2100,28 @@ printf 'scheduled\n'
                 'trusted_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous")'
             );
             expect(recoveryCommand).toContain(
-                'if [ "$current_commit" = "$candidate_commit" ] && restart_services && ready_for_commit "${candidate_commit:0:8}"; then'
+                'candidate_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/releases/$candidate_commit")'
+            );
+            expect(recoveryCommand).toContain('trusted_release="$candidate_release"');
+            expect(recoveryCommand).toContain(
+                'activation_output="$(run_lifecycle activate "$candidate_commit")"'
+            );
+            expect(recoveryCommand).toContain(
+                '[ "$activation_commit" = "$candidate_commit" ]'
+            );
+            expect(recoveryCommand).toContain(
+                'if restart_services && ready_for_commit "${candidate_commit:0:8}"; then'
             );
             expect(recoveryCommand).toContain(
                 "Interrupted release cutover recovered; active candidate passed restart and commit-bound readiness"
             );
             expect(
-                recoveryCommand.indexOf('if [ "$current_commit" = "$candidate_commit" ]')
-            ).toBeLessThan(
                 recoveryCommand.indexOf(
                     'activation_output="$(run_lifecycle activate "$candidate_commit")"'
+                )
+            ).toBeLessThan(
+                recoveryCommand.indexOf(
+                    'if restart_services && ready_for_commit "${candidate_commit:0:8}"; then'
                 )
             );
             expect(recoveryCommand).toContain(

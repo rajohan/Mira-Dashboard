@@ -37,6 +37,7 @@ const deploymentCutoverReconcileIntervalMs = 5000;
 const deploymentCutoverMaximumUnknownMs = 10 * 60 * 1000;
 const interruptedHandlerGraceMs = 30_000;
 const RELEASE_COMMIT_PATTERN = /^(?:[\da-f]{8,40}|development)$/u;
+const FULL_RELEASE_COMMIT_PATTERN = /^[\da-f]{40}$/u;
 const DEPLOYMENT_GUARDIAN_UNIT_PREFIX = "mira-dashboard-deploy-";
 const DEPLOYMENT_RECOVERY_UNIT_PREFIX = "mira-dashboard-deploy-recovery-";
 const actionHandlers = new Map<string, ScheduledJobActionRegistration>();
@@ -1367,6 +1368,46 @@ function isDeploymentCutoverReconciliationExpired(
     );
 }
 
+function didTerminalizeUnrecoverableDeploymentCutover(
+    cutover: OrphanedDeploymentCutover,
+    timestamp: string
+): boolean {
+    const terminalize = database.transaction(() => {
+        const result = database
+            .prepare(
+                `UPDATE deployment_jobs
+                 SET status = 'failed',
+                     updated_at = ?,
+                     note = ?
+                 WHERE id = ?
+                   AND status = 'restart-scheduled'`
+            )
+            .run(
+                timestamp,
+                "Interrupted legacy deployment cutover cannot be recovered because it lacks a persisted full candidate SHA",
+                cutover.id
+            );
+        if (result.changes === 0) {
+            return false;
+        }
+        database
+            .prepare("DELETE FROM deployment_lock WHERE id = 1 AND job_id = ?")
+            .run(cutover.id);
+        return true;
+    });
+    const didTerminalize = terminalize();
+    if (didTerminalize) {
+        console.warn(
+            "[ScheduledJobs] Terminalized unrecoverable legacy deployment cutover",
+            {
+                candidateCommit: cutover.candidateCommit,
+                cutoverId: cutover.id,
+            }
+        );
+    }
+    return didTerminalize;
+}
+
 export function reconcileOrphanedDeploymentCutovers(
     timestamp = nowIso(),
     readGuardianState: DeploymentGuardianStateReader = readDeploymentGuardianState,
@@ -1394,7 +1435,7 @@ export function reconcileOrphanedDeploymentCutovers(
         id: row.id,
         updatedAt: row.updatedAt,
     }));
-    let recovered = 0;
+    let reconciled = 0;
     const cutoversMissingRecoveryHandler: string[] = [];
     for (const cutover of pending) {
         let state: DeploymentGuardianState = "unknown";
@@ -1413,13 +1454,22 @@ export function reconcileOrphanedDeploymentCutovers(
         if (!shouldRecover) {
             continue;
         }
+        if (
+            !cutover.candidateCommit ||
+            !FULL_RELEASE_COMMIT_PATTERN.test(cutover.candidateCommit)
+        ) {
+            if (didTerminalizeUnrecoverableDeploymentCutover(cutover, timestamp)) {
+                reconciled += 1;
+            }
+            continue;
+        }
         if (!recoverCutover) {
             cutoversMissingRecoveryHandler.push(cutover.id);
             continue;
         }
         try {
             if (recoverCutover(cutover)) {
-                recovered += 1;
+                reconciled += 1;
             }
         } catch (error) {
             console.warn(
@@ -1442,7 +1492,7 @@ export function reconcileOrphanedDeploymentCutovers(
         );
     }
     scheduledJobRuntimeState.missingCutoverRecoveryWarningKey = warningKey || undefined;
-    return recovered;
+    return reconciled;
 }
 
 /** Registers the detached rollback scheduler used for orphaned release cutovers. */
@@ -1458,10 +1508,10 @@ function hasPendingDeploymentCutover(): boolean {
     if (now >= scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt) {
         scheduledJobRuntimeState.nextDeploymentCutoverReconcileAt =
             now + deploymentCutoverReconcileIntervalMs;
-        const recovered = reconcileOrphanedDeploymentCutovers();
-        if (recovered > 0) {
-            console.warn("[ScheduledJobs] Scheduled orphaned deployment rollbacks", {
-                scheduled: recovered,
+        const reconciled = reconcileOrphanedDeploymentCutovers();
+        if (reconciled > 0) {
+            console.warn("[ScheduledJobs] Reconciled orphaned deployment cutovers", {
+                reconciled,
             });
         }
     }
