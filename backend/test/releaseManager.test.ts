@@ -12,10 +12,11 @@ import {
     symlinkSync,
     writeFileSync,
 } from "node:fs";
+import fsp from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 
 import {
     databaseMigrationIdentities,
@@ -64,7 +65,16 @@ function testLiveSchemaState(
     version: number,
     overrides: Partial<Record<number, DatabaseMigrationIdentity>> = {}
 ) {
-    const migrations = [...databaseMigrationIdentities(), ...TEST_FUTURE_MIGRATIONS]
+    const availableMigrations = [
+        ...databaseMigrationIdentities(),
+        ...TEST_FUTURE_MIGRATIONS,
+    ];
+    if (version > availableMigrations.length) {
+        throw new Error(
+            `testLiveSchemaState(${version}) requires ${version} known migrations, only ${availableMigrations.length} available`
+        );
+    }
+    const migrations = availableMigrations
         .slice(0, version)
         .map((migration) => overrides[migration.version] ?? migration);
     return { migrations, version };
@@ -301,6 +311,26 @@ describe("Dashboard immutable release manager", () => {
         expect(
             readdirSync(root).filter((entry) => entry.startsWith(".previous."))
         ).toEqual([]);
+    });
+
+    it("removes an orphaned previous link during first activation", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        symlinkSync(`releases/${FIRST_COMMIT}`, path.join(root, "previous"), "dir");
+
+        const activated = await activateDashboardRelease(
+            SECOND_COMMIT,
+            root,
+            SCHEMA_6_OPTIONS
+        );
+
+        expect(activated.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(activated.previous).toBeUndefined();
+        expect(readlinkSync(path.join(root, "current"))).toBe(
+            `releases/${SECOND_COMMIT}`
+        );
+        expect(existsSync(path.join(root, "previous"))).toBe(false);
     });
 
     it("exposes bounded lifecycle command summaries without artifact contents", async () => {
@@ -663,7 +693,7 @@ describe("Dashboard immutable release manager", () => {
         );
         expect(recovered.current?.commitSha).toBe(SECOND_COMMIT);
         expect(recovered.previous?.commitSha).toBe(FIRST_COMMIT);
-        expect(existsSync(path.join(root, ".release-transition.lock"))).toBe(true);
+        expect(existsSync(path.join(root, RELEASE_TRANSITION_LOCK_FILE_NAME))).toBe(true);
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
     });
 
@@ -738,6 +768,40 @@ describe("Dashboard immutable release manager", () => {
         const state = await readDashboardReleaseState(root);
         expect(state.current?.commitSha).toBe(FIRST_COMMIT);
         expect(state.previous).toBeUndefined();
+    });
+
+    it("restores the prior state when an artifact changes during the link switch", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        const originalRename = fsp.rename.bind(fsp);
+        let hasChangedCandidate = false;
+        const rename = spyOn(fsp, "rename").mockImplementation(
+            async (oldPath, newPath) => {
+                if (!hasChangedCandidate && newPath === path.join(root, "current")) {
+                    hasChangedCandidate = true;
+                    writeFileSync(
+                        path.join(candidatePath, "dist", "assets", "app.js"),
+                        "changed during activation\n"
+                    );
+                }
+                return originalRename(oldPath, newPath);
+            }
+        );
+
+        try {
+            await expect(
+                activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
+            ).rejects.toThrow("Managed release snapshot changed while linking");
+        } finally {
+            rename.mockRestore();
+        }
+
+        const state = await readDashboardReleaseState(root);
+        expect(state.current?.commitSha).toBe(FIRST_COMMIT);
+        expect(state.previous).toBeUndefined();
+        expect(existsSync(path.join(root, ".release-transition.json"))).toBe(false);
     });
 
     it("requires two distinct releases before rollback", async () => {

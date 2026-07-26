@@ -314,16 +314,22 @@ SQLite preflight, and writes an ignored `release-manifest.json` in the release
 root. The manifest is the release identity source when `NODE_ENV=production`;
 Git is only a development/test fallback.
 
-Manifest format version 1 records:
+Manifest format version 2 records:
 
 - the full and eight-character Git commit plus commit title and build time;
 - the Bun version used for the build;
 - matching frontend/backend commit identities emitted inside both build trees;
 - the target, minimum-compatible, and maximum-compatible SQLite schema;
 - a checksum of the immutable migration registry;
+- the ordered migration identities and their inventory digest;
 - the SHA-256 and byte length of every frontend/backend build artifact plus
   both package manifests, Bun lockfiles, and the default runtime log-rotation
   configuration.
+
+Format version 1 remains readable only for the first managed cutover and its
+rollback window because the currently deployed release predates the migration
+inventory and lifecycle artifact. Remove v1 support once neither `current` nor
+`previous` can reference that release; all newly built releases are format v2.
 
 The backend bundle also embeds its full build commit. Runtime readiness requires
 that embedded commit, both build-identity files, and the release manifest to
@@ -365,7 +371,8 @@ doppler run --config prd --project rajohan -- \
 
 `current` and `previous` are relative links inside the release root. Link
 replacement uses same-directory temporary symlinks, atomic rename, and a
-directory fsync. Activation verifies every artifact, both component build
+directory fsync, then re-verifies the linked release before committing the
+transition. Activation verifies every artifact, both component build
 identities, the exact manifest/directory SHA, the host Bun version, the actual
 live SQLite schema, and the previous release's rollback window. Rollback also
 checks the live schema rather than assuming it was downgraded by a code-only

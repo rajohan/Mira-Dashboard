@@ -37,6 +37,8 @@ const FORMAT_2_REQUIRED_RELEASE_ARTIFACTS = [
     "dist/build-identity.json",
     "dist/index.html",
 ] as const;
+// Format 1 remains readable only for the first managed cutover and its rollback
+// window. Remove this compatibility list once current/previous cannot reference v1.
 const FORMAT_1_REQUIRED_RELEASE_ARTIFACTS = FORMAT_2_REQUIRED_RELEASE_ARTIFACTS.filter(
     (artifactPath) => artifactPath !== "backend/dist/releaseLifecycle.js"
 );
@@ -541,6 +543,8 @@ function parseSchema(
         formatVersion === 2 && Array.isArray(value.migrations)
             ? value.migrations.map((migration) => parseMigrationIdentity(migration))
             : undefined;
+    // This digest proves only that a foreign manifest is internally consistent.
+    // Runtime and release-manager validation bind it to local code and live history.
     if (
         formatVersion === 2 &&
         (!migrations ||
@@ -748,7 +752,8 @@ export async function loadRuntimeReleaseIdentity(
         await verifyReleaseArtifacts(realReleaseRoot, manifest);
         try {
             await verifyReleaseBuildIdentities(realReleaseRoot, manifest);
-        } catch {
+        } catch (error) {
+            console.warn("[ReleaseManifest] Build identity verification failed:", error);
             return {
                 artifactCount: manifest.artifacts.length,
                 backendCommit: manifest.components.backendCommit,
@@ -769,6 +774,9 @@ export async function loadRuntimeReleaseIdentity(
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.minimum &&
             manifest.schema.maximumCompatible ===
                 DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum &&
+            // Format v1 has no migration inventory, so readiness cannot bind it to
+            // local migration identities. Remove this branch after the first
+            // managed-cutover rollback window no longer contains a v1 release.
             (manifest.formatVersion === 1 ||
                 manifest.schema.migrationInventorySha256 ===
                     databaseMigrationInventorySha256()) &&

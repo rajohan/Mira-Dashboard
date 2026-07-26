@@ -72,6 +72,13 @@ function appliedMigrationRows(database: Database): AppliedMigrationRow[] {
         .all() as AppliedMigrationRow[];
 }
 
+/**
+ * Reads structurally valid history for release compatibility checks.
+ *
+ * Well-formed unknown migrations are intentionally allowed and the local registry
+ * is not asserted or compared here. validateDatabaseMigrationHistory owns full
+ * validation against the running code's registry.
+ */
 export function readAppliedDatabaseMigrationHistory(
     database: Database,
     maximumCompatibleVersion: number
@@ -122,23 +129,8 @@ export function validateDatabaseMigrationHistory(
         maximumCompatibleVersion
     );
     for (const [index, row] of appliedRows.entries()) {
-        const expectedVersion = index + 1;
-        if (row.version !== expectedVersion) {
-            throw new Error(
-                `SQLite migration history is not contiguous at version ${expectedVersion}`
-            );
-        }
         const expected = databaseMigrations[index];
         if (!expected) {
-            if (
-                row.version > maximumCompatibleVersion ||
-                !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(row.name) ||
-                !/^[\da-f]{64}$/u.test(row.checksum)
-            ) {
-                throw new Error(
-                    `Database contains incompatible SQLite migration version ${row.version}`
-                );
-            }
             continue;
         }
         if (row.name !== expected.name) {

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -38,6 +38,7 @@ export interface ManagedDashboardRelease {
     commitSha: string;
     directoryIdentity: string;
     manifest: DashboardReleaseManifest;
+    manifestIdentity: string;
     path: string;
 }
 
@@ -387,12 +388,61 @@ async function loadManagedReleaseFromLayout(
         commitSha,
         directoryIdentity: directoryIdentityAfter,
         manifest,
+        manifestIdentity: releaseManifestIdentity(manifest),
         path: releasePath,
     };
 }
 
 function releaseDirectoryIdentity(stat: fs.BigIntStats): string {
     return [stat.dev, stat.ino, stat.ctimeNs, stat.birthtimeNs].join(":");
+}
+
+function releaseManifestIdentity(manifest: DashboardReleaseManifest): string {
+    const canonicalManifest = {
+        artifacts: manifest.artifacts
+            .map(({ path: artifactPath, sha256, sizeBytes }) => ({
+                path: artifactPath,
+                sha256,
+                sizeBytes,
+            }))
+            .toSorted((left, right) => compareStrings(left.path, right.path)),
+        builtAt: manifest.builtAt,
+        bunVersion: manifest.bunVersion,
+        commitSha: manifest.commitSha,
+        commitShort: manifest.commitShort,
+        commitTitle: manifest.commitTitle,
+        components: {
+            backendCommit: manifest.components.backendCommit,
+            frontendCommit: manifest.components.frontendCommit,
+        },
+        formatVersion: manifest.formatVersion,
+        schema: {
+            maximumCompatible: manifest.schema.maximumCompatible,
+            migrations: manifest.schema.migrations
+                ?.map(({ checksum, name, version }) => ({
+                    checksum,
+                    name,
+                    version,
+                }))
+                .toSorted((left, right) => left.version - right.version),
+            migrationInventorySha256: manifest.schema.migrationInventorySha256,
+            migrationRegistrySha256: manifest.schema.migrationRegistrySha256,
+            minimumCompatible: manifest.schema.minimumCompatible,
+            target: manifest.schema.target,
+        },
+    };
+    return createHash("sha256").update(JSON.stringify(canonicalManifest)).digest("hex");
+}
+
+function isSameManagedReleaseSnapshot(
+    actual: ManagedDashboardRelease,
+    expected: ManagedDashboardRelease
+): boolean {
+    return (
+        actual.commitSha === expected.commitSha &&
+        actual.directoryIdentity === expected.directoryIdentity &&
+        actual.manifestIdentity === expected.manifestIdentity
+    );
 }
 
 export async function loadManagedRelease(
@@ -474,11 +524,7 @@ async function replaceReleaseLink(
 ): Promise<void> {
     await assertReleaseLinkSlot(layout, linkName);
     const verifiedRelease = await loadManagedReleaseFromLayout(layout, commitSha);
-    if (
-        verifiedRelease.directoryIdentity !== expectedRelease.directoryIdentity ||
-        JSON.stringify(verifiedRelease.manifest) !==
-            JSON.stringify(expectedRelease.manifest)
-    ) {
+    if (!isSameManagedReleaseSnapshot(verifiedRelease, expectedRelease)) {
         throw new Error(`Managed release snapshot changed before linking ${commitSha}`);
     }
     const temporaryPath = path.join(
@@ -489,6 +535,20 @@ async function replaceReleaseLink(
         await fsp.symlink(releaseLinkTarget(commitSha), temporaryPath, "dir");
         await fsp.rename(temporaryPath, path.join(layout.root, linkName));
         await syncDirectory(layout.root);
+        try {
+            const linkedRelease = await readReleaseLink(layout, linkName);
+            if (
+                !linkedRelease ||
+                !isSameManagedReleaseSnapshot(linkedRelease, expectedRelease)
+            ) {
+                throw new Error("Linked release snapshot does not match");
+            }
+        } catch (error) {
+            throw new Error(
+                `Managed release snapshot changed while linking ${commitSha}`,
+                { cause: error }
+            );
+        }
     } finally {
         await fsp.rm(temporaryPath, { force: true });
     }
@@ -571,6 +631,9 @@ function assertReleaseMigrationHistoryCompatible(
 ): void {
     const expectedMigrations = release.schema.migrations;
     if (!expectedMigrations) {
+        // Only temporary format-v1 manifests omit migration identities. They stay
+        // readable for the first managed cutover rollback window, but cannot bind
+        // activation or rollback to the exact applied migration history.
         return;
     }
     for (const actual of liveState.migrations.slice(0, release.schema.target)) {
@@ -709,6 +772,24 @@ async function readDashboardReleaseStateFromLayout(
     };
 }
 
+async function readActivationReleaseStateFromLayout(
+    layout: DashboardReleaseLayout
+): Promise<DashboardReleaseState> {
+    const current = await readReleaseLink(layout, "current");
+    if (!current) {
+        // An orphaned previous link is not a usable release state. Activation
+        // canonicalizes it to an empty state through the transition journal.
+        await assertReleaseLinkSlot(layout, "previous");
+        return { root: layout.root };
+    }
+    const previous = await readReleaseLink(layout, "previous");
+    return {
+        current,
+        ...(previous && { previous }),
+        root: layout.root,
+    };
+}
+
 function releaseLinkStateFromDashboardState(
     state: DashboardReleaseState
 ): ReleaseLinkState {
@@ -746,9 +827,10 @@ async function validateReleaseLinkState(
 
 async function applyReleaseLinkState(
     layout: DashboardReleaseLayout,
-    state: ReleaseLinkState
+    state: ReleaseLinkState,
+    expectedReleases?: Map<string, ManagedDashboardRelease>
 ): Promise<void> {
-    const releases = await validateReleaseLinkState(layout, state);
+    const releases = expectedReleases ?? (await validateReleaseLinkState(layout, state));
     if (state.current) {
         await replaceReleaseLink(
             layout,
@@ -983,7 +1065,7 @@ export async function activateDashboardRelease(
         await recoverInterruptedReleaseTransition(layout);
         const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
         assertHostRuntimeCompatible(candidate);
-        const state = await readDashboardReleaseStateFromLayout(layout);
+        const state = await readActivationReleaseStateFromLayout(layout);
         if (state.current) {
             assertReleaseActivationCompatible(
                 candidate.manifest,
@@ -1038,15 +1120,13 @@ export async function activateDashboardRelease(
             operation: "activate",
         };
         return await executeReleaseTransition(layout, journal, async () => {
+            const expectedReleases = new Map<string, ManagedDashboardRelease>([
+                [candidate.commitSha, candidate],
+            ]);
             if (state.current) {
-                await replaceReleaseLink(
-                    layout,
-                    "previous",
-                    state.current.commitSha,
-                    state.current
-                );
+                expectedReleases.set(state.current.commitSha, state.current);
             }
-            await replaceReleaseLink(layout, "current", candidate.commitSha, candidate);
+            await applyReleaseLinkState(layout, journal.after, expectedReleases);
         });
     });
 }

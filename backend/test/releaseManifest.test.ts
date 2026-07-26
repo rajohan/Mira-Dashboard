@@ -262,6 +262,13 @@ describe("Dashboard release manifest", () => {
         await expect(
             verifyReleaseArtifacts(root, legacyManifest)
         ).resolves.toBeUndefined();
+        await expect(
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
+        ).resolves.toMatchObject({
+            manifestFormatVersion: 1,
+            ready: true,
+            source: "manifest",
+        });
     });
 
     it("refuses to write a manifest larger than the loader accepts", async () => {
