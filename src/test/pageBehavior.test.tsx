@@ -2865,6 +2865,161 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("starts and stops an eligible trusted PR development environment", async () => {
+        const user = userEvent.setup();
+        let preview: Record<string, unknown> = { status: "stopped" };
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (method === "GET" && url === "/api/pull-requests") {
+                    return Response.json({
+                        pullRequests: [
+                            {
+                                additions: 12,
+                                author: { login: "mira-2026" },
+                                baseRefName: "main",
+                                body: "Trusted preview",
+                                changedFiles: 2,
+                                createdAt: "2026-06-24T08:00:00.000Z",
+                                deletions: 3,
+                                headRefName: "mira/trusted-preview",
+                                headRefOid: "a".repeat(40),
+                                isDraft: false,
+                                mergeable: "MERGEABLE",
+                                mergeStateStatus: "CLEAN",
+                                number: 335,
+                                previewEligible: true,
+                                reviewerApproved: true,
+                                reviewDecision: "APPROVED",
+                                statusCheckRollup: [
+                                    { conclusion: "SUCCESS", status: "COMPLETED" },
+                                ],
+                                title: "Trusted PR dev",
+                                updatedAt: "2026-06-24T08:05:00.000Z",
+                                url: "https://github.com/rajohan/Mira-Dashboard/pull/335",
+                            },
+                        ],
+                    });
+                }
+                if (method === "GET" && url === "/api/pull-requests/preview") {
+                    return Response.json({ preview });
+                }
+                if (method === "POST" && url === "/api/pull-requests/335/preview/start") {
+                    expect(parseRequestBody(init)).toEqual({});
+                    preview = {
+                        commitSha: "a".repeat(40),
+                        number: 335,
+                        status: "running",
+                        title: "Trusted PR dev",
+                        updatedAt: "2026-06-24T08:06:00.000Z",
+                        url: "https://dashboard.test:5173",
+                    };
+                    return Response.json({ isOk: true, preview });
+                }
+                if (method === "POST" && url === "/api/pull-requests/335/preview/stop") {
+                    expect(parseRequestBody(init)).toEqual({});
+                    preview = {
+                        ...preview,
+                        status: "stopped",
+                        updatedAt: "2026-06-24T08:07:00.000Z",
+                    };
+                    return Response.json({ isOk: true, preview });
+                }
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(PullRequests));
+
+        await waitFor(() => {
+            expect(screen.getByText("Trusted PR dev")).toBeInTheDocument();
+        });
+        await user.click(screen.getByRole("button", { name: "Run in dev" }));
+        expect(
+            screen.getByRole("heading", { name: "Run PR in dev" })
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Run PR in dev" }));
+        await waitFor(() => {
+            expect(
+                screen.getByText("PR #335 dev is running at https://dashboard.test:5173")
+            ).toBeInTheDocument();
+        });
+        expect(screen.getAllByRole("link", { name: "Open dev" })).toHaveLength(2);
+
+        await user.click(screen.getAllByRole("button", { name: "Stop dev" })[0]!);
+        expect(screen.getByRole("heading", { name: "Stop PR dev" })).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Stop PR dev" }));
+        await waitFor(() => {
+            expect(screen.getByText("PR #335 dev stopped")).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("keeps an active PR development stop control when GitHub listing fails", async () => {
+        const user = userEvent.setup();
+        let isPreviewRunning = true;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (method === "GET" && url === "/api/pull-requests") {
+                    return Response.json(
+                        { error: "GitHub listing unavailable" },
+                        { status: 503 }
+                    );
+                }
+                if (method === "GET" && url === "/api/pull-requests/preview") {
+                    return Response.json({
+                        preview: {
+                            commitSha: "a".repeat(40),
+                            number: 335,
+                            status: isPreviewRunning ? "running" : "stopped",
+                            title: "Active PR dev",
+                            updatedAt: "2026-06-24T08:06:00.000Z",
+                            url: "https://dashboard.test:5173",
+                        },
+                    });
+                }
+                if (method === "POST" && url === "/api/pull-requests/335/preview/stop") {
+                    isPreviewRunning = false;
+                    return Response.json({
+                        isOk: true,
+                        preview: {
+                            commitSha: "a".repeat(40),
+                            number: 335,
+                            status: "stopped",
+                            title: "Active PR dev",
+                            updatedAt: "2026-06-24T08:07:00.000Z",
+                        },
+                    });
+                }
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(PullRequests));
+
+        await waitFor(() => {
+            expect(screen.getByText("GitHub listing unavailable")).toBeInTheDocument();
+            expect(screen.getByText(/PR #335: Active PR dev/)).toBeInTheDocument();
+        });
+        await user.click(screen.getByRole("button", { name: "Stop dev" }));
+        await user.click(screen.getByRole("button", { name: "Stop PR dev" }));
+        await waitFor(() => {
+            expect(screen.getByText("PR #335 dev stopped")).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("shows when the Mira-authored pull request queue is clear", async () => {
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,

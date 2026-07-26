@@ -1,9 +1,13 @@
 import {
     chmodSync,
+    closeSync,
+    constants,
     existsSync,
+    fstatSync,
     lstatSync,
     mkdirSync,
-    readFileSync,
+    openSync,
+    readSync,
     realpathSync,
     renameSync,
     rmSync,
@@ -430,14 +434,51 @@ function previewRecordFromJson(value: unknown): PullRequestPreviewRecord {
 function readPreviewRecord(
     config: PullRequestPreviewConfig
 ): PullRequestPreviewRecord | undefined {
-    if (!existsSync(config.stateFile)) return undefined;
-    if (!isRealRegularFile(config.stateFile)) {
-        throw new Error("Dashboard preview state must be a real regular file");
+    let descriptor: number;
+    try {
+        descriptor = openSync(
+            config.stateFile,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw new Error("Dashboard preview state must be a readable real regular file", {
+            cause: error,
+        });
     }
-    if (lstatSync(config.stateFile).size > MAX_PREVIEW_RECORD_BYTES) {
-        throw new Error("Dashboard preview state is too large");
+
+    let content: string;
+    try {
+        const stat = fstatSync(descriptor);
+        if (!stat.isFile()) {
+            throw new Error(
+                "Dashboard preview state must be a readable real regular file"
+            );
+        }
+        if (stat.size > MAX_PREVIEW_RECORD_BYTES) {
+            throw new Error("Dashboard preview state is too large");
+        }
+        const buffer = Buffer.allocUnsafe(MAX_PREVIEW_RECORD_BYTES + 1);
+        let bytesRead = 0;
+        while (bytesRead < buffer.length) {
+            const chunkLength = readSync(
+                descriptor,
+                buffer,
+                bytesRead,
+                buffer.length - bytesRead,
+                bytesRead
+            );
+            if (chunkLength === 0) break;
+            bytesRead += chunkLength;
+        }
+        if (bytesRead > MAX_PREVIEW_RECORD_BYTES) {
+            throw new Error("Dashboard preview state is too large");
+        }
+        content = buffer.toString("utf8", 0, bytesRead);
+    } finally {
+        closeSync(descriptor);
     }
-    const content = readFileSync(config.stateFile, "utf8");
+
     try {
         return previewRecordFromJson(JSON.parse(content) as unknown);
     } catch (error) {
@@ -1120,7 +1161,7 @@ export async function getPullRequestPreviewStatus(
     const unitState = await previewUnitState(config);
     if (
         unitState &&
-        record.status === "running" &&
+        (record.status === "running" || record.status === "starting") &&
         ["failed", "inactive"].includes(unitState.activeState || "")
     ) {
         const cleanupErrors: string[] = [];

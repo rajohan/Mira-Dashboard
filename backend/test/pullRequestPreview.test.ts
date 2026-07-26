@@ -7,6 +7,7 @@ import {
     readFileSync,
     rmSync,
     statSync,
+    symlinkSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -323,6 +324,30 @@ describe("managed pull request preview", () => {
         }
     });
 
+    it("rejects a symlinked preview record without quarantining its target", async () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-symlink-state-"));
+        const config = previewConfig(root);
+        const target = path.join(root, "outside-preview-state.json");
+        mkdirSync(config.previewRoot, { recursive: true });
+        writeFileSync(target, "{}\n", { mode: 0o600 });
+        symlinkSync(target, config.stateFile);
+
+        try {
+            await expect(getPullRequestPreviewStatus(config)).rejects.toThrow(
+                "Dashboard preview state must be a readable real regular file"
+            );
+            expect(existsSync(config.stateFile)).toBe(true);
+            expect(existsSync(target)).toBe(true);
+            expect(
+                readdirSync(config.previewRoot).filter((entry) =>
+                    entry.startsWith("active-preview.corrupt-")
+                )
+            ).toHaveLength(0);
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
     it("starts, reuses, updates, reports, and stops one trusted preview slot", async () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-lifecycle-"));
         const config = {
@@ -530,6 +555,42 @@ describe("managed pull request preview", () => {
                 status: "running",
             });
             expect(prepareStateSpy).toHaveBeenCalledTimes(2);
+
+            const interruptedAfterServeRecord = JSON.parse(
+                readFileSync(config.stateFile, "utf8")
+            ) as Record<string, unknown>;
+            writeFileSync(
+                config.stateFile,
+                `${JSON.stringify({
+                    ...interruptedAfterServeRecord,
+                    ownsTailscaleServe: true,
+                    status: "starting",
+                })}\n`,
+                { mode: 0o600 }
+            );
+            isServeEnabled = true;
+            isUnitActive = false;
+            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+                commitSha: COMMIT,
+                status: "stopped",
+            });
+            expect(isServeEnabled).toBe(false);
+            expect(existsSync(config.gatewayTokenFile)).toBe(false);
+            expect(JSON.parse(readFileSync(config.stateFile, "utf8"))).toMatchObject({
+                ownsTailscaleServe: false,
+                status: "stopped",
+            });
+
+            await expect(
+                startPullRequestPreview(candidate, {
+                    config,
+                    readGatewayToken: () => "persisted-gateway-token",
+                })
+            ).resolves.toMatchObject({
+                commitSha: COMMIT,
+                status: "running",
+            });
+            expect(prepareStateSpy).toHaveBeenCalledTimes(3);
             await expect(
                 startPullRequestPreview(
                     { ...candidate, number: 336, title: "Other trusted preview" },

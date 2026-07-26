@@ -979,20 +979,7 @@ export function PullRequests() {
     }
 
     return (
-        <PageState
-            isLoading={isLoading}
-            loading={<LoadingState message="Loading pull requests..." size="lg" />}
-            error={error?.message ?? undefined}
-            errorView={
-                <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-3 sm:p-6">
-                    <p className="text-red-400">{error?.message}</p>
-                    <RefreshButton
-                        onClick={() => void refetchPullRequests()}
-                        label="Retry"
-                    />
-                </div>
-            }
-        >
+        <>
             <div className="space-y-4 p-3 sm:p-4 lg:p-6">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
@@ -1126,80 +1113,103 @@ export function PullRequests() {
                 </Card>
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
-                    <div className="space-y-4">
-                        {pullRequests.length === 0 ? (
-                            <Card variant="bordered">
-                                <CardTitle>No open PRs waiting</CardTitle>
-                                <p className="mt-2 text-sm text-primary-400">
-                                    New dashboard and dependency PRs will appear here for
-                                    review.
-                                </p>
-                            </Card>
-                        ) : undefined}
-
-                        {pullRequests.length > 0 && miraPullRequests.length === 0 ? (
-                            <Card variant="bordered">
-                                <CardTitle>No Mira-authored PRs waiting</CardTitle>
-                                <p className="mt-2 text-sm text-primary-400">
-                                    Autopilot changes will appear here when Mira opens a
-                                    dashboard PR for Raymond to review.
-                                </p>
-                            </Card>
-                        ) : undefined}
-
-                        {miraPullRequests.length > 0 ? (
-                            <section className="space-y-3" aria-label="Mira-authored PRs">
-                                <div>
-                                    <SectionHeader
-                                        title="Mira-authored PRs"
-                                        count={miraPullRequests.length}
-                                        badgeVariant="info"
-                                    />
-                                    <p className="mt-1 text-sm text-primary-400">
-                                        These can be merged, rejected, or merged and
-                                        deployed from the dashboard.
-                                    </p>
-                                </div>
-                                <div className="space-y-3">
-                                    {miraPullRequests.map((pr) => (
-                                        <PullRequestCard
-                                            key={pr.number}
-                                            pr={pr}
-                                            actions={renderPullRequestActions(pr)}
-                                        />
-                                    ))}
-                                </div>
-                            </section>
-                        ) : undefined}
-
-                        {externalPullRequests.length > 0 ? (
-                            <section
-                                className="space-y-3"
-                                aria-label="Dependency and external PRs"
+                    <PageState
+                        isLoading={isLoading}
+                        loading={
+                            <LoadingState message="Loading pull requests..." size="lg" />
+                        }
+                        error={error?.message ?? undefined}
+                        errorView={
+                            <Card
+                                variant="bordered"
+                                className="flex min-h-48 flex-col items-center justify-center gap-4"
                             >
-                                <div>
-                                    <SectionHeader
-                                        title="Dependency / external PRs"
-                                        count={externalPullRequests.length}
-                                        badgeVariant="default"
-                                    />
-                                    <p className="mt-1 text-sm text-primary-400">
-                                        These can be merged after the same review, CI, and
-                                        checkout gates as Mira-authored PRs.
+                                <p className="text-red-400">{error?.message}</p>
+                                <RefreshButton
+                                    onClick={() => void refetchPullRequests()}
+                                    label="Retry"
+                                />
+                            </Card>
+                        }
+                    >
+                        <div className="space-y-4">
+                            {pullRequests.length === 0 ? (
+                                <Card variant="bordered">
+                                    <CardTitle>No open PRs waiting</CardTitle>
+                                    <p className="mt-2 text-sm text-primary-400">
+                                        New dashboard and dependency PRs will appear here
+                                        for review.
                                     </p>
-                                </div>
-                                <div className="space-y-3">
-                                    {externalPullRequests.map((pr) => (
-                                        <PullRequestCard
-                                            key={pr.number}
-                                            pr={pr}
-                                            actions={renderPullRequestActions(pr)}
+                                </Card>
+                            ) : undefined}
+
+                            {pullRequests.length > 0 && miraPullRequests.length === 0 ? (
+                                <Card variant="bordered">
+                                    <CardTitle>No Mira-authored PRs waiting</CardTitle>
+                                    <p className="mt-2 text-sm text-primary-400">
+                                        Autopilot changes will appear here when Mira opens
+                                        a dashboard PR for Raymond to review.
+                                    </p>
+                                </Card>
+                            ) : undefined}
+
+                            {miraPullRequests.length > 0 ? (
+                                <section
+                                    className="space-y-3"
+                                    aria-label="Mira-authored PRs"
+                                >
+                                    <div>
+                                        <SectionHeader
+                                            title="Mira-authored PRs"
+                                            count={miraPullRequests.length}
+                                            badgeVariant="info"
                                         />
-                                    ))}
-                                </div>
-                            </section>
-                        ) : undefined}
-                    </div>
+                                        <p className="mt-1 text-sm text-primary-400">
+                                            These can be merged, rejected, or merged and
+                                            deployed from the dashboard.
+                                        </p>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {miraPullRequests.map((pr) => (
+                                            <PullRequestCard
+                                                key={pr.number}
+                                                pr={pr}
+                                                actions={renderPullRequestActions(pr)}
+                                            />
+                                        ))}
+                                    </div>
+                                </section>
+                            ) : undefined}
+
+                            {externalPullRequests.length > 0 ? (
+                                <section
+                                    className="space-y-3"
+                                    aria-label="Dependency and external PRs"
+                                >
+                                    <div>
+                                        <SectionHeader
+                                            title="Dependency / external PRs"
+                                            count={externalPullRequests.length}
+                                            badgeVariant="default"
+                                        />
+                                        <p className="mt-1 text-sm text-primary-400">
+                                            These can be merged after the same review, CI,
+                                            and checkout gates as Mira-authored PRs.
+                                        </p>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {externalPullRequests.map((pr) => (
+                                            <PullRequestCard
+                                                key={pr.number}
+                                                pr={pr}
+                                                actions={renderPullRequestActions(pr)}
+                                            />
+                                        ))}
+                                    </div>
+                                </section>
+                            ) : undefined}
+                        </div>
+                    </PageState>
                     <div className={pullRequests.length > 0 ? "xl:pt-15" : undefined}>
                         <RecentDeploysCard deployments={deployments} />
                     </div>
@@ -1231,6 +1241,6 @@ export function PullRequests() {
                     />
                 )}
             </div>
-        </PageState>
+        </>
     );
 }
