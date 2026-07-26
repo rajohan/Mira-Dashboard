@@ -5,7 +5,6 @@ import {
     readdirSync,
     readFileSync,
     rmSync,
-    writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,80 +14,43 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
     assertManagedDashboardUnitProperties,
     type DashboardReleaseCommandRunner,
+    MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT,
+    MANAGED_DASHBOARD_UNITS,
     managedDashboardUnitContract,
     runReleaseDeploymentCommand,
     stageDashboardRelease,
 } from "../src/releaseDeployment.ts";
 import { managedReleasePath } from "../src/releaseManager.ts";
-import { writeReleaseManifest } from "../src/releaseManifest.ts";
+import { createReleaseFixture } from "./support/releaseFixture.ts";
 
 const COMMIT_SHA = "a".repeat(40);
 const OTHER_COMMIT_SHA = "b".repeat(40);
 const temporaryRoots: string[] = [];
 
+function managedUnitProperties(unitContents: string): string {
+    const lines = unitContents.split("\n");
+    const environment = lines
+        .filter((line) => line.startsWith("Environment="))
+        .map((line) => line.slice("Environment=".length));
+    const execStart = lines.find((line) => line.startsWith("ExecStart="));
+    const workingDirectory = lines.find((line) => line.startsWith("WorkingDirectory="));
+    if (!execStart || !workingDirectory) {
+        throw new Error("Managed unit fixture is missing required service properties");
+    }
+    return [`Environment=${environment.join(" ")}`, execStart, workingDirectory].join(
+        "\n"
+    );
+}
+
+async function concurrentBuildTimeout(): Promise<never> {
+    await Bun.sleep(5000);
+    throw new Error("Concurrent release build barrier timed out");
+}
+
 function temporaryRoot(label: string): string {
     const root = mkdtempSync(path.join(tmpdir(), `${label}-`));
     temporaryRoots.push(root);
     return root;
-}
-
-async function createBuiltRelease(
-    releaseRoot: string,
-    commitSha = COMMIT_SHA
-): Promise<void> {
-    mkdirSync(path.join(releaseRoot, "backend", "config"), { recursive: true });
-    mkdirSync(path.join(releaseRoot, "backend", "dist"), { recursive: true });
-    mkdirSync(path.join(releaseRoot, "dist", "assets"), { recursive: true });
-    writeFileSync(path.join(releaseRoot, "package.json"), "{}\n");
-    writeFileSync(path.join(releaseRoot, "bun.lock"), "root-lock\n");
-    writeFileSync(path.join(releaseRoot, "backend", "package.json"), "{}\n");
-    writeFileSync(path.join(releaseRoot, "backend", "bun.lock"), "backend-lock\n");
-    writeFileSync(
-        path.join(releaseRoot, "backend", "config", "log-rotation.json"),
-        '{"jobs":[]}\n'
-    );
-    writeFileSync(path.join(releaseRoot, "dist", "index.html"), "<main>ok</main>\n");
-    writeFileSync(
-        path.join(releaseRoot, "dist", "assets", "app.js"),
-        "export const ok = true;\n"
-    );
-    writeFileSync(
-        path.join(releaseRoot, "dist", "build-identity.json"),
-        `${JSON.stringify({
-            bunVersion: Bun.version,
-            commitSha,
-            component: "frontend",
-            formatVersion: 1,
-        })}\n`
-    );
-    writeFileSync(
-        path.join(releaseRoot, "backend", "dist", "build-identity.json"),
-        `${JSON.stringify({
-            bunVersion: Bun.version,
-            commitSha,
-            component: "backend",
-            formatVersion: 1,
-        })}\n`
-    );
-    for (const entrypoint of [
-        "databasePreflight",
-        "releaseLifecycle",
-        "resetDashboardPassword",
-        "serverStart",
-        "workerStart",
-    ]) {
-        writeFileSync(
-            path.join(releaseRoot, "backend", "dist", `${entrypoint}.js`),
-            `export const commit = "${commitSha}";\n`
-        );
-    }
-    writeFileSync(path.join(releaseRoot, "not-a-release-artifact.txt"), "ignore me\n");
-    await writeReleaseManifest({
-        builtAt: new Date("2026-07-26T01:30:00.000Z"),
-        commitSha,
-        commitTitle: `Release ${commitSha.slice(0, 8)}`,
-        releaseRoot,
-    });
 }
 
 function stagingOptions() {
@@ -118,15 +80,30 @@ afterEach(() => {
 });
 
 describe("immutable release deployment", () => {
-    it("keeps tracked production state outside source and release directories", () => {
-        for (const unitName of [
-            "mira-dashboard.service",
-            "mira-dashboard-worker.service",
-        ]) {
+    it("keeps shipped managed units aligned with the production contract", () => {
+        const releasesRoot = "/home/ubuntu/projects/mira-dashboard-releases";
+        const contract = {
+            databasePath: "/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db",
+            logRotationLockFile:
+                "/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock",
+            openClawHome: "/home/ubuntu/projects/mira-dashboard-state/openclaw-client",
+            releaseRoot: `${releasesRoot}/current`,
+            releasesRoot,
+        };
+        for (const unitName of Object.keys(MANAGED_DASHBOARD_UNITS) as Array<
+            keyof typeof MANAGED_DASHBOARD_UNITS
+        >) {
             const unit = readFileSync(
                 path.resolve(import.meta.dirname, "../../systemd", unitName),
                 "utf8"
             );
+            expect(() =>
+                assertManagedDashboardUnitProperties(
+                    unitName,
+                    managedUnitProperties(unit),
+                    contract
+                )
+            ).not.toThrow();
             expect(unit).toContain(
                 "WorkingDirectory=/home/ubuntu/projects/mira-dashboard-releases/current/backend"
             );
@@ -151,6 +128,7 @@ describe("immutable release deployment", () => {
             arguments_: readonly string[];
             command: string;
             cwd: string;
+            releaseRoot: string | undefined;
         }> = [];
         const progress: string[] = [];
         const runner: DashboardReleaseCommandRunner = async (
@@ -158,12 +136,17 @@ describe("immutable release deployment", () => {
             arguments_,
             commandOptions
         ) => {
-            calls.push({ arguments_, command, cwd: commandOptions.cwd });
+            calls.push({
+                arguments_,
+                command,
+                cwd: commandOptions.cwd,
+                releaseRoot: commandOptions.environment.MIRA_DASHBOARD_RELEASE_ROOT,
+            });
             if (command === "git" && arguments_[0] === "worktree") {
                 if (arguments_[1] === "add") {
                     const worktreePath = String(arguments_[3]);
                     mkdirSync(worktreePath);
-                    await createBuiltRelease(worktreePath);
+                    await createReleaseFixture(worktreePath, COMMIT_SHA);
                 } else if (arguments_[1] === "remove") {
                     rmSync(String(arguments_[3]), { force: true, recursive: true });
                 }
@@ -210,13 +193,16 @@ describe("immutable release deployment", () => {
             "Building and preflighting release",
             "Publishing verified immutable release",
         ]);
+        const buildReleaseRoots = new Set(calls.map(({ releaseRoot }) => releaseRoot));
+        expect(buildReleaseRoots.size).toBe(1);
+        expect([...buildReleaseRoots][0]).toStartWith(`${options.worktreeRoot}/release-`);
     });
 
     it("reuses an already verified immutable release without running commands", async () => {
         const options = stagingOptions();
         const buildRoot = path.join(options.worktreeRoot, "prepared");
         mkdirSync(buildRoot);
-        await createBuiltRelease(buildRoot);
+        await createReleaseFixture(buildRoot, COMMIT_SHA);
         const initialRunner: DashboardReleaseCommandRunner = async (
             command,
             arguments_
@@ -225,7 +211,7 @@ describe("immutable release deployment", () => {
                 if (arguments_[1] === "add") {
                     const worktreePath = String(arguments_[3]);
                     mkdirSync(worktreePath);
-                    await createBuiltRelease(worktreePath);
+                    await createReleaseFixture(worktreePath, COMMIT_SHA);
                 } else {
                     rmSync(String(arguments_[3]), { force: true, recursive: true });
                 }
@@ -261,7 +247,7 @@ describe("immutable release deployment", () => {
                 if (arguments_[1] === "add") {
                     const worktreePath = String(arguments_[3]);
                     mkdirSync(worktreePath);
-                    await createBuiltRelease(worktreePath);
+                    await createReleaseFixture(worktreePath, COMMIT_SHA);
                 } else {
                     rmSync(String(arguments_[3]), { force: true, recursive: true });
                 }
@@ -275,7 +261,7 @@ describe("immutable release deployment", () => {
                 if (buildsReady === 2) {
                     releaseBuilds();
                 }
-                await buildsReleased;
+                await Promise.race([buildsReleased, concurrentBuildTimeout()]);
             }
             return {
                 stderr: "",
@@ -382,7 +368,7 @@ describe("immutable release deployment", () => {
                 if (arguments_[1] === "add") {
                     const worktreePath = String(arguments_[3]);
                     mkdirSync(worktreePath);
-                    await createBuiltRelease(worktreePath);
+                    await createReleaseFixture(worktreePath, COMMIT_SHA);
                 } else if (arguments_[1] === "remove") {
                     throw new Error("registered worktree removal failed");
                 }
@@ -412,7 +398,7 @@ describe("immutable release deployment", () => {
                 if (arguments_[1] === "add") {
                     const worktreePath = String(arguments_[3]);
                     mkdirSync(worktreePath);
-                    await createBuiltRelease(worktreePath, OTHER_COMMIT_SHA);
+                    await createReleaseFixture(worktreePath, OTHER_COMMIT_SHA);
                 } else {
                     rmSync(String(arguments_[3]), { force: true, recursive: true });
                 }
@@ -449,6 +435,9 @@ describe("immutable release deployment", () => {
                 options.openClawHome
             )
         ).toThrow("database path must be an absolute non-root path");
+        expect(() =>
+            managedDashboardUnitContract("/", options.databasePath, options.openClawHome)
+        ).toThrow("releases root must be an absolute non-root path");
         const contract = managedDashboardUnitContract(
             options.releasesRoot,
             options.databasePath,
@@ -457,7 +446,7 @@ describe("immutable release deployment", () => {
         const properties = [
             `WorkingDirectory=${contract.releaseRoot}/backend`,
             `Environment=NODE_ENV=production MIRA_DASHBOARD_DB_PATH=${contract.databasePath} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${contract.logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${contract.openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${contract.releaseRoot} MIRA_DASHBOARD_RELEASES_ROOT=${contract.releasesRoot}`,
-            "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run -- bun dist/serverStart.js ; }",
+            `ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=${MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT.join(",")} -- bun dist/serverStart.js ; }`,
         ].join("\n");
         expect(() =>
             assertManagedDashboardUnitProperties(
@@ -466,6 +455,16 @@ describe("immutable release deployment", () => {
                 contract
             )
         ).not.toThrow();
+        expect(() =>
+            assertManagedDashboardUnitProperties(
+                "mira-dashboard.service",
+                properties.replace(
+                    ` --preserve-env=${MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT.join(",")}`,
+                    ""
+                ),
+                contract
+            )
+        ).toThrow("must preserve managed release environment");
         expect(() =>
             assertManagedDashboardUnitProperties(
                 "mira-dashboard-worker.service",
@@ -523,6 +522,9 @@ describe("immutable release deployment", () => {
             runReleaseDeploymentCommand(["unknown"], options.releasesRoot)
         ).rejects.toThrow("Usage");
         await expect(
+            runReleaseDeploymentCommand(["stage"], options.releasesRoot)
+        ).rejects.toThrow("stage requires a commit SHA");
+        await expect(
             runReleaseDeploymentCommand(["prune", "1"], options.releasesRoot)
         ).rejects.toThrow("retention must be between 2 and 20");
         await expect(
@@ -530,6 +532,6 @@ describe("immutable release deployment", () => {
         ).rejects.toThrow("unexpected arguments");
         expect(
             await runReleaseDeploymentCommand(["prune"], options.releasesRoot)
-        ).toEqual({ removed: [], retained: [] });
+        ).toEqual({ removed: [], retained: [], warnings: [] });
     });
 });

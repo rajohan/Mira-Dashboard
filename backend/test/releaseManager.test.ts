@@ -115,7 +115,8 @@ async function createManagedRelease(
     releasesRoot: string,
     directoryCommit: string,
     manifestCommit = directoryCommit,
-    bunVersion = Bun.version
+    bunVersion = Bun.version,
+    builtAt = new Date("2026-07-25T17:00:00.000Z")
 ): Promise<string> {
     await ensureDashboardReleaseLayout(releasesRoot);
     const releasePath = managedReleasePath(releasesRoot, directoryCommit);
@@ -169,7 +170,7 @@ async function createManagedRelease(
         );
     }
     await writeReleaseManifest({
-        builtAt: new Date("2026-07-25T17:00:00.000Z"),
+        builtAt,
         bunVersion,
         commitSha: manifestCommit,
         commitTitle: `Release ${manifestCommit.slice(0, 8)}`,
@@ -388,6 +389,7 @@ describe("Dashboard immutable release manager", () => {
         await expect(runReleaseLifecycleCommand(["prune"], root)).resolves.toEqual({
             removed: [],
             retained: [SECOND_COMMIT, FIRST_COMMIT],
+            warnings: [],
         });
         await expect(runReleaseLifecycleCommand(["prune", "1"], root)).rejects.toThrow(
             "retention must be between 2 and 20"
@@ -829,10 +831,34 @@ describe("Dashboard immutable release manager", () => {
 
     it("prunes old releases while preserving current and previous", async () => {
         const root = temporaryReleasesRoot();
-        await createManagedRelease(root, FIRST_COMMIT);
-        await createManagedRelease(root, SECOND_COMMIT);
-        await createManagedRelease(root, THIRD_COMMIT);
-        await createManagedRelease(root, FOURTH_COMMIT);
+        await createManagedRelease(
+            root,
+            FIRST_COMMIT,
+            FIRST_COMMIT,
+            Bun.version,
+            new Date("2026-07-25T17:00:00.000Z")
+        );
+        await createManagedRelease(
+            root,
+            SECOND_COMMIT,
+            SECOND_COMMIT,
+            Bun.version,
+            new Date("2026-07-25T17:01:00.000Z")
+        );
+        await createManagedRelease(
+            root,
+            THIRD_COMMIT,
+            THIRD_COMMIT,
+            Bun.version,
+            new Date("2026-07-25T17:02:00.000Z")
+        );
+        await createManagedRelease(
+            root,
+            FOURTH_COMMIT,
+            FOURTH_COMMIT,
+            Bun.version,
+            new Date("2026-07-25T17:03:00.000Z")
+        );
         await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
         await activateDashboardRelease(THIRD_COMMIT, root, SCHEMA_6_OPTIONS);
         const interruptedRetirementPath = path.join(
@@ -842,17 +868,23 @@ describe("Dashboard immutable release manager", () => {
         );
         mkdirSync(interruptedRetirementPath);
         writeFileSync(path.join(interruptedRetirementPath, "stale"), "stale\n");
+        const unverifiableCommit = "e".repeat(40);
+        const unverifiablePath = managedReleasePath(root, unverifiableCommit);
+        mkdirSync(unverifiablePath);
+        writeFileSync(path.join(unverifiablePath, "invalid"), "invalid\n");
 
         const result = await pruneDashboardReleases(3, root);
 
         expect(result).toEqual({
             removed: [FIRST_COMMIT],
             retained: [FOURTH_COMMIT, THIRD_COMMIT, SECOND_COMMIT],
+            warnings: [`Skipped unverifiable release ${unverifiableCommit}`],
         });
         expect(existsSync(managedReleasePath(root, FIRST_COMMIT))).toBe(false);
         expect(existsSync(managedReleasePath(root, SECOND_COMMIT))).toBe(true);
         expect(existsSync(managedReleasePath(root, THIRD_COMMIT))).toBe(true);
         expect(existsSync(managedReleasePath(root, FOURTH_COMMIT))).toBe(true);
+        expect(existsSync(unverifiablePath)).toBe(true);
         expect(existsSync(interruptedRetirementPath)).toBe(false);
         const state = await readDashboardReleaseState(root);
         expect(state.current?.commitSha).toBe(THIRD_COMMIT);

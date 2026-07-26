@@ -4,6 +4,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { runProcess } from "./lib/processes.ts";
+import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
     type DashboardReleaseRetentionResult,
     ensureDashboardReleaseLayout,
@@ -32,6 +33,13 @@ export const MANAGED_DASHBOARD_UNITS = {
     "mira-dashboard-worker.service": "dist/workerStart.js",
     "mira-dashboard.service": "dist/serverStart.js",
 } as const;
+export const MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT = [
+    "MIRA_DASHBOARD_DB_PATH",
+    "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE",
+    "MIRA_DASHBOARD_OPENCLAW_HOME",
+    "MIRA_DASHBOARD_RELEASE_ROOT",
+    "MIRA_DASHBOARD_RELEASES_ROOT",
+] as const;
 
 export interface DashboardReleaseCommandResult {
     stderr: string;
@@ -75,18 +83,6 @@ function assertFullCommitSha(commitSha: string): string {
         throw new TypeError("Release staging requires a full lowercase Git SHA");
     }
     return commitSha;
-}
-
-function resolveAbsoluteNonRootPath(value: string, label: string): string {
-    const trimmed = value.trim();
-    if (!trimmed || trimmed.includes("\0") || !path.isAbsolute(trimmed)) {
-        throw new TypeError(`${label} must be an absolute non-root path`);
-    }
-    const resolved = path.resolve(trimmed);
-    if (resolved === path.parse(resolved).root) {
-        throw new TypeError(`${label} must be an absolute non-root path`);
-    }
-    return resolved;
 }
 
 function hasExactEnvironmentAssignment(
@@ -356,6 +352,14 @@ export function assertManagedDashboardUnitProperties(
     if (!hasExactSerializedToken(execStart, MANAGED_DASHBOARD_UNITS[unit])) {
         throw new Error(`${unit} has an unexpected managed release entrypoint`);
     }
+    const preservedEnvironment = `--preserve-env=${MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT.join(
+        ","
+    )}`;
+    if (!hasExactSerializedToken(execStart, preservedEnvironment)) {
+        throw new Error(
+            `${unit} must preserve managed release environment through Doppler`
+        );
+    }
     const environment = actual.get("Environment") ?? "";
     const missingEnvironment = expectedEnvironment.filter(
         (entry) => !hasExactEnvironmentAssignment(environment, entry)
@@ -413,6 +417,7 @@ export async function stageDashboardRelease(
         MIRA_DASHBOARD_DB_PATH: contract.databasePath,
         MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE: contract.logRotationLockFile,
         MIRA_DASHBOARD_OPENCLAW_HOME: contract.openClawHome,
+        MIRA_DASHBOARD_RELEASE_ROOT: worktreePath,
         MIRA_DASHBOARD_RELEASES_ROOT: contract.releasesRoot,
         NODE_ENV: "production",
     };

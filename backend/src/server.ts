@@ -15,6 +15,7 @@ import type { DashboardSocket } from "./dashboardSocket.ts";
 import { resolveFrontendPath } from "./frontendAssets.ts";
 import gateway from "./gateway.ts";
 import { isAllowedDashboardOrigin, sessionIdFromCookie } from "./http.ts";
+import { resolveDashboardPort } from "./lib/values.ts";
 import { requiresRecentMfaForGatewayMethod } from "./requestPolicy.ts";
 import { withRequestSecurity } from "./requestSecurity.ts";
 import { routes } from "./routes.ts";
@@ -76,14 +77,7 @@ function hasHiddenStaticSegment(relativePath: string): boolean {
     return relativePath.split(path.sep).some((segment) => segment.startsWith("."));
 }
 
-export function resolveListenPort(value = process.env.PORT): number {
-    const trimmed = value?.trim() ?? "";
-    if (!/^\d+$/u.test(trimmed)) {
-        return 3100;
-    }
-    const port = Number(trimmed);
-    return port > 0 && port <= 65_535 ? port : 3100;
-}
+export { resolveDashboardPort as resolveListenPort } from "./lib/values.ts";
 
 function dashboardSocketFromBun(
     ws: ServerWebSocket<DashboardSocketData>
@@ -106,7 +100,7 @@ function dashboardSocketFromBun(
     };
 }
 
-export function createServer(port = resolveListenPort()): Server<DashboardSocketData> {
+export function createServer(port = resolveDashboardPort()): Server<DashboardSocketData> {
     validateAuthenticationConfig();
     validateStoredSecretConfig();
     validateAutomationCredentials();

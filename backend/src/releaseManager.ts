@@ -13,6 +13,7 @@ import {
 import { readAppliedDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
 import type { DatabaseMigrationIdentity } from "./databaseMigrations/index.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
+import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     type DashboardReleaseManifest,
@@ -58,6 +59,7 @@ export interface DashboardReleaseState {
 export interface DashboardReleaseRetentionResult {
     removed: string[];
     retained: string[];
+    warnings: string[];
 }
 
 export interface DashboardReleaseManagerOptions {
@@ -98,17 +100,6 @@ function assertReleaseCommitSha(commitSha: string): void {
     if (!RELEASE_COMMIT_SHA_PATTERN.test(commitSha)) {
         throw new TypeError("Managed release commit must be a full lowercase Git SHA");
     }
-}
-
-function assertAbsoluteNonRootPath(value: string): string {
-    if (!value || value.includes("\0") || !path.isAbsolute(value)) {
-        throw new TypeError("Dashboard releases root must be an absolute non-root path");
-    }
-    const resolved = path.resolve(value);
-    if (resolved === path.parse(resolved).root) {
-        throw new TypeError("Dashboard releases root must be an absolute non-root path");
-    }
-    return resolved;
 }
 
 async function assertRealDirectory(directoryPath: string): Promise<void> {
@@ -332,13 +323,13 @@ export function resolveDashboardReleasesRoot(
     configuredRoot = process.env.MIRA_DASHBOARD_RELEASES_ROOT ??
         DEFAULT_DASHBOARD_RELEASES_ROOT
 ): string {
-    return assertAbsoluteNonRootPath(configuredRoot.trim());
+    return resolveAbsoluteNonRootPath(configuredRoot, "Dashboard releases root");
 }
 
 export async function ensureDashboardReleaseLayout(
     configuredRoot = resolveDashboardReleasesRoot()
 ): Promise<DashboardReleaseLayout> {
-    const root = assertAbsoluteNonRootPath(configuredRoot);
+    const root = resolveAbsoluteNonRootPath(configuredRoot, "Dashboard releases root");
     const releasesPath = path.join(root, MANAGED_RELEASES_DIRECTORY_NAME);
     await assertRealDirectory(path.dirname(root));
     try {
@@ -363,7 +354,7 @@ export async function ensureDashboardReleaseLayout(
 export function managedReleasePath(releasesRoot: string, commitSha: string): string {
     assertReleaseCommitSha(commitSha);
     return path.join(
-        assertAbsoluteNonRootPath(releasesRoot),
+        resolveAbsoluteNonRootPath(releasesRoot, "Dashboard releases root"),
         MANAGED_RELEASES_DIRECTORY_NAME,
         commitSha
     );
@@ -1229,7 +1220,11 @@ export async function pruneDashboardReleases(
             withFileTypes: true,
         });
         let hasFilesystemChanges = false;
-        const releases: ManagedDashboardRelease[] = [];
+        const releases: Array<{
+            publishedAtNs: bigint;
+            release: ManagedDashboardRelease;
+        }> = [];
+        const warnings: string[] = [];
         for (const entry of entries) {
             if (RETIRED_RELEASE_DIRECTORY_PATTERN.test(entry.name)) {
                 if (!entry.isDirectory() || entry.isSymbolicLink()) {
@@ -1251,17 +1246,43 @@ export async function pruneDashboardReleases(
                     `Managed release entry must be a real directory: ${entry.name}`
                 );
             }
-            releases.push(await loadManagedReleaseFromLayout(layout, entry.name));
+            try {
+                const release = await loadManagedReleaseFromLayout(layout, entry.name);
+                const directoryStat = await fsp.lstat(release.path, { bigint: true });
+                if (
+                    !directoryStat.isDirectory() ||
+                    directoryStat.isSymbolicLink() ||
+                    releaseDirectoryIdentity(directoryStat) !== release.directoryIdentity
+                ) {
+                    throw new Error(
+                        `Managed release changed before retention ordering: ${entry.name}`
+                    );
+                }
+                releases.push({
+                    publishedAtNs: directoryStat.birthtimeNs,
+                    release,
+                });
+            } catch (error) {
+                if (protectedCommits.has(entry.name)) {
+                    throw error;
+                }
+                warnings.push(`Skipped unverifiable release ${entry.name}`);
+            }
         }
 
         const newestFirst = releases.toSorted((left, right) => {
-            const builtAtComparison = right.manifest.builtAt.localeCompare(
-                left.manifest.builtAt
-            );
-            return builtAtComparison || right.commitSha.localeCompare(left.commitSha);
+            if (left.release.manifest.builtAt !== right.release.manifest.builtAt) {
+                return left.release.manifest.builtAt < right.release.manifest.builtAt
+                    ? 1
+                    : -1;
+            }
+            if (left.publishedAtNs === right.publishedAtNs) {
+                return 0;
+            }
+            return left.publishedAtNs < right.publishedAtNs ? 1 : -1;
         });
         const retained = new Set(protectedCommits);
-        for (const release of newestFirst) {
+        for (const { release } of newestFirst) {
             if (retained.size >= retainCount) {
                 break;
             }
@@ -1269,7 +1290,7 @@ export async function pruneDashboardReleases(
         }
 
         const removed: string[] = [];
-        for (const release of newestFirst.toReversed()) {
+        for (const { release } of newestFirst.toReversed()) {
             if (retained.has(release.commitSha)) {
                 continue;
             }
@@ -1310,8 +1331,10 @@ export async function pruneDashboardReleases(
         return {
             removed,
             retained: newestFirst
+                .map(({ release }) => release)
                 .filter((release) => retained.has(release.commitSha))
                 .map((release) => release.commitSha),
+            warnings: warnings.toSorted(compareStrings),
         };
     });
 }

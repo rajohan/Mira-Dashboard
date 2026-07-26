@@ -24,7 +24,7 @@ import {
     ensureDashboardReleaseLayout,
     managedReleasePath,
 } from "../src/releaseManager.ts";
-import { writeReleaseManifest } from "../src/releaseManifest.ts";
+import { createReleaseFixture } from "./support/releaseFixture.ts";
 
 const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
@@ -45,66 +45,6 @@ function createTemporaryRoot(prefix: string): string {
         rmSync(root, { force: true, recursive: true });
     });
     return root;
-}
-
-async function createDeploymentReleaseFixture(
-    releaseRoot: string,
-    commitSha: string,
-    commitTitle: string
-): Promise<void> {
-    mkdirSync(path.join(releaseRoot, "backend", "config"), { recursive: true });
-    mkdirSync(path.join(releaseRoot, "backend", "dist"), { recursive: true });
-    mkdirSync(path.join(releaseRoot, "dist", "assets"), { recursive: true });
-    writeFileSync(path.join(releaseRoot, "package.json"), "{}\n");
-    writeFileSync(path.join(releaseRoot, "bun.lock"), "root-lock\n");
-    writeFileSync(path.join(releaseRoot, "backend", "package.json"), "{}\n");
-    writeFileSync(path.join(releaseRoot, "backend", "bun.lock"), "backend-lock\n");
-    writeFileSync(
-        path.join(releaseRoot, "backend", "config", "log-rotation.json"),
-        '{"jobs":[]}\n'
-    );
-    writeFileSync(path.join(releaseRoot, "dist", "index.html"), "<main>ready</main>\n");
-    writeFileSync(
-        path.join(releaseRoot, "dist", "assets", "app.js"),
-        `export const commit = "${commitSha}";\n`
-    );
-    writeFileSync(
-        path.join(releaseRoot, "not-a-release-artifact.txt"),
-        "must not publish\n"
-    );
-    for (const component of ["frontend", "backend"] as const) {
-        const componentRoot =
-            component === "frontend"
-                ? path.join(releaseRoot, "dist")
-                : path.join(releaseRoot, "backend", "dist");
-        writeFileSync(
-            path.join(componentRoot, "build-identity.json"),
-            `${JSON.stringify({
-                bunVersion: Bun.version,
-                commitSha,
-                component,
-                formatVersion: 1,
-            })}\n`
-        );
-    }
-    for (const entrypoint of [
-        "databasePreflight",
-        "releaseLifecycle",
-        "resetDashboardPassword",
-        "serverStart",
-        "workerStart",
-    ]) {
-        writeFileSync(
-            path.join(releaseRoot, "backend", "dist", `${entrypoint}.js`),
-            `export const commit = "${commitSha}";\n`
-        );
-    }
-    await writeReleaseManifest({
-        builtAt: new Date("2026-07-26T02:00:00.000Z"),
-        commitSha,
-        commitTitle,
-        releaseRoot,
-    });
 }
 
 function readableUtf8Stream(value: string): ReadableStream<Uint8Array> {
@@ -1876,13 +1816,14 @@ describe("backend service behavior", () => {
         }
     });
 
-    it("publishes and activates an immutable release before detached cutover", async () => {
+    it("publishes an immutable release and hands activation to detached cutover", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE");
+        rememberEnvironment("PORT");
         const fakeRoot = createTemporaryRoot("mira-pr-deploy-root-");
         const fakeBin = createTemporaryRoot("mira-pr-deploy-bin-");
         const worktreeRoot = path.join(fakeRoot, "worktrees");
@@ -1900,18 +1841,14 @@ describe("backend service behavior", () => {
         mkdirSync(worktreeRoot);
         mkdirSync(path.dirname(openClawHome), { recursive: true });
         mkdirSync(candidateTemplate);
-        await createDeploymentReleaseFixture(
-            candidateTemplate,
-            candidateCommit,
-            "Deployable dashboard commit"
-        );
+        await createReleaseFixture(candidateTemplate, candidateCommit, {
+            commitTitle: "Deployable dashboard commit",
+        });
         await ensureDashboardReleaseLayout(releasesRoot);
         const oldReleasePath = managedReleasePath(releasesRoot, oldCommit);
-        await createDeploymentReleaseFixture(
-            oldReleasePath,
-            oldCommit,
-            "Previous dashboard commit"
-        );
+        await createReleaseFixture(oldReleasePath, oldCommit, {
+            commitTitle: "Previous dashboard commit",
+        });
         symlinkSync(`releases/${oldCommit}`, path.join(releasesRoot, "current"), "dir");
         writeFileSync(
             path.join(fakeBin, "git"),
@@ -1972,7 +1909,7 @@ else
 fi
 printf '%s\n' \
   'Environment=NODE_ENV=production MIRA_DASHBOARD_DB_PATH=${getMiraDatabasePath()} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${releasesRoot}/current MIRA_DASHBOARD_RELEASES_ROOT=${releasesRoot}' \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run -- bun $entrypoint ; }" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=MIRA_DASHBOARD_DB_PATH,MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE,MIRA_DASHBOARD_OPENCLAW_HOME,MIRA_DASHBOARD_RELEASE_ROOT,MIRA_DASHBOARD_RELEASES_ROOT -- bun $entrypoint ; }" \
   'WorkingDirectory=${releasesRoot}/current/backend'
 `
         );
@@ -1980,6 +1917,7 @@ printf '%s\n' \
             path.join(fakeBin, "systemd-run"),
             String.raw`#!/usr/bin/env bash
 set -euo pipefail
+/bin/bash -n <<<"$6"
 printf '%s\n' "$*" >> ${JSON.stringify(systemdLog)}
 printf 'scheduled\n'
 `
@@ -1994,6 +1932,7 @@ printf 'scheduled\n'
         process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openClawHome;
         process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = logRotationLockFile;
+        process.env.PORT = "4310";
 
         const { registerPullRequestExecutionActions, startDeployLatest } =
             await import("../src/services/pullRequests.ts");
@@ -2056,7 +1995,7 @@ printf 'scheduled\n'
             expect(row).toEqual({
                 commit_sha: candidateCommit.slice(0, 8),
                 commit_title: "Deployable dashboard commit",
-                note: "Immutable release published. Atomic restart and rollback check scheduled",
+                note: "Immutable release published. Detached activation and rollback check scheduled",
                 status: "restart-scheduled",
             });
             await expect(Bun.file(gitLog).text()).resolves.toContain(
@@ -2075,20 +2014,22 @@ printf 'scheduled\n'
                 `mira-dashboard-deploy-${job.id}`
             );
             const restartCommand = await Bun.file(systemdLog).text();
-            expect(restartCommand).toContain("/api/health/ready");
+            expect(restartCommand).toContain("http://127.0.0.1:4310/api/health/ready");
             expect(restartCommand).toContain("--connect-timeout 2 --max-time 5");
             expect(restartCommand).toContain("for attempt in {1..30}");
             expect(restartCommand).toContain(".checks.release.backendCommit");
             expect(restartCommand).toContain("releaseLifecycle.js");
+            expect(restartCommand).toContain(`activate '${candidateCommit}'`);
+            expect(restartCommand.indexOf(`activate '${candidateCommit}'`)).toBeLessThan(
+                restartCommand.indexOf("if restart_services")
+            );
             expect(restartCommand).toContain("rollback");
             expect(restartCommand).toContain("prune 3");
             expect(restartCommand).not.toContain("/api/job-executions");
             expect(readlinkSync(path.join(releasesRoot, "current"))).toBe(
-                `releases/${candidateCommit}`
-            );
-            expect(readlinkSync(path.join(releasesRoot, "previous"))).toBe(
                 `releases/${oldCommit}`
             );
+            expect(existsSync(path.join(releasesRoot, "previous"))).toBe(false);
             const publishedReleasePath = managedReleasePath(
                 releasesRoot,
                 candidateCommit
@@ -5064,6 +5005,13 @@ fi
     });
 
     it("normalizes elevated log rotation command output and failures", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_DB_PATH");
+        rememberEnvironment("MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE");
+        const stateRoot = createTemporaryRoot("mira-elevated-log-rotation-");
+        const configuredLockFile = path.join(stateRoot, "log-rotation.lock");
+        const configuredDatabasePath = path.join(stateRoot, "mira-dashboard.db");
+        process.env.MIRA_DASHBOARD_DB_PATH = configuredDatabasePath;
+        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = configuredLockFile;
         const { runElevatedLogRotationService } =
             await import("../src/services/logRotation.ts");
         const runProcessSpy = jest
@@ -5094,6 +5042,16 @@ fi
             result: { checkedFiles: 2, isOk: true },
             stderr: "sudo notice",
         });
+        const [sudoCommand, sudoArguments, sudoOptions] =
+            runProcessSpy.mock.calls[0] ?? [];
+        expect(sudoCommand).toBe("sudo");
+        expect(sudoArguments).toContain(
+            "--preserve-env=LANG,NODE_ENV,TZ,MIRA_DASHBOARD_DB_PATH,MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE"
+        );
+        expect(sudoOptions?.env).toMatchObject({
+            MIRA_DASHBOARD_DB_PATH: configuredDatabasePath,
+            MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE: configuredLockFile,
+        });
         await expect(
             runElevatedLogRotationService({ isDryRun: false })
         ).resolves.toMatchObject({
@@ -5119,6 +5077,28 @@ fi
             },
             stderr: expect.stringContaining("bad json stderr"),
         });
+    });
+
+    it("uses the configured lock for non-elevated log rotation", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE");
+        const stateRoot = createTemporaryRoot("mira-log-rotation-lock-");
+        const configuredLockFile = path.join(stateRoot, "custom.lock");
+        const configPath = path.join(stateRoot, "log-rotation.json");
+        writeFileSync(configPath, '{"groups":[],"version":1}\n');
+        writeFileSync(configuredLockFile, `${process.pid}\n`);
+        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = configuredLockFile;
+        const { runLogRotationService } = await import("../src/services/logRotation.ts");
+
+        const summary = await runLogRotationService({
+            config: configPath,
+            isDryRun: false,
+        });
+
+        expect(summary).toMatchObject({
+            errors: [{ message: "Log rotation is already running" }],
+            isOk: false,
+        });
+        expect(readFileSync(configuredLockFile, "utf8")).toBe(`${process.pid}\n`);
     });
 
     it("records scheduled log-rotation failures in cache state", async () => {
