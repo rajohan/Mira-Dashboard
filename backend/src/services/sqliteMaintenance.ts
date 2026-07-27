@@ -4,7 +4,15 @@ import { sessionIdleTtlMs } from "../auth.ts";
 import { database, getMiraDatabasePath } from "../database.ts";
 import { validateDatabaseMigrationHistory } from "../databaseMigrationRunner.ts";
 import { errorMessage } from "../lib/errors.ts";
+import {
+    readDashboardReleaseState,
+    resolveDashboardReleasesRoot,
+} from "../releaseManager.ts";
 import { createVerifiedSqliteBackup, pruneSqliteBackups } from "../sqliteBackup.ts";
+import {
+    DEPLOYMENT_RUNTIME_FAILURE_NOTE_PATTERNS,
+    DEPLOYMENT_RUNTIME_FAILURE_NOTE_PREDICATE_SQL,
+} from "./deploymentRuntimeResults.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
 import {
     getScheduledJob,
@@ -19,12 +27,57 @@ const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const SQLITE_MAINTENANCE_TIMEOUT_MS = 15 * 60 * 1000;
 const CHAT_RUNTIME_SNAPSHOT_RETENTION_DAYS = 30;
 const MAX_CHAT_RUNTIME_SNAPSHOTS = 200;
+const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 
 function retentionCutoff(now: Date, days: number): string {
     return new Date(now.getTime() - days * MILLISECONDS_PER_DAY).toISOString();
 }
 
-export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
+interface DatabaseHistoryRetentionOptions {
+    protectedDeploymentCommits?: readonly string[];
+    pruneDeploymentJobs?: boolean;
+}
+
+function protectedDeploymentRuntimeJobIds(
+    databaseConnection: Database,
+    commits: readonly string[]
+): string[] {
+    const query = databaseConnection.prepare(
+        `SELECT id
+         FROM deployment_jobs
+         WHERE commit_sha = ?
+           AND (
+               status = 'isOk'
+               OR (
+                   status = 'failed'
+                   AND (
+                       ${DEPLOYMENT_RUNTIME_FAILURE_NOTE_PREDICATE_SQL}
+                   )
+               )
+           )
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1`
+    );
+    return commits.flatMap((commit) => {
+        const row = query.get(commit, ...DEPLOYMENT_RUNTIME_FAILURE_NOTE_PATTERNS) as
+            { id: string } | undefined;
+        return row ? [row.id] : [];
+    });
+}
+
+export function pruneDatabaseHistory(
+    databaseConnection: Database,
+    now: Date,
+    options: DatabaseHistoryRetentionOptions = {}
+) {
+    const protectedDeploymentCommits = [...new Set(options.protectedDeploymentCommits)];
+    if (
+        protectedDeploymentCommits.some((commit) => !FULL_COMMIT_SHA_PATTERN.test(commit))
+    ) {
+        throw new TypeError(
+            "Protected deployment runtime results require full commit SHAs"
+        );
+    }
     const changes = {
         agentTaskHistory: 0,
         authPendingLogins: 0,
@@ -172,22 +225,33 @@ export function pruneDatabaseHistory(databaseConnection: Database, now: Date) {
                    )`
             )
             .run(retentionCutoff(now, 90)).changes;
-        changes.deploymentJobs = databaseConnection
-            .prepare(
-                `DELETE FROM deployment_jobs
-                 WHERE status NOT IN ('building', 'restart-scheduled')
-                   AND (
-                       started_at < ?
-                       OR id IN (
-                           SELECT id
-                           FROM deployment_jobs
-                           WHERE status NOT IN ('building', 'restart-scheduled')
-                           ORDER BY started_at DESC, id DESC
-                           LIMIT -1 OFFSET 500
-                       )
-                   )`
-            )
-            .run(retentionCutoff(now, 90)).changes;
+        if (options.pruneDeploymentJobs !== false) {
+            const protectedJobIds = protectedDeploymentRuntimeJobIds(
+                databaseConnection,
+                protectedDeploymentCommits
+            );
+            const protectedJobClause =
+                protectedJobIds.length > 0
+                    ? `AND id NOT IN (${protectedJobIds.map(() => "?").join(", ")})`
+                    : "";
+            changes.deploymentJobs = databaseConnection
+                .prepare(
+                    `DELETE FROM deployment_jobs
+                     WHERE status NOT IN ('building', 'restart-scheduled')
+                       ${protectedJobClause}
+                       AND (
+                           started_at < ?
+                           OR id IN (
+                               SELECT id
+                               FROM deployment_jobs
+                               WHERE status NOT IN ('building', 'restart-scheduled')
+                               ORDER BY started_at DESC, id DESC
+                               LIMIT -1 OFFSET 500
+                           )
+                       )`
+                )
+                .run(...protectedJobIds, retentionCutoff(now, 90)).changes;
+        }
         changes.agentTaskHistory = databaseConnection
             .prepare(
                 `DELETE FROM agent_task_history
@@ -354,14 +418,33 @@ function passiveWalCheckpoint() {
     };
 }
 
-export function runSqliteMaintenance(now = new Date()) {
+async function protectedDeploymentCommitsForMaintenance(): Promise<string[] | undefined> {
+    try {
+        const state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
+        return [state.current?.commitSha, state.previous?.commitSha].filter(
+            (commit): commit is string => commit !== undefined
+        );
+    } catch (error) {
+        console.warn(
+            "[SQLiteMaintenance] Managed release status unavailable; preserving deployment job history:",
+            errorMessage(error, "Managed release status unavailable")
+        );
+        return undefined;
+    }
+}
+
+export async function runSqliteMaintenance(now = new Date()) {
     const databasePath = getMiraDatabasePath();
+    const protectedDeploymentCommits = await protectedDeploymentCommitsForMaintenance();
     const before = sqlitePageMetrics();
     const backup = createVerifiedSqliteBackup(database, databasePath, "scheduled", {
         createdAt: now,
         validateRestore: validateDatabaseMigrationHistory,
     });
-    const prunedRows = pruneDatabaseHistory(database, now);
+    const prunedRows = pruneDatabaseHistory(database, now, {
+        ...(protectedDeploymentCommits && { protectedDeploymentCommits }),
+        pruneDeploymentJobs: protectedDeploymentCommits !== undefined,
+    });
     database.run("PRAGMA optimize");
     const checkpoint = passiveWalCheckpoint();
     const after = sqlitePageMetrics();
@@ -387,9 +470,9 @@ export function registerSqliteMaintenanceScheduledJob(
 ): void {
     registerScheduledJobAction(
         SQLITE_MAINTENANCE_JOB_ID,
-        (_job, _signal, context) => {
+        async (_job, _signal, context) => {
             context.protectFromCancellation();
-            const result = runSqliteMaintenance();
+            const result = await runSqliteMaintenance();
             if (!options.enqueueDatabaseSummaryRefresh) {
                 return result;
             }

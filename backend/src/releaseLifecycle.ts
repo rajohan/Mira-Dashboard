@@ -7,6 +7,7 @@ import {
     pruneDashboardReleases,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
+    restoreDashboardReleaseAfterFailedActivation,
     rollbackDashboardRelease,
 } from "./releaseManager.ts";
 
@@ -86,6 +87,35 @@ export async function runReleaseLifecycleCommand(
             });
             break;
         }
+        case "restore": {
+            const [
+                expectedCandidateCommitSha,
+                expectedRollbackCommitSha,
+                previousCommitSha,
+            ] = commandArguments;
+            if (
+                !expectedCandidateCommitSha ||
+                !expectedRollbackCommitSha ||
+                commandArguments.length < 2 ||
+                commandArguments.length > 3
+            ) {
+                throw new TypeError(
+                    "Release lifecycle restore requires expected candidate and rollback commit SHAs, with an optional previous commit SHA"
+                );
+            }
+            state = await restoreDashboardReleaseAfterFailedActivation(
+                {
+                    ...transitionOptions,
+                    expected: {
+                        candidateCommitSha: expectedCandidateCommitSha,
+                        ...(previousCommitSha && { previousCommitSha }),
+                        rollbackCommitSha: expectedRollbackCommitSha,
+                    },
+                },
+                releasesRoot
+            );
+            break;
+        }
         case "status": {
             if (commandArguments.length > 0) {
                 throw new TypeError("Release lifecycle status takes no commit SHA");
@@ -104,7 +134,7 @@ export async function runReleaseLifecycleCommand(
         }
         default: {
             throw new TypeError(
-                "Usage: releaseLifecycle.js <status|activate COMMIT_SHA [--coordinated-schema-cutover]|rollback EXPECTED_CURRENT_SHA EXPECTED_TARGET_SHA|prune [RETAIN_COUNT]>"
+                "Usage: releaseLifecycle.js <status|activate COMMIT_SHA [--coordinated-schema-cutover]|restore EXPECTED_CANDIDATE_SHA EXPECTED_ROLLBACK_SHA [PREVIOUS_SHA]|rollback EXPECTED_CURRENT_SHA EXPECTED_TARGET_SHA|prune [RETAIN_COUNT]>"
             );
         }
     }

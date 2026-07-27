@@ -85,6 +85,16 @@ export interface DashboardReleaseRollbackOptions extends DashboardReleaseManager
     expected?: DashboardReleaseRollbackExpectation;
 }
 
+export interface DashboardReleaseFailedActivationRestoreExpectation {
+    candidateCommitSha: string;
+    previousCommitSha?: string;
+    rollbackCommitSha: string;
+}
+
+export interface DashboardReleaseFailedActivationRestoreOptions extends DashboardReleaseManagerOptions {
+    expected: DashboardReleaseFailedActivationRestoreExpectation;
+}
+
 export interface DashboardReleasePublicationOptions {
     onTransitionLockContention?: () => void;
 }
@@ -103,7 +113,7 @@ interface ReleaseTransitionJournal {
     after: ReleaseLinkState;
     before: ReleaseLinkState;
     formatVersion: 1;
-    operation: "activate" | "rollback";
+    operation: "activate" | "restore" | "rollback";
 }
 
 interface ReleaseTransitionJournalSnapshot {
@@ -207,7 +217,9 @@ function parseReleaseTransitionJournal(value: unknown): ReleaseTransitionJournal
         !isPlainRecord(value) ||
         !hasExactKeys(value, ["after", "before", "formatVersion", "operation"]) ||
         value.formatVersion !== RELEASE_TRANSITION_FORMAT_VERSION ||
-        (value.operation !== "activate" && value.operation !== "rollback")
+        (value.operation !== "activate" &&
+            value.operation !== "restore" &&
+            value.operation !== "rollback")
     ) {
         throw new TypeError("Release transition journal is invalid");
     }
@@ -220,13 +232,19 @@ function parseReleaseTransitionJournal(value: unknown): ReleaseTransitionJournal
         if (after.previous !== before.current) {
             throw new TypeError("Activation journal has an invalid rollback slot");
         }
-    } else if (
-        !before.current ||
-        !before.previous ||
-        after.current !== before.previous ||
-        after.previous !== before.current
-    ) {
-        throw new TypeError("Rollback journal has an invalid release swap");
+    } else if (value.operation === "rollback") {
+        if (
+            !before.current ||
+            !before.previous ||
+            after.current !== before.previous ||
+            after.previous !== before.current
+        ) {
+            throw new TypeError("Rollback journal has an invalid release swap");
+        }
+    } else if (!before.current || !before.previous || after.current !== before.previous) {
+        throw new TypeError(
+            "Failed activation restore journal has an invalid release state"
+        );
     }
     return {
         after,
@@ -1219,7 +1237,7 @@ export async function readDashboardReleaseState(
         async () => {
             if (await readReleaseTransitionJournal(layout)) {
                 throw new Error(
-                    "Managed release status requires activate or rollback to recover an interrupted transition"
+                    "Managed release status requires activate, restore, or rollback to recover an interrupted transition"
                 );
             }
             return readDashboardReleaseStateFromLayout(layout);
@@ -1400,6 +1418,100 @@ export async function rollbackDashboardRelease(
                     activeRelease.commitSha,
                     activeRelease
                 );
+            });
+        },
+        options.transitionLockWaitMs
+    );
+}
+
+/**
+ * Restores the exact current/previous snapshot that existed before a failed
+ * activation. Unlike a manual rollback, the failed candidate is not retained
+ * in the previous slot.
+ */
+export async function restoreDashboardReleaseAfterFailedActivation(
+    options: DashboardReleaseFailedActivationRestoreOptions,
+    releasesRoot = resolveDashboardReleasesRoot()
+): Promise<DashboardReleaseState> {
+    const { candidateCommitSha, previousCommitSha, rollbackCommitSha } = options.expected;
+    assertReleaseCommitSha(candidateCommitSha);
+    assertReleaseCommitSha(rollbackCommitSha);
+    if (previousCommitSha) {
+        assertReleaseCommitSha(previousCommitSha);
+    }
+    if (
+        candidateCommitSha === rollbackCommitSha ||
+        rollbackCommitSha === previousCommitSha
+    ) {
+        throw new TypeError(
+            "Failed activation restore requires distinct managed releases"
+        );
+    }
+
+    const layout = await ensureDashboardReleaseLayout(releasesRoot);
+    return withReleaseTransitionLock(
+        layout,
+        "exclusive",
+        async () => {
+            await recoverInterruptedReleaseTransition(layout);
+            const state = await readDashboardReleaseStateFromLayout(layout);
+            if (
+                state.current?.commitSha !== candidateCommitSha ||
+                state.previous?.commitSha !== rollbackCommitSha
+            ) {
+                throw new Error(
+                    "Managed release slots changed before the failed activation restore"
+                );
+            }
+
+            const candidateRelease = state.current;
+            const rollbackRelease = state.previous;
+            assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
+            const restoredPreviousRelease = previousCommitSha
+                ? await loadManagedReleaseFromLayout(layout, previousCommitSha)
+                : undefined;
+            const maximumInspectableSchemaVersion = Math.max(
+                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+                candidateRelease.manifest.schema.maximumCompatible,
+                rollbackRelease.manifest.schema.maximumCompatible
+            );
+            const liveSchemaState = await resolveLiveSchemaState(
+                options,
+                maximumInspectableSchemaVersion
+            );
+            assertReleaseRollbackCompatible(
+                candidateRelease.manifest,
+                rollbackRelease.manifest,
+                liveSchemaState.version
+            );
+            assertReleaseMigrationHistoryCompatible(
+                rollbackRelease.manifest,
+                liveSchemaState,
+                "Rollback"
+            );
+
+            const before = releaseLinkStateFromDashboardState(state);
+            const journal: ReleaseTransitionJournal = {
+                after: {
+                    current: rollbackCommitSha,
+                    previous: previousCommitSha ?? false,
+                },
+                before,
+                formatVersion: RELEASE_TRANSITION_FORMAT_VERSION,
+                operation: "restore",
+            };
+            return executeReleaseTransition(layout, journal, async () => {
+                const expectedReleases = new Map<string, ManagedDashboardRelease>([
+                    [candidateCommitSha, candidateRelease],
+                    [rollbackCommitSha, rollbackRelease],
+                ]);
+                if (restoredPreviousRelease) {
+                    expectedReleases.set(
+                        restoredPreviousRelease.commitSha,
+                        restoredPreviousRelease
+                    );
+                }
+                await applyReleaseLinkState(layout, journal.after, expectedReleases);
             });
         },
         options.transitionLockWaitMs

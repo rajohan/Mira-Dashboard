@@ -96,8 +96,9 @@ export function ProductionReleasesCard({
                 <div>
                     <CardTitle className="text-base">Production releases</CardTitle>
                     <p className="mt-1 text-sm text-primary-400">
-                        Active and previous are verified immutable releases. Rollback
-                        eligibility is revalidated immediately before the atomic swap.
+                        Active and previous are immutable release slots. A previous
+                        release is offered as a rollback target only while its latest
+                        runtime result is eligible.
                     </p>
                 </div>
                 <Badge
@@ -125,11 +126,27 @@ export function ProductionReleasesCard({
                     }
                 />
                 <ReleaseSlot
-                    label="Rollback target"
+                    label={
+                        release?.previous && !release.rollback.available
+                            ? "Previous slot"
+                            : "Rollback target"
+                    }
                     release={release?.previous}
                     badge={
-                        <Badge variant={release?.previous ? "warning" : "default"}>
-                            {release?.previous ? "Previous" : "Unavailable"}
+                        <Badge
+                            variant={
+                                release?.previous
+                                    ? release.rollback.available
+                                        ? "warning"
+                                        : "error"
+                                    : "default"
+                            }
+                        >
+                            {release?.previous
+                                ? release.rollback.available
+                                    ? "Previous"
+                                    : "Not eligible"
+                                : "Unavailable"}
                         </Badge>
                     }
                 />
