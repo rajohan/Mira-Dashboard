@@ -9,6 +9,7 @@ import type {
     OpenClawGatewayClientOptions,
 } from "../src/lib/openclawGatewayClient.ts";
 import {
+    MAX_CLIENT_PENDING_REQUESTS,
     type PullRequestPreviewGatewayProxy,
     type PullRequestPreviewGatewayProxyOptions,
     startPullRequestPreviewGatewayProxy,
@@ -259,7 +260,7 @@ describe("PR dev Gateway capability proxy", () => {
                 isOk: false,
             });
 
-            socket.data.pendingRequests = 128;
+            socket.data.pendingRequests = MAX_CLIENT_PENDING_REQUESTS;
             await handleMessage(
                 socket,
                 JSON.stringify({

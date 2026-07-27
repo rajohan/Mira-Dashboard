@@ -1,15 +1,21 @@
 const UNKNOWN_FORWARDED_CLIENT = "unknown";
 
-/** Resolves the trusted external scheme instead of the local proxy transport. */
-export function developmentForwardedProtocol(
-    publicOrigin: string | undefined,
-    requestUrl: string
-): string {
-    const origin = new URL(publicOrigin || requestUrl);
+function developmentUrlProtocol(value: string): string {
+    const origin = new URL(value);
     if (origin.protocol !== "http:" && origin.protocol !== "https:") {
         throw new TypeError("Development proxy origin must use HTTP or HTTPS");
     }
     return origin.protocol.slice(0, -1);
+}
+
+/** Validates the external origin at startup and falls back to each local request URL. */
+export function createDevelopmentForwardedProtocolResolver(
+    publicOrigin: string | undefined
+): (requestUrl: string) => string {
+    const externalProtocol = publicOrigin
+        ? developmentUrlProtocol(publicOrigin)
+        : undefined;
+    return (requestUrl) => externalProtocol || developmentUrlProtocol(requestUrl);
 }
 
 /** Keeps only the isolated dev session cookies before proxying into PR backend code. */

@@ -25,7 +25,7 @@ import {
 import { redactConfigSecrets } from "./services/configRedaction.ts";
 
 const AUTHENTICATION_TIMEOUT_MS = 10_000;
-const MAX_CLIENT_PENDING_REQUESTS = 128;
+export const MAX_CLIENT_PENDING_REQUESTS = 128;
 const MAX_GATEWAY_FRAME_BYTES = 1024 * 1024;
 const MAX_GATEWAY_TOKEN_BYTES = 16 * 1024;
 const PROXY_PATH = "/gateway";

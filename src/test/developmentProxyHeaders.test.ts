@@ -2,29 +2,20 @@ import { describe, expect, it } from "bun:test";
 
 import {
     addForwardedClientHeaders,
+    createDevelopmentForwardedProtocolResolver,
     developmentCookieHeader,
-    developmentForwardedProtocol,
 } from "../lib/developmentProxyHeaders.ts";
 
 describe("development proxy forwarding headers", () => {
     it("preserves the trusted external HTTPS scheme across local proxy transport", () => {
-        expect(
-            developmentForwardedProtocol(
-                "https://dashboard.example:5173",
-                "http://127.0.0.1:5173/api/auth/login"
-            )
-        ).toBe("https");
-        expect(
-            developmentForwardedProtocol(
-                undefined,
-                "http://127.0.0.1:5173/api/auth/login"
-            )
-        ).toBe("http");
+        const externalProtocol = createDevelopmentForwardedProtocolResolver(
+            "https://dashboard.example:5173"
+        );
+        expect(externalProtocol("http://127.0.0.1:5173/api/auth/login")).toBe("https");
+        const requestProtocol = createDevelopmentForwardedProtocolResolver(undefined);
+        expect(requestProtocol("http://127.0.0.1:5173/api/auth/login")).toBe("http");
         expect(() =>
-            developmentForwardedProtocol(
-                "file:///tmp/dashboard",
-                "http://127.0.0.1:5173/api/auth/login"
-            )
+            createDevelopmentForwardedProtocolResolver("file:///tmp/dashboard")
         ).toThrow("must use HTTP or HTTPS");
     });
 
