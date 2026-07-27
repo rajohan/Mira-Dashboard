@@ -4,6 +4,7 @@ import dashboard from "../index.html";
 import {
     addForwardedClientHeaders,
     developmentCookieHeader,
+    developmentForwardedProtocol,
 } from "../src/lib/developmentProxyHeaders.ts";
 
 const host = process.env.HOST || "127.0.0.1";
@@ -12,6 +13,7 @@ const apiTarget = process.env.DASHBOARD_API_TARGET || "http://127.0.0.1:3101";
 const backendWebSocketTarget = apiTarget.replace(/^http/u, "ws");
 const cookieNamespace =
     process.env.MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE || `mira_dashboard_dev_${port}`;
+const publicOrigin = process.env.MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN;
 
 interface WebSocketProxyData {
     backend?: WebSocket;
@@ -49,7 +51,11 @@ async function proxyApi(
         headers.delete("cookie");
     }
     const clientAddress = server.requestIP(request)?.address;
-    addForwardedClientHeaders(headers, clientAddress, sourceUrl.protocol.slice(0, -1));
+    addForwardedClientHeaders(
+        headers,
+        clientAddress,
+        developmentForwardedProtocol(publicOrigin, request.url)
+    );
     const forwardedOrigin = forwardedBrowserOrigin(request, targetUrl.origin);
     if (forwardedOrigin) {
         headers.set("origin", forwardedOrigin);
@@ -68,7 +74,6 @@ function upgradeWebSocket(
     request: Request,
     server: Server<WebSocketProxyData>
 ): Response {
-    const sourceUrl = new URL(request.url);
     if (
         server.upgrade(request, {
             data: {
@@ -79,7 +84,7 @@ function upgradeWebSocket(
                 ),
                 origin: forwardedBrowserOrigin(request, new URL(apiTarget).origin),
                 pendingMessages: [],
-                protocol: sourceUrl.protocol.slice(0, -1),
+                protocol: developmentForwardedProtocol(publicOrigin, request.url),
             },
         })
     ) {

@@ -1915,6 +1915,8 @@ printf 'scheduled\n'
         const { prepareAndStartRollback, registerPullRequestExecutionActions } =
             await import("../src/services/pullRequests.ts");
         const { getJobExecution } = await import("../src/services/jobExecutionQueue.ts");
+        const { reconcileOrphanedDeploymentCutovers } =
+            await import("../src/services/scheduledJobs.ts");
         registerPullRequestExecutionActions();
         await startTestScheduledExecutor();
         const rollback = await prepareAndStartRollback(previousCommit);
@@ -1957,6 +1959,19 @@ printf 'scheduled\n'
             );
             expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
                 `--unit=mira-dashboard-deploy-${rollback.id}\n`
+            );
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    new Date().toISOString(),
+                    () => "inactive"
+                )
+            ).toBe(1);
+            const recoveryGuardian = readFileSync(systemdScriptLog, "utf8");
+            expect(recoveryGuardian).toContain(
+                'if run_activation_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+            );
+            expect(recoveryGuardian).not.toContain(
+                'if run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
             );
         } finally {
             database

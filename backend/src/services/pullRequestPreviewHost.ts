@@ -1278,6 +1278,9 @@ function lifecycleFromUnit(
     state: SystemdUnitState | undefined,
     fallback: PullRequestPreviewLifecycle
 ): PullRequestPreviewLifecycle {
+    if (fallback === "failed") {
+        return "failed";
+    }
     switch (state?.activeState) {
         case "active": {
             return fallback === "starting" ? "starting" : "running";

@@ -3,9 +3,31 @@ import { describe, expect, it } from "bun:test";
 import {
     addForwardedClientHeaders,
     developmentCookieHeader,
+    developmentForwardedProtocol,
 } from "../lib/developmentProxyHeaders.ts";
 
 describe("development proxy forwarding headers", () => {
+    it("preserves the trusted external HTTPS scheme across local proxy transport", () => {
+        expect(
+            developmentForwardedProtocol(
+                "https://dashboard.example:5173",
+                "http://127.0.0.1:5173/api/auth/login"
+            )
+        ).toBe("https");
+        expect(
+            developmentForwardedProtocol(
+                undefined,
+                "http://127.0.0.1:5173/api/auth/login"
+            )
+        ).toBe("http");
+        expect(() =>
+            developmentForwardedProtocol(
+                "file:///tmp/dashboard",
+                "http://127.0.0.1:5173/api/auth/login"
+            )
+        ).toThrow("must use HTTP or HTTPS");
+    });
+
     it("forwards only the isolated dev cookies", () => {
         expect(
             developmentCookieHeader(

@@ -993,6 +993,7 @@ function frontendEnvironment(config: DevelopmentStackConfig): Record<string, str
         DASHBOARD_API_TARGET: config.apiTarget,
         HOST: config.frontendHost,
         MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: `mira_dashboard_dev_${config.frontendPort}`,
+        MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: config.publicOrigin,
         PORT: String(config.frontendPort),
     };
 }

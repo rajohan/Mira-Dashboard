@@ -27,8 +27,8 @@ export type {
     PullRequestPreviewStatus,
 } from "./pullRequestPreviewHost.ts";
 
-const PREVIEW_START_TIMEOUT_MS = 10 * 60 * 1000;
-const PREVIEW_STOP_TIMEOUT_MS = 60_000;
+const PREVIEW_START_TIMEOUT_MS = 30 * 60 * 1000;
+const PREVIEW_STOP_TIMEOUT_MS = 6 * 60 * 1000;
 const PREVIEW_WAIT_GRACE_MS = 5 * 60 * 1000;
 const COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const PREVIEW_LIFECYCLES = new Set<PullRequestPreviewLifecycle>([

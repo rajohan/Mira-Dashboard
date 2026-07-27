@@ -2058,6 +2058,11 @@ function didScheduleOrphanedReleaseCutoverRecovery(
     }
 
     const releasesRoot = resolveDashboardReleasesRoot();
+    const recoveryExecution = readDeploymentLockExecution(cutover.id);
+    const rollbackLifecycleFunction =
+        recoveryExecution?.action_key === "dashboard.rollback"
+            ? "run_activation_lifecycle"
+            : "run_candidate_lifecycle";
     const rolledBackJob: DeploymentJob = {
         ...job,
         status: "failed",
@@ -2129,7 +2134,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         '  rollback_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.previous.commitSha // empty\')"',
         '  [[ "$rollback_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
         '  [ "$rollback_commit" != "$candidate_commit" ] || exit 1',
-        '  if run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services && ready_for_commit "${rollback_commit:0:8}"; then',
+        `  if ${rollbackLifecycleFunction} rollback "$candidate_commit" "$rollback_commit" && restart_services && ready_for_commit "\${rollback_commit:0:8}"; then`,
         `    ${deploymentJobUpdateCommand(rolledBackJob)}`,
         "  else",
         "    exit 1",

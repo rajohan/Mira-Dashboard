@@ -671,6 +671,7 @@ describe("development stack", () => {
                 cwd: root,
                 env: expect.objectContaining({
                     DASHBOARD_API_TARGET: "http://127.0.0.1:3101",
+                    MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: "http://localhost:5173",
                     PORT: "5173",
                 }),
             });

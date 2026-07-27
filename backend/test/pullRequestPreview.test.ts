@@ -758,6 +758,13 @@ describe("managed pull request preview", () => {
                 ownsTailscaleServe: true,
                 status: "failed",
             });
+            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+                commitSha: expectedCommit,
+                message: expect.stringContaining(
+                    "Tailscale Serve activation failed and its route could not be removed"
+                ),
+                status: "failed",
+            });
             await expect(stopPullRequestPreview(335, { config })).rejects.toThrow(
                 "PR dev stop cleanup failed"
             );
@@ -903,6 +910,14 @@ describe("managed pull request preview", () => {
                     actionKey: "dashboard.preview.start",
                     payload: { commitSha: COMMIT, number: 335 },
                     resourceClass: "exclusive",
+                    timeoutMs: 30 * 60 * 1000,
+                })
+            );
+            expect(enqueueSpy).toHaveBeenNthCalledWith(
+                2,
+                expect.objectContaining({
+                    actionKey: "dashboard.preview.stop",
+                    timeoutMs: 6 * 60 * 1000,
                 })
             );
             expect(enqueueSpy).toHaveBeenNthCalledWith(
@@ -911,6 +926,7 @@ describe("managed pull request preview", () => {
                     actionKey: "dashboard.preview.stop",
                     displayName: "Stop PR preview",
                     payload: { number: undefined },
+                    timeoutMs: 6 * 60 * 1000,
                 })
             );
             expect(waitSpy).toHaveBeenCalledTimes(2);
