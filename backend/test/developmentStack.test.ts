@@ -484,16 +484,11 @@ describe("development stack", () => {
 
             const environment = developmentBackendEnvironment(config);
             expect(environment).toMatchObject({
-                BUN_BINARY: process.execPath,
-                MIRA_DASHBOARD_COOKIE_NAMESPACE: "mira_dashboard_dev_5173",
                 MIRA_DASHBOARD_DB_PATH: config.databasePath,
+                MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: "mira_dashboard_dev_5173",
                 MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
-                MIRA_DASHBOARD_DISABLE_SCHEDULER: "0",
-                MIRA_DASHBOARD_EXECUTION_ROLE: "combined",
                 MIRA_DASHBOARD_FRONTEND_PATH: root,
-                MIRA_DASHBOARD_JOB_PROFILE: "isolated",
                 MIRA_DASHBOARD_LOGS_ROOT: path.join(stateRoot, "logs"),
-                MIRA_DASHBOARD_METRICS_DISK_PATH: root,
                 OPENCLAW_GATEWAY_TOKEN: "development-gateway-token",
                 OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789/",
             });
@@ -761,7 +756,6 @@ describe("development stack", () => {
                 cwd: path.join(root, "backend"),
                 env: expect.objectContaining({
                     MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
-                    MIRA_DASHBOARD_JOB_PROFILE: "isolated",
                 }),
             });
             expect(spawnSpy.mock.calls[1]?.[0]).toEqual([

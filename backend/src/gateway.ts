@@ -6,8 +6,8 @@ import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
 import {
-    configuredDashboardProjectPaths,
-    resolveDashboardProjectPaths,
+    resolveDashboardProjectPathsForRuntime,
+    resolveDashboardRuntimePath,
 } from "./lib/dashboardPaths.ts";
 import { errorMessage } from "./lib/errors.ts";
 import {
@@ -36,12 +36,8 @@ function defaultOpenClawHome(): string {
 }
 
 const DEFAULT_DASHBOARD_OPENCLAW_HOME =
-    (
-        configuredDashboardProjectPaths() ??
-        (process.env.NODE_ENV === "production"
-            ? resolveDashboardProjectPaths()
-            : undefined)
-    )?.productionOpenClawHome ?? Path.join(process.cwd(), "data", "openclaw-client");
+    resolveDashboardProjectPathsForRuntime()?.productionOpenClawHome ??
+    Path.join(process.cwd(), "data", "openclaw-client");
 
 /** Performs load or create dashboard device IDentity. */
 function loadOrCreateDashboardDeviceIdentity(
@@ -211,10 +207,10 @@ type GatewayClientConstructor = new (
 const gatewayRuntime = {
     clientConstructor: OpenClawGatewayClient as GatewayClientConstructor,
     dashboardOpenClawHome: validateOpenClawRoot(
-        nonEmptyEnvironmentFallback(
-            "MIRA_DASHBOARD_OPENCLAW_HOME",
-            DEFAULT_DASHBOARD_OPENCLAW_HOME
-        ).trim(),
+        resolveDashboardRuntimePath(
+            resolveDashboardProjectPathsForRuntime()?.productionOpenClawHome,
+            process.env.MIRA_DASHBOARD_OPENCLAW_HOME
+        ) ?? DEFAULT_DASHBOARD_OPENCLAW_HOME,
         "MIRA_DASHBOARD_OPENCLAW_HOME"
     ),
     openClawHome: validateOpenClawRoot(

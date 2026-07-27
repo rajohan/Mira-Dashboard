@@ -8,19 +8,11 @@ export function resolveFrontendPath(
     releaseRoot = getProcessReleaseRoot()
 ): string {
     const releaseFrontendPath = path.join(releaseRoot, "dist");
-    const configuredPath = environment.MIRA_DASHBOARD_FRONTEND_PATH?.trim();
-    if (!configuredPath) {
+    if (environment.NODE_ENV === "production") {
         return releaseFrontendPath;
     }
-    if (
-        environment.NODE_ENV === "production" &&
-        path.resolve(configuredPath) !== path.resolve(releaseFrontendPath)
-    ) {
-        throw new Error(
-            "MIRA_DASHBOARD_FRONTEND_PATH cannot override the checksummed release frontend in production"
-        );
-    }
-    return configuredPath;
+    const configuredPath = environment.MIRA_DASHBOARD_FRONTEND_PATH?.trim();
+    return configuredPath || releaseFrontendPath;
 }
 
 export function isFrontendIndexReady(): boolean {

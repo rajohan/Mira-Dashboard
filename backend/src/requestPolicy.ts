@@ -158,6 +158,7 @@ export function isDevelopmentHostMutationBlocked(
     environment: Record<string, string | undefined> = process.env
 ): boolean {
     if (
+        environment.NODE_ENV === "production" ||
         environment.MIRA_DASHBOARD_DEV_SAFE_MODE !== "1" ||
         SAFE_REQUEST_METHODS.has(request.method.toUpperCase())
     ) {
@@ -173,7 +174,10 @@ export function isDevelopmentHostMutationBlocked(
 export function isDevelopmentExternalNotificationSuppressed(
     environment: Record<string, string | undefined> = process.env
 ): boolean {
-    return environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1";
+    return (
+        environment.NODE_ENV !== "production" &&
+        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1"
+    );
 }
 
 export {
@@ -188,6 +192,7 @@ export function isDevelopmentGatewayMethodBlocked(
     environment: Record<string, string | undefined> = process.env
 ): boolean {
     return (
+        environment.NODE_ENV !== "production" &&
         environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
         !isDevelopmentGatewayMethodAllowed(method)
     );

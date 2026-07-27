@@ -15,6 +15,7 @@ import {
     rmSync,
     writeFileSync,
 } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { getPersistedGatewayToken } from "../auth.ts";
@@ -39,9 +40,10 @@ const PREVIEW_READY_POLL_MS = 500;
 const MAX_COMMAND_BUFFER = 10 * 1024 * 1024;
 const MAX_PREVIEW_RECORD_BYTES = 256 * 1024;
 const COMMIT_PATTERN = /^[\da-f]{40}$/u;
-const UNIT_NAME_PATTERN = /^[A-Za-z0-9_.@-]+\.service$/u;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const DEFAULT_GATEWAY_PROXY_PORT = 18_790;
+const DEFAULT_PREVIEW_BACKEND_PORT = 3101;
+const DEFAULT_PREVIEW_FRONTEND_PORT = 5173;
 const MANAGED_STATE_DIRECTORY_PATTERN = /^pr-([1-9]\d*)$/u;
 const PREVIEW_REFERENCE = "refs/mira-dashboard/previews/active";
 const PREVIEW_GATEWAY_PROXY_ENTRYPOINT = "pullRequestPreviewGatewayProxy.js";
@@ -110,6 +112,7 @@ export interface PullRequestPreviewConfig {
     managedWorktreePath: string;
     openClawConfigSource?: string;
     previewRoot: string;
+    projectRoot: string;
     recentAuthMinutes?: string;
     releaseSource?: string;
     sessionIdleMinutes?: string;
@@ -180,31 +183,6 @@ function absoluteNonRootPath(name: string, value: string): string {
     return resolved;
 }
 
-function optionalAbsoluteNonRootPath(
-    name: string,
-    value: string | undefined
-): string | undefined {
-    const configured = value?.trim();
-    return configured ? absoluteNonRootPath(name, configured) : undefined;
-}
-
-function configuredPort(
-    name: string,
-    value: string | undefined,
-    fallback: number
-): number {
-    const normalized = value?.trim();
-    if (!normalized) return fallback;
-    if (!/^\d+$/u.test(normalized)) {
-        throw new TypeError(`${name} must be an integer between 1 and 65535`);
-    }
-    const port = Number(normalized);
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-        throw new TypeError(`${name} must be an integer between 1 and 65535`);
-    }
-    return port;
-}
-
 function configuredGatewayUrl(value: string | undefined): string | undefined {
     const configured = value?.trim();
     if (!configured) return undefined;
@@ -212,7 +190,7 @@ function configuredGatewayUrl(value: string | undefined): string | undefined {
     try {
         url = new URL(configured);
     } catch {
-        throw new TypeError("MIRA_DASHBOARD_PREVIEW_GATEWAY_URL must be a valid URL");
+        throw new TypeError("OPENCLAW_GATEWAY_URL must be a valid URL");
     }
     if (
         !["ws:", "wss:"].includes(url.protocol) ||
@@ -221,7 +199,7 @@ function configuredGatewayUrl(value: string | undefined): string | undefined {
         url.hash
     ) {
         throw new TypeError(
-            "MIRA_DASHBOARD_PREVIEW_GATEWAY_URL must be ws:// or wss:// without credentials or a fragment"
+            "OPENCLAW_GATEWAY_URL must be ws:// or wss:// without credentials or a fragment"
         );
     }
     return url.href;
@@ -237,33 +215,6 @@ function optionalEnvironmentValue(
         throw new TypeError(`${name} must be a single environment value`);
     }
     return configured;
-}
-
-function resolveExecutable(
-    value: string | undefined,
-    fallback: string,
-    searchPath: string | undefined = process.env.PATH
-): string {
-    const configured = value?.trim();
-    const resolved =
-        configured ||
-        Bun.which(fallback, { PATH: searchPath }) ||
-        (fallback === "bun" ? process.execPath : undefined);
-    if (!resolved || !path.isAbsolute(resolved)) {
-        throw new TypeError(`${fallback} executable must resolve to an absolute path`);
-    }
-    return path.resolve(resolved);
-}
-
-function gitCommonDirectory(
-    dashboardRoot: string,
-    configured: string | undefined
-): string {
-    const explicit = optionalAbsoluteNonRootPath(
-        "MIRA_DASHBOARD_PREVIEW_GIT_COMMON_DIR",
-        configured
-    );
-    return explicit || path.join(dashboardRoot, ".git");
 }
 
 function defaultGatewayProxyEntrypoint(): string {
@@ -285,127 +236,40 @@ export function resolvePullRequestPreviewConfig(
     environment: Record<string, string | undefined> = process.env
 ): PullRequestPreviewConfig {
     const projectPaths = resolveDashboardProjectPaths(environment);
-    const dashboardRoot = absoluteNonRootPath(
-        "MIRA_DASHBOARD_ROOT",
-        environment.MIRA_DASHBOARD_ROOT?.trim() || projectPaths.productionCheckoutRoot
+    const dashboardRoot = projectPaths.productionCheckoutRoot;
+    const previewRoot = projectPaths.developmentPreviewStateRoot;
+    const managedWorktreePath = projectPaths.developmentPreviewRoot;
+    const openClawSourceRoot = absoluteNonRootPath(
+        "OPENCLAW_HOME",
+        environment.OPENCLAW_HOME?.trim() ||
+            path.join(environment.HOME?.trim() || os.homedir(), ".openclaw")
     );
-    const previewRoot = absoluteNonRootPath(
-        "MIRA_DASHBOARD_PREVIEW_ROOT",
-        environment.MIRA_DASHBOARD_PREVIEW_ROOT?.trim() ||
-            projectPaths.developmentPreviewStateRoot
-    );
-    const managedWorktreePath = absoluteNonRootPath(
-        "MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH",
-        environment.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH?.trim() ||
-            projectPaths.developmentPreviewRoot
-    );
-    if (
-        [dashboardRoot, previewRoot].some(
-            (protectedRoot) =>
-                managedWorktreePath === protectedRoot ||
-                isPathStrictlyWithin(managedWorktreePath, protectedRoot) ||
-                isPathStrictlyWithin(protectedRoot, managedWorktreePath)
-        )
-    ) {
-        throw new TypeError(
-            "MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH must not overlap Dashboard source or preview state"
-        );
-    }
-    const frontendPort = configuredPort(
-        "MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT",
-        environment.MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT,
-        5173
-    );
-    const backendPort = configuredPort(
-        "MIRA_DASHBOARD_PREVIEW_BACKEND_PORT",
-        environment.MIRA_DASHBOARD_PREVIEW_BACKEND_PORT,
-        3101
-    );
-    const gatewayProxyPort = configuredPort(
-        "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT",
-        environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT,
-        DEFAULT_GATEWAY_PROXY_PORT
-    );
-    if (new Set([frontendPort, backendPort, gatewayProxyPort]).size !== 3) {
-        throw new TypeError(
-            "Dashboard preview frontend, backend, and Gateway proxy ports must differ"
-        );
-    }
-    const unitName = environment.MIRA_DASHBOARD_PREVIEW_UNIT?.trim() || PREVIEW_UNIT;
-    if (!UNIT_NAME_PATTERN.test(unitName)) {
-        throw new TypeError(
-            "MIRA_DASHBOARD_PREVIEW_UNIT must be a valid .service unit name"
-        );
-    }
-    const gatewayProxyUnitName =
-        environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_UNIT?.trim() ||
-        PREVIEW_GATEWAY_PROXY_UNIT;
-    if (
-        gatewayProxyUnitName === unitName ||
-        !UNIT_NAME_PATTERN.test(gatewayProxyUnitName)
-    ) {
-        throw new TypeError(
-            "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_UNIT must be a distinct valid .service unit name"
-        );
-    }
-    const allowedAuthors = resolvePullRequestPreviewAllowedAuthors(
-        environment.MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS
-    );
-    const openClawSourceRoot = optionalAbsoluteNonRootPath(
-        "MIRA_DASHBOARD_PREVIEW_OPENCLAW_SOURCE_ROOT",
-        environment.MIRA_DASHBOARD_PREVIEW_OPENCLAW_SOURCE_ROOT?.trim() ||
-            "/home/ubuntu/.openclaw"
-    );
+    const allowedAuthors = resolvePullRequestPreviewAllowedAuthors();
     return {
         allowedAuthors,
-        backendPort,
-        bunExecutable: resolveExecutable(
-            environment.BUN_BINARY,
-            "bun",
-            environment.PATH ?? process.env.PATH
-        ),
+        backendPort: DEFAULT_PREVIEW_BACKEND_PORT,
+        bunExecutable: absoluteNonRootPath("Bun executable", process.execPath),
         dashboardRoot,
-        databaseTemplate: optionalAbsoluteNonRootPath(
-            "MIRA_DASHBOARD_PREVIEW_DB_TEMPLATE",
-            environment.MIRA_DASHBOARD_PREVIEW_DB_TEMPLATE?.trim() ||
-                projectPaths.productionDatabasePath
-        ),
-        frontendPort,
-        gatewayProxyEntrypoint: absoluteNonRootPath(
-            "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_ENTRYPOINT",
-            environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_ENTRYPOINT?.trim() ||
-                defaultGatewayProxyEntrypoint()
-        ),
+        databaseTemplate: projectPaths.productionDatabasePath,
+        frontendPort: DEFAULT_PREVIEW_FRONTEND_PORT,
+        gatewayProxyEntrypoint: defaultGatewayProxyEntrypoint(),
         gatewayProxyIdentityFile: path.join(previewRoot, "gateway-proxy-identity.json"),
-        gatewayProxyPort,
-        gatewayProxyUnitName,
-        gatewayTokenFile:
-            optionalAbsoluteNonRootPath(
-                "MIRA_DASHBOARD_PREVIEW_GATEWAY_TOKEN_FILE",
-                environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_TOKEN_FILE
-            ) || path.join(previewRoot, "gateway.token"),
+        gatewayProxyPort: DEFAULT_GATEWAY_PROXY_PORT,
+        gatewayProxyUnitName: PREVIEW_GATEWAY_PROXY_UNIT,
+        gatewayTokenFile: path.join(previewRoot, "gateway.token"),
         gatewayUpstreamTokenFile: path.join(previewRoot, "gateway-upstream.token"),
         gatewayUrl:
-            configuredGatewayUrl(environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_URL) ||
-            DEFAULT_GATEWAY_URL,
-        gitCommonDirectory: gitCommonDirectory(
-            dashboardRoot,
-            environment.MIRA_DASHBOARD_PREVIEW_GIT_COMMON_DIR
-        ),
+            configuredGatewayUrl(environment.OPENCLAW_GATEWAY_URL) || DEFAULT_GATEWAY_URL,
+        gitCommonDirectory: path.join(dashboardRoot, ".git"),
         managedWorktreePath,
-        openClawConfigSource: openClawSourceRoot
-            ? path.join(openClawSourceRoot, "openclaw.json")
-            : undefined,
+        openClawConfigSource: path.join(openClawSourceRoot, "openclaw.json"),
         previewRoot,
+        projectRoot: projectPaths.projectRoot,
         recentAuthMinutes: optionalEnvironmentValue(
             "MIRA_DASHBOARD_RECENT_AUTH_MINUTES",
             environment.MIRA_DASHBOARD_RECENT_AUTH_MINUTES
         ),
-        releaseSource: optionalAbsoluteNonRootPath(
-            "MIRA_DASHBOARD_PREVIEW_RELEASES_SOURCE",
-            environment.MIRA_DASHBOARD_PREVIEW_RELEASES_SOURCE?.trim() ||
-                projectPaths.productionReleasesRoot
-        ),
+        releaseSource: projectPaths.productionReleasesRoot,
         sessionIdleMinutes: optionalEnvironmentValue(
             "MIRA_DASHBOARD_SESSION_IDLE_MINUTES",
             environment.MIRA_DASHBOARD_SESSION_IDLE_MINUTES
@@ -415,10 +279,8 @@ export function resolvePullRequestPreviewConfig(
             environment.MIRA_DASHBOARD_WEBAUTHN_RP_ID
         ),
         stateFile: path.join(previewRoot, PREVIEW_RECORD_FILE),
-        unitName,
-        workspaceSource: openClawSourceRoot
-            ? path.join(openClawSourceRoot, "workspace")
-            : undefined,
+        unitName: PREVIEW_UNIT,
+        workspaceSource: path.join(openClawSourceRoot, "workspace"),
     };
 }
 
@@ -701,6 +563,7 @@ function safeInstallEnvironment(
     ensureRealDirectory(cacheDirectory);
     environment.BUN_INSTALL_CACHE_DIR = cacheDirectory;
     environment.HOME = installerHome;
+    environment.MIRA_DASHBOARD_PROJECT_ROOT = config.projectRoot;
     return environment;
 }
 
@@ -1151,10 +1014,9 @@ async function preparePreviewState(
         MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE: config.gatewayTokenFile,
         MIRA_DASHBOARD_DEV_GATEWAY_URL: previewGatewayProxyUrl(config),
         MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: publicOrigin,
-        MIRA_DASHBOARD_DEV_STATE_OWNER: `managed-pr-${number}`,
         MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
         ...(config.sourceWebAuthnRpId && {
-            MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID: config.sourceWebAuthnRpId,
+            MIRA_DASHBOARD_WEBAUTHN_RP_ID: config.sourceWebAuthnRpId,
         }),
         ...(config.openClawConfigSource && {
             MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE: config.openClawConfigSource,
@@ -1200,12 +1062,11 @@ function sandboxDirectories(...targets: string[]): string[] {
 /** Builds the filesystem-isolated process used by the transient preview unit. */
 export function buildPullRequestPreviewSandboxCommand(input: {
     config: PullRequestPreviewConfig;
-    number: number;
     publicOrigin: string;
     stateRoot: string;
     worktreePath: string;
 }): string[] {
-    const { config, number, publicOrigin, stateRoot, worktreePath } = input;
+    const { config, publicOrigin, stateRoot, worktreePath } = input;
     const arguments_ = [
         "bwrap",
         "--unshare-all",
@@ -1277,14 +1138,11 @@ export function buildPullRequestPreviewSandboxCommand(input: {
         "PATH",
         "/usr/bin:/bin",
         "--setenv",
-        "MIRA_DASHBOARD_DEV_BACKEND_HOST",
-        "127.0.0.1",
+        "MIRA_DASHBOARD_PROJECT_ROOT",
+        config.projectRoot,
         "--setenv",
         "MIRA_DASHBOARD_DEV_BACKEND_PORT",
         String(config.backendPort),
-        "--setenv",
-        "MIRA_DASHBOARD_DEV_FRONTEND_HOST",
-        "127.0.0.1",
         "--setenv",
         "MIRA_DASHBOARD_DEV_FRONTEND_PORT",
         String(config.frontendPort),
@@ -1301,9 +1159,6 @@ export function buildPullRequestPreviewSandboxCommand(input: {
         "MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN",
         publicOrigin,
         "--setenv",
-        "MIRA_DASHBOARD_DEV_STATE_OWNER",
-        `managed-pr-${number}`,
-        "--setenv",
         "MIRA_DASHBOARD_DEV_STATE_ROOT",
         stateRoot
     );
@@ -1317,7 +1172,7 @@ export function buildPullRequestPreviewSandboxCommand(input: {
     if (config.sourceWebAuthnRpId) {
         arguments_.push(
             "--setenv",
-            "MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID",
+            "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
             config.sourceWebAuthnRpId
         );
     }
@@ -1829,7 +1684,6 @@ export async function startPullRequestPreview(
         );
         const sandboxCommand = buildPullRequestPreviewSandboxCommand({
             config,
-            number,
             publicOrigin,
             stateRoot,
             worktreePath: preparedWorktree,

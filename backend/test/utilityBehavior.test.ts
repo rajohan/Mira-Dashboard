@@ -468,6 +468,9 @@ describe("backend service utilities", () => {
             expect(resolveDashboardPort("not-a-port")).toBe(3100);
             expect(resolveDashboardHost(" 127.0.0.1 ")).toBe("127.0.0.1");
             expect(resolveDashboardHost("")).toBe("0.0.0.0");
+            expect(resolveDashboardHost("127.0.0.1", { NODE_ENV: "production" })).toBe(
+                "0.0.0.0"
+            );
             expect(() => resolveDashboardHost("bad host")).toThrow(
                 "MIRA_DASHBOARD_HOST must be a valid bind host"
             );
@@ -577,12 +580,33 @@ describe("backend service utilities", () => {
         expect(requiresRecentMfaForGatewayMethod("config.get")).toBe(true);
         expect(requiresRecentMfaForGatewayMethod("cron.list")).toBe(true);
         expect(isDevelopmentGatewayMethodBlocked("config.patch", {})).toBe(false);
-        expect(dashboardJobProfile({ MIRA_DASHBOARD_JOB_PROFILE: "isolated" })).toBe(
+        expect(
+            isDevelopmentGatewayMethodBlocked("config.patch", {
+                MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
+                NODE_ENV: "production",
+            })
+        ).toBe(false);
+        expect(
+            isDevelopmentHostMutationBlocked(
+                new Request("http://localhost/api/docker/update", {
+                    method: "POST",
+                }),
+                {
+                    MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
+                    NODE_ENV: "production",
+                }
+            )
+        ).toBe(false);
+        expect(dashboardJobProfile({ MIRA_DASHBOARD_DEV_SAFE_MODE: "1" })).toBe(
             "isolated"
         );
-        expect(dashboardJobProfile({ MIRA_DASHBOARD_JOB_PROFILE: "unknown" })).toBe(
-            "full"
-        );
+        expect(
+            dashboardJobProfile({
+                MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
+                NODE_ENV: "production",
+            })
+        ).toBe("full");
+        expect(dashboardJobProfile({ MIRA_DASHBOARD_DEV_SAFE_MODE: "0" })).toBe("full");
     });
 
     it("maps operational errors without leaking unknown values", () => {
@@ -882,18 +906,27 @@ describe("backend service utilities", () => {
         });
         expect(
             resolveDashboardCookieNames({
-                MIRA_DASHBOARD_COOKIE_NAMESPACE: "mira_dashboard_dev_5173",
+                MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: "mira_dashboard_dev_5173",
             })
         ).toEqual({
             pendingLogin: "mira_dashboard_dev_5173_pending_login",
             session: "mira_dashboard_dev_5173_session",
         });
+        expect(
+            resolveDashboardCookieNames({
+                MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: "ignored_in_production",
+                NODE_ENV: "production",
+            })
+        ).toEqual({
+            pendingLogin: "mira_dashboard_pending_login",
+            session: "mira_dashboard_session",
+        });
         for (const namespace of ["Prod", "dev-cookie", "a".repeat(49)]) {
             expect(() =>
                 resolveDashboardCookieNames({
-                    MIRA_DASHBOARD_COOKIE_NAMESPACE: namespace,
+                    MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: namespace,
                 })
-            ).toThrow("MIRA_DASHBOARD_COOKIE_NAMESPACE");
+            ).toThrow("MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE");
         }
     });
 

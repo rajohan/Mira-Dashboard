@@ -50,7 +50,6 @@ openclaw status
 3. Check Dashboard logs for `gateway token mismatch`.
 4. Verify token precedence:
     - `OPENCLAW_GATEWAY_TOKEN`
-    - `OPENCLAW_TOKEN`
     - persisted `app_config.gateway_token`
 5. If bootstrap was just reset, ensure the new token was accepted by bootstrap.
 

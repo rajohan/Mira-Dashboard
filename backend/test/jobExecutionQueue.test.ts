@@ -480,8 +480,7 @@ printf 'LoadState=loaded\nActiveState=active\n'
                 "docker",
                 ["exec", "worker", "sh", "-c", 'printf "%s" "$JOB_COMMAND"'],
                 {
-                    MIRA_DASHBOARD_ENABLE_JOB_SCOPES: "1",
-                    MIRA_DASHBOARD_JOB_SCOPE_OWNER: "mira-dashboard-worker.service",
+                    NODE_ENV: "production",
                 }
             )
         );

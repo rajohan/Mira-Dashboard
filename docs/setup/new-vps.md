@@ -49,10 +49,11 @@ Create the managed runtime roots:
 
 ```bash
 install -d -m 0755 \
-  /home/ubuntu/projects/mira-dashboard/development/state \
   /home/ubuntu/projects/mira-dashboard/development/worktrees \
   /home/ubuntu/projects/mira-dashboard/production/releases
-install -d -m 0700 /home/ubuntu/projects/mira-dashboard/production/state
+install -d -m 0700 \
+  /home/ubuntu/projects/mira-dashboard/development/state \
+  /home/ubuntu/projects/mira-dashboard/production/state
 ```
 
 ## Publish The Initial Managed Release
@@ -92,6 +93,8 @@ env \
 Activate it before installing/starting the managed systemd units:
 
 ```bash
+export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
+cd "$MIRA_DASHBOARD_PROJECT_ROOT/production/checkout"
 CANDIDATE_SHA="$(git rev-parse HEAD)"
 env \
   NODE_ENV=production \

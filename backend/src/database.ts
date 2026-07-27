@@ -10,8 +10,8 @@ import {
     secureSqliteFilePermissions,
 } from "./databaseStorage.ts";
 import {
-    configuredDashboardProjectPaths,
-    resolveDashboardProjectPaths,
+    resolveDashboardProjectPathsForRuntime,
+    resolveDashboardRuntimePath,
 } from "./lib/dashboardPaths.ts";
 
 type DatabaseSync = Database;
@@ -29,14 +29,11 @@ function resolveDatabasePath(): {
     configuredDatabasePath: string | undefined;
     databasePath: string;
 } {
-    const projectPaths =
-        configuredDashboardProjectPaths() ??
-        (process.env.NODE_ENV === "production"
-            ? resolveDashboardProjectPaths()
-            : undefined);
-    const configuredDatabasePath =
-        process.env.MIRA_DASHBOARD_DB_PATH?.trim() ||
-        projectPaths?.productionDatabasePath;
+    const projectPaths = resolveDashboardProjectPathsForRuntime();
+    const configuredDatabasePath = resolveDashboardRuntimePath(
+        projectPaths?.productionDatabasePath,
+        process.env.MIRA_DASHBOARD_DB_PATH
+    );
     return {
         configuredDatabasePath,
         databasePath: configuredDatabasePath

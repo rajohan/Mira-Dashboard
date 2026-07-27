@@ -462,7 +462,6 @@ describe("Docker updater tag patterns", () => {
         rememberEnvironment("MIRA_DOCKER_BIN");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
-        rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
         const appsRoot = createTemporaryRoot("mira-docker-updater-lock-abort-");
         const appRoot = path.join(appsRoot, "unit-lock-abort-app");
         const composePath = path.join(appRoot, "compose.yaml");
@@ -495,7 +494,6 @@ describe("Docker updater tag patterns", () => {
         process.env.MIRA_DOCKER_BIN = "docker";
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = composeWrapper;
         delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
-        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
 
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
@@ -633,7 +631,6 @@ describe("Docker updater tag patterns", () => {
         rememberEnvironment("MIRA_DOCKER_BIN");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
-        rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
         const appsRoot = createTemporaryRoot("mira-docker-updater-apply-");
         const appRoot = path.join(appsRoot, "unit-apply-app");
         const composePath = path.join(appRoot, "compose.yaml");
@@ -644,6 +641,7 @@ describe("Docker updater tag patterns", () => {
                 "services:",
                 "  web:",
                 "    image: ghcr.io/unit/web:1.0.0",
+                "    platform: linux/amd64",
                 "    labels:",
                 "      mira.updater.enabled: 'true'",
                 "      mira.updater.autoUpdate: 'false'",
@@ -657,7 +655,6 @@ describe("Docker updater tag patterns", () => {
         process.env.MIRA_DOCKER_BIN = "docker";
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(appsRoot, "compose-wrapper");
         delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
-        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
         ) => {
@@ -753,7 +750,6 @@ describe("Docker updater tag patterns", () => {
         rememberEnvironment("MIRA_DOCKER_BIN");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
-        rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
         const appsRoot = createTemporaryRoot("mira-docker-updater-formatting-");
         const appRoot = path.join(appsRoot, "unit-formatting-app");
         const composePath = path.join(appRoot, "compose.yaml");
@@ -787,7 +783,6 @@ describe("Docker updater tag patterns", () => {
         process.env.MIRA_DOCKER_BIN = "docker";
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(appsRoot, "compose-wrapper");
         delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
-        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
         ) => {
@@ -837,7 +832,6 @@ describe("Docker updater tag patterns", () => {
         rememberEnvironment("MIRA_DOCKER_BIN");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
         rememberEnvironment("MIRA_DOCKER_UPDATER_SKIP_REGISTRY");
-        rememberEnvironment("MIRA_DOCKER_UPDATER_PLATFORM");
         const appsRoot = createTemporaryRoot("mira-docker-updater-complex-scalar-");
         const appRoot = path.join(appsRoot, "unit-complex-scalar-app");
         const composePath = path.join(appRoot, "compose.yaml");
@@ -872,7 +866,6 @@ describe("Docker updater tag patterns", () => {
         process.env.MIRA_DOCKER_BIN = "docker";
         process.env.MIRA_DOCKER_COMPOSE_WRAPPER = path.join(appsRoot, "compose-wrapper");
         delete process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY;
-        process.env.MIRA_DOCKER_UPDATER_PLATFORM = "linux/amd64";
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
         ) => {

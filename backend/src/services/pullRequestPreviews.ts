@@ -149,15 +149,24 @@ function previewFromExecution(execution: JobExecution): PullRequestPreviewStatus
     return parsePullRequestPreviewStatus(output.preview);
 }
 
+function unavailablePreviewControls(): PullRequestPreviewStatus | undefined {
+    if (
+        process.env.NODE_ENV === "production" ||
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE !== "1"
+    ) {
+        return;
+    }
+    return {
+        controlsAvailable: false,
+        message: PREVIEW_CONTROLS_UNAVAILABLE_MESSAGE,
+        status: "stopped",
+    };
+}
+
 /** Reads the current preview state, including queued lifecycle transitions. */
 export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewStatus> {
-    if (process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1") {
-        return {
-            controlsAvailable: false,
-            message: PREVIEW_CONTROLS_UNAVAILABLE_MESSAGE,
-            status: "stopped",
-        };
-    }
+    const unavailable = unavailablePreviewControls();
+    if (unavailable) return unavailable;
     const preview = await readPullRequestPreviewStatus();
     const activeExecution = listJobExecutions(200).find(
         (execution) =>
@@ -193,7 +202,12 @@ export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewS
 export async function reconcileClosedPullRequestPreview(
     openPullRequests: readonly PullRequestSummary[]
 ): Promise<void> {
-    if (process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1") return;
+    if (
+        process.env.NODE_ENV !== "production" &&
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1"
+    ) {
+        return;
+    }
     try {
         if (
             listJobExecutions(200).some(
@@ -241,6 +255,8 @@ export async function reconcileClosedPullRequestPreview(
 export async function prepareAndStartPullRequestPreview(
     number: number
 ): Promise<PullRequestPreviewStatus> {
+    const unavailable = unavailablePreviewControls();
+    if (unavailable) return unavailable;
     const candidate = await findPullRequest(number);
     const current = await getPullRequestPreviewStatus();
     if (
@@ -289,6 +305,8 @@ export async function prepareAndStartPullRequestPreview(
 export async function prepareAndStopPullRequestPreview(
     number?: number
 ): Promise<PullRequestPreviewStatus> {
+    const unavailable = unavailablePreviewControls();
+    if (unavailable) return unavailable;
     const execution = enqueueJobExecution({
         actionKey: "dashboard.preview.stop",
         displayName: number ? `Stop PR #${number} preview` : "Stop PR preview",

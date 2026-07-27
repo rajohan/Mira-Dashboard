@@ -47,9 +47,8 @@ Mutable state is deliberately outside both Git and every release:
 | Dashboard Gateway device identity  | `/home/ubuntu/projects/mira-dashboard/production/state/openclaw-client/`  |
 | Log-rotation lock                  | `/home/ubuntu/projects/mira-dashboard/production/state/log-rotation.lock` |
 
-The backup directory is derived from the production state root (or from
-`dirname(MIRA_DASHBOARD_DB_PATH)` when that advanced override is used), so
-pre-deploy and pre-migration snapshots automatically stay under the state root.
+The backup directory is derived from the production state root, so pre-deploy
+and pre-migration snapshots automatically stay under the state root.
 Kopia mounts `/home/ubuntu/projects` as its projects source; the separate state
 directory remains in that backup scope.
 
@@ -64,11 +63,11 @@ MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
 ```
 
 The backend derives every production and development path in the layout above
-from that root. Their Doppler command preserves it plus `NODE_ENV`,
-`MIRA_DASHBOARD_EXECUTION_ROLE`, `MIRA_DASHBOARD_ENABLE_JOB_SCOPES`, and
-`MIRA_DASHBOARD_JOB_SCOPE_OWNER`, so production secrets cannot replace
-unit-owned paths or orchestration policy. Fine-grained path variables remain
-available only as explicit development, test, and recovery overrides.
+from that root. The Doppler command preserves only the root and `NODE_ENV`, so
+production secrets cannot replace unit-owned paths or runtime mode. The web and
+worker entry points define orchestration policy directly; it is not configurable
+through environment variables. Fine-grained path variables remain internal
+development, test, and one-shot recovery contracts.
 
 The OpenClaw home preserves the signed Gateway device identity across releases.
 Secrets remain in Doppler `rajohan/prd`; tracked unit files contain no secret

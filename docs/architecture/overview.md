@@ -133,8 +133,7 @@ state to the browser through a Dashboard WebSocket.
 Startup token precedence:
 
 1. `OPENCLAW_GATEWAY_TOKEN`
-2. `OPENCLAW_TOKEN`
-3. decrypted `app_config.gateway_token` AES-GCM envelope
+2. decrypted `app_config.gateway_token` AES-GCM envelope
 
 The Dashboard WebSocket at `/ws` requires:
 
@@ -164,11 +163,11 @@ Worker startup registers scheduled jobs for:
 - OpenClaw update notifications;
 - scheduled job runner.
 
-Production uses `MIRA_DASHBOARD_EXECUTION_ROLE=web` and `worker` in separate
-systemd services. Local development uses the `combined` role with the
-`isolated` job profile: scheduler/worker behavior remains testable, while
-backup, deploy, Docker, exec, log-rotation, PR, and OpenClaw-restart adapters
-are not registered.
+Production runs separate web and worker entry points. Local development runs
+the combined server entry point and dev safe mode selects the isolated job
+profile: scheduler/worker behavior remains testable, while backup, deploy,
+Docker, exec, log-rotation, PR, and OpenClaw-restart adapters are not
+registered.
 
 See [Scheduler, cache, and backups](../operations/scheduler-cache-backups.md)
 for job tables, cache entries, backup scripts, and inspection commands.

@@ -8,11 +8,8 @@ Type=simple
 UMask=0077
 WorkingDirectory=%h/projects/mira-dashboard/production/releases/current/backend
 Environment=NODE_ENV=production
-Environment=MIRA_DASHBOARD_EXECUTION_ROLE=web
-Environment=MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1
-Environment=MIRA_DASHBOARD_JOB_SCOPE_OWNER=mira-dashboard.service
 Environment=MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
-ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --preserve-env=NODE_ENV,MIRA_DASHBOARD_EXECUTION_ROLE,MIRA_DASHBOARD_ENABLE_JOB_SCOPES,MIRA_DASHBOARD_JOB_SCOPE_OWNER,MIRA_DASHBOARD_PROJECT_ROOT -- /home/ubuntu/.bun/bin/bun dist/serverStart.js
+ExecStart=/usr/local/bin/doppler run --config prd --project rajohan --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- /home/ubuntu/.bun/bin/bun dist/serverStart.js
 Restart=on-failure
 RestartSec=5
 KillMode=control-group

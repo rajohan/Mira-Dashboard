@@ -1864,7 +1864,9 @@ async function refreshDockerSummaryCache() {
 }
 
 async function refreshDatabaseSummaryCache() {
-    const isIsolated = process.env.MIRA_DASHBOARD_JOB_PROFILE === "isolated";
+    const isIsolated =
+        process.env.NODE_ENV !== "production" &&
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1";
     const previousEntry = isIsolated
         ? await getCacheEntry(DATABASE_SUMMARY_KEY)
         : undefined;

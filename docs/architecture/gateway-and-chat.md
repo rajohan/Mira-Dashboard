@@ -21,8 +21,7 @@ auth.
 On backend startup, the Gateway token is selected in this order:
 
 1. `OPENCLAW_GATEWAY_TOKEN`
-2. `OPENCLAW_TOKEN`
-3. decrypted `app_config.gateway_token` AES-GCM envelope
+2. decrypted `app_config.gateway_token` AES-GCM envelope
 
 Environment tokens win over the persisted database token. This is intentional:
 production should prefer Doppler-managed state over older bootstrap state.

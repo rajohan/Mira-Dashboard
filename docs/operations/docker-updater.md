@@ -11,8 +11,6 @@ Important environment variables:
 | Variable                                     | Purpose                                                                                                    |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `MIRA_DOCKER_COMPOSE_WRAPPER`                | Command used to run compose operations. Production commonly uses `/opt/docker/bin/docker-compose-doppler`. |
-| `MIRA_DOCKER_UPDATER_PLATFORM`               | Optional platform override for registry lookups.                                                           |
-| `MIRA_DOCKER_UPDATER_SKIP_REGISTRY`          | Set `1` only for tests/debugging to skip registry checks.                                                  |
 | `DOCKER_LOGIN` + `DOCKER_TOKEN`              | Docker Hub auth. Both are required; token alone is ignored.                                                |
 | `MIRA_GITHUB_USERNAME` + `MIRA_GITHUB_TOKEN` | GHCR auth for registry lookups where needed.                                                               |
 

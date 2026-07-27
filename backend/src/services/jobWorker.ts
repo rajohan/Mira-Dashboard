@@ -35,7 +35,10 @@ export type DashboardJobProfile = "full" | "isolated";
 export function dashboardJobProfile(
     environment: Record<string, string | undefined> = process.env
 ): DashboardJobProfile {
-    return environment.MIRA_DASHBOARD_JOB_PROFILE === "isolated" ? "isolated" : "full";
+    return environment.NODE_ENV !== "production" &&
+        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1"
+        ? "isolated"
+        : "full";
 }
 
 function trackWorkerStop(operation: () => Promise<void>): Promise<void> {

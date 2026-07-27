@@ -142,7 +142,7 @@ CI and local verification.
 
 ## Production checkout and PR worktrees
 
-`/home/ubuntu/projects/mira-dashboard/production/checkout` is the production checkout. Keep it on `main`; the running service and deploy workflow build from this path only after Raymond approves a merge/deploy.
+`/home/ubuntu/projects/mira-dashboard/production/checkout` is the clean production control checkout. Keep it on `main`; after Raymond approves a merge/deploy, the deploy workflow updates this source and builds the exact commit in an isolated detached worktree. Production never builds in or executes from the control checkout.
 
 Feature and autopilot work must use separate git worktrees under `/home/ubuntu/projects/mira-dashboard/development/worktrees`, for example:
 

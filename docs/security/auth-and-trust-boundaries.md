@@ -360,8 +360,7 @@ metadata such as length and timestamps.
 Startup token precedence:
 
 1. `OPENCLAW_GATEWAY_TOKEN`
-2. `OPENCLAW_TOKEN`
-3. persisted `app_config.gateway_token`
+2. persisted `app_config.gateway_token`
 
 If an environment token exists, it should be considered the source of truth for
 production.

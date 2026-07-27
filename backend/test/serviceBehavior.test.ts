@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import { database, sqlNullable } from "../src/database.ts";
+import { resolveDashboardProjectPaths } from "../src/lib/dashboardPaths.ts";
 import * as processModule from "../src/lib/processes.ts";
 import {
     ensureDashboardReleaseLayout,
@@ -48,7 +49,7 @@ function createTemporaryRoot(prefix: string): string {
 }
 
 async function executeSuccessfulGuardianPath(script: string): Promise<void> {
-    const firstLifecycleBranch = script.indexOf("\nif MIRA_DASHBOARD_RELEASES_ROOT=");
+    const firstLifecycleBranch = script.indexOf("\nif MIRA_DASHBOARD_PROJECT_ROOT=");
     if (firstLifecycleBranch === -1) {
         throw new Error("Guardian fixture is missing its lifecycle branch");
     }
@@ -1899,27 +1900,20 @@ describe("backend service behavior", () => {
     it("hands manual rollback to a detached readiness-bound guardian", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_PROJECT_ROOT");
-        rememberEnvironment("MIRA_DASHBOARD_ROOT");
-        rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
-        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
-        rememberEnvironment("MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE");
-        rememberEnvironment("MIRA_DASHBOARD_PREVIEW_ROOT");
-        rememberEnvironment("MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH");
-        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
         const fakeRoot = createTemporaryRoot("mira-release-rollback-root-");
+        const projectPaths = resolveDashboardProjectPaths({
+            MIRA_DASHBOARD_PROJECT_ROOT: fakeRoot,
+        });
         const fakeBin = createTemporaryRoot("mira-release-rollback-bin-");
-        const releasesRoot = path.join(fakeRoot, "managed-releases");
-        const openClawHome = path.join(fakeRoot, "state", "openclaw-client");
-        const logRotationLockFile = path.join(fakeRoot, "state", "log-rotation.lock");
-        const previewRoot = path.join(fakeRoot, "preview-state");
-        const previewWorktreePath = path.join(fakeRoot, "preview");
-        const worktreeRoot = path.join(fakeRoot, "worktrees");
+        const releasesRoot = projectPaths.productionReleasesRoot;
         const systemdScriptLog = path.join(fakeRoot, "rollback-guardian.sh");
         const systemdArgumentsLog = path.join(fakeRoot, "rollback-systemd-run.args");
         const currentCommit = "c".repeat(40);
         const previousCommit = "d".repeat(40);
-        mkdirSync(path.join(fakeRoot, "backend"), { recursive: true });
-        mkdirSync(path.dirname(openClawHome), { recursive: true });
+        mkdirSync(path.join(projectPaths.productionCheckoutRoot, "backend"), {
+            recursive: true,
+        });
+        mkdirSync(projectPaths.productionStateRoot, { recursive: true });
         await ensureDashboardReleaseLayout(releasesRoot);
         await createReleaseFixture(
             managedReleasePath(releasesRoot, currentCommit),
@@ -1951,16 +1945,12 @@ if [[ "$*" != *"--user show"* ]]; then
 fi
 if [[ "$*" == *"mira-dashboard-worker.service"* ]]; then
   entrypoint="dist/workerStart.js"
-  execution_role="worker"
-  scope_owner="mira-dashboard-worker.service"
 else
   entrypoint="dist/serverStart.js"
-  execution_role="web"
-  scope_owner="mira-dashboard.service"
 fi
 printf '%s\n' \
-  "Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=$execution_role MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=$scope_owner MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_EXECUTION_ROLE,MIRA_DASHBOARD_ENABLE_JOB_SCOPES,MIRA_DASHBOARD_JOB_SCOPE_OWNER,MIRA_DASHBOARD_PROJECT_ROOT -- bun $entrypoint ; }" \
+  "Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- bun $entrypoint ; }" \
   "WorkingDirectory=${releasesRoot}/current/backend"
 `
         );
@@ -1979,13 +1969,6 @@ printf 'scheduled\n'
         chmodSync(path.join(fakeBin, "systemd-run"), 0o755);
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         process.env.MIRA_DASHBOARD_PROJECT_ROOT = fakeRoot;
-        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
-        process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openClawHome;
-        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = logRotationLockFile;
-        process.env.MIRA_DASHBOARD_PREVIEW_ROOT = previewRoot;
-        process.env.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH = previewWorktreePath;
-        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
 
         const { prepareAndStartRollback, registerPullRequestExecutionActions } =
             await import("../src/services/pullRequests.ts");
@@ -2400,23 +2383,15 @@ printf 'scheduled\n'
     it("publishes an immutable release and hands activation to detached cutover", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_PROJECT_ROOT");
-        rememberEnvironment("MIRA_DASHBOARD_ROOT");
-        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
-        rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
-        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
-        rememberEnvironment("MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE");
-        rememberEnvironment("MIRA_DASHBOARD_PREVIEW_ROOT");
-        rememberEnvironment("MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH");
         rememberEnvironment("PORT");
         const fakeRoot = createTemporaryRoot("mira-pr-deploy-root-");
+        const projectPaths = resolveDashboardProjectPaths({
+            MIRA_DASHBOARD_PROJECT_ROOT: fakeRoot,
+        });
         const fakeBin = createTemporaryRoot("mira-pr-deploy-bin-");
-        const worktreeRoot = path.join(fakeRoot, "worktrees");
-        const releasesRoot = path.join(fakeRoot, "managed-releases");
+        const worktreeRoot = projectPaths.developmentWorktreeRoot;
+        const releasesRoot = projectPaths.productionReleasesRoot;
         const candidateTemplate = path.join(fakeRoot, "candidate-template");
-        const openClawHome = path.join(fakeRoot, "state", "openclaw-client");
-        const logRotationLockFile = path.join(fakeRoot, "state", "log-rotation.lock");
-        const previewRoot = path.join(fakeRoot, "preview-state");
-        const previewWorktreePath = path.join(fakeRoot, "preview");
         const priorPreviousCommit = "b".repeat(40);
         const oldCommit = "c".repeat(40);
         const candidateCommit = "d".repeat(40);
@@ -2425,9 +2400,11 @@ printf 'scheduled\n'
         const bunLog = path.join(fakeRoot, "bun.log");
         const systemctlLog = path.join(fakeRoot, "systemctl.log");
         const systemdLog = path.join(fakeRoot, "systemd.log");
-        mkdirSync(path.join(fakeRoot, "backend"), { recursive: true });
-        mkdirSync(worktreeRoot);
-        mkdirSync(path.dirname(openClawHome), { recursive: true });
+        mkdirSync(path.join(projectPaths.productionCheckoutRoot, "backend"), {
+            recursive: true,
+        });
+        mkdirSync(worktreeRoot, { recursive: true });
+        mkdirSync(projectPaths.productionStateRoot, { recursive: true });
         mkdirSync(candidateTemplate);
         await createReleaseFixture(candidateTemplate, candidateCommit, {
             commitTitle: "Deployable dashboard commit",
@@ -2456,7 +2433,7 @@ set -euo pipefail
 head_commit=$(<${JSON.stringify(gitHeadFile)})
 printf '%s\n' "$*" >> ${JSON.stringify(gitLog)}
 if [[ "$*" == "rev-parse --show-toplevel" ]]; then
-  printf '%s\n' ${JSON.stringify(fakeRoot)}
+  printf '%s\n' ${JSON.stringify(projectPaths.productionCheckoutRoot)}
 elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
   printf 'main\n'
 elif [[ "$*" == "rev-parse --short HEAD" ]]; then
@@ -2510,16 +2487,12 @@ if [[ "$*" != *"--user show"* ]]; then
 fi
 if [[ "$*" == *"mira-dashboard-worker.service"* ]]; then
   entrypoint="dist/workerStart.js"
-  execution_role="worker"
-  scope_owner="mira-dashboard-worker.service"
 else
   entrypoint="dist/serverStart.js"
-  execution_role="web"
-  scope_owner="mira-dashboard.service"
 fi
 printf '%s\n' \
-  "Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=$execution_role MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=$scope_owner MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_EXECUTION_ROLE,MIRA_DASHBOARD_ENABLE_JOB_SCOPES,MIRA_DASHBOARD_JOB_SCOPE_OWNER,MIRA_DASHBOARD_PROJECT_ROOT -- bun $entrypoint ; }" \
+  "Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- bun $entrypoint ; }" \
   'WorkingDirectory=${releasesRoot}/current/backend'
 `
         );
@@ -2537,15 +2510,27 @@ printf 'scheduled\n'
         chmodSync(path.join(fakeBin, "bun"), 0o755);
         chmodSync(path.join(fakeBin, "systemctl"), 0o755);
         chmodSync(path.join(fakeBin, "systemd-run"), 0o755);
+        const runProcess = processModule.runProcess;
+        const bunProcessSpy = jest
+            .spyOn(processModule, "runProcess")
+            .mockImplementation(async (command, arguments_, options) => {
+                if (
+                    command === process.execPath &&
+                    (arguments_[0] === "install" ||
+                        (arguments_[0] === "run" && arguments_[1] === "deploy:prepare") ||
+                        arguments_[0] === "dist/databasePreflight.js")
+                ) {
+                    appendFileSync(
+                        bunLog,
+                        `${options?.cwd ?? process.cwd()}|${arguments_.join(" ")}\n`
+                    );
+                    return { code: 0, stderr: "", stdout: "ok\n" };
+                }
+                return runProcess(command, arguments_, options);
+            });
+        cleanupCallbacks.push(() => bunProcessSpy.mockRestore());
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         process.env.MIRA_DASHBOARD_PROJECT_ROOT = fakeRoot;
-        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
-        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
-        process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
-        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openClawHome;
-        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = logRotationLockFile;
-        process.env.MIRA_DASHBOARD_PREVIEW_ROOT = previewRoot;
-        process.env.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH = previewWorktreePath;
         process.env.PORT = "4310";
 
         const { registerPullRequestExecutionActions, startDeployLatest } =
@@ -3052,13 +3037,11 @@ fi
     it("lists pull requests from GitHub JSON lines and refreshes blocked merge state", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
-        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
         const fakeRoot = createTemporaryRoot("mira-pr-list-root-");
         const fakeBin = createTemporaryRoot("mira-pr-list-bin-");
         writeFakeGh(path.join(fakeBin, "gh"));
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
-        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
 
         const {
             isDashboardPullRequestOpen,
@@ -3093,7 +3076,6 @@ fi
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
         rememberEnvironment("RAJOHAN_GITHUB_TOKEN");
-        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
         const fakeRoot = createTemporaryRoot("mira-pr-actions-root-");
         const fakeBin = createTemporaryRoot("mira-pr-actions-bin-");
         const ghLog = path.join(fakeRoot, "gh.log");
@@ -3115,7 +3097,6 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
         process.env.RAJOHAN_GITHUB_TOKEN = "review-token";
-        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
 
         const {
             approvePullRequestReview,
@@ -3268,7 +3249,6 @@ fi
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
-        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
         const fakeRoot = createTemporaryRoot("mira-pr-merge-root-");
         const worktreeRoot = path.join(fakeRoot, "worktrees");
         const localWorktree = path.join(worktreeRoot, "merge-branch");
@@ -3312,7 +3292,6 @@ fi
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
-        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
 
         try {
             const { registerPullRequestExecutionActions, runPullRequestApproval } =
@@ -3368,7 +3347,6 @@ fi
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
-        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
         const fakeRoot = createTemporaryRoot("mira-pr-sync-fail-root-");
         const worktreeRoot = path.join(fakeRoot, "worktrees");
         const fakeBin = createTemporaryRoot("mira-pr-sync-fail-bin-");
@@ -3409,7 +3387,6 @@ fi
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
-        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
 
         try {
             const { approvePullRequest } =
@@ -3509,7 +3486,6 @@ fi
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
         rememberEnvironment("RAJOHAN_GITHUB_TOKEN");
-        rememberEnvironment("RAJOHAN_GITHUB_USERNAME");
         const fakeRoot = createTemporaryRoot("mira-pr-validation-root-");
         const fakeBin = createTemporaryRoot("mira-pr-validation-bin-");
         writeFakeGhForPullRequestValidation(path.join(fakeBin, "gh"));
@@ -3517,7 +3493,6 @@ fi
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = path.join(fakeRoot, "worktrees");
-        process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
         delete process.env.RAJOHAN_GITHUB_TOKEN;
 
         const {
@@ -5581,7 +5556,7 @@ fi
         const rotationRoot = createTemporaryRoot("mira-log-rotation-lock-test-");
         const logFile = path.join(rotationRoot, "locked.log");
         const configFile = path.join(rotationRoot, "log-rotation.json");
-        const lockFile = path.join(process.cwd(), "data", "log-rotation.lock");
+        const lockFile = resolveDashboardProjectPaths().productionLogRotationLockFile;
         mkdirSync(path.dirname(lockFile), { recursive: true });
         writeFileSync(lockFile, `${process.pid}\n`);
         cleanupCallbacks.push(() => {
@@ -5628,7 +5603,7 @@ fi
         const rotationRoot = createTemporaryRoot("mira-log-rotation-stale-lock-");
         const logFile = path.join(rotationRoot, "stale-lock.log");
         const configFile = path.join(rotationRoot, "log-rotation.json");
-        const lockFile = path.join(process.cwd(), "data", "log-rotation.lock");
+        const lockFile = resolveDashboardProjectPaths().productionLogRotationLockFile;
         mkdirSync(path.dirname(lockFile), { recursive: true });
         writeFileSync(lockFile, "999999999\n");
         const staleTime = new Date(Date.now() - 13 * 60 * 60 * 1000);

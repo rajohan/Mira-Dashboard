@@ -84,7 +84,6 @@ function mimeTypeFromPath(filePath: string): string {
 function configuredGatewayToken(): string | undefined {
     return (
         process.env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
-        process.env.OPENCLAW_TOKEN?.trim() ||
         getPersistedGatewayToken()?.trim() ||
         undefined
     );

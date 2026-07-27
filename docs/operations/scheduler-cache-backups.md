@@ -1,12 +1,11 @@
 # Scheduler, Cache, And Backups
 
-Dashboard runs background jobs from `backend/src/workerStart.ts`. Production
-sets `MIRA_DASHBOARD_EXECUTION_ROLE=web` on the web unit and
-`MIRA_DASHBOARD_EXECUTION_ROLE=worker` on the worker unit. The backward-
-disables the in-process worker when explicitly requested. Ordinary local
-development uses `combined` with `MIRA_DASHBOARD_JOB_PROFILE=isolated`, keeping
-the scheduler/worker active without registering host backup, deploy, Docker,
-exec, log-rotation, PR, or OpenClaw-restart actions.
+Dashboard runs production background jobs from
+`backend/src/workerStart.ts`; the separate web entry point never starts an
+in-process production worker. Ordinary local development uses the combined
+server entry point, and dev safe mode keeps the scheduler/worker active without
+registering host backup, deploy, Docker, exec, log-rotation, PR, or
+OpenClaw-restart actions.
 
 ## Scheduled Jobs
 

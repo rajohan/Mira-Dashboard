@@ -17,11 +17,15 @@ That default is for development. Production units set:
 The `-wal`/`-shm` sidecars and `backups/` directory stay below the same
 persistent state root, outside the control checkout and immutable releases.
 
-Override:
+Isolated development, tests, and one-shot recovery checks may inject a
+temporary database into their child process:
 
 ```bash
 MIRA_DASHBOARD_DB_PATH=/absolute/path/to/mira-dashboard.db
 ```
+
+This is not a production service/Doppler override. Production derives the
+database path from `MIRA_DASHBOARD_PROJECT_ROOT`.
 
 ## Startup Behavior
 
@@ -122,8 +126,10 @@ legacy reusable session ids do not survive the upgrade.
 The deploy flow uses one combined build/preflight command before restart:
 
 ```bash
+export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
 cd /home/ubuntu/projects/mira-dashboard/production/checkout
-/usr/local/bin/doppler run --config prd --project rajohan -- \
+/usr/local/bin/doppler run --config prd --project rajohan \
+  --preserve-env=MIRA_DASHBOARD_PROJECT_ROOT -- \
   bun run deploy:prepare
 ```
 
@@ -151,8 +157,8 @@ schema enforces append-only history. Any future archive/retention design must
 arrive through a reviewed forward migration that preserves required audit
 history.
 
-Snapshots live below `dirname(MIRA_DASHBOARD_DB_PATH)/backups/`. This is
-`backend/data/backups/` in development and
+Snapshots live beside the active database below `backups/`. This is
+`backend/data/backups/` for an unwrapped source process and
 `/home/ubuntu/projects/mira-dashboard/production/state/backups/` in production:
 
 | Kind            | Maximum age | Maximum count |

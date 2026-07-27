@@ -15,6 +15,7 @@ import type { DatabaseMigrationIdentity } from "./databaseMigrations/index.ts";
 import {
     configuredDashboardProjectPaths,
     resolveDashboardProjectPaths,
+    resolveDashboardRuntimePath,
 } from "./lib/dashboardPaths.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
@@ -369,9 +370,11 @@ async function writeReleaseTransitionJournal(
 }
 
 export function resolveDashboardReleasesRoot(
-    configuredRoot = process.env.MIRA_DASHBOARD_RELEASES_ROOT ??
+    configuredRoot = resolveDashboardRuntimePath(
         configuredDashboardProjectPaths()?.productionReleasesRoot ??
-        resolveDashboardProjectPaths({}).productionReleasesRoot
+            resolveDashboardProjectPaths({}).productionReleasesRoot,
+        process.env.MIRA_DASHBOARD_RELEASES_ROOT
+    ) ?? resolveDashboardProjectPaths({}).productionReleasesRoot
 ): string {
     return resolveAbsoluteNonRootPath(configuredRoot, "Dashboard releases root");
 }

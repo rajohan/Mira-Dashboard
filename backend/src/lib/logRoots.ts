@@ -13,7 +13,8 @@ function invalidLogRoot(message: string): Error {
 export function logUnavailableReason(
     environment: Record<string, string | undefined> = process.env
 ): string | undefined {
-    return environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
+    return environment.NODE_ENV !== "production" &&
+        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
         !environment.MIRA_DASHBOARD_LOGS_ROOT?.trim()
         ? ISOLATED_DEV_LOGS_UNAVAILABLE_REASON
         : undefined;
@@ -21,7 +22,9 @@ export function logUnavailableReason(
 
 export function resolveRealLogsDirectory(): string {
     const configuredRoot =
-        process.env.MIRA_DASHBOARD_LOGS_ROOT?.trim() || DEFAULT_LOGS_DIRECTORY;
+        process.env.NODE_ENV === "production"
+            ? DEFAULT_LOGS_DIRECTORY
+            : process.env.MIRA_DASHBOARD_LOGS_ROOT?.trim() || DEFAULT_LOGS_DIRECTORY;
     const resolvedRoot = path.resolve(configuredRoot);
 
     if (!path.isAbsolute(configuredRoot)) {

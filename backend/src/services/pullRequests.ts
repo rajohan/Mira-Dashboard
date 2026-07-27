@@ -98,29 +98,13 @@ const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipp
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "verifying"]);
 const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
-const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
 const publicPullRequestCache: {
     failure?: { expiresAt: number; message: string };
     value?: { expiresAt: number; pullRequests: PullRequestSummary[] };
 } = {};
 
-function resolveExecutableFromPath(executable: string): string | undefined {
-    if (path.isAbsolute(executable)) {
-        return executable;
-    }
-    if (executable.includes(path.sep)) {
-        return path.resolve(executable);
-    }
-
-    return Bun.which(executable, { PATH: process.env.PATH }) ?? undefined;
-}
-
 function resolveBunExecutable(): string {
-    const resolved = resolveExecutableFromPath(BUN_EXECUTABLE);
-    if (resolved) {
-        return resolved;
-    }
-    return BUN_EXECUTABLE === "bun" ? process.execPath : BUN_EXECUTABLE;
+    return process.execPath;
 }
 
 export function getResolvedRoots() {
@@ -131,17 +115,21 @@ export function getResolvedRoots() {
 }
 
 function getDashboardRoot(): string {
-    return resolveConfiguredRoot(
-        "MIRA_DASHBOARD_ROOT",
-        resolveDashboardProjectPaths().productionCheckoutRoot
-    );
+    return process.env.NODE_ENV === "production"
+        ? resolveDashboardProjectPaths().productionCheckoutRoot
+        : resolveConfiguredRoot(
+              "MIRA_DASHBOARD_ROOT",
+              resolveDashboardProjectPaths().productionCheckoutRoot
+          );
 }
 
 function getDashboardWorktreeRoot(): string {
-    return resolveConfiguredRoot(
-        "MIRA_DASHBOARD_WORKTREE_ROOT",
-        resolveDashboardProjectPaths().developmentWorktreeRoot
-    );
+    return process.env.NODE_ENV === "production"
+        ? resolveDashboardProjectPaths().developmentWorktreeRoot
+        : resolveConfiguredRoot(
+              "MIRA_DASHBOARD_WORKTREE_ROOT",
+              resolveDashboardProjectPaths().developmentWorktreeRoot
+          );
 }
 
 /** Represents command result. */
@@ -919,14 +907,9 @@ function buildReviewCommandEnvironment(): NodeJS.ProcessEnv {
     return buildGithubCommandEnvironment(githubToken);
 }
 
-/** Returns the configured reviewer author. */
-function reviewerAuthor(): string {
-    return process.env.RAJOHAN_GITHUB_USERNAME?.trim() || DEFAULT_REVIEWER_AUTHOR;
-}
-
 /** Returns whether the configured reviewer has approved the pull request. */
 function hasReviewerApproval(pr: PullRequestSummary): boolean {
-    const author = reviewerAuthor();
+    const author = DEFAULT_REVIEWER_AUTHOR;
     const reviews = (
         pr.latestOpinionatedReviews?.nodes?.length
             ? pr.latestOpinionatedReviews.nodes
@@ -954,7 +937,7 @@ function isPullRequestReviewApproved(pr: PullRequestSummary): boolean {
 /** Returns whether the configured reviewer can approve the pull request. */
 function canReviewerApprove(pr: PullRequestSummary): boolean {
     return (
-        pr.author?.login !== reviewerAuthor() &&
+        pr.author?.login !== DEFAULT_REVIEWER_AUTHOR &&
         !pr.isDraft &&
         !isPullRequestReviewApproved(pr)
     );
@@ -965,9 +948,7 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
     const rest = { ...pr };
     delete rest.latestOpinionatedReviews;
     delete rest.reviews;
-    const previewAllowedAuthors = resolvePullRequestPreviewAllowedAuthors(
-        process.env.MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS
-    );
+    const previewAllowedAuthors = resolvePullRequestPreviewAllowedAuthors();
 
     return {
         ...rest,
@@ -1342,6 +1323,7 @@ async function runGhJsonLines<T>(
 /** Lists open pull requests targeting the dashboard production branch. */
 export async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
     if (
+        process.env.NODE_ENV !== "production" &&
         process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
         !configuredGithubReadToken()
     ) {
@@ -1672,7 +1654,7 @@ function validateDashboardPrForApproval(pr: PullRequestSummary): void {
 /** Validates a pull request can receive Rajohan's review approval. */
 function validateDashboardPrForReviewApproval(pr: PullRequestSummary): void {
     validateDashboardPr(pr);
-    if (pr.author?.login === reviewerAuthor()) {
+    if (pr.author?.login === DEFAULT_REVIEWER_AUTHOR) {
         throw new Error("Rajohan cannot approve his own pull request");
     }
     if (isPullRequestReviewApproved(pr)) {
@@ -1928,13 +1910,11 @@ try {
     ].join(" ");
 }
 
-function releaseLifecycleInvocation(
-    releasesRoot: string,
-    lifecycleCommand: string
-): string {
+function releaseLifecycleInvocation(lifecycleCommand: string): string {
     return [
-        `MIRA_DASHBOARD_RELEASES_ROOT=${shellQuote(releasesRoot)}`,
-        `MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())}`,
+        `MIRA_DASHBOARD_PROJECT_ROOT=${shellQuote(
+            resolveDashboardProjectPaths().projectRoot
+        )}`,
         "NODE_ENV=production",
         shellQuote(resolveBunExecutable()),
         shellQuote(lifecycleCommand),
@@ -2085,11 +2065,9 @@ async function scheduleReleaseCutover(
         "releaseLifecycle.js"
     );
     const activationLifecycleEnvironment = releaseLifecycleInvocation(
-        releasesRoot,
         activationLifecycleCommand
     );
     const guardedLifecycleEnvironment = releaseLifecycleInvocation(
-        releasesRoot,
         guardedLifecycleCommand
     );
     const restoreCommand = isNewActivation
@@ -2206,10 +2184,7 @@ async function scheduleReleaseRollback(
         "dist",
         "releaseLifecycle.js"
     );
-    const lifecycleEnvironment = releaseLifecycleInvocation(
-        releasesRoot,
-        lifecycleCommand
-    );
+    const lifecycleEnvironment = releaseLifecycleInvocation(lifecycleCommand);
     const targetShort = targetCommit.slice(0, 8);
     const originalShort = originalCommit.slice(0, 8);
     const okJob: DeploymentJob = {
@@ -2331,6 +2306,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
     const script = [
         "sleep 1",
         ...releaseCutoverShellFunctions(),
+        `project_root=${shellQuote(resolveDashboardProjectPaths().projectRoot)}`,
         `releases_root=${shellQuote(releasesRoot)}`,
         `candidate_commit=${shellQuote(candidateCommit)}`,
         `recovery_mode=${shellQuote(recoveryMode)}`,
@@ -2364,14 +2340,12 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         '  [ -f "$activation_lifecycle" ] && [ ! -L "$activation_lifecycle" ]',
         "}",
         "run_activation_lifecycle() {",
-        '  MIRA_DASHBOARD_RELEASES_ROOT="$releases_root" \\',
-        `  MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())} \\`,
+        '  MIRA_DASHBOARD_PROJECT_ROOT="$project_root" \\',
         "  NODE_ENV=production \\",
         '  "$bun_executable" "$activation_lifecycle" "$@"',
         "}",
         "run_candidate_lifecycle() {",
-        '  MIRA_DASHBOARD_RELEASES_ROOT="$releases_root" \\',
-        `  MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())} \\`,
+        '  MIRA_DASHBOARD_PROJECT_ROOT="$project_root" \\',
         "  NODE_ENV=production \\",
         '  "$bun_executable" "$candidate_lifecycle" "$@"',
         "}",
@@ -2513,7 +2487,6 @@ async function runDeploymentJob(
                     signal: options.signal,
                     timeoutMs: options.timeoutMs,
                 }),
-            databasePath: getMiraDatabasePath(),
             onProgress: () => {
                 currentJob = refreshDeploymentHeartbeat(currentJob);
             },

@@ -201,12 +201,11 @@ MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE
 MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE
 MIRA_DASHBOARD_DEV_GATEWAY_URL
 MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE
-MIRA_DASHBOARD_PREVIEW_ROOT
-MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH
 ```
 
 Use overrides only with absolute, non-root state/source paths. The ordinary
 commands already select the host's production snapshots and runtime Gateway.
+Managed PR dev paths are always derived from `MIRA_DASHBOARD_PROJECT_ROOT`.
 
 ## Verification
 

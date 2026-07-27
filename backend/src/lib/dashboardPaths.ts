@@ -59,3 +59,27 @@ export function resolveDashboardProjectPaths(
         environment.MIRA_DASHBOARD_PROJECT_ROOT?.trim() || FALLBACK_DASHBOARD_PROJECT_ROOT
     );
 }
+
+export function resolveDashboardProjectPathsForRuntime(
+    environment: NodeJS.ProcessEnv = process.env
+): DashboardProjectPaths | undefined {
+    return (
+        configuredDashboardProjectPaths(environment) ??
+        (environment.NODE_ENV === "production"
+            ? resolveDashboardProjectPaths(environment)
+            : undefined)
+    );
+}
+
+/**
+ * Keeps the production layout immutable while allowing isolated development
+ * children and tests to inject process-specific paths.
+ */
+export function resolveDashboardRuntimePath(
+    derivedPath: string | undefined,
+    internalOverride: string | undefined,
+    environment: NodeJS.ProcessEnv = process.env
+): string | undefined {
+    const override = internalOverride?.trim() || undefined;
+    return environment.NODE_ENV === "production" ? derivedPath : override || derivedPath;
+}
