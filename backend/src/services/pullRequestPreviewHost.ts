@@ -228,12 +228,20 @@ function optionalEnvironmentValue(
     return configured;
 }
 
-function resolveExecutable(value: string | undefined, fallback: string): string {
-    const configured = value?.trim() || Bun.which(fallback);
-    if (!configured || !path.isAbsolute(configured)) {
+function resolveExecutable(
+    value: string | undefined,
+    fallback: string,
+    searchPath: string | undefined = process.env.PATH
+): string {
+    const configured = value?.trim();
+    const resolved =
+        configured ||
+        Bun.which(fallback, { PATH: searchPath }) ||
+        (fallback === "bun" ? process.execPath : undefined);
+    if (!resolved || !path.isAbsolute(resolved)) {
         throw new TypeError(`${fallback} executable must resolve to an absolute path`);
     }
-    return path.resolve(configured);
+    return path.resolve(resolved);
 }
 
 function gitCommonDirectory(
@@ -327,7 +335,11 @@ export function resolvePullRequestPreviewConfig(
     return {
         allowedAuthors,
         backendPort,
-        bunExecutable: resolveExecutable(environment.BUN_BINARY, "bun"),
+        bunExecutable: resolveExecutable(
+            environment.BUN_BINARY,
+            "bun",
+            environment.PATH ?? process.env.PATH
+        ),
         dashboardRoot,
         databaseTemplate: optionalAbsoluteNonRootPath(
             "MIRA_DASHBOARD_PREVIEW_DB_TEMPLATE",

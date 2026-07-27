@@ -2873,6 +2873,71 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("keeps PR dev status messages ahead of pull request action buttons", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                if (url === "/api/pull-requests") {
+                    return Response.json({
+                        pullRequests: [
+                            {
+                                additions: 12,
+                                author: { login: "mira-2026" },
+                                baseRefName: "main",
+                                body: "PR dev layout regression",
+                                canReviewerApprove: true,
+                                changedFiles: 2,
+                                createdAt: "2026-06-24T08:00:00.000Z",
+                                deletions: 3,
+                                headRefName: "mira/preview-layout",
+                                headRefOid: "a".repeat(40),
+                                isDraft: false,
+                                mergeable: "MERGEABLE",
+                                mergeStateStatus: "CLEAN",
+                                number: 335,
+                                previewEligible: true,
+                                reviewDecision: "REVIEW_REQUIRED",
+                                statusCheckRollup: [
+                                    { conclusion: "SUCCESS", status: "COMPLETED" },
+                                ],
+                                title: "PR dev action layout",
+                                updatedAt: "2026-06-24T08:05:00.000Z",
+                                url: "https://github.com/rajohan/Mira-Dashboard/pull/335",
+                            },
+                        ],
+                    });
+                }
+                if (url === "/api/pull-requests/preview") {
+                    return Response.json(
+                        {
+                            error: "bun executable must resolve to an absolute path",
+                        },
+                        { status: 500 }
+                    );
+                }
+                const method = init?.method ?? "GET";
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(PullRequests));
+
+        const previewStatus = await screen.findByText(
+            "PR dev status is unavailable: bun executable must resolve to an absolute path"
+        );
+        const approveButton = screen.getByRole("button", { name: "Approve PR" });
+        expect(
+            previewStatus.compareDocumentPosition(approveButton) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
+        expect(previewStatus).toHaveClass("col-span-full", "w-full");
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
     it("starts and stops an eligible trusted PR development environment", async () => {
         const user = userEvent.setup();
         let preview: Record<string, unknown> = { status: "stopped" };

@@ -773,9 +773,11 @@ export function PullRequests() {
         }
     }
 
-    /** Renders trusted PR dev controls for an eligible pull request. */
-    function renderPullRequestPreviewActions(pr: PullRequestSummary) {
-        if (pr.previewEligible !== true) return;
+    /** Builds trusted PR dev status and controls for an eligible pull request. */
+    function pullRequestPreviewActions(pr: PullRequestSummary) {
+        if (pr.previewEligible !== true) {
+            return { blockedMessage: undefined, controls: undefined };
+        }
         const isPreviewSlotActive =
             previewStatus !== undefined &&
             ACTIVE_PREVIEW_STATUSES.has(previewStatus.status);
@@ -807,13 +809,8 @@ export function PullRequests() {
             blockedMessage = "PR dev is currently changing state.";
         }
 
-        return (
+        const controls = (
             <>
-                {blockedMessage ? (
-                    <p className="text-xs text-primary-400 sm:basis-full">
-                        {blockedMessage}
-                    </p>
-                ) : undefined}
                 {hasPullRequestPreviewSlot &&
                 previewStatus.status === "running" &&
                 previewStatus.url ? (
@@ -861,10 +858,12 @@ export function PullRequests() {
                 ) : undefined}
             </>
         );
+        return { blockedMessage, controls };
     }
 
     /** Renders merge controls for a pull request. */
     function renderPullRequestActions(pr: PullRequestSummary) {
+        const previewActions = pullRequestPreviewActions(pr);
         const isChecksPassed = hasPullRequestChecksPassed(pr.statusCheckRollup);
         const isReviewApproved = isPullRequestReviewApproved(pr);
         const isMergeBlocked = isGithubMergeBlocked(pr);
@@ -906,9 +905,14 @@ export function PullRequests() {
                 {mergeDisabledReason ? (
                     <p
                         id={mergeDisabledReasonId}
-                        className="text-xs text-primary-400 sm:basis-full"
+                        className="col-span-full w-full text-xs text-primary-400"
                     >
                         {mergeDisabledReason}
+                    </p>
+                ) : undefined}
+                {previewActions.blockedMessage ? (
+                    <p className="col-span-full w-full text-xs text-primary-400">
+                        {previewActions.blockedMessage}
                     </p>
                 ) : undefined}
                 {canConfiguredReviewerApproveReview(pr) ? (
@@ -947,7 +951,7 @@ export function PullRequests() {
                             : "Update branch"}
                     </Button>
                 ) : undefined}
-                {renderPullRequestPreviewActions(pr)}
+                {previewActions.controls}
                 <Button
                     variant="primary"
                     onClick={() => setPendingAction({ type: "merge-deploy", pr })}

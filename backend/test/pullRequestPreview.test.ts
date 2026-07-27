@@ -147,6 +147,32 @@ function previewScheduledJob(number: unknown, commitSha: unknown = COMMIT): Sche
 }
 
 describe("managed pull request preview", () => {
+    it("uses the running Bun executable when the service PATH does not expose Bun", () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-bun-path-"));
+        try {
+            const config = resolvePullRequestPreviewConfig({
+                MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
+                MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
+                PATH: path.join(root, "empty-bin"),
+            });
+
+            expect(config.bunExecutable).toBe(process.execPath);
+            expect(path.isAbsolute(config.bunExecutable)).toBe(true);
+            expect(() =>
+                resolvePullRequestPreviewConfig({
+                    BUN_BINARY: "bun",
+                    MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
+                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
+                    PATH: path.join(root, "empty-bin"),
+                })
+            ).toThrow("bun executable must resolve to an absolute path");
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
     it("resolves a single-slot host contract without accepting ambiguous config", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-config-"));
         try {
