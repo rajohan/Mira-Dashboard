@@ -35,6 +35,7 @@ import {
     stringFallback,
 } from "../src/lib/values.ts";
 import {
+    isDevelopmentExternalNotificationSuppressed,
     isDevelopmentGatewayMethodBlocked,
     isDevelopmentGatewayProxyEventAllowed,
     isDevelopmentGatewayProxyMethodAllowed,
@@ -527,6 +528,8 @@ describe("backend service utilities", () => {
                 safeEnvironment
             )
         ).toBe(false);
+        expect(isDevelopmentExternalNotificationSuppressed(safeEnvironment)).toBe(true);
+        expect(isDevelopmentExternalNotificationSuppressed({})).toBe(false);
         expect(
             isDevelopmentHostMutationBlocked(
                 new Request("http://localhost/api/docker"),

@@ -10,12 +10,21 @@ import type {
 } from "../src/lib/openclawGatewayClient.ts";
 import {
     type PullRequestPreviewGatewayProxy,
+    type PullRequestPreviewGatewayProxyOptions,
     startPullRequestPreviewGatewayProxy,
 } from "../src/pullRequestPreviewGatewayProxy.ts";
 import { CONFIG_REDACTION_SENTINEL } from "../src/services/configRedaction.ts";
 
 const INTEGRATION_CHILD_ENV =
     "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_TEST_INTEGRATION_CHILD";
+
+type ProxyServerFactory = NonNullable<
+    PullRequestPreviewGatewayProxyOptions["serverFactory"]
+>;
+type ProxyServeOptions = Parameters<ProxyServerFactory>[0];
+type ProxyFetchHandler = NonNullable<ProxyServeOptions["fetch"]>;
+type ProxyWebSocketHandler = NonNullable<ProxyServeOptions["websocket"]>;
+type ProxySocket = Parameters<NonNullable<ProxyWebSocketHandler["open"]>>[0];
 
 interface SocketHarness {
     close: () => void;
@@ -72,6 +81,275 @@ function websocketHarness(url: string): SocketHarness {
 }
 
 describe("PR dev Gateway capability proxy", () => {
+    it("enforces protocol policy through an injected server", async () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-gateway-policy-"));
+        let clientOptions: OpenClawGatewayClientOptions | undefined;
+        let serveOptions: ProxyServeOptions | undefined;
+        let shouldRejectRequest = false;
+        const request = jest.fn(
+            async (method: string, parameters?: unknown): Promise<unknown> => {
+                if (shouldRejectRequest) throw new Error("upstream request failed");
+                return method === "config.get"
+                    ? {
+                          parsed: {
+                              gateway: { token: "production-gateway-token" },
+                          },
+                      }
+                    : { method, parameters };
+            }
+        );
+        const upstreamStop = jest.fn();
+        const upstreamClientFactory = (
+            options: OpenClawGatewayClientOptions
+        ): OpenClawGatewayClientInstance => {
+            clientOptions = options;
+            return {
+                request,
+                start: () =>
+                    options.onHelloOk?.({
+                        policy: { tickIntervalMs: 30_000 },
+                        protocol: 4,
+                        type: "hello-ok",
+                    }),
+                stop: upstreamStop,
+            };
+        };
+        const serverStop = jest.fn(async () => {});
+        const serverUnref = jest.fn();
+        const fakeServer = {
+            port: 19_001,
+            stop: serverStop,
+            unref: serverUnref,
+        } as unknown as ReturnType<ProxyServerFactory>;
+        const serverFactory: ProxyServerFactory = (options) => {
+            serveOptions = options;
+            return fakeServer;
+        };
+        let proxy: PullRequestPreviewGatewayProxy | undefined;
+
+        try {
+            proxy = startPullRequestPreviewGatewayProxy({
+                clientToken: "disposable-preview-token",
+                deviceIdentityFile: path.join(root, "device.json"),
+                port: 19_000,
+                serverFactory,
+                upstreamClientFactory,
+                upstreamToken: "production-gateway-token",
+                upstreamUrl: "ws://127.0.0.1:18789",
+            });
+            expect(proxy.port).toBe(19_001);
+            expect(proxy.isUpstreamConnected()).toBe(true);
+
+            const options = serveOptions;
+            const fetchHandler = options?.fetch as ProxyFetchHandler | undefined;
+            const websocket = options?.websocket;
+            if (!fetchHandler || !websocket) {
+                throw new Error("Proxy server handlers were not captured");
+            }
+            const openSocket = websocket.open;
+            const handleMessage = websocket.message;
+            const closeSocket = websocket.close;
+            if (!openSocket || !handleMessage || !closeSocket) {
+                throw new Error("Proxy WebSocket handlers are incomplete");
+            }
+
+            let shouldUpgrade = false;
+            let upgradedData: ProxySocket["data"] | undefined;
+            const upgrade = jest.fn(
+                (_request: Request, upgradeOptions: { data: ProxySocket["data"] }) => {
+                    upgradedData = upgradeOptions.data;
+                    return shouldUpgrade;
+                }
+            );
+            const fetchServer = {
+                upgrade,
+            } as unknown as Parameters<ProxyFetchHandler>[1];
+            const callFetch = (request: Request) =>
+                fetchHandler.call(fetchServer, request, fetchServer);
+
+            const health = await callFetch(new Request("http://127.0.0.1:19000/health"));
+            expect(health).toMatchObject({ status: 200 });
+            await expect((health as Response).json()).resolves.toEqual({
+                upstreamConnected: true,
+            });
+            const notFound = await callFetch(
+                new Request("http://127.0.0.1:19000/unavailable")
+            );
+            expect(notFound).toMatchObject({ status: 404 });
+            const notUpgraded = await callFetch(
+                new Request("http://127.0.0.1:19000/gateway")
+            );
+            expect(notUpgraded).toMatchObject({ status: 426 });
+
+            shouldUpgrade = true;
+            const upgraded = await callFetch(
+                new Request("http://127.0.0.1:19000/gateway")
+            );
+            expect(upgraded).toBeUndefined();
+            if (!upgradedData) throw new Error("Proxy upgrade data was not captured");
+
+            const sentFrames: Array<Record<string, unknown>> = [];
+            const makeSocket = (data: ProxySocket["data"]): ProxySocket =>
+                ({
+                    data,
+                    send: (frame: string | Buffer) => {
+                        sentFrames.push(
+                            JSON.parse(
+                                typeof frame === "string" ? frame : frame.toString("utf8")
+                            ) as Record<string, unknown>
+                        );
+                        return 1;
+                    },
+                    terminate: jest.fn(),
+                }) as unknown as ProxySocket;
+            const socket = makeSocket(upgradedData);
+            openSocket(socket);
+            expect(sentFrames.at(-1)).toMatchObject({
+                event: "connect.challenge",
+                type: "event",
+            });
+            await handleMessage(
+                socket,
+                JSON.stringify({
+                    id: "connect-1",
+                    method: "connect",
+                    params: { auth: { token: "disposable-preview-token" } },
+                    type: "req",
+                })
+            );
+            expect(sentFrames.at(-1)).toMatchObject({
+                id: "connect-1",
+                isOk: true,
+                payload: { type: "hello-ok" },
+            });
+
+            await handleMessage(
+                socket,
+                Buffer.from(
+                    JSON.stringify({
+                        id: "config-1",
+                        method: "config.get",
+                        params: {},
+                        type: "req",
+                    })
+                )
+            );
+            expect(sentFrames.at(-1)).toMatchObject({
+                id: "config-1",
+                isOk: true,
+                payload: {
+                    parsed: {
+                        gateway: { token: CONFIG_REDACTION_SENTINEL },
+                    },
+                },
+            });
+
+            await handleMessage(
+                socket,
+                JSON.stringify({
+                    id: "blocked-1",
+                    method: "config.patch",
+                    params: {},
+                    type: "req",
+                })
+            );
+            expect(sentFrames.at(-1)).toMatchObject({
+                error: { code: "PREVIEW_GATEWAY_DENIED" },
+                id: "blocked-1",
+                isOk: false,
+            });
+
+            socket.data.pendingRequests = 128;
+            await handleMessage(
+                socket,
+                JSON.stringify({
+                    id: "bounded-1",
+                    method: "chat.history",
+                    params: {},
+                    type: "req",
+                })
+            );
+            expect(sentFrames.at(-1)).toMatchObject({
+                error: { message: "Too many pending Gateway requests" },
+                id: "bounded-1",
+            });
+            socket.data.pendingRequests = 0;
+
+            shouldRejectRequest = true;
+            await handleMessage(
+                socket,
+                JSON.stringify({
+                    id: "failed-1",
+                    method: "chat.history",
+                    params: {},
+                    type: "req",
+                })
+            );
+            expect(sentFrames.at(-1)).toMatchObject({
+                error: { message: "upstream request failed" },
+                id: "failed-1",
+            });
+            shouldRejectRequest = false;
+
+            const sentBeforeEvents = sentFrames.length;
+            clientOptions?.onEvent?.({
+                event: "plugin.approval.requested",
+                payload: { ignored: true },
+                type: "event",
+            });
+            clientOptions?.onEvent?.({
+                event: "tick",
+                payload: { at: 1 },
+                type: "event",
+            });
+            expect(sentFrames).toHaveLength(sentBeforeEvents + 1);
+            expect(sentFrames.at(-1)).toMatchObject({ event: "tick" });
+
+            const invalidSocket = makeSocket({
+                authenticated: false,
+                challengeNonce: "invalid-frame",
+                pendingRequests: 0,
+            });
+            await handleMessage(invalidSocket, "{");
+            expect(invalidSocket.terminate).toHaveBeenCalledTimes(1);
+
+            const unauthenticatedSocket = makeSocket({
+                authenticated: false,
+                challengeNonce: "unauthenticated",
+                pendingRequests: 0,
+            });
+            await handleMessage(
+                unauthenticatedSocket,
+                JSON.stringify({
+                    id: "unauthenticated-1",
+                    method: "chat.history",
+                    params: {},
+                    type: "req",
+                })
+            );
+            expect(unauthenticatedSocket.terminate).toHaveBeenCalledTimes(1);
+            expect(sentFrames.at(-1)).toMatchObject({
+                error: { message: "Gateway proxy authentication is required" },
+            });
+
+            clientOptions?.onClose?.(1006, "upstream closed");
+            expect(proxy.isUpstreamConnected()).toBe(false);
+            expect(socket.terminate).toHaveBeenCalledTimes(1);
+            const offlineHealth = await callFetch(
+                new Request("http://127.0.0.1:19000/health")
+            );
+            expect(offlineHealth).toMatchObject({ status: 503 });
+
+            closeSocket(socket, 1000, "test complete");
+        } finally {
+            await proxy?.stop();
+            expect(serverStop).toHaveBeenCalledWith(true);
+            expect(serverUnref).toHaveBeenCalledTimes(proxy ? 1 : 0);
+            expect(upstreamStop).toHaveBeenCalledTimes(proxy ? 1 : 0);
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
     it("authenticates with a disposable token and forwards only allowed methods", async () => {
         if (process.env[INTEGRATION_CHILD_ENV] !== "1") {
             // Bun 1.3.14 on arm64 can panic under coverage after an in-process

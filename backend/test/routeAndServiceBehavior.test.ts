@@ -1026,6 +1026,28 @@ describe("backend route and service behavior", () => {
             `Task assigned: #${id} Coverage route task updated. This task is assigned to Mira and may need attention when the current work is clear.`
         );
 
+        rememberEnvironment("MIRA_DASHBOARD_DEV_SAFE_MODE");
+        const previousDevelopmentSafeMode = process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+        const notificationsBeforeIsolatedUpdate = taskNotifications.length;
+        const isolatedPatch = await taskRoutes["/api/tasks/:id"].PATCH(
+            requestWithParameters(
+                `/api/tasks/${id}`,
+                { id: String(id) },
+                {
+                    body: JSON.stringify({ title: "Coverage route task updated" }),
+                    method: "PATCH",
+                }
+            )
+        );
+        expect(isolatedPatch.status).toBe(200);
+        expect(taskNotifications).toHaveLength(notificationsBeforeIsolatedUpdate);
+        if (previousDevelopmentSafeMode === undefined) {
+            delete process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+        } else {
+            process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = previousDevelopmentSafeMode;
+        }
+
         const invalidMove = await taskRoutes["/api/tasks/:id/move"].POST(
             requestWithParameters(
                 `/api/tasks/${id}/move`,

@@ -19,24 +19,59 @@ const OMITTED_WORKSPACE_DIRECTORIES = new Set([
     ".aws",
     ".azure",
     ".credentials",
+    ".docker",
     ".git",
     ".gnupg",
+    ".kube",
+    ".npm",
+    ".pki",
     ".secrets",
     ".ssh",
+    ".terraform",
     "credentials",
     "secrets",
 ]);
 const SAFE_ENVIRONMENT_TEMPLATE_SUFFIXES = new Set(["example", "sample", "template"]);
 const SENSITIVE_WORKSPACE_FILE_NAMES = new Set([
     ".env",
+    ".git-credentials",
+    ".netrc",
+    ".npmrc",
+    ".pnpmrc",
+    ".pypirc",
+    ".yarnrc",
+    "application_default_credentials.json",
+    "auth.json",
     "credentials.json",
+    "dockerconfigjson",
+    "id_dsa",
+    "id_ecdsa",
     "id_ed25519",
     "id_rsa",
     "private.key",
+    "service-account.json",
+    "service_account.json",
     "secrets.json",
     "secrets.yaml",
     "secrets.yml",
 ]);
+const SENSITIVE_WORKSPACE_FILE_SUFFIXES = [
+    ".jks",
+    ".key",
+    ".keytab",
+    ".kdbx",
+    ".keystore",
+    ".kubeconfig",
+    ".ovpn",
+    ".p12",
+    ".pem",
+    ".pfx",
+    ".pkcs12",
+    ".tfstate",
+    ".tfstate.backup",
+] as const;
+const SENSITIVE_WORKSPACE_PATH_SEGMENT =
+    /(?:^|[._-])(?:api[._-]?keys?|credentials?|passwords?|private[._-]?keys?|secrets?|service[._-]?accounts?|tokens?)(?:$|[._-]|\d)/iu;
 const SENSITIVE_AGENT_CONFIG_KEY =
     /(?:^|[._-])(?:api[._-]?keys?|credentials?|passwords?|secrets?|tokens?)(?:$|[._-]|\d)/iu;
 
@@ -66,8 +101,19 @@ function isRealRegularFile(filePath: string): boolean {
     }
 }
 
+function isPathPresentNoFollow(filePath: string): boolean {
+    try {
+        lstatSync(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function ensurePrivateDirectory(directoryPath: string): void {
-    mkdirSync(directoryPath, { mode: 0o700, recursive: true });
+    if (!isPathPresentNoFollow(directoryPath)) {
+        mkdirSync(directoryPath, { mode: 0o700 });
+    }
     if (!isRealDirectory(directoryPath)) {
         throw new Error(`Development path must be a real directory: ${directoryPath}`);
     }
@@ -181,20 +227,30 @@ function isEnvironmentTemplate(fileName: string): boolean {
     return SAFE_ENVIRONMENT_TEMPLATE_SUFFIXES.has(suffix);
 }
 
+function isSensitiveWorkspacePathSegment(segment: string): boolean {
+    const normalized = segment.toLowerCase();
+    return (
+        SENSITIVE_WORKSPACE_FILE_NAMES.has(normalized) ||
+        SENSITIVE_WORKSPACE_FILE_SUFFIXES.some((suffix) => normalized.endsWith(suffix)) ||
+        SENSITIVE_WORKSPACE_PATH_SEGMENT.test(normalized)
+    );
+}
+
 function shouldCopyWorkspacePath(sourceRoot: string, candidate: string): boolean {
     const relativePath = path.relative(sourceRoot, candidate);
     if (!relativePath) return true;
     const segments = relativePath.split(path.sep);
     if (
-        segments.some((segment) =>
-            OMITTED_WORKSPACE_DIRECTORIES.has(segment.toLowerCase())
+        segments.some(
+            (segment) =>
+                OMITTED_WORKSPACE_DIRECTORIES.has(segment.toLowerCase()) ||
+                isSensitiveWorkspacePathSegment(segment)
         )
     ) {
         return false;
     }
     const fileName = segments.at(-1)?.toLowerCase() || "";
     return !(
-        SENSITIVE_WORKSPACE_FILE_NAMES.has(fileName) ||
         (fileName.startsWith(".env.") && !isEnvironmentTemplate(fileName)) ||
         fileName.endsWith(".token") ||
         fileName.endsWith(".secret")

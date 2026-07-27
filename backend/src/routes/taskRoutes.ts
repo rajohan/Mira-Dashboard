@@ -8,6 +8,7 @@ import gateway from "../gateway.ts";
 import { HttpError, json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { objectFallback } from "../lib/values.ts";
+import { isDevelopmentExternalNotificationSuppressed } from "../requestPolicy.ts";
 
 type Status = "todo" | "in-progress" | "blocked" | "done";
 type Assignee = TaskAssigneeId;
@@ -319,6 +320,7 @@ async function notifyMira(
     eventType: MiraTaskNotificationEvent,
     task: { id: number; title: string }
 ) {
+    if (isDevelopmentExternalNotificationSuppressed()) return;
     try {
         await gateway.sendSessionMessage(
             "main",

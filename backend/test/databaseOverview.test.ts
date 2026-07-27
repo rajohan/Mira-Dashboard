@@ -477,5 +477,12 @@ describe("database overview service", () => {
             4096 + overview.sqlite.storageBytes
         );
         expect(overview).not.toHaveProperty("checkedAt");
+
+        const malformedSnapshot: Record<string, unknown> = { ...snapshot };
+        delete malformedSnapshot.bloatEstimates;
+        const fallback = getIsolatedDatabaseOverview(malformedSnapshot);
+        expect(fallback.databases).toEqual([]);
+        expect(fallback.bloatEstimates).toEqual([]);
+        expect(fallback.postgresSnapshotCheckedAt).toBeUndefined();
     });
 });

@@ -19,10 +19,15 @@ interface TailscaleServeStatus {
     >;
 }
 
-interface DevelopmentTailscaleStatus {
+export interface DevelopmentTailscaleStatus {
     enabled: boolean;
     origin: string;
     proxyTarget: string;
+}
+
+export interface DevelopmentTailscaleCommandAdapter {
+    currentStatus: (port: number) => Promise<DevelopmentTailscaleStatus>;
+    run: (command: string[]) => Promise<string>;
 }
 
 const COMMAND_TIMEOUT_MS = 15_000;
@@ -139,12 +144,18 @@ async function currentDevelopmentServeStatus(
     return developmentServeStatus(serveStatus, tailscaleDnsName(status), port);
 }
 
-async function enableDevelopmentServe(
-    port: number
+const defaultCommandAdapter: DevelopmentTailscaleCommandAdapter = {
+    currentStatus: currentDevelopmentServeStatus,
+    run: commandOutput,
+};
+
+export async function enableDevelopmentServe(
+    port: number,
+    commands: DevelopmentTailscaleCommandAdapter = defaultCommandAdapter
 ): Promise<{ didCreate: boolean; status: DevelopmentTailscaleStatus }> {
-    const current = await currentDevelopmentServeStatus(port);
+    const current = await commands.currentStatus(port);
     if (current.enabled) return { didCreate: false, status: current };
-    await commandOutput([
+    await commands.run([
         "sudo",
         "-n",
         "tailscale",
@@ -153,11 +164,31 @@ async function enableDevelopmentServe(
         `--https=${port}`,
         current.proxyTarget,
     ]);
-    const enabled = await currentDevelopmentServeStatus(port);
-    if (!enabled.enabled) {
-        throw new Error(`Tailscale Serve did not activate ${enabled.origin}`);
+    try {
+        const enabled = await commands.currentStatus(port);
+        if (!enabled.enabled) {
+            throw new Error(`Tailscale Serve did not activate ${enabled.origin}`);
+        }
+        return { didCreate: true, status: enabled };
+    } catch (activationError) {
+        try {
+            await commands.run([
+                "sudo",
+                "-n",
+                "tailscale",
+                "serve",
+                `--https=${port}`,
+                "off",
+            ]);
+        } catch (cleanupError) {
+            throw new AggregateError(
+                [activationError, cleanupError],
+                `Tailscale Serve activation failed and port ${port} cleanup also failed`,
+                { cause: cleanupError }
+            );
+        }
+        throw activationError;
     }
-    return { didCreate: true, status: enabled };
 }
 
 async function disableDevelopmentServe(

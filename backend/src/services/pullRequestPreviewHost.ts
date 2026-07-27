@@ -1126,6 +1126,13 @@ export function buildPullRequestPreviewSandboxCommand(input: {
             config.recentAuthMinutes
         );
     }
+    if (config.sourceWebAuthnRpId) {
+        arguments_.push(
+            "--setenv",
+            "MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID",
+            config.sourceWebAuthnRpId
+        );
+    }
     if (config.sessionIdleMinutes) {
         arguments_.push(
             "--setenv",

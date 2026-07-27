@@ -242,6 +242,13 @@ describe("development stack", () => {
         writeFileSync(path.join(workspaceSource, "README.md"), "development snapshot");
         writeFileSync(path.join(workspaceSource, ".env"), "SECRET=value");
         writeFileSync(path.join(workspaceSource, ".env.example"), "SAFE=example");
+        writeFileSync(path.join(workspaceSource, ".netrc"), "machine example.test");
+        writeFileSync(path.join(workspaceSource, ".npmrc"), "//registry/:_authToken=x");
+        writeFileSync(path.join(workspaceSource, "client.pem"), "private key");
+        writeFileSync(
+            path.join(workspaceSource, "service-account.json"),
+            '{"private_key":"secret"}'
+        );
         writeFileSync(
             path.join(workspaceSource, "credentials", "service.token"),
             "secret"
@@ -375,6 +382,16 @@ describe("development stack", () => {
             expect(existsSync(path.join(developmentWorkspace, "credentials"))).toBe(
                 false
             );
+            for (const sensitiveFile of [
+                ".netrc",
+                ".npmrc",
+                "client.pem",
+                "service-account.json",
+            ]) {
+                expect(existsSync(path.join(developmentWorkspace, sensitiveFile))).toBe(
+                    false
+                );
+            }
             const openClawConfigText = readFileSync(
                 path.join(config.openClawHome, "openclaw.json"),
                 "utf8"
@@ -426,7 +443,7 @@ describe("development stack", () => {
         }
     });
 
-    it("disables copied MFA when the development WebAuthn RP differs", () => {
+    it("re-scrubs copied MFA when a reused database moves to another RP", () => {
         const root = temporaryRoot("mira-development-rp-snapshot-");
         const sourceDatabase = path.join(root, "production.db");
         const stateRoot = path.join(root, "state");
@@ -436,7 +453,17 @@ describe("development stack", () => {
             recursive: true,
         });
         writeFileSync(path.join(root, ".openclaw", "openclaw.json"), "{}");
-        const config = resolveDevelopmentStackConfig(
+        const remoteConfig = resolveDevelopmentStackConfig(
+            {
+                HOME: root,
+                MIRA_DASHBOARD_DEV_DB_SOURCE: sourceDatabase,
+                MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: "https://dashboard.example:5173",
+                MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
+                MIRA_DASHBOARD_WEBAUTHN_RP_ID: "dashboard.example",
+            },
+            root
+        );
+        const localConfig = resolveDevelopmentStackConfig(
             {
                 HOME: root,
                 MIRA_DASHBOARD_DEV_DB_SOURCE: sourceDatabase,
@@ -448,11 +475,37 @@ describe("development stack", () => {
         );
 
         try {
-            expect(prepareDevelopmentState(config).database).toBe("snapshot-created");
-            const snapshot = new Database(config.databasePath, { readonly: true });
+            expect(prepareDevelopmentState(remoteConfig).database).toBe(
+                "snapshot-created"
+            );
+            const remoteSnapshot = new Database(remoteConfig.databasePath, {
+                readonly: true,
+            });
             try {
                 expect(
-                    snapshot
+                    remoteSnapshot
+                        .query("SELECT id, mfa_enabled_at FROM users ORDER BY id")
+                        .all()
+                ).toEqual([
+                    { id: 1, mfa_enabled_at: "now" },
+                    { id: 2, mfa_enabled_at: SQL_NULL },
+                ]);
+                expect(
+                    remoteSnapshot
+                        .query("SELECT COUNT(*) AS count FROM user_webauthn_credentials")
+                        .get()
+                ).toEqual({ count: 1 });
+            } finally {
+                remoteSnapshot.close();
+            }
+
+            expect(prepareDevelopmentState(localConfig).database).toBe("reused");
+            const localSnapshot = new Database(localConfig.databasePath, {
+                readonly: true,
+            });
+            try {
+                expect(
+                    localSnapshot
                         .query("SELECT id, mfa_enabled_at FROM users ORDER BY id")
                         .all()
                 ).toEqual([
@@ -460,13 +513,48 @@ describe("development stack", () => {
                     { id: 2, mfa_enabled_at: SQL_NULL },
                 ]);
                 expect(
-                    snapshot
+                    localSnapshot
                         .query("SELECT COUNT(*) AS count FROM user_webauthn_credentials")
                         .get()
                 ).toEqual({ count: 0 });
             } finally {
-                snapshot.close();
+                localSnapshot.close();
             }
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("rejects symlinked state directories before host-side writes", () => {
+        const root = temporaryRoot("mira-development-state-symlink-");
+        const sourceDatabase = path.join(root, "production.db");
+        const releaseSource = path.join(root, "release-source");
+        const stateRoot = path.join(root, "state");
+        const outsideRoot = path.join(root, "outside");
+        createSnapshotSource(sourceDatabase);
+        mkdirSync(path.join(root, ".openclaw", "workspace"), { recursive: true });
+        mkdirSync(releaseSource);
+        mkdirSync(outsideRoot);
+        writeFileSync(path.join(root, ".openclaw", "openclaw.json"), "{}");
+        const config = resolveDevelopmentStackConfig(
+            {
+                HOME: root,
+                MIRA_DASHBOARD_DEV_DB_SOURCE: sourceDatabase,
+                MIRA_DASHBOARD_DEV_RELEASES_SOURCE: releaseSource,
+                MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
+            },
+            root
+        );
+
+        try {
+            expect(prepareDevelopmentState(config).releases).toBe("empty");
+            rmSync(config.releaseRoot, { recursive: true });
+            symlinkSync(outsideRoot, config.releaseRoot);
+
+            expect(() => prepareDevelopmentState(config)).toThrow(
+                "Development state path must be a real directory"
+            );
+            expect(readdirSync(outsideRoot)).toEqual([]);
         } finally {
             rmSync(root, { force: true, recursive: true });
         }

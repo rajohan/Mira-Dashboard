@@ -220,6 +220,7 @@ describe("managed pull request preview", () => {
                 ...previewConfig(root),
                 gatewayTokenFile: path.join(root, "gateway.token"),
                 gatewayUrl: "wss://gateway.example/ws",
+                sourceWebAuthnRpId: "dashboard.example",
             };
             const worktreePath = path.join(config.worktreeRoot, "preview-pr-335");
             const stateRoot = path.join(config.previewRoot, "states", "pr-335");
@@ -247,6 +248,8 @@ describe("managed pull request preview", () => {
                 "/run/mira-dashboard-preview/gateway.token",
                 "MIRA_DASHBOARD_DEV_GATEWAY_URL",
                 "ws://127.0.0.1:18790/gateway",
+                "MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID",
+                "dashboard.example",
             ]) {
                 expect(command).toContain(value);
             }

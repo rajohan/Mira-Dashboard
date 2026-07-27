@@ -47,6 +47,9 @@ export interface PullRequestPreviewGatewayProxyOptions {
     clientToken: string;
     deviceIdentityFile: string;
     port: number;
+    serverFactory?: (
+        options: Bun.Serve.Options<PreviewGatewaySocketData>
+    ) => Server<PreviewGatewaySocketData>;
     upstreamClientFactory?: (
         options: OpenClawGatewayClientOptions
     ) => OpenClawGatewayClientInstance;
@@ -367,7 +370,7 @@ export function startPullRequestPreviewGatewayProxy(
         url: options.upstreamUrl,
     });
 
-    const server: Server<PreviewGatewaySocketData> = Bun.serve({
+    const serverOptions = {
         fetch(request, bunServer) {
             const url = new URL(request.url);
             if (request.method === "GET" && url.pathname === "/health") {
@@ -476,7 +479,10 @@ export function startPullRequestPreviewGatewayProxy(
                 });
             },
         },
-    });
+    } satisfies Bun.Serve.Options<PreviewGatewaySocketData>;
+    const server: Server<PreviewGatewaySocketData> = options.serverFactory
+        ? options.serverFactory(serverOptions)
+        : Bun.serve(serverOptions);
 
     try {
         upstreamClient.start();

@@ -169,6 +169,13 @@ export function isDevelopmentHostMutationBlocked(
     );
 }
 
+/** Prevents isolated data mutations from notifying production integrations. */
+export function isDevelopmentExternalNotificationSuppressed(
+    environment: Record<string, string | undefined> = process.env
+): boolean {
+    return environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1";
+}
+
 export {
     isDevelopmentGatewayMethodAllowed,
     isDevelopmentGatewayProxyEventAllowed,

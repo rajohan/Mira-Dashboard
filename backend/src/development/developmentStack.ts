@@ -1,18 +1,21 @@
 import { randomBytes } from "node:crypto";
 import {
-    appendFileSync,
     chmodSync,
+    closeSync,
+    constants,
     cpSync,
     existsSync,
+    fchmodSync,
+    fstatSync,
     lstatSync,
     mkdirSync,
+    openSync,
     readdirSync,
     readFileSync,
     readlinkSync,
     realpathSync,
     renameSync,
     rmSync,
-    statSync,
     symlinkSync,
     writeFileSync,
 } from "node:fs";
@@ -143,30 +146,68 @@ function appendDevelopmentLogEntry(
     timestamp = new Date()
 ): void {
     const logPath = developmentLogPath(config, timestamp);
-    if (existsSync(logPath) && statSync(logPath).size >= MAX_DEVELOPMENT_LOG_BYTES) {
-        return;
-    }
-    appendFileSync(
+    const line = `${JSON.stringify({
+        0: entry.message,
+        _meta: {
+            date: timestamp.toISOString(),
+            logLevelName: entry.level,
+        },
+    })}\n`;
+    const descriptor = openSync(
         logPath,
-        `${JSON.stringify({
-            0: entry.message,
-            _meta: {
-                date: timestamp.toISOString(),
-                logLevelName: entry.level,
-            },
-        })}\n`,
-        { encoding: "utf8", mode: 0o600 }
+        constants.O_WRONLY |
+            constants.O_APPEND |
+            constants.O_CREAT |
+            constants.O_NOFOLLOW,
+        0o600
     );
-    chmodSync(logPath, 0o600);
+    try {
+        const stat = fstatSync(descriptor);
+        if (!stat.isFile() || stat.nlink !== 1) {
+            throw new Error("Development log must be a single-link regular file");
+        }
+        fchmodSync(descriptor, 0o600);
+        if (
+            stat.size >= MAX_DEVELOPMENT_LOG_BYTES ||
+            stat.size + Buffer.byteLength(line, "utf8") > MAX_DEVELOPMENT_LOG_BYTES
+        ) {
+            return;
+        }
+        writeFileSync(descriptor, line, "utf8");
+    } finally {
+        closeSync(descriptor);
+    }
+}
+
+function developmentLogFileSize(logPath: string): number | undefined {
+    let descriptor: number;
+    try {
+        descriptor = openSync(
+            logPath,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+    }
+    try {
+        const stat = fstatSync(descriptor);
+        if (!stat.isFile() || stat.nlink !== 1) {
+            throw new Error("Development log must be a single-link regular file");
+        }
+        return stat.size;
+    } finally {
+        closeSync(descriptor);
+    }
 }
 
 function prepareDevelopmentLog(config: DevelopmentStackConfig): void {
     const logsRoot = developmentLogsRoot(config);
-    mkdirSync(logsRoot, { mode: 0o700, recursive: true });
-    chmodSync(logsRoot, 0o700);
+    ensurePrivateStateDirectory(config, logsRoot);
     const timestamp = new Date();
     const logPath = developmentLogPath(config, timestamp);
-    if (!existsSync(logPath) || statSync(logPath).size < 1024) {
+    const existingLogSize = developmentLogFileSize(logPath);
+    if (existingLogSize === undefined || existingLogSize < 1024) {
         for (let index = 0; index < 24; index += 1) {
             appendDevelopmentLogEntry(
                 config,
@@ -448,6 +489,41 @@ function isPathPresentNoFollow(filePath: string): boolean {
     }
 }
 
+function ensurePrivateStateDirectory(
+    config: DevelopmentStackConfig,
+    directoryPath: string
+): void {
+    const stateRoot = path.resolve(config.stateRoot);
+    const target = path.resolve(directoryPath);
+    const relativePath = path.relative(stateRoot, target);
+    if (
+        relativePath === ".." ||
+        relativePath.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relativePath)
+    ) {
+        throw new Error(`Development directory must remain inside state: ${target}`);
+    }
+    if (!isRealDirectory(stateRoot)) {
+        throw new Error("Development state root must be a real directory");
+    }
+    chmodSync(stateRoot, 0o700);
+
+    const pathSegments = relativePath.split(path.sep).filter(Boolean);
+    let current = stateRoot;
+    for (const segment of pathSegments) {
+        current = path.join(current, segment);
+        if (!isPathPresentNoFollow(current)) {
+            mkdirSync(current, { mode: 0o700 });
+        }
+        if (!isRealDirectory(current)) {
+            throw new Error(
+                `Development state path must be a real directory: ${current}`
+            );
+        }
+        chmodSync(current, 0o700);
+    }
+}
+
 function hasTable(database: Database, tableName: string): boolean {
     return Boolean(
         database
@@ -643,7 +719,9 @@ function didCopyDevelopmentReleases(sourceRoot: string, targetRoot: string): boo
     }
     const previousCommit = releaseCommitForSlot(sourceRoot, "previous");
     const releaseDirectory = path.join(targetRoot, "releases");
-    mkdirSync(releaseDirectory, { mode: 0o700, recursive: true });
+    if (!isRealDirectory(targetRoot) || !isRealDirectory(releaseDirectory)) {
+        throw new Error("Development release target must use real directories");
+    }
     const copiedPaths: string[] = [];
     const commits = new Set(
         [currentCommit, previousCommit].filter((value): value is string => Boolean(value))
@@ -773,12 +851,10 @@ export function prepareDevelopmentState(
     config: DevelopmentStackConfig
 ): DevelopmentStateResult {
     assertOrCreateStateOwnership(config);
-    mkdirSync(config.openClawClientHome, { mode: 0o700, recursive: true });
-    mkdirSync(config.openClawHome, { mode: 0o700, recursive: true });
-    mkdirSync(path.join(config.releaseRoot, "releases"), {
-        mode: 0o700,
-        recursive: true,
-    });
+    ensurePrivateStateDirectory(config, config.openClawClientHome);
+    ensurePrivateStateDirectory(config, config.openClawHome);
+    ensurePrivateStateDirectory(config, config.releaseRoot);
+    ensurePrivateStateDirectory(config, path.join(config.releaseRoot, "releases"));
     developmentSecretEncryptionKey(config);
     const workspace = prepareDevelopmentOpenClawSnapshot({
         configSource: config.openClawConfigSource,
@@ -790,6 +866,9 @@ export function prepareDevelopmentState(
     if (isPathPresentNoFollow(config.databasePath)) {
         if (!isRealRegularFile(config.databasePath)) {
             throw new Error("Development database must be a real regular file");
+        }
+        if (config.sourceWebAuthnRpId !== config.rpId) {
+            scrubDevelopmentDatabase(config.databasePath, false);
         }
         database = "reused";
     } else if (config.databaseSource) {
@@ -804,8 +883,12 @@ export function prepareDevelopmentState(
     }
 
     let releases: DevelopmentStateResult["releases"];
-    if (isPathPresentNoFollow(path.join(config.releaseRoot, "current"))) {
+    const currentRelease = releaseCommitForSlot(config.releaseRoot, "current");
+    const previousRelease = releaseCommitForSlot(config.releaseRoot, "previous");
+    if (currentRelease) {
         releases = "reused";
+    } else if (previousRelease) {
+        throw new Error("Development release previous slot requires a current slot");
     } else if (config.releaseSource) {
         releases = didCopyDevelopmentReleases(config.releaseSource, config.releaseRoot)
             ? "copied"

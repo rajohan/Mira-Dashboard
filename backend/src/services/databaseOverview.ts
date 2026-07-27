@@ -636,6 +636,7 @@ function isDatabaseOverviewSnapshot(value: unknown): value is DatabaseOverviewSn
         typeof candidate.overview === "object" &&
         Array.isArray(candidate.databases) &&
         Array.isArray(candidate.deadTuples) &&
+        Array.isArray(candidate.bloatEstimates) &&
         Array.isArray(candidate.topQueries) &&
         Array.isArray(candidate.pgbouncerPools) &&
         Array.isArray(candidate.pgbouncerStats)
