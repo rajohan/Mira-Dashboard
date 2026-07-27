@@ -107,7 +107,7 @@ must still return `401`.
 ## Rollback
 
 Normal activation automatically rolls back on restart or commit-bound readiness
-failure. The preferred manual path is **Pull requests → Production releases →
+failure. The preferred manual path is **Delivery → Production releases →
 Roll back**, which uses the same exclusive release lock, persistent job,
 detached guardian, web/worker restart, commit-bound readiness, and automatic
 restoration of the original release if the rollback target fails.

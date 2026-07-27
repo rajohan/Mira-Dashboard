@@ -145,13 +145,13 @@ import {
 import { OpenClawSocketProvider, useOpenClawSocket } from "../hooks/useOpenClawSocket";
 import { OPS_ACTIONS, useExecJob, useStartOpsAction } from "../hooks/useOpsActions";
 import {
-    pullRequestKeys,
+    deliveryKeys,
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useDashboardDeployments,
     useDashboardReleaseStatus,
     useDeployDashboard,
     useProductionCheckout,
-    usePullRequestDeployments,
     usePullRequestPreview,
     usePullRequests,
     useRejectPullRequest,
@@ -159,7 +159,7 @@ import {
     useStartPullRequestPreview,
     useStopPullRequestPreview,
     useUpdatePullRequestBranch,
-} from "../hooks/usePullRequests";
+} from "../hooks/useDelivery";
 import { hasQuotaStatus, useQuotas } from "../hooks/useQuotas";
 import {
     scheduledJobKeys,
@@ -664,6 +664,8 @@ describe("Mira Dashboard frontend behavior", () => {
         expect(Login).toBeTypeOf("function");
         expect(DashboardDevtools).toBeTypeOf("function");
         expect(router.navigate).toBeTypeOf("function");
+        expect(Object.keys(router.routesByPath)).toContain("/delivery");
+        expect(Object.keys(router.routesByPath)).not.toContain("/pull-requests");
         expect(normalizeChatSearch({ session: " agent:ops:main:heartbeat " })).toEqual({
             session: "agent:ops:main:heartbeat",
         });
@@ -900,6 +902,10 @@ describe("Mira Dashboard frontend behavior", () => {
             });
 
             expect(screen.getByText("v2026.6.9")).toBeInTheDocument();
+            expect(screen.getByRole("link", { name: /Delivery/u })).toHaveAttribute(
+                "href",
+                "/delivery"
+            );
             const systemStatus = screen.getByRole("button", {
                 name: /System status: .+\. Open details/u,
             });
@@ -3310,7 +3316,7 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(pullRequests.result.current.data?.[0]?.number).toBe(189)
         );
 
-        const deployments = renderHookWithQueryClient(() => usePullRequestDeployments());
+        const deployments = renderHookWithQueryClient(() => useDashboardDeployments());
         await waitFor(() =>
             expect(deployments.result.current.data?.[0]?.id).toBe("deploy-1")
         );
@@ -4738,7 +4744,7 @@ describe("Mira Dashboard frontend behavior", () => {
             status: "running",
         });
         expect(
-            startPreview.queryClient.getQueryData(pullRequestKeys.preview())
+            startPreview.queryClient.getQueryData(deliveryKeys.preview())
         ).toMatchObject({
             number: 189,
             status: "running",
@@ -4752,7 +4758,7 @@ describe("Mira Dashboard frontend behavior", () => {
             status: "stopped",
         });
         expect(
-            stopPreview.queryClient.getQueryData(pullRequestKeys.preview())
+            stopPreview.queryClient.getQueryData(deliveryKeys.preview())
         ).toMatchObject({
             number: 189,
             status: "stopped",

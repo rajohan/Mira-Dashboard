@@ -20,7 +20,7 @@ cannot infer.
 | `/jobs`          | `Jobs.tsx`              | scheduled jobs and run history              |
 | `/reports`       | `Reports.tsx`           | reports list/detail APIs                    |
 | `/notifications` | notification bell/modal | notification APIs                           |
-| `/pull-requests` | `PullRequests.tsx`      | GitHub, PR dev, release/deploy services     |
+| `/delivery`      | `Delivery.tsx`          | GitHub, PR dev, release/deploy services     |
 | `/docker`        | `Docker.tsx`            | Docker inventory/updater APIs               |
 | `/files`         | `Files.tsx`             | workspace file APIs                         |
 | `/logs`          | `Logs.tsx`              | log file APIs                               |

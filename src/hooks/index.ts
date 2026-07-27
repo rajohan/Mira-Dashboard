@@ -117,17 +117,17 @@ export type {
     PullRequestPreviewStatus,
     PullRequestSummary,
     WorktreeCleanupResult,
-} from "./usePullRequests";
+} from "./useDelivery";
 export {
-    PULL_REQUEST_NAV_REFRESH_MS,
-    PULL_REQUEST_PAGE_REFRESH_MS,
-    pullRequestKeys,
+    DELIVERY_NAV_REFRESH_MS,
+    DELIVERY_PAGE_REFRESH_MS,
+    deliveryKeys,
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useDashboardDeployments,
     useDashboardReleaseStatus,
     useDeployDashboard,
     useProductionCheckout,
-    usePullRequestDeployments,
     usePullRequestPreview,
     usePullRequests,
     useRejectPullRequest,
@@ -135,7 +135,7 @@ export {
     useStartPullRequestPreview,
     useStopPullRequestPreview,
     useUpdatePullRequestBranch,
-} from "./usePullRequests";
+} from "./useDelivery";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";
 export type { ReportItem, ReportStatus, ReportType } from "./useReports";
 export {

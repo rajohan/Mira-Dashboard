@@ -133,7 +133,7 @@ the frontend proxy strips non-dev Dashboard cookies before forwarding requests.
 
 ## Managed PR Dev
 
-The Pull requests page exposes one shared **PR dev** slot:
+The Delivery page exposes one shared **PR dev** slot:
 
 - Only PRs targeting `main` from the configured trusted-author allowlist can
   start.

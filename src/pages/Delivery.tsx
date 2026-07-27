@@ -3,7 +3,6 @@ import {
     ExternalLink,
     GitBranch,
     GitMerge,
-    GitPullRequest,
     Play,
     Rocket,
     Square,
@@ -15,8 +14,8 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
-import { ProductionReleasesCard } from "../components/features/pullRequests/ProductionReleasesCard";
-import { PullRequestPreviewCard } from "../components/features/pullRequests/PullRequestPreviewCard";
+import { ProductionReleasesCard } from "../components/features/delivery/ProductionReleasesCard";
+import { PullRequestDevelopmentCard } from "../components/features/delivery/PullRequestDevelopmentCard";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -38,7 +37,7 @@ import {
     useDashboardReleaseStatus,
     useDeployDashboard,
     useProductionCheckout,
-    usePullRequestDeployments,
+    useDashboardDeployments,
     usePullRequestPreview,
     usePullRequests,
     useRejectPullRequest,
@@ -631,15 +630,15 @@ function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
     );
 }
 
-/** Renders the pull requests UI. */
-export function PullRequests() {
+/** Renders Dashboard delivery operations. */
+export function Delivery() {
     const {
         data: pullRequests = [],
         isLoading,
         error,
         refetch: refetchPullRequests,
     } = usePullRequests();
-    const { data: deployments = [] } = usePullRequestDeployments();
+    const { data: deployments = [] } = useDashboardDeployments();
     const { data: productionCheckout, error: productionCheckoutError } =
         useProductionCheckout();
     const { data: releaseStatus, error: releaseStatusError } =
@@ -988,13 +987,12 @@ export function PullRequests() {
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                         <h2 className="flex items-center gap-2 text-xl font-semibold text-primary-100">
-                            <GitPullRequest className="size-5" />
-                            Pull requests
+                            <Rocket className="size-5" />
+                            Delivery
                         </h2>
                         <p className="mt-1 max-w-2xl text-sm text-primary-400">
-                            Review or temporarily preview open rajohan/Mira-Dashboard pull
-                            requests. Merge actions are enabled after review approval,
-                            passing CI, and a safe production checkout.
+                            Review and run trusted pull requests, manage production
+                            releases, and deploy the latest safe main checkout.
                         </p>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:justify-items-end">
@@ -1035,7 +1033,7 @@ export function PullRequests() {
                     </Card>
                 ) : undefined}
 
-                <PullRequestPreviewCard
+                <PullRequestDevelopmentCard
                     error={previewStatusError ?? undefined}
                     isStopPending={isActionPending}
                     onStop={

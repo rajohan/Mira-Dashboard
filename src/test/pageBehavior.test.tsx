@@ -43,7 +43,7 @@ import { Files } from "../pages/Files";
 import { defaultDisableUntilDraft, Jobs } from "../pages/Jobs";
 import { Logs } from "../pages/Logs";
 import { Moltbook } from "../pages/Moltbook";
-import { PullRequests } from "../pages/PullRequests";
+import { Delivery } from "../pages/Delivery";
 import { Sessions } from "../pages/Sessions";
 import {
     errorMessage,
@@ -2147,7 +2147,7 @@ describe("Mira Dashboard pages", () => {
             [createElement(Jobs), "Heartbeat"],
             [createElement(Logs), "openclaw.log", { withSocket: true }],
             [createElement(Moltbook), "Dashboard testing"],
-            [createElement(PullRequests), "Expand backend coverage"],
+            [createElement(Delivery), "Expand backend coverage"],
             [createElement(Settings), "Two-step login", { withRouter: true }],
             [createElement(Terminal), "~"],
         ];
@@ -2807,9 +2807,10 @@ describe("Mira Dashboard pages", () => {
 
     it("drives pull request review, branch update, deploy, merge, and reject flows", async () => {
         const user = userEvent.setup();
-        const view = renderPage(createElement(PullRequests));
+        const view = renderPage(createElement(Delivery));
 
         await waitFor(() => {
+            expect(screen.getByRole("heading", { name: "Delivery" })).toBeInTheDocument();
             expect(screen.getByText("Expand backend coverage")).toBeInTheDocument();
             expect(screen.getByText("Bump dashboard dependency")).toBeInTheDocument();
             expect(screen.getByText("Deploy dashboard")).toBeInTheDocument();
@@ -2922,7 +2923,7 @@ describe("Mira Dashboard pages", () => {
             writable: true,
         });
 
-        const view = renderPage(createElement(PullRequests));
+        const view = renderPage(createElement(Delivery));
 
         const previewStatus = await screen.findByText(
             "PR dev status is unavailable: bun executable must resolve to an absolute path"
@@ -3005,7 +3006,7 @@ describe("Mira Dashboard pages", () => {
             writable: true,
         });
 
-        const view = renderPage(createElement(PullRequests));
+        const view = renderPage(createElement(Delivery));
 
         await waitFor(() => {
             expect(screen.getByText("Trusted PR dev")).toBeInTheDocument();
@@ -3077,7 +3078,7 @@ describe("Mira Dashboard pages", () => {
             writable: true,
         });
 
-        const view = renderPage(createElement(PullRequests));
+        const view = renderPage(createElement(Delivery));
 
         await waitFor(() => {
             expect(screen.getByText("GitHub listing unavailable")).toBeInTheDocument();
@@ -3133,7 +3134,7 @@ describe("Mira Dashboard pages", () => {
             writable: true,
         });
 
-        const view = renderPage(createElement(PullRequests));
+        const view = renderPage(createElement(Delivery));
 
         await waitFor(() => {
             expect(screen.getByText("No Mira-authored PRs waiting")).toBeInTheDocument();
@@ -3174,7 +3175,7 @@ describe("Mira Dashboard pages", () => {
             writable: true,
         });
 
-        const view = renderPage(createElement(PullRequests));
+        const view = renderPage(createElement(Delivery));
 
         await waitFor(() => {
             expect(screen.getByText("Dirty checkout")).toBeInTheDocument();
@@ -3248,7 +3249,7 @@ describe("Mira Dashboard pages", () => {
             writable: true,
         });
 
-        const view = renderPage(createElement(PullRequests));
+        const view = renderPage(createElement(Delivery));
 
         await waitFor(() => {
             expect(screen.getByText("Refresh stale check handling")).toBeInTheDocument();

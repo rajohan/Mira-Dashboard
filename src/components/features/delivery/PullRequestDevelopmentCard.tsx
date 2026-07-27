@@ -45,7 +45,7 @@ function previewLabel(status: PullRequestPreviewStatus["status"]): string {
 }
 
 /** Renders the global single-slot trusted PR development status. */
-export function PullRequestPreviewCard({
+export function PullRequestDevelopmentCard({
     error,
     isStopPending = false,
     onStop,
