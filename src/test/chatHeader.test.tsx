@@ -62,6 +62,10 @@ describe("ChatHeader", () => {
         );
         expect(screen.getByLabelText("Thinking: medium")).toHaveTextContent("medium");
         expect(screen.getByLabelText("Speed: Auto")).toHaveTextContent("Auto");
+        expect(screen.getByTestId("chat-session-badges").parentElement).toHaveClass(
+            "flex-col",
+            "sm:flex-row"
+        );
         expect(screen.queryByText(/MAIN/u)).not.toBeInTheDocument();
         expect(screen.queryByText(/gpt-5\.6-sol · Context:/u)).not.toBeInTheDocument();
 

@@ -1,5 +1,6 @@
 import { registerBackupScheduledJobs } from "./backups.ts";
 import {
+    DATABASE_SUMMARY_KEY,
     enqueueDatabaseSummaryRefresh,
     registerCacheRefreshScheduledJobs,
 } from "./cacheRefresh.ts";
@@ -9,6 +10,7 @@ import { registerExecExecutionActions } from "./execJobs.ts";
 import { registerGitHygieneScheduledJobs } from "./gitHygiene.ts";
 import { registerLogRotationScheduledJobs } from "./logRotation.ts";
 import { registerOpenClawExecutionActions } from "./openclawActions.ts";
+import { registerPullRequestPreviewExecutionActions } from "./pullRequestPreviews.ts";
 import { registerPullRequestExecutionActions } from "./pullRequests.ts";
 import {
     startScheduledJobExecutor,
@@ -27,6 +29,15 @@ const workerState: {
     stopGeneration: 0,
 };
 
+export type DashboardJobProfile = "full" | "isolated";
+
+/** Selects whether the worker may register host-control execution actions. */
+export function dashboardJobProfile(
+    environment: Record<string, string | undefined> = process.env
+): DashboardJobProfile {
+    return environment.MIRA_DASHBOARD_JOB_PROFILE === "isolated" ? "isolated" : "full";
+}
+
 function trackWorkerStop(operation: () => Promise<void>): Promise<void> {
     const generation = ++workerState.stopGeneration;
     const pendingStop = (async () => {
@@ -42,12 +53,21 @@ function trackWorkerStop(operation: () => Promise<void>): Promise<void> {
     return pendingStop;
 }
 
-function registerScheduledActions(): void {
-    registerBackupScheduledJobs();
+function registerScheduledActions(profile = dashboardJobProfile()): void {
     registerCacheRefreshScheduledJobs({
+        ...(profile === "isolated" && {
+            allowedKeys: [DATABASE_SUMMARY_KEY],
+        }),
         refreshDatabaseOnStartup: true,
         seedStrategy: "queue",
     });
+    registerSqliteMaintenanceScheduledJob({
+        enqueueDatabaseSummaryRefresh,
+    });
+    if (profile === "isolated") {
+        return;
+    }
+    registerBackupScheduledJobs();
     registerDockerExecutionActions();
     registerDockerUpdaterScheduledJobs();
     registerExecExecutionActions();
@@ -55,9 +75,7 @@ function registerScheduledActions(): void {
     registerLogRotationScheduledJobs();
     registerOpenClawExecutionActions();
     registerPullRequestExecutionActions();
-    registerSqliteMaintenanceScheduledJob({
-        enqueueDatabaseSummaryRefresh,
-    });
+    registerPullRequestPreviewExecutionActions();
 }
 
 /** Starts the persistent queue scheduler and its single-concurrency executor. */

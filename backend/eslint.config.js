@@ -19,7 +19,13 @@ const tsEslintRecommended = tsEslint.configs.recommended.map((config) => ({
 
 const eslintConfig = defineConfig(
     {
-        ignores: ["node_modules/**", "coverage/**", "dist/**", "eslint.config.js"],
+        ignores: [
+            "node_modules/**",
+            "coverage/**",
+            "data/**",
+            "dist/**",
+            "eslint.config.js",
+        ],
     },
     eslintConfigs.configs.recommended,
     tsEslintRecommended,

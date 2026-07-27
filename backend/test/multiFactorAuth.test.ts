@@ -605,6 +605,14 @@ describe("Dashboard multi-factor authentication", () => {
         expect(
             requiresRecentMfa(
                 new Request(
+                    "https://dashboard.example/api/pull-requests/releases/rollback",
+                    { method: "POST" }
+                )
+            )
+        ).toBe(true);
+        expect(
+            requiresRecentMfa(
+                new Request(
                     "https://dashboard.example/api/config-files/openclaw%2ejson?reveal=1"
                 )
             )

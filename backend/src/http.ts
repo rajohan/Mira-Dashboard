@@ -2,8 +2,28 @@ import type { Server } from "bun";
 
 import { type AuthSession, type AuthUser, getAuthSessionFromSessionId } from "./auth.ts";
 
-const SESSION_COOKIE = "mira_dashboard_session";
-const PENDING_LOGIN_COOKIE = "mira_dashboard_pending_login";
+const DEFAULT_COOKIE_NAMESPACE = "mira_dashboard";
+const COOKIE_NAMESPACE_PATTERN = /^[a-z0-9_]{1,48}$/u;
+
+/** Resolves stable cookie names so dev and production sessions can share a host safely. */
+export function resolveDashboardCookieNames(
+    environment: Record<string, string | undefined> = process.env
+): { pendingLogin: string; session: string } {
+    const namespace =
+        environment.MIRA_DASHBOARD_COOKIE_NAMESPACE?.trim() || DEFAULT_COOKIE_NAMESPACE;
+    if (!COOKIE_NAMESPACE_PATTERN.test(namespace)) {
+        throw new TypeError(
+            "MIRA_DASHBOARD_COOKIE_NAMESPACE must contain 1-48 lowercase letters, digits, or underscores"
+        );
+    }
+    return {
+        pendingLogin: `${namespace}_pending_login`,
+        session: `${namespace}_session`,
+    };
+}
+
+const { pendingLogin: PENDING_LOGIN_COOKIE, session: SESSION_COOKIE } =
+    resolveDashboardCookieNames();
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const PENDING_LOGIN_TTL_MS = 5 * 60_000;
 const DEFAULT_JSON_BODY_LIMIT = 2 * 1024 * 1024;

@@ -17,6 +17,7 @@ import {
 } from "../releaseDeployment.ts";
 import {
     assertDashboardReleaseHostRuntimeCompatible,
+    type ManagedDashboardRelease,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
 } from "../releaseManager.ts";
@@ -27,6 +28,10 @@ import {
     registerExpiredJobExecutionHandler,
     registerQueuedJobCancellationHandler,
 } from "./jobExecutionQueue.ts";
+import {
+    isPullRequestPreviewAuthorAllowed,
+    resolvePullRequestPreviewAllowedAuthors,
+} from "./pullRequestPreviewPolicy.ts";
 import {
     successfulJobExecutionOutput,
     waitForJobExecution,
@@ -68,6 +73,9 @@ const RECENT_DEPLOYMENTS_LIMIT = 10;
 const MAX_BUFFER = 20 * 1024 * 1024;
 const MAX_JSON_LINE_LENGTH = 1024 * 1024;
 const PR_LIST_TIMEOUT_MS = 180_000;
+const PUBLIC_PR_CACHE_MS = 2 * 60 * 1000;
+const PUBLIC_PR_FAILURE_CACHE_MS = 30_000;
+const PUBLIC_GITHUB_API_TIMEOUT_MS = 15_000;
 const DEPLOYMENT_RESTART_STATUS_POLL_MS = 1000;
 const DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEPLOYMENT_WORKER_STABILITY_SECONDS =
@@ -75,7 +83,12 @@ const DEPLOYMENT_WORKER_STABILITY_SECONDS =
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
+const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
+const publicPullRequestCache: {
+    failure?: { expiresAt: number; message: string };
+    value?: { expiresAt: number; pullRequests: PullRequestSummary[] };
+} = {};
 
 function resolveExecutableFromPath(executable: string): string | undefined {
     if (path.isAbsolute(executable)) {
@@ -130,7 +143,7 @@ interface PullRequestAuthor {
 }
 
 /** Represents pull request summary. */
-interface PullRequestSummary {
+export interface PullRequestSummary {
     number: number;
     title: string;
     body?: string;
@@ -144,6 +157,7 @@ interface PullRequestSummary {
     headRefOid?: string;
     mergeable?: string;
     mergeStateStatus?: string;
+    previewEligible?: boolean;
     reviewDecision?: string;
     reviewerApproved?: boolean;
     canReviewerApprove?: boolean;
@@ -167,6 +181,19 @@ interface PullRequestReviewConnection {
     nodes?: PullRequestReview[];
 }
 
+interface PublicGitHubPullRequest {
+    base?: { ref?: unknown };
+    body?: unknown;
+    created_at?: unknown;
+    draft?: unknown;
+    head?: { ref?: unknown; sha?: unknown };
+    html_url?: unknown;
+    number?: unknown;
+    title?: unknown;
+    updated_at?: unknown;
+    user?: { login?: unknown };
+}
+
 /** Represents deployment job. */
 interface DeploymentJob {
     id: string;
@@ -181,6 +208,29 @@ interface DeploymentJob {
     stderr?: string;
 }
 
+/** Represents one immutable Dashboard release exposed to the operator UI. */
+export interface DashboardReleaseSummary {
+    builtAt: string;
+    commitSha: string;
+    commitTitle: string;
+    commitUrl: string;
+    schema: {
+        maximumCompatible: number;
+        minimumCompatible: number;
+        target: number;
+    };
+}
+
+/** Represents the active and immediately rollback-capable release slots. */
+export interface DashboardReleaseStatus {
+    current?: DashboardReleaseSummary;
+    previous?: DashboardReleaseSummary;
+    rollback: {
+        available: boolean;
+        reason?: string;
+    };
+}
+
 /** Represents production checkout status. */
 interface ProductionCheckoutStatus {
     root: string;
@@ -189,6 +239,7 @@ interface ProductionCheckoutStatus {
     branch: string;
     expectedBranch: string;
     head: string;
+    headCommit: string;
     upstream?: string;
     isClean: boolean;
     isProductionRoot: boolean;
@@ -264,6 +315,10 @@ interface DeploymentJobRow {
     stderr: string | null;
 }
 
+function dashboardCommitUrl(commitSha: string): string {
+    return `https://github.com/${DASHBOARD_REPO}/commit/${encodeURIComponent(commitSha)}`;
+}
+
 function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
     const commit = row.commit_sha ?? undefined;
     return {
@@ -273,9 +328,7 @@ function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
         updatedAt: row.updated_at,
         commit,
         commitTitle: row.commit_title ?? undefined,
-        commitUrl: commit
-            ? `https://github.com/${DASHBOARD_REPO}/commit/${encodeURIComponent(commit)}`
-            : undefined,
+        commitUrl: commit ? dashboardCommitUrl(commit) : undefined,
         note: row.note ?? undefined,
         stdout: row.stdout ?? undefined,
         stderr: row.stderr ?? undefined,
@@ -320,6 +373,7 @@ interface DeploymentLockRow {
 }
 
 interface DeploymentLockExecutionRow {
+    action_key: string;
     status: JobExecution["status"];
 }
 
@@ -344,12 +398,12 @@ function readDeploymentLockExecution(
 ): DeploymentLockExecutionRow | undefined {
     return database
         .prepare(
-            `SELECT status
+            `SELECT action_key, status
              FROM job_executions
              WHERE json_valid(payload_json)
                AND (
                    (
-                       action_key = 'dashboard.deploy'
+                       action_key IN ('dashboard.deploy', 'dashboard.rollback')
                        AND json_extract(payload_json, '$.deploymentId') = ?
                    )
                    OR (
@@ -363,7 +417,7 @@ function readDeploymentLockExecution(
         .get(lockOwner, lockOwner) as DeploymentLockExecutionRow | undefined;
 }
 
-/** Releases the active deploy lock if it still belongs to the given job. */
+/** Releases the active release lock if it still belongs to the given job. */
 function releaseDeploymentLock(jobId: string): void {
     try {
         database
@@ -379,7 +433,10 @@ function cleanupTerminatedDeploymentExecution(
     timestamp: string,
     note: string
 ): void {
-    if (execution.actionKey === "dashboard.deploy") {
+    if (
+        execution.actionKey === "dashboard.deploy" ||
+        execution.actionKey === "dashboard.rollback"
+    ) {
         const deploymentId = execution.payload.deploymentId;
         if (typeof deploymentId !== "string" || deploymentId.trim() === "") {
             return;
@@ -414,7 +471,9 @@ function cleanupQueuedDeploymentCancellation(
     cleanupTerminatedDeploymentExecution(
         execution,
         timestamp,
-        "Deploy cancelled before execution"
+        execution.actionKey === "dashboard.rollback"
+            ? "Rollback cancelled before execution"
+            : "Deploy cancelled before execution"
     );
 }
 
@@ -422,9 +481,13 @@ function cleanupExpiredDeploymentExecution(execution: JobExecution): void {
     cleanupTerminatedDeploymentExecution(
         execution,
         execution.finishedAt ?? dateToISOString(new Date()),
-        execution.status === "cancelled"
-            ? "Deploy cancelled after its worker lease expired"
-            : "Deploy failed after its worker lease expired"
+        execution.actionKey === "dashboard.rollback"
+            ? execution.status === "cancelled"
+                ? "Rollback cancelled after its worker lease expired"
+                : "Rollback failed after its worker lease expired"
+            : execution.status === "cancelled"
+              ? "Deploy cancelled after its worker lease expired"
+              : "Deploy failed after its worker lease expired"
     );
 }
 
@@ -432,6 +495,10 @@ function cleanupExpiredDeploymentExecution(execution: JobExecution): void {
 export function registerPullRequestJobLifecycleHandlers(): void {
     registerQueuedJobCancellationHandler(
         "dashboard.deploy",
+        cleanupQueuedDeploymentCancellation
+    );
+    registerQueuedJobCancellationHandler(
+        "dashboard.rollback",
         cleanupQueuedDeploymentCancellation
     );
     registerQueuedJobCancellationHandler(
@@ -444,6 +511,10 @@ export function registerPullRequestJobLifecycleHandlers(): void {
     );
     registerExpiredJobExecutionHandler(
         "dashboard.deploy",
+        cleanupExpiredDeploymentExecution
+    );
+    registerExpiredJobExecutionHandler(
+        "dashboard.rollback",
         cleanupExpiredDeploymentExecution
     );
     registerExpiredJobExecutionHandler("github.merge", cleanupExpiredDeploymentExecution);
@@ -461,12 +532,17 @@ function ensureNoActiveDeployment(): void {
         const activeJob = readDeploymentJob(activeJobId);
         const lockExecution = readDeploymentLockExecution(activeJobId);
         if (lockExecution?.status === "queued" || lockExecution?.status === "running") {
-            throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
+            throw new Error(
+                `Dashboard release action already in progress (${activeJobId})`
+            );
         }
         if (lockExecution && activeJob?.status === "building") {
             writeDeploymentJob({
                 ...activeJob,
-                note: "Deploy execution ended before build completion",
+                note:
+                    lockExecution.action_key === "dashboard.rollback"
+                        ? "Rollback execution ended before build completion"
+                        : "Deploy execution ended before build completion",
                 status: "failed",
                 updatedAt: dateToISOString(new Date()),
             });
@@ -475,21 +551,25 @@ function ensureNoActiveDeployment(): void {
         }
         if (!activeJob) {
             if (!lockExecution && !isDeploymentLockStale(activeLock)) {
-                throw new Error(`Dashboard deploy already in progress (${activeJobId})`);
+                throw new Error(
+                    `Dashboard release action already in progress (${activeJobId})`
+                );
             }
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         } else if (
             ACTIVE_DEPLOYMENT_STATUSES.has(activeJob.status) &&
             !isDeploymentJobStale(activeJob)
         ) {
-            throw new Error(`Dashboard deploy already in progress (${activeJob.id})`);
+            throw new Error(
+                `Dashboard release action already in progress (${activeJob.id})`
+            );
         } else {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
         }
     }
 }
 
-/** Acquires the active deploy lock for a new deployment job. */
+/** Acquires the active release lock for a deployment or rollback job. */
 function acquireDeploymentLock(jobId: string): void {
     ensureNoActiveDeployment();
     try {
@@ -500,7 +580,7 @@ function acquireDeploymentLock(jobId: string): void {
             .run(jobId, dateToISOString(new Date()));
     } catch (error) {
         if (error instanceof Error && /constraint/i.test(error.message)) {
-            throw new Error("Dashboard deploy already in progress", {
+            throw new Error("Dashboard release action already in progress", {
                 cause: error,
             });
         }
@@ -513,7 +593,7 @@ function refreshDeploymentLockOwner(jobId: string): void {
         .prepare("UPDATE deployment_lock SET updated_at = ? WHERE id = 1 AND job_id = ?")
         .run(dateToISOString(new Date()), jobId);
     if (result.changes !== 1) {
-        throw new Error("Dashboard deploy lock ownership was lost");
+        throw new Error("Dashboard release lock ownership was lost");
     }
 }
 
@@ -550,6 +630,46 @@ export function readDeploymentJobs(): DeploymentJob[] {
             )
             .all(RECENT_DEPLOYMENTS_LIMIT) as unknown as DeploymentJobRow[]
     ).map((row) => mapDeploymentJob(row));
+}
+
+function dashboardReleaseSummary(
+    release: ManagedDashboardRelease
+): DashboardReleaseSummary {
+    return {
+        builtAt: release.manifest.builtAt,
+        commitSha: release.commitSha,
+        commitTitle: release.manifest.commitTitle,
+        commitUrl: dashboardCommitUrl(release.commitSha),
+        schema: {
+            maximumCompatible: release.manifest.schema.maximumCompatible,
+            minimumCompatible: release.manifest.schema.minimumCompatible,
+            target: release.manifest.schema.target,
+        },
+    };
+}
+
+/** Reads the managed production release slots without exposing host paths. */
+export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatus> {
+    const state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
+    const current = state.current ? dashboardReleaseSummary(state.current) : undefined;
+    const previous = state.previous ? dashboardReleaseSummary(state.previous) : undefined;
+    const isRollbackAvailable =
+        current !== undefined &&
+        previous !== undefined &&
+        current.commitSha !== previous.commitSha;
+
+    return {
+        current,
+        previous,
+        rollback: {
+            available: isRollbackAvailable,
+            ...(!isRollbackAvailable && {
+                reason: current
+                    ? "No distinct previous release is available"
+                    : "No active managed release is available",
+            }),
+        },
+    };
 }
 
 /** Performs trim output. */
@@ -591,11 +711,7 @@ function buildGithubCommandEnvironment(githubToken: string): NodeJS.ProcessEnv {
 
 /** Builds command environment. */
 function buildCommandEnvironment(): NodeJS.ProcessEnv {
-    const githubToken =
-        process.env.MIRA_GITHUB_TOKEN?.trim() ||
-        process.env.GH_TOKEN?.trim() ||
-        process.env.GITHUB_TOKEN?.trim() ||
-        "";
+    const githubToken = configuredGithubReadToken();
     const environment = buildGithubCommandEnvironment(githubToken);
     const bunBinDirectory = path.join(
         nonEmptyEnvironmentFallback("HOME", "/home/ubuntu"),
@@ -606,6 +722,15 @@ function buildCommandEnvironment(): NodeJS.ProcessEnv {
         .filter(Boolean)
         .join(path.delimiter);
     return environment;
+}
+
+function configuredGithubReadToken(): string {
+    return (
+        process.env.MIRA_GITHUB_TOKEN?.trim() ||
+        process.env.GH_TOKEN?.trim() ||
+        process.env.GITHUB_TOKEN?.trim() ||
+        ""
+    );
 }
 
 /** Builds reviewer command environment. */
@@ -663,12 +788,145 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
     const rest = { ...pr };
     delete rest.latestOpinionatedReviews;
     delete rest.reviews;
+    const previewAllowedAuthors = resolvePullRequestPreviewAllowedAuthors(
+        process.env.MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS
+    );
 
     return {
         ...rest,
-        reviewerApproved: isPullRequestReviewApproved(pr),
         canReviewerApprove: canReviewerApprove(pr),
+        previewEligible:
+            pr.baseRefName === DEFAULT_BASE &&
+            isPullRequestPreviewAuthorAllowed(pr.author?.login, previewAllowedAuthors) &&
+            typeof pr.headRefOid === "string" &&
+            FULL_COMMIT_SHA_PATTERN.test(pr.headRefOid),
+        reviewerApproved: isPullRequestReviewApproved(pr),
     };
+}
+
+/** Parses the bounded public REST shape used only by credential-free dev previews. */
+export function parsePublicGithubPullRequests(value: unknown): PullRequestSummary[] {
+    if (!Array.isArray(value) || value.length > 100) {
+        throw new Error("GitHub public pull request response is invalid");
+    }
+    return value.map((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            throw new Error("GitHub public pull request response is invalid");
+        }
+        const pullRequest = entry as PublicGitHubPullRequest;
+        if (
+            !Number.isSafeInteger(pullRequest.number) ||
+            Number(pullRequest.number) <= 0 ||
+            typeof pullRequest.title !== "string" ||
+            typeof pullRequest.html_url !== "string" ||
+            typeof pullRequest.head?.ref !== "string" ||
+            typeof pullRequest.head.sha !== "string" ||
+            !FULL_COMMIT_SHA_PATTERN.test(pullRequest.head.sha) ||
+            typeof pullRequest.base?.ref !== "string" ||
+            typeof pullRequest.user?.login !== "string" ||
+            typeof pullRequest.created_at !== "string" ||
+            typeof pullRequest.updated_at !== "string" ||
+            typeof pullRequest.draft !== "boolean"
+        ) {
+            throw new Error("GitHub public pull request response is invalid");
+        }
+        return normalizePullRequest({
+            author: { login: pullRequest.user.login },
+            baseRefName: pullRequest.base.ref,
+            body: typeof pullRequest.body === "string" ? pullRequest.body : undefined,
+            createdAt: pullRequest.created_at,
+            headRefName: pullRequest.head.ref,
+            headRefOid: pullRequest.head.sha,
+            isDraft: pullRequest.draft,
+            number: Number(pullRequest.number),
+            statusCheckRollup: [],
+            title: pullRequest.title,
+            updatedAt: pullRequest.updated_at,
+            url: pullRequest.html_url,
+        });
+    });
+}
+
+async function readBoundedJsonResponse(
+    response: Response,
+    maximumBytes: number
+): Promise<unknown> {
+    if (!response.body) {
+        throw new Error("GitHub public pull request response was empty");
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let receivedBytes = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            receivedBytes += value.byteLength;
+            if (receivedBytes > maximumBytes) {
+                await reader.cancel();
+                throw new Error("GitHub public pull request response was too large");
+            }
+            chunks.push(value);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+    const body = Buffer.concat(chunks, receivedBytes).toString("utf8");
+    return JSON.parse(body) as unknown;
+}
+
+async function listPublicDashboardPullRequests(): Promise<PullRequestSummary[]> {
+    const now = Date.now();
+    const cachedPullRequests = publicPullRequestCache.value;
+    if (cachedPullRequests && cachedPullRequests.expiresAt > now) {
+        return cachedPullRequests.pullRequests;
+    }
+    const cachedFailure = publicPullRequestCache.failure;
+    if (cachedFailure && cachedFailure.expiresAt > now) {
+        throw new Error(cachedFailure.message);
+    }
+    try {
+        const response = await fetch(
+            `https://api.github.com/repos/${DASHBOARD_REPO}/pulls?state=open&base=${DEFAULT_BASE}&per_page=100`,
+            {
+                headers: {
+                    Accept: "application/vnd.github+json",
+                    "User-Agent": "Mira-Dashboard-development-preview",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                signal: AbortSignal.timeout(PUBLIC_GITHUB_API_TIMEOUT_MS),
+            }
+        );
+        if (!response.ok) {
+            throw new Error(
+                `GitHub public pull request request failed with status ${response.status}`
+            );
+        }
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        if (contentLength > MAX_BUFFER) {
+            throw new Error("GitHub public pull request response was too large");
+        }
+        const pullRequests = parsePublicGithubPullRequests(
+            await readBoundedJsonResponse(response, MAX_BUFFER)
+        );
+        publicPullRequestCache.value = {
+            expiresAt: now + PUBLIC_PR_CACHE_MS,
+            pullRequests,
+        };
+        publicPullRequestCache.failure = undefined;
+        return pullRequests;
+    } catch (error) {
+        if (cachedPullRequests) {
+            cachedPullRequests.expiresAt = now + PUBLIC_PR_FAILURE_CACHE_MS;
+            return cachedPullRequests.pullRequests;
+        }
+        const message = errorMessage(error, "GitHub public pull request request failed");
+        publicPullRequestCache.failure = {
+            expiresAt: now + PUBLIC_PR_FAILURE_CACHE_MS,
+            message,
+        };
+        throw new Error(message, { cause: error });
+    }
 }
 
 /** Performs run command. */
@@ -906,6 +1164,12 @@ async function runGhJsonLines<T>(
 
 /** Lists open pull requests targeting the dashboard production branch. */
 export async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
+    if (
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
+        !configuredGithubReadToken()
+    ) {
+        return listPublicDashboardPullRequests();
+    }
     const repo = parseRepoParts(DASHBOARD_REPO);
     const pullRequests = await runGhJsonLines<PullRequestSummary>(
         [
@@ -1302,7 +1566,7 @@ export async function getProductionCheckoutStatus(
                 signal,
                 timeoutMs: 30_000,
             }),
-            runCommand("git", ["rev-parse", "--short", "HEAD"], {
+            runCommand("git", ["rev-parse", "HEAD"], {
                 signal,
                 timeoutMs: 30_000,
             }),
@@ -1338,7 +1602,8 @@ export async function getProductionCheckoutStatus(
         worktreeRoot: dashboardWorktreeRoot,
         branch: currentBranch,
         expectedBranch: DEFAULT_BASE,
-        head: head.trim(),
+        head: head.trim().slice(0, 8),
+        headCommit: head.trim(),
         upstream,
         isClean,
         isProductionRoot,
@@ -1567,20 +1832,26 @@ async function scheduleReleaseCutover(
     rollbackCommit: string,
     signal?: AbortSignal
 ): Promise<CommandResult> {
-    if (!job.commit || !/^[\da-f]{40}$/u.test(job.commit)) {
+    if (!job.commit || !FULL_COMMIT_SHA_PATTERN.test(job.commit)) {
         throw new TypeError("Release cutover requires a full candidate commit");
     }
-    if (!/^[\da-f]{40}$/u.test(candidateCommit) || candidateCommit !== job.commit) {
+    if (
+        !FULL_COMMIT_SHA_PATTERN.test(candidateCommit) ||
+        candidateCommit !== job.commit
+    ) {
         throw new TypeError("Release cutover requires the matching full candidate SHA");
     }
-    if (!/^[\da-f]{40}$/u.test(preActivationCommit)) {
+    if (!FULL_COMMIT_SHA_PATTERN.test(preActivationCommit)) {
         throw new TypeError("Release cutover requires a full pre-activation commit");
     }
-    if (rollbackCommit === candidateCommit || !/^[\da-f]{40}$/u.test(rollbackCommit)) {
+    if (
+        rollbackCommit === candidateCommit ||
+        !FULL_COMMIT_SHA_PATTERN.test(rollbackCommit)
+    ) {
         throw new TypeError("Release cutover requires a distinct full rollback commit");
     }
     const releasesRoot = resolveDashboardReleasesRoot();
-    const lifecycleCommand = path.join(
+    const activationLifecycleCommand = path.join(
         releasesRoot,
         "releases",
         preActivationCommit,
@@ -1588,9 +1859,21 @@ async function scheduleReleaseCutover(
         "dist",
         "releaseLifecycle.js"
     );
-    const lifecycleEnvironment = releaseLifecycleInvocation(
+    const guardedLifecycleCommand = path.join(
         releasesRoot,
-        lifecycleCommand
+        "releases",
+        candidateCommit,
+        "backend",
+        "dist",
+        "releaseLifecycle.js"
+    );
+    const activationLifecycleEnvironment = releaseLifecycleInvocation(
+        releasesRoot,
+        activationLifecycleCommand
+    );
+    const guardedLifecycleEnvironment = releaseLifecycleInvocation(
+        releasesRoot,
+        guardedLifecycleCommand
     );
     const candidateShort = candidateCommit.slice(0, 8);
     const rollbackShort = rollbackCommit.slice(0, 8);
@@ -1626,15 +1909,15 @@ async function scheduleReleaseCutover(
     const script = [
         "sleep 2",
         ...releaseCutoverShellFunctions(),
-        `if ${lifecycleEnvironment} activate ${shellQuote(candidateCommit)}; then`,
+        `if ${activationLifecycleEnvironment} activate ${shellQuote(candidateCommit)}; then`,
         `  if restart_services && ready_for_commit ${shellQuote(candidateShort)}; then`,
-        `    if ${lifecycleEnvironment} prune 3; then`,
+        `    if ${activationLifecycleEnvironment} prune 3; then`,
         `      ${deploymentJobUpdateCommand(okJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(okWithRetentionWarningJob)}`,
         "    fi",
         "  else",
-        `    if ${lifecycleEnvironment} rollback && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
+        `    if ${guardedLifecycleEnvironment} rollback ${shellQuote(candidateCommit)} ${shellQuote(rollbackCommit)} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
         `      ${deploymentJobUpdateCommand(rolledBackJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
@@ -1660,6 +1943,102 @@ async function scheduleReleaseCutover(
     );
 }
 
+/** Schedules a detached current/previous swap with readiness-bound restoration. */
+async function scheduleReleaseRollback(
+    job: DeploymentJob,
+    targetCommit: string,
+    originalCommit: string,
+    signal?: AbortSignal
+): Promise<CommandResult> {
+    if (
+        !job.commit ||
+        !FULL_COMMIT_SHA_PATTERN.test(job.commit) ||
+        job.commit !== targetCommit
+    ) {
+        throw new TypeError("Release rollback requires its matching full target SHA");
+    }
+    if (
+        originalCommit === targetCommit ||
+        !FULL_COMMIT_SHA_PATTERN.test(originalCommit)
+    ) {
+        throw new TypeError(
+            "Release rollback requires a distinct full original release SHA"
+        );
+    }
+
+    const releasesRoot = resolveDashboardReleasesRoot();
+    const lifecycleCommand = path.join(
+        releasesRoot,
+        "releases",
+        originalCommit,
+        "backend",
+        "dist",
+        "releaseLifecycle.js"
+    );
+    const lifecycleEnvironment = releaseLifecycleInvocation(
+        releasesRoot,
+        lifecycleCommand
+    );
+    const targetShort = targetCommit.slice(0, 8);
+    const originalShort = originalCommit.slice(0, 8);
+    const okJob: DeploymentJob = {
+        ...job,
+        status: "isOk",
+        updatedAt: dateToISOString(new Date()),
+        note: `Atomic rollback activated ${targetShort}. Web, worker, and commit readiness passed`,
+    };
+    const restoredJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: `Rollback target failed readiness. Original release ${originalShort} was restored automatically`,
+    };
+    const restorationFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: `Rollback target failed readiness and restoration of ${originalShort} failed`,
+    };
+    const transitionFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Atomic rollback failed before restart. Current release was left unchanged",
+    };
+
+    const script = [
+        "sleep 2",
+        ...releaseCutoverShellFunctions(),
+        `if ${lifecycleEnvironment} rollback ${shellQuote(originalCommit)} ${shellQuote(targetCommit)}; then`,
+        `  if restart_services && ready_for_commit ${shellQuote(targetShort)}; then`,
+        `    ${deploymentJobUpdateCommand(okJob)}`,
+        "  else",
+        `    if ${lifecycleEnvironment} rollback ${shellQuote(targetCommit)} ${shellQuote(originalCommit)} && restart_services && ready_for_commit ${shellQuote(originalShort)}; then`,
+        `      ${deploymentJobUpdateCommand(restoredJob)}`,
+        "    else",
+        `      ${deploymentJobUpdateCommand(restorationFailedJob)}`,
+        "    fi",
+        "  fi",
+        "else",
+        `  ${deploymentJobUpdateCommand(transitionFailedJob)}`,
+        "fi",
+    ].join("\n");
+
+    return runCommand(
+        "systemd-run",
+        [
+            "--user",
+            "--collect",
+            `--unit=mira-dashboard-deploy-${job.id}`,
+            "--description=Mira Dashboard atomic release rollback",
+            "/bin/bash",
+            "-lc",
+            script,
+        ],
+        { signal, timeoutMs: 30_000 }
+    );
+}
+
 function didScheduleOrphanedReleaseCutoverRecovery(
     cutover: OrphanedDeploymentCutover
 ): boolean {
@@ -1670,7 +2049,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
     const candidateCommit = cutover.candidateCommit ?? job.commit;
     if (
         !candidateCommit ||
-        !/^[\da-f]{40}$/u.test(candidateCommit) ||
+        !FULL_COMMIT_SHA_PATTERN.test(candidateCommit) ||
         job.commit !== candidateCommit
     ) {
         throw new Error(
@@ -1679,6 +2058,11 @@ function didScheduleOrphanedReleaseCutoverRecovery(
     }
 
     const releasesRoot = resolveDashboardReleasesRoot();
+    const recoveryExecution = readDeploymentLockExecution(cutover.id);
+    const rollbackLifecycleFunction =
+        recoveryExecution?.action_key === "dashboard.rollback"
+            ? "run_activation_lifecycle"
+            : "run_candidate_lifecycle";
     const rolledBackJob: DeploymentJob = {
         ...job,
         status: "failed",
@@ -1703,36 +2087,44 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         `releases_root=${shellQuote(releasesRoot)}`,
         `candidate_commit=${shellQuote(candidateCommit)}`,
         `bun_executable=${shellQuote(resolveBunExecutable())}`,
-        "resolve_trusted_lifecycle() {",
+        "resolve_trusted_lifecycles() {",
         '  candidate_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/releases/$candidate_commit") || return 1',
         '  [ "$candidate_release" = "$releases_root/releases/$candidate_commit" ] || return 1',
+        '  candidate_lifecycle="$candidate_release/backend/dist/releaseLifecycle.js"',
+        '  [ -f "$candidate_lifecycle" ] && [ ! -L "$candidate_lifecycle" ] || return 1',
         '  current_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/current") || return 1',
         '  current_commit="$(/usr/bin/basename -- "$current_release")"',
         '  [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || return 1',
         '  [ "$current_release" = "$releases_root/releases/$current_commit" ] || return 1',
         '  if [ "$current_commit" = "$candidate_commit" ]; then',
         '    if [ -e "$releases_root/previous" ] || [ -L "$releases_root/previous" ]; then',
-        '      trusted_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous") || return 1',
+        '      activation_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous") || return 1',
         "    else",
-        '      trusted_release="$candidate_release"',
+        '      activation_release="$candidate_release"',
         "    fi",
         "  else",
-        '    trusted_release="$current_release"',
+        '    activation_release="$current_release"',
         "  fi",
-        '  trusted_commit="$(/usr/bin/basename -- "$trusted_release")"',
-        '  [[ "$trusted_commit" =~ ^[0-9a-f]{40}$ ]] || return 1',
-        '  [ "$trusted_release" = "$releases_root/releases/$trusted_commit" ] || return 1',
-        '  trusted_lifecycle="$trusted_release/backend/dist/releaseLifecycle.js"',
-        '  [ -f "$trusted_lifecycle" ] && [ ! -L "$trusted_lifecycle" ]',
+        '  activation_commit="$(/usr/bin/basename -- "$activation_release")"',
+        '  [[ "$activation_commit" =~ ^[0-9a-f]{40}$ ]] || return 1',
+        '  [ "$activation_release" = "$releases_root/releases/$activation_commit" ] || return 1',
+        '  activation_lifecycle="$activation_release/backend/dist/releaseLifecycle.js"',
+        '  [ -f "$activation_lifecycle" ] && [ ! -L "$activation_lifecycle" ]',
         "}",
-        "run_lifecycle() {",
+        "run_activation_lifecycle() {",
         '  MIRA_DASHBOARD_RELEASES_ROOT="$releases_root" \\',
         `  MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())} \\`,
         "  NODE_ENV=production \\",
-        '  "$bun_executable" "$trusted_lifecycle" "$@"',
+        '  "$bun_executable" "$activation_lifecycle" "$@"',
         "}",
-        "resolve_trusted_lifecycle || exit 1",
-        'if activation_output="$(run_lifecycle activate "$candidate_commit")"; then',
+        "run_candidate_lifecycle() {",
+        '  MIRA_DASHBOARD_RELEASES_ROOT="$releases_root" \\',
+        `  MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())} \\`,
+        "  NODE_ENV=production \\",
+        '  "$bun_executable" "$candidate_lifecycle" "$@"',
+        "}",
+        "resolve_trusted_lifecycles || exit 1",
+        'if activation_output="$(run_activation_lifecycle activate "$candidate_commit")"; then',
         '  activation_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
         '  [ "$activation_commit" = "$candidate_commit" ] || exit 1',
         '  if restart_services && ready_for_commit "${candidate_commit:0:8}"; then',
@@ -1742,13 +2134,13 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         '  rollback_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.previous.commitSha // empty\')"',
         '  [[ "$rollback_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
         '  [ "$rollback_commit" != "$candidate_commit" ] || exit 1',
-        '  if run_lifecycle rollback && restart_services && ready_for_commit "${rollback_commit:0:8}"; then',
+        `  if ${rollbackLifecycleFunction} rollback "$candidate_commit" "$rollback_commit" && restart_services && ready_for_commit "\${rollback_commit:0:8}"; then`,
         `    ${deploymentJobUpdateCommand(rolledBackJob)}`,
         "  else",
         "    exit 1",
         "  fi",
         "else",
-        '  status_output="$(run_lifecycle status)" || exit 1',
+        '  status_output="$(run_activation_lifecycle status)" || exit 1',
         '  current_commit="$(printf "%s" "$status_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
         '  [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
         '  [ "$current_commit" != "$candidate_commit" ] || exit 1',
@@ -1811,9 +2203,7 @@ async function runDeploymentJob(
         currentJob = refreshDeploymentHeartbeat(currentJob);
         const currentState = await readDashboardReleaseState(releasesRoot);
         if (!currentState.current) {
-            throw new Error(
-                "Managed deployment requires a current release from the one-time production cutover"
-            );
+            throw new Error("Managed deployment requires an active current release");
         }
         currentJob = refreshDeploymentHeartbeat(currentJob);
         const { stdout: commitSha } = await runCommand("git", ["rev-parse", "HEAD"], {
@@ -1873,6 +2263,65 @@ async function runDeploymentJob(
             status: "failed",
             updatedAt: dateToISOString(new Date()),
             note: errorMessage(error, "Deploy failed"),
+        };
+        try {
+            writeDeploymentJob(failed);
+        } finally {
+            releaseDeploymentLock(job.id);
+        }
+        return false;
+    }
+}
+
+/** Validates and schedules a managed rollback after the API has returned its job. */
+async function runRollbackJob(
+    job: DeploymentJob,
+    signal?: AbortSignal
+): Promise<boolean> {
+    let currentJob = job;
+    const releasesRoot = resolveDashboardReleasesRoot();
+    try {
+        currentJob = refreshDeploymentHeartbeat(currentJob);
+        await assertManagedDashboardServiceContract(signal);
+        currentJob = refreshDeploymentHeartbeat(currentJob);
+        const state = await readDashboardReleaseState(releasesRoot);
+        if (!state.current || !state.previous) {
+            throw new Error(
+                "Managed release rollback requires active current and previous releases"
+            );
+        }
+        if (!job.commit || state.previous.commitSha !== job.commit) {
+            throw new Error(
+                "Rollback target changed before execution. Refresh release status and try again"
+            );
+        }
+        if (state.current.commitSha === state.previous.commitSha) {
+            throw new Error("Managed release rollback requires two distinct releases");
+        }
+        assertDashboardReleaseHostRuntimeCompatible(state.previous);
+
+        const restartScheduled: DeploymentJob = {
+            ...currentJob,
+            status: "restart-scheduled",
+            updatedAt: dateToISOString(new Date()),
+            commit: state.previous.commitSha,
+            commitTitle: state.previous.manifest.commitTitle,
+            note: "Verified rollback target. Detached atomic rollback and readiness check scheduled",
+        };
+        writeDeploymentJob(restartScheduled);
+        await scheduleReleaseRollback(
+            restartScheduled,
+            state.previous.commitSha,
+            state.current.commitSha,
+            signal
+        );
+        return true;
+    } catch (error) {
+        const failed: DeploymentJob = {
+            ...currentJob,
+            status: "failed",
+            updatedAt: dateToISOString(new Date()),
+            note: errorMessage(error, "Rollback failed"),
         };
         try {
             writeDeploymentJob(failed);
@@ -1975,6 +2424,83 @@ export function startDeployLatest(lockHeldBy?: string): DeploymentJob {
 /** Queues a direct deploy; production validation is owned by the worker action. */
 export async function prepareAndStartDeployLatest(): Promise<DeploymentJob> {
     return startDeployLatest();
+}
+
+/** Validates the confirmed target against current release slots and queues rollback. */
+export async function prepareAndStartRollback(
+    expectedTargetCommit: string
+): Promise<DeploymentJob> {
+    if (!FULL_COMMIT_SHA_PATTERN.test(expectedTargetCommit)) {
+        throw Object.assign(
+            new TypeError("Rollback target must be a full lowercase commit SHA"),
+            { statusCode: 400 }
+        );
+    }
+    registerPullRequestJobLifecycleHandlers();
+    const now = dateToISOString(new Date());
+    const deploymentId = Bun.randomUUIDv7();
+    let job: DeploymentJob | undefined;
+    acquireDeploymentLock(deploymentId);
+    try {
+        const state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
+        if (!state.current || !state.previous) {
+            throw Object.assign(
+                new Error(
+                    "Managed release rollback requires active current and previous releases"
+                ),
+                { statusCode: 409 }
+            );
+        }
+        if (state.current.commitSha === state.previous.commitSha) {
+            throw Object.assign(
+                new Error("Managed release rollback requires two distinct releases"),
+                { statusCode: 409 }
+            );
+        }
+        if (state.previous.commitSha !== expectedTargetCommit) {
+            throw Object.assign(
+                new Error(
+                    "Rollback target changed. Refresh release status and confirm the current previous release"
+                ),
+                { statusCode: 409 }
+            );
+        }
+        assertDashboardReleaseHostRuntimeCompatible(state.previous);
+
+        job = {
+            id: deploymentId,
+            status: "building",
+            startedAt: now,
+            updatedAt: now,
+            commit: state.previous.commitSha,
+            commitTitle: state.previous.manifest.commitTitle,
+            note: `Rollback to ${state.previous.commitSha.slice(0, 8)} queued`,
+        };
+        writeDeploymentJob(job);
+        enqueueJobExecution({
+            actionKey: "dashboard.rollback",
+            displayName: `Roll back Mira Dashboard to ${state.previous.commitSha.slice(0, 8)}`,
+            payload: { deploymentId: job.id },
+            resourceClass: "exclusive",
+            timeoutMs: 15 * 60 * 1000,
+        });
+        return job;
+    } catch (error) {
+        releaseDeploymentLock(deploymentId);
+        if (job) {
+            try {
+                writeDeploymentJob({
+                    ...job,
+                    note: errorMessage(error, "Dashboard rollback failed to queue"),
+                    status: "failed",
+                    updatedAt: dateToISOString(new Date()),
+                });
+            } catch {
+                // Preserve the original rollback validation or queue error.
+            }
+        }
+        throw error;
+    }
 }
 
 interface PullRequestApprovalExecutionOptions {
@@ -2238,7 +2764,7 @@ async function executePullRequestMerge(
     return { result };
 }
 
-/** Registers every mutating GitHub/deploy action exclusively in the worker. */
+/** Registers every mutating GitHub/release action exclusively in the worker. */
 export function registerPullRequestExecutionActions(): void {
     registerPullRequestJobLifecycleHandlers();
     registerDeploymentCutoverRecoveryHandler(didScheduleOrphanedReleaseCutoverRecovery);
@@ -2259,6 +2785,30 @@ export function registerPullRequestExecutionActions(): void {
         const isSuccess = await runDeploymentJob(deployment, signal);
         if (!isSuccess) {
             throw new ScheduledJobActionError("Dashboard deploy failed", {
+                deploymentId,
+            });
+        }
+        const resumeWorkerClaims = context.pauseWorkerClaims();
+        resumeWorkerClaimsWhenDeploymentRestartSettles(deploymentId, resumeWorkerClaims);
+        return { deploymentId };
+    });
+    registerScheduledJobAction("dashboard.rollback", async (job, signal, context) => {
+        const deploymentId = job.actionPayload.deploymentId;
+        if (typeof deploymentId !== "string" || deploymentId.trim() === "") {
+            throw Object.assign(new Error("Deployment id is missing"), {
+                statusCode: 400,
+            });
+        }
+        const deployment = readDeploymentJob(deploymentId);
+        if (!deployment) {
+            throw Object.assign(new Error("Deployment job not found"), {
+                statusCode: 404,
+            });
+        }
+        context.protectFromCancellation();
+        const isSuccess = await runRollbackJob(deployment, signal);
+        if (!isSuccess) {
+            throw new ScheduledJobActionError("Dashboard rollback failed", {
                 deploymentId,
             });
         }

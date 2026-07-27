@@ -443,4 +443,46 @@ describe("database overview service", () => {
             consoleSpy.mockRestore();
         }
     });
+
+    it("refreshes isolated SQLite metrics without replacing copied host metrics", async () => {
+        const { getIsolatedDatabaseOverview } =
+            await import("../src/services/databaseOverview.ts");
+        const snapshot = {
+            checkedAt: "2026-07-26T20:00:00.000Z",
+            overview: {
+                totalDatabaseSizeBytes: 4096,
+                managedDatabaseCount: 2,
+                totalManagedDatabaseSizeBytes: 8192,
+            },
+            databases: [{ datname: "copied-production" }],
+            deadTuples: [],
+            bloatEstimates: [],
+            topQueries: [],
+            pgbouncerPools: [],
+            pgbouncerStats: [],
+        };
+
+        const overview = getIsolatedDatabaseOverview(snapshot);
+
+        expect(overview).toMatchObject({
+            mode: "isolated",
+            postgresSnapshotCheckedAt: snapshot.checkedAt,
+            databases: snapshot.databases,
+            overview: {
+                managedDatabaseCount: 2,
+                totalDatabaseSizeBytes: 4096,
+            },
+        });
+        expect(overview.overview.totalManagedDatabaseSizeBytes).toBe(
+            4096 + overview.sqlite.storageBytes
+        );
+        expect(overview).not.toHaveProperty("checkedAt");
+
+        const malformedSnapshot: Record<string, unknown> = { ...snapshot };
+        delete malformedSnapshot.bloatEstimates;
+        const fallback = getIsolatedDatabaseOverview(malformedSnapshot);
+        expect(fallback.databases).toEqual([]);
+        expect(fallback.bloatEstimates).toEqual([]);
+        expect(fallback.postgresSnapshotCheckedAt).toBeUndefined();
+    });
 });

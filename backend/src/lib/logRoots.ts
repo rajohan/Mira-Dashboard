@@ -3,9 +3,20 @@ import path from "node:path";
 
 const DEFAULT_LOGS_DIRECTORY = "/tmp/openclaw";
 const DEFAULT_LOG_TIME_ZONE = "Europe/Oslo";
+const ISOLATED_DEV_LOGS_UNAVAILABLE_REASON =
+    "Host logs are unavailable in isolated Dashboard dev.";
 
 function invalidLogRoot(message: string): Error {
     return Object.assign(new Error(message), { code: "ERR_INVALID_ARG_VALUE" });
+}
+
+export function logUnavailableReason(
+    environment: Record<string, string | undefined> = process.env
+): string | undefined {
+    return environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
+        !environment.MIRA_DASHBOARD_LOGS_ROOT?.trim()
+        ? ISOLATED_DEV_LOGS_UNAVAILABLE_REASON
+        : undefined;
 }
 
 export function resolveRealLogsDirectory(): string {

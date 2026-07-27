@@ -66,6 +66,14 @@ function routeRequest<T extends string>(
     });
 }
 
+function rollbackRouteRequest(targetCommit: unknown): Request {
+    return new Request("https://dashboard.test/api/pull-requests/releases/rollback", {
+        body: JSON.stringify({ targetCommit }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+    });
+}
+
 function writeFakeGit(binaryPath: string, repoRoot: string): void {
     writeFileSync(
         binaryPath,
@@ -76,8 +84,8 @@ if [[ "$args" == "rev-parse --show-toplevel" ]]; then
   printf '%s\n' ${JSON.stringify(repoRoot)}
 elif [[ "$args" == "rev-parse --abbrev-ref HEAD" ]]; then
   printf 'main\n'
-elif [[ "$args" == "rev-parse --short HEAD" ]]; then
-  printf 'abc1234\n'
+elif [[ "$args" == "rev-parse HEAD" ]]; then
+  printf 'abc1234abc1234abc1234abc1234abc1234abc12\n'
 elif [[ "$args" == "rev-parse --abbrev-ref --symbolic-full-name @{u}" ]]; then
   printf 'origin/main\n'
 elif [[ "$1" == "status" ]]; then
@@ -1593,6 +1601,388 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("reports managed release slots and queues rollback through the release lock", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
+        const releasesRoot = createTemporaryRoot("mira-release-status-");
+        const currentCommit = "a".repeat(40);
+        const previousCommit = "b".repeat(40);
+        await ensureDashboardReleaseLayout(releasesRoot);
+        await createReleaseFixture(
+            managedReleasePath(releasesRoot, currentCommit),
+            currentCommit,
+            { commitTitle: "Current dashboard release" }
+        );
+        await createReleaseFixture(
+            managedReleasePath(releasesRoot, previousCommit),
+            previousCommit,
+            { commitTitle: "Previous dashboard release" }
+        );
+        symlinkSync(
+            `releases/${currentCommit}`,
+            path.join(releasesRoot, "current"),
+            "dir"
+        );
+        symlinkSync(
+            `releases/${previousCommit}`,
+            path.join(releasesRoot, "previous"),
+            "dir"
+        );
+        process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
+
+        const { getDashboardReleaseStatus, prepareAndStartRollback } =
+            await import("../src/services/pullRequests.ts");
+        const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
+        const { cancelJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+
+        const status = await getDashboardReleaseStatus();
+        expect(status).toMatchObject({
+            current: {
+                commitSha: currentCommit,
+                commitTitle: "Current dashboard release",
+            },
+            previous: {
+                commitSha: previousCommit,
+                commitTitle: "Previous dashboard release",
+            },
+            rollback: { available: true },
+        });
+
+        const statusResponse =
+            await pullRequestRoutes["/api/pull-requests/releases"].GET();
+        expect(statusResponse.status).toBe(200);
+        await expect(statusResponse.json()).resolves.toMatchObject({
+            release: { rollback: { available: true } },
+        });
+
+        const rollbackResponse = await pullRequestRoutes[
+            "/api/pull-requests/releases/rollback"
+        ].POST(rollbackRouteRequest(previousCommit));
+        expect(rollbackResponse.status).toBe(200);
+        const rollbackBody = (await rollbackResponse.json()) as {
+            deployment: Awaited<ReturnType<typeof prepareAndStartRollback>>;
+            isOk: boolean;
+        };
+        expect(rollbackBody.isOk).toBe(true);
+        const rollback = rollbackBody.deployment;
+        try {
+            expect(rollback).toMatchObject({
+                commit: previousCommit,
+                commitTitle: "Previous dashboard release",
+                note: "Rollback to bbbbbbbb queued",
+                status: "building",
+            });
+            expect(
+                database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+            ).toEqual({ job_id: rollback.id });
+            const execution = database
+                .prepare(
+                    `SELECT id, display_name
+                     FROM job_executions
+                     WHERE action_key = 'dashboard.rollback'
+                       AND json_extract(payload_json, '$.deploymentId') = ?`
+                )
+                .get(rollback.id) as { display_name: string; id: string };
+            expect(execution.display_name).toBe("Roll back Mira Dashboard to bbbbbbbb");
+
+            cancelJobExecution(execution.id);
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(rollback.id)
+            ).toEqual({
+                note: "Rollback cancelled before execution",
+                status: "failed",
+            });
+            expect(
+                database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+            ).toBeNull();
+
+            await expect(prepareAndStartRollback(currentCommit)).rejects.toThrow(
+                "Rollback target changed"
+            );
+            const changedTargetResponse = await pullRequestRoutes[
+                "/api/pull-requests/releases/rollback"
+            ].POST(rollbackRouteRequest(currentCommit));
+            expect(changedTargetResponse.status).toBe(409);
+            await expect(changedTargetResponse.json()).resolves.toMatchObject({
+                error: "Rollback target changed. Refresh release status and confirm the current previous release",
+            });
+
+            const missingTargetResponse = await pullRequestRoutes[
+                "/api/pull-requests/releases/rollback"
+            ].POST(rollbackRouteRequest(undefined));
+            expect(missingTargetResponse.status).toBe(400);
+            await expect(missingTargetResponse.json()).resolves.toMatchObject({
+                error: "Rollback target commit is required",
+            });
+
+            const nullBodyResponse = await pullRequestRoutes[
+                "/api/pull-requests/releases/rollback"
+            ].POST(
+                new Request(
+                    "https://dashboard.test/api/pull-requests/releases/rollback",
+                    {
+                        body: "null",
+                        headers: { "Content-Type": "application/json" },
+                        method: "POST",
+                    }
+                )
+            );
+            expect(nullBodyResponse.status).toBe(400);
+            await expect(nullBodyResponse.json()).resolves.toMatchObject({
+                error: "Rollback target commit is required",
+            });
+
+            rmSync(path.join(releasesRoot, "previous"));
+            await expect(getDashboardReleaseStatus()).resolves.toMatchObject({
+                previous: undefined,
+                rollback: {
+                    available: false,
+                    reason: "No distinct previous release is available",
+                },
+            });
+            await expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
+                "requires active current and previous releases"
+            );
+            const unavailableRollbackResponse = await pullRequestRoutes[
+                "/api/pull-requests/releases/rollback"
+            ].POST(rollbackRouteRequest(previousCommit));
+            expect(unavailableRollbackResponse.status).toBe(409);
+            await expect(unavailableRollbackResponse.json()).resolves.toMatchObject({
+                error: "Managed release rollback requires active current and previous releases",
+            });
+            expect(
+                database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+            ).toBeNull();
+
+            symlinkSync(
+                `releases/${currentCommit}`,
+                path.join(releasesRoot, "previous"),
+                "dir"
+            );
+            await expect(prepareAndStartRollback(currentCommit)).rejects.toThrow(
+                "requires two distinct releases"
+            );
+            expect(
+                database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+            ).toBeNull();
+
+            process.env.MIRA_DASHBOARD_RELEASES_ROOT = "relative-release-root";
+            const unavailableStatusResponse =
+                await pullRequestRoutes["/api/pull-requests/releases"].GET();
+            expect(unavailableStatusResponse.status).toBe(500);
+            process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database
+                .prepare(
+                    `DELETE FROM job_executions
+                     WHERE action_key = 'dashboard.rollback'
+                       AND json_extract(payload_json, '$.deploymentId') = ?`
+                )
+                .run(rollback.id);
+            database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(rollback.id);
+        }
+    });
+
+    it("rejects malformed and missing rollback worker executions", async () => {
+        const { registerPullRequestExecutionActions } =
+            await import("../src/services/pullRequests.ts");
+        const { enqueueJobExecution, getJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        registerPullRequestExecutionActions();
+        await startTestScheduledExecutor();
+
+        const missingIdExecution = enqueueJobExecution({
+            actionKey: "dashboard.rollback",
+            displayName: "Rollback without deployment id",
+            payload: {},
+            resourceClass: "exclusive",
+            timeoutMs: 1000,
+        });
+        const absentDeploymentId = `missing-rollback-${Bun.randomUUIDv7()}`;
+        const missingDeploymentExecution = enqueueJobExecution({
+            actionKey: "dashboard.rollback",
+            displayName: "Rollback with missing deployment",
+            payload: { deploymentId: absentDeploymentId },
+            resourceClass: "exclusive",
+            timeoutMs: 1000,
+        });
+
+        try {
+            await waitFor(
+                () =>
+                    getJobExecution(missingIdExecution.id)?.status === "failed" &&
+                    getJobExecution(missingDeploymentExecution.id)?.status === "failed",
+                5000
+            );
+            expect(getJobExecution(missingIdExecution.id)).toMatchObject({
+                message: "Deployment id is missing",
+                status: "failed",
+            });
+            expect(getJobExecution(missingDeploymentExecution.id)).toMatchObject({
+                message: "Deployment job not found",
+                status: "failed",
+            });
+        } finally {
+            database
+                .prepare("DELETE FROM job_executions WHERE id IN (?, ?)")
+                .run(missingIdExecution.id, missingDeploymentExecution.id);
+        }
+    });
+
+    it("hands manual rollback to a detached readiness-bound guardian", async () => {
+        rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
+        rememberEnvironment("MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE");
+        const fakeRoot = createTemporaryRoot("mira-release-rollback-root-");
+        const fakeBin = createTemporaryRoot("mira-release-rollback-bin-");
+        const releasesRoot = path.join(fakeRoot, "managed-releases");
+        const openClawHome = path.join(fakeRoot, "state", "openclaw-client");
+        const logRotationLockFile = path.join(fakeRoot, "state", "log-rotation.lock");
+        const systemdScriptLog = path.join(fakeRoot, "rollback-guardian.sh");
+        const systemdArgumentsLog = path.join(fakeRoot, "rollback-systemd-run.args");
+        const currentCommit = "c".repeat(40);
+        const previousCommit = "d".repeat(40);
+        mkdirSync(path.join(fakeRoot, "backend"), { recursive: true });
+        mkdirSync(path.dirname(openClawHome), { recursive: true });
+        await ensureDashboardReleaseLayout(releasesRoot);
+        await createReleaseFixture(
+            managedReleasePath(releasesRoot, currentCommit),
+            currentCommit,
+            { commitTitle: "Current rollback source" }
+        );
+        await createReleaseFixture(
+            managedReleasePath(releasesRoot, previousCommit),
+            previousCommit,
+            { commitTitle: "Verified rollback target" }
+        );
+        symlinkSync(
+            `releases/${currentCommit}`,
+            path.join(releasesRoot, "current"),
+            "dir"
+        );
+        symlinkSync(
+            `releases/${previousCommit}`,
+            path.join(releasesRoot, "previous"),
+            "dir"
+        );
+        writeFileSync(
+            path.join(fakeBin, "systemctl"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" != *"--user show"* ]]; then
+  echo "unexpected systemctl args: $*" >&2
+  exit 2
+fi
+if [[ "$*" == *"mira-dashboard-worker.service"* ]]; then
+  entrypoint="dist/workerStart.js"
+  execution_role="worker"
+  scope_owner="mira-dashboard-worker.service"
+else
+  entrypoint="dist/serverStart.js"
+  execution_role="web"
+  scope_owner="mira-dashboard.service"
+fi
+printf '%s\n' \
+  "Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=$execution_role MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=$scope_owner MIRA_DASHBOARD_DB_PATH=${getMiraDatabasePath()} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${releasesRoot}/current MIRA_DASHBOARD_RELEASES_ROOT=${releasesRoot}" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_EXECUTION_ROLE,MIRA_DASHBOARD_ENABLE_JOB_SCOPES,MIRA_DASHBOARD_JOB_SCOPE_OWNER,MIRA_DASHBOARD_DB_PATH,MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE,MIRA_DASHBOARD_OPENCLAW_HOME,MIRA_DASHBOARD_RELEASE_ROOT,MIRA_DASHBOARD_RELEASES_ROOT -- bun $entrypoint ; }" \
+  "WorkingDirectory=${releasesRoot}/current/backend"
+`
+        );
+        writeFileSync(
+            path.join(fakeBin, "systemd-run"),
+            String.raw`#!/usr/bin/env bash
+set -euo pipefail
+script="${"$"}{!#}"
+/bin/bash -n <<<"$script"
+printf '%s' "$script" > ${JSON.stringify(systemdScriptLog)}
+printf '%s\n' "$@" > ${JSON.stringify(systemdArgumentsLog)}
+printf 'scheduled\n'
+`
+        );
+        chmodSync(path.join(fakeBin, "systemctl"), 0o755);
+        chmodSync(path.join(fakeBin, "systemd-run"), 0o755);
+        process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
+        process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
+        process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openClawHome;
+        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = logRotationLockFile;
+
+        const { prepareAndStartRollback, registerPullRequestExecutionActions } =
+            await import("../src/services/pullRequests.ts");
+        const { getJobExecution } = await import("../src/services/jobExecutionQueue.ts");
+        const { reconcileOrphanedDeploymentCutovers } =
+            await import("../src/services/scheduledJobs.ts");
+        registerPullRequestExecutionActions();
+        await startTestScheduledExecutor();
+        const rollback = await prepareAndStartRollback(previousCommit);
+        const execution = database
+            .prepare(
+                `SELECT id
+                 FROM job_executions
+                 WHERE action_key = 'dashboard.rollback'
+                   AND json_extract(payload_json, '$.deploymentId') = ?`
+            )
+            .get(rollback.id) as { id: string };
+
+        try {
+            await waitFor(() => {
+                const row = database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(rollback.id) as
+                    { note: string | null; status: string } | undefined;
+                return (
+                    row?.status === "restart-scheduled" && existsSync(systemdScriptLog)
+                );
+            }, 5000);
+            await waitFor(
+                () => getJobExecution(execution.id)?.status === "success",
+                5000
+            );
+
+            const guardian = readFileSync(systemdScriptLog, "utf8");
+            expect(guardian).toContain(
+                `${releasesRoot}/releases/${currentCommit}/backend/dist/releaseLifecycle.js`
+            );
+            expect(guardian).toContain(`rollback '${currentCommit}' '${previousCommit}'`);
+            expect(guardian).toContain(`rollback '${previousCommit}' '${currentCommit}'`);
+            expect(guardian).toContain(
+                `ready_for_commit '${previousCommit.slice(0, 8)}'`
+            );
+            expect(guardian).toContain(`ready_for_commit '${currentCommit.slice(0, 8)}'`);
+            expect(guardian).toContain(
+                "Original release cccccccc was restored automatically"
+            );
+            expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
+                `--unit=mira-dashboard-deploy-${rollback.id}\n`
+            );
+            expect(
+                reconcileOrphanedDeploymentCutovers(
+                    new Date().toISOString(),
+                    () => "inactive"
+                )
+            ).toBe(1);
+            const recoveryGuardian = readFileSync(systemdScriptLog, "utf8");
+            expect(recoveryGuardian).toContain(
+                'if run_activation_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+            );
+            expect(recoveryGuardian).not.toContain(
+                'if run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+            );
+        } finally {
+            database
+                .prepare("UPDATE deployment_jobs SET status = 'failed' WHERE id = ?")
+                .run(rollback.id);
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database.prepare("DELETE FROM job_executions WHERE id = ?").run(execution.id);
+            database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(rollback.id);
+        }
+    });
+
     it("rejects active deployment locks before starting deploy work", async () => {
         const jobId = `test-deploy-active-${Bun.randomUUIDv7()}`;
         const staleOwner = `test-deploy-stale-owner-${Bun.randomUUIDv7()}`;
@@ -1622,7 +2012,7 @@ describe("backend service behavior", () => {
         try {
             const { startDeployLatest } = await import("../src/services/pullRequests.ts");
             expect(() => startDeployLatest()).toThrow(
-                `Dashboard deploy already in progress (${jobId})`
+                `Dashboard release action already in progress (${jobId})`
             );
             expect(() => startDeployLatest(staleOwner)).toThrow(
                 "Dashboard deploy lock handoff failed"
@@ -1630,6 +2020,79 @@ describe("backend service behavior", () => {
         } finally {
             database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
             database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(jobId);
+        }
+    });
+
+    it("labels stale rollback executions as rollback failures", async () => {
+        const staleRollbackId = `test-rollback-stale-${Bun.randomUUIDv7()}`;
+        const { enqueueJobExecution } =
+            await import("../src/services/jobExecutionQueue.ts");
+        const { startDeployLatest } = await import("../src/services/pullRequests.ts");
+        database
+            .prepare(
+                `INSERT INTO deployment_jobs
+                 (id, status, started_at, updated_at, commit_sha, commit_title, note, stdout, stderr)
+                 VALUES (?, 'building', ?, ?, ?, ?, 'rollback queued', '', '')`
+            )
+            .run(
+                staleRollbackId,
+                new Date().toISOString(),
+                new Date().toISOString(),
+                "b".repeat(40),
+                "Previous release"
+            );
+        database
+            .prepare(
+                "INSERT INTO deployment_lock (id, job_id, updated_at) VALUES (1, ?, ?)"
+            )
+            .run(staleRollbackId, new Date().toISOString());
+        const staleExecution = enqueueJobExecution({
+            actionKey: "dashboard.rollback",
+            displayName: "Stale rollback",
+            payload: { deploymentId: staleRollbackId },
+            resourceClass: "exclusive",
+            timeoutMs: 1000,
+        });
+        database
+            .prepare(
+                `UPDATE job_executions
+                 SET status = 'failed', finished_at = ?, message = 'worker stopped'
+                 WHERE id = ?`
+            )
+            .run(new Date().toISOString(), staleExecution.id);
+
+        let replacementId: string | undefined;
+        try {
+            const replacement = startDeployLatest();
+            replacementId = replacement.id;
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(staleRollbackId)
+            ).toEqual({
+                note: "Rollback execution ended before build completion",
+                status: "failed",
+            });
+        } finally {
+            database.prepare("DELETE FROM deployment_lock WHERE id = 1").run();
+            database
+                .prepare("DELETE FROM job_executions WHERE id = ?")
+                .run(staleExecution.id);
+            database
+                .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                .run(staleRollbackId);
+            if (replacementId) {
+                database
+                    .prepare(
+                        `DELETE FROM job_executions
+                         WHERE action_key = 'dashboard.deploy'
+                           AND json_extract(payload_json, '$.deploymentId') = ?`
+                    )
+                    .run(replacementId);
+                database
+                    .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                    .run(replacementId);
+            }
         }
     });
 
@@ -1648,7 +2111,7 @@ describe("backend service behavior", () => {
                 .run("2026-01-01T00:00:00.000Z", first.id);
 
             expect(() => startDeployLatest()).toThrow(
-                `Dashboard deploy already in progress (${first.id})`
+                `Dashboard release action already in progress (${first.id})`
             );
 
             const firstExecution = database
@@ -1785,7 +2248,7 @@ describe("backend service behavior", () => {
                 .get() as { id: string };
             approvalExecutionId = execution.id;
             expect(() => startDeployLatest()).toThrow(
-                "Dashboard deploy already in progress"
+                "Dashboard release action already in progress"
             );
 
             cancelJobExecution(execution.id);
@@ -2054,11 +2517,27 @@ printf 'scheduled\n'
             expect(restartCommand).toContain(
                 `${releasesRoot}/releases/${oldCommit}/backend/dist/releaseLifecycle.js`
             );
+            expect(restartCommand).toContain(
+                `${releasesRoot}/releases/${candidateCommit}/backend/dist/releaseLifecycle.js`
+            );
             expect(restartCommand).toContain(`activate '${candidateCommit}'`);
             expect(restartCommand.indexOf(`activate '${candidateCommit}'`)).toBeLessThan(
                 restartCommand.indexOf("if restart_services")
             );
-            expect(restartCommand).toContain("rollback");
+            expect(restartCommand).toContain(
+                `rollback '${candidateCommit}' '${oldCommit}'`
+            );
+            const automaticRollbackLine = restartCommand
+                .split("\n")
+                .find((line) =>
+                    line.includes(`rollback '${candidateCommit}' '${oldCommit}'`)
+                );
+            expect(automaticRollbackLine).toContain(
+                `${releasesRoot}/releases/${candidateCommit}/backend/dist/releaseLifecycle.js`
+            );
+            expect(automaticRollbackLine).not.toContain(
+                `${releasesRoot}/releases/${oldCommit}/backend/dist/releaseLifecycle.js`
+            );
             expect(restartCommand).toContain("prune 3");
             expect(restartCommand).not.toContain("/api/job-executions");
             expect(readlinkSync(path.join(releasesRoot, "current"))).toBe(
@@ -2097,14 +2576,14 @@ printf 'scheduled\n'
                 'current_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/current")'
             );
             expect(recoveryCommand).toContain(
-                'trusted_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous")'
+                'activation_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous")'
             );
             expect(recoveryCommand).toContain(
                 'candidate_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/releases/$candidate_commit")'
             );
-            expect(recoveryCommand).toContain('trusted_release="$candidate_release"');
+            expect(recoveryCommand).toContain('activation_release="$candidate_release"');
             expect(recoveryCommand).toContain(
-                'activation_output="$(run_lifecycle activate "$candidate_commit")"'
+                'activation_output="$(run_activation_lifecycle activate "$candidate_commit")"'
             );
             expect(recoveryCommand).toContain(
                 '[ "$activation_commit" = "$candidate_commit" ]'
@@ -2117,7 +2596,7 @@ printf 'scheduled\n'
             );
             expect(
                 recoveryCommand.indexOf(
-                    'activation_output="$(run_lifecycle activate "$candidate_commit")"'
+                    'activation_output="$(run_activation_lifecycle activate "$candidate_commit")"'
                 )
             ).toBeLessThan(
                 recoveryCommand.indexOf(
@@ -2125,7 +2604,10 @@ printf 'scheduled\n'
                 )
             );
             expect(recoveryCommand).toContain(
-                "run_lifecycle rollback && restart_services"
+                'run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+            );
+            expect(recoveryCommand).toContain(
+                'candidate_lifecycle="$candidate_release/backend/dist/releaseLifecycle.js"'
             );
             expect(
                 database
@@ -2190,7 +2672,8 @@ printf 'scheduled\n'
             expectedRoot: fakeRoot,
             branch: "main",
             expectedBranch: "main",
-            head: "abc1234",
+            head: "abc1234a",
+            headCommit: "abc1234abc1234abc1234abc1234abc1234abc12",
             upstream: "origin/main",
             isClean: true,
             isProductionRoot: true,
@@ -2218,8 +2701,8 @@ if [[ "$*" == "rev-parse --show-toplevel" ]]; then
   printf '%s\n' ${JSON.stringify(actualRoot)}
 elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
   printf 'feature\n'
-elif [[ "$*" == "rev-parse --short HEAD" ]]; then
-  printf 'badc0de\n'
+elif [[ "$*" == "rev-parse HEAD" ]]; then
+  printf 'badc0debadc0debadc0debadc0debadc0debadc0\n'
 elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
   exit 1
 elif [[ "$1" == "status" ]]; then
@@ -2486,6 +2969,8 @@ if [[ "$*" == "rev-parse --show-toplevel" ]]; then
   printf '%s\n' ${JSON.stringify(fakeRoot)}
 elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
   printf 'main\n'
+elif [[ "$*" == "rev-parse HEAD" ]]; then
+  printf 'abc1234abc1234abc1234abc1234abc1234abc12\n'
 elif [[ "$*" == "rev-parse --short HEAD" ]]; then
   printf 'abc1234\n'
 elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
@@ -2578,6 +3063,8 @@ if [[ "$*" == "rev-parse --show-toplevel" ]]; then
   printf '%s\n' ${JSON.stringify(fakeRoot)}
 elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
   printf 'main\n'
+elif [[ "$*" == "rev-parse HEAD" ]]; then
+  printf 'abc1234abc1234abc1234abc1234abc1234abc12\n'
 elif [[ "$*" == "rev-parse --short HEAD" ]]; then
   printf 'abc1234\n'
 elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then

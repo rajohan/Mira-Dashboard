@@ -38,23 +38,23 @@ Mira Dashboard worker                         |
 
 Primary pages:
 
-| Path             | Purpose                                                  |
-| ---------------- | -------------------------------------------------------- |
-| `/`              | Operations dashboard overview.                           |
-| `/tasks`         | Local task board and task updates.                       |
-| `/agents`        | Agent status and task history.                           |
-| `/sessions`      | OpenClaw session table and actions.                      |
-| `/chat`          | Gateway-backed chat UI.                                  |
-| `/logs`          | Log file browsing/tailing.                               |
-| `/jobs`          | Dashboard scheduled jobs.                                |
-| `/reports`       | Daily briefs, summaries, heartbeats, and custom reports. |
-| `/pull-requests` | Dashboard PR review/deploy operations.                   |
-| `/files`         | Workspace file browser/editor.                           |
-| `/docker`        | Docker state and managed updater.                        |
-| `/database`      | Postgres/PgBouncer and Dashboard SQLite overview.        |
-| `/moltbook`      | Moltbook dashboard.                                      |
-| `/settings`      | OpenClaw/Dashboard settings.                             |
-| `/terminal`      | Terminal helper/completion UI.                           |
+| Path             | Purpose                                                    |
+| ---------------- | ---------------------------------------------------------- |
+| `/`              | Operations dashboard overview.                             |
+| `/tasks`         | Local task board and task updates.                         |
+| `/agents`        | Agent status and task history.                             |
+| `/sessions`      | OpenClaw session table and actions.                        |
+| `/chat`          | Gateway-backed chat UI.                                    |
+| `/logs`          | Log file browsing/tailing.                                 |
+| `/jobs`          | Dashboard scheduled jobs.                                  |
+| `/reports`       | Daily briefs, summaries, heartbeats, and custom reports.   |
+| `/pull-requests` | PR review, trusted PR dev, releases, deploy, and rollback. |
+| `/files`         | Workspace file browser/editor.                             |
+| `/docker`        | Docker state and managed updater.                          |
+| `/database`      | Postgres/PgBouncer and Dashboard SQLite overview.          |
+| `/moltbook`      | Moltbook dashboard.                                        |
+| `/settings`      | OpenClaw/Dashboard settings.                               |
+| `/terminal`      | Terminal helper/completion UI.                             |
 
 ## Backend
 
@@ -165,9 +165,10 @@ Worker startup registers scheduled jobs for:
 - scheduled job runner.
 
 Production uses `MIRA_DASHBOARD_EXECUTION_ROLE=web` and `worker` in separate
-systemd services. The default `combined` role exists for compatibility and
-tests; local backend development disables it through
-`MIRA_DASHBOARD_DISABLE_SCHEDULER=1`.
+systemd services. Local development uses the `combined` role with the
+`isolated` job profile: scheduler/worker behavior remains testable, while
+backup, deploy, Docker, exec, log-rotation, PR, and OpenClaw-restart adapters
+are not registered.
 
 See [Scheduler, cache, and backups](../operations/scheduler-cache-backups.md)
 for job tables, cache entries, backup scripts, and inspection commands.

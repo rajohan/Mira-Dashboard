@@ -11,7 +11,11 @@ import {
 import os from "node:os";
 
 import { database } from "../database.ts";
-import { invalidateCacheEntry } from "../lib/cacheStore.ts";
+import {
+    getCacheEntry,
+    invalidateCacheEntry,
+    parseJsonField,
+} from "../lib/cacheStore.ts";
 import type { JobResourceClass } from "../lib/jobResources.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
@@ -24,7 +28,7 @@ import {
     getVolumes,
 } from "../routes/dockerRoutes.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
-import { getDatabaseOverview } from "./databaseOverview.ts";
+import { getDatabaseOverview, getIsolatedDatabaseOverview } from "./databaseOverview.ts";
 import { evaluateOpenClawNotifications } from "./openclawNotifications.ts";
 import { evaluateQuotaNotifications } from "./quotaNotifications.ts";
 import {
@@ -91,7 +95,7 @@ type MoltbookCacheKey = (typeof MOLTBOOK_CACHE_KEY_LIST)[number];
 const MOLTBOOK_CACHE_KEYS = new Set<string>(MOLTBOOK_CACHE_KEY_LIST);
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
 const DOCKER_SUMMARY_KEY = "docker.summary";
-const DATABASE_SUMMARY_KEY = "database.summary";
+export const DATABASE_SUMMARY_KEY = "database.summary";
 const DATABASE_SUMMARY_JOB_ID = "cache.database.summary";
 
 const gitRepos = [
@@ -1858,9 +1862,18 @@ async function refreshDockerSummaryCache() {
 }
 
 async function refreshDatabaseSummaryCache() {
+    const isIsolated = process.env.MIRA_DASHBOARD_JOB_PROFILE === "isolated";
+    const previousEntry = isIsolated
+        ? await getCacheEntry(DATABASE_SUMMARY_KEY)
+        : undefined;
+    const previous = isIsolated
+        ? parseJsonField<unknown>(previousEntry?.data || "")
+        : undefined;
     const payload = {
         checkedAt: nowIso(),
-        ...(await getDatabaseOverview()),
+        ...(isIsolated
+            ? getIsolatedDatabaseOverview(previous)
+            : await getDatabaseOverview()),
     };
     writeCacheSuccess({
         key: DATABASE_SUMMARY_KEY,
@@ -1870,6 +1883,7 @@ async function refreshDatabaseSummaryCache() {
         ttlUnit: "minutes",
         metadata: {
             producer: "refreshCacheProducer",
+            profile: isIsolated ? "isolated" : "full",
             workflow: "Cache Foundation - Database Summary",
             refreshIntervalMinutes: 60,
         },
@@ -2331,6 +2345,7 @@ const localCacheSeedPromises = new Map<string, Promise<void>>();
 type CacheSeedStrategy = "local" | "none" | "queue";
 
 interface CacheRefreshScheduledJobOptions {
+    allowedKeys?: readonly string[];
     refreshDatabaseOnStartup?: boolean;
     seedStrategy?: CacheSeedStrategy;
 }
@@ -2408,8 +2423,16 @@ function queueMissingCacheSeeds(
 export function registerCacheRefreshScheduledJobs(
     options: CacheRefreshScheduledJobOptions = {}
 ): void {
+    const allowedKeys = options.allowedKeys ? new Set(options.allowedKeys) : undefined;
+    const registeredJobs = cacheRefreshScheduledJobs;
     registerScheduledJobAction("cache.refresh", async (job, signal) => {
         const key = getScheduledCacheKey(job);
+        if (allowedKeys && !allowedKeys.has(key)) {
+            throw Object.assign(
+                new Error(`Cache refresh is not allowed in this job profile: ${key}`),
+                { statusCode: 403 }
+            );
+        }
         const result = await refreshCacheProducer(key, signal);
         return { key, ...result };
     });
@@ -2418,14 +2441,15 @@ export function registerCacheRefreshScheduledJobs(
     try {
         removeScheduledJobsNotInAction(
             "cache.refresh",
-            cacheRefreshScheduledJobs.map((job) => job.id)
+            registeredJobs.map((job) => job.id)
         );
 
-        for (const job of cacheRefreshScheduledJobs) {
+        for (const job of registeredJobs) {
             const existing = getScheduledJob(job.id);
+            const isAllowed = !allowedKeys || allowedKeys.has(job.actionPayload.key);
             upsertScheduledJob({
                 ...job,
-                enabled: existing?.enabled ?? true,
+                enabled: isAllowed ? (existing?.enabled ?? true) : false,
                 scheduleType: existing?.scheduleType ?? job.scheduleType,
                 intervalSeconds: existing?.intervalSeconds ?? job.intervalSeconds,
                 timeOfDay: existing
@@ -2439,7 +2463,7 @@ export function registerCacheRefreshScheduledJobs(
                         ? job.cronExpression
                         : undefined),
             });
-            if (existing?.enabled ?? true) {
+            if (isAllowed && (existing?.enabled ?? true)) {
                 seedJobs.push({ id: job.id, key: job.actionPayload.key });
             }
         }

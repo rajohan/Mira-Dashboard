@@ -4,7 +4,11 @@ import path from "node:path";
 import type { DashboardSocket } from "../dashboardSocket.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
-import { formatOpenClawLogDate, resolveRealLogsDirectory } from "../lib/logRoots.ts";
+import {
+    formatOpenClawLogDate,
+    logUnavailableReason,
+    resolveRealLogsDirectory,
+} from "../lib/logRoots.ts";
 import { lineEntriesFromLogRead, type LogRead } from "../lib/logTail.ts";
 
 const logsRouteState: {
@@ -292,6 +296,22 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
 
 /** Performs subscribe to logs. */
 export function subscribeToLogs(ws: DashboardSocket): void {
+    const unavailableReason = logUnavailableReason();
+    if (unavailableReason) {
+        try {
+            ws.send(
+                JSON.stringify({
+                    type: "log_unavailable",
+                    reason: unavailableReason,
+                })
+            );
+            ws.send(JSON.stringify({ type: "log_history_complete", count: 0 }));
+        } catch {
+            // The HTTP log-info response remains the source of availability state.
+        }
+        return;
+    }
+
     logSubscribers.add(ws);
 
     // Send log history first

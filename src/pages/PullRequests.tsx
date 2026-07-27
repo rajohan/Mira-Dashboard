@@ -1,9 +1,12 @@
 import {
     CheckCircle,
+    ExternalLink,
     GitBranch,
     GitMerge,
     GitPullRequest,
+    Play,
     Rocket,
+    Square,
     XCircle,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -12,6 +15,8 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
+import { ProductionReleasesCard } from "../components/features/pullRequests/ProductionReleasesCard";
+import { PullRequestPreviewCard } from "../components/features/pullRequests/PullRequestPreviewCard";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -20,19 +25,26 @@ import { LoadingState } from "../components/ui/LoadingState";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import type {
+    DashboardReleaseSummary,
     DeploymentJob,
     ProductionCheckoutStatus,
+    PullRequestPreviewStatus,
     PullRequestSummary,
     WorktreeCleanupResult,
 } from "../hooks";
 import {
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useDashboardReleaseStatus,
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
+    usePullRequestPreview,
     usePullRequests,
     useRejectPullRequest,
+    useRollbackDashboard,
+    useStartPullRequestPreview,
+    useStopPullRequestPreview,
     useUpdatePullRequestBranch,
 } from "../hooks";
 import { formatDate } from "../utils/format";
@@ -43,12 +55,22 @@ type PendingAction =
     | { type: "merge"; pr: PullRequestSummary }
     | { type: "merge-deploy"; pr: PullRequestSummary }
     | { type: "review-approve"; pr: PullRequestSummary }
+    | { type: "preview-start"; pr: PullRequestSummary }
+    | { number: number; title?: string; type: "preview-stop" }
     | { type: "reject"; pr: PullRequestSummary }
+    | { release: DashboardReleaseSummary; type: "rollback" }
     | { type: "deploy" };
 type PendingActionType = Exclude<PendingAction, undefined>["type"];
 type UnhandledPendingActionType = Exclude<
     PendingActionType,
-    "deploy" | "merge" | "merge-deploy" | "reject" | "review-approve"
+    | "deploy"
+    | "merge"
+    | "merge-deploy"
+    | "preview-start"
+    | "preview-stop"
+    | "reject"
+    | "review-approve"
+    | "rollback"
 >;
 
 const PENDING_ACTION_SWITCH_IS_EXHAUSTIVE: UnhandledPendingActionType extends never
@@ -60,6 +82,11 @@ const MIRA_AUTHOR = "mira-2026";
 const DEFAULT_REVIEWER_AUTHOR = "rajohan";
 const DEPENDABOT_AUTHOR = "app/dependabot";
 const DEFAULT_BASE = "main";
+const ACTIVE_PREVIEW_STATUSES = new Set<PullRequestPreviewStatus["status"]>([
+    "running",
+    "starting",
+    "stopping",
+]);
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const FAILED_CHECK_VALUES = new Set([
     "error",
@@ -395,11 +422,20 @@ function actionLabel(action: Exclude<PendingAction, undefined>) {
         case "review-approve": {
             return "Approve PR";
         }
+        case "preview-start": {
+            return "Run PR in dev";
+        }
+        case "preview-stop": {
+            return "Stop PR dev";
+        }
         case "reject": {
             return "Reject PR";
         }
         case "deploy": {
             return `Deploy latest ${DEFAULT_BASE}`;
+        }
+        case "rollback": {
+            return `Roll back to ${action.release.commitSha.slice(0, 8)}`;
         }
     }
 }
@@ -411,16 +447,26 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
             return `Merge PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge the PR and delete the remote branch. It will not deploy.`;
         }
         case "merge-deploy": {
-            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a service restart, and run a health check.`;
+            return `Merge and deploy PR #${action.pr.number}: ${action.pr.title}?\n\nThis will squash-merge, sync ${DEFAULT_BASE}, publish an immutable release, atomically activate it, restart web and worker, and verify commit-bound readiness. A failed release is rolled back automatically.`;
         }
         case "review-approve": {
             return `Approve PR #${action.pr.number}: ${action.pr.title}?\n\nThis approves the PR on GitHub. It does not merge or deploy.`;
+        }
+        case "preview-start": {
+            return `Run PR #${action.pr.number} in dev: ${action.pr.title}?\n\nThis runs the trusted PR over Tailscale HTTPS with hot reload, an isolated Dashboard database, a writable workspace snapshot, and an isolated scheduler/worker without host or backup jobs. It connects to the live production Gateway so chat and session changes can affect production data. The dev environment stops automatically after four hours.`;
+        }
+        case "preview-stop": {
+            const title = action.title ? `: ${action.title}` : "";
+            return `Stop PR dev for #${action.number}${title}?\n\nIts isolated database, workspace snapshot, and worktree are kept for a faster later restart.`;
         }
         case "reject": {
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
         }
         case "deploy": {
-            return `Deploy latest ${DEFAULT_BASE}?\n\nThis will sync the production checkout to ${DEFAULT_BASE}, build frontend/backend from there, schedule a mira-dashboard.service restart, and run a health check.`;
+            return `Deploy latest ${DEFAULT_BASE}?\n\nThis will sync ${DEFAULT_BASE}, publish an immutable release, atomically activate it, restart web and worker, and verify commit-bound readiness. A failed release is rolled back automatically.`;
+        }
+        case "rollback": {
+            return `Roll back to ${action.release.commitSha.slice(0, 8)}: ${action.release.commitTitle}?\n\nThis atomically swaps the active and previous releases, restarts web and worker, and verifies commit-bound readiness. If the rollback target fails, the current release is restored automatically.`;
         }
     }
 }
@@ -531,10 +577,10 @@ function PullRequestCard({
 function RecentDeploysCard({ deployments }: { deployments: DeploymentJob[] }) {
     return (
         <Card variant="bordered" className="h-fit space-y-3">
-            <CardTitle className="text-base">Recent deploys</CardTitle>
+            <CardTitle className="text-base">Recent release jobs</CardTitle>
             {deployments.length === 0 ? (
                 <p className="text-sm text-primary-400">
-                    No dashboard deploy jobs recorded yet.
+                    No dashboard release jobs recorded yet.
                 </p>
             ) : (
                 <div className="space-y-2">
@@ -596,11 +642,21 @@ export function PullRequests() {
     const { data: deployments = [] } = usePullRequestDeployments();
     const { data: productionCheckout, error: productionCheckoutError } =
         useProductionCheckout();
+    const { data: releaseStatus, error: releaseStatusError } =
+        useDashboardReleaseStatus();
+    const {
+        data: previewStatus,
+        error: previewStatusError,
+        isLoading: isPreviewStatusLoading,
+    } = usePullRequestPreview();
     const approvePullRequest = useApprovePullRequest();
     const approvePullRequestReview = useApprovePullRequestReview();
     const rejectPullRequest = useRejectPullRequest();
     const updatePullRequestBranch = useUpdatePullRequestBranch();
     const deployDashboard = useDeployDashboard();
+    const rollbackDashboard = useRollbackDashboard();
+    const startPullRequestPreview = useStartPullRequestPreview();
+    const stopPullRequestPreview = useStopPullRequestPreview();
     const [pendingAction, setPendingAction] = useState<PendingAction>(undefined);
     const [lastResult, setLastResult] = useState<string | undefined>(undefined);
     const [actionError, setActionError] = useState<string | undefined>(undefined);
@@ -609,7 +665,10 @@ export function PullRequests() {
         approvePullRequestReview.isPending ||
         rejectPullRequest.isPending ||
         updatePullRequestBranch.isPending ||
-        deployDashboard.isPending;
+        deployDashboard.isPending ||
+        rollbackDashboard.isPending ||
+        startPullRequestPreview.isPending ||
+        stopPullRequestPreview.isPending;
     const isProductionActionBlocked = !productionCheckout?.isSafeForDeploy;
     const productionActionBlockedMessage = isProductionActionBlocked
         ? checkoutMessage(productionCheckout, productionCheckoutError ?? undefined)
@@ -617,6 +676,13 @@ export function PullRequests() {
     const deployBlockedReasonId = productionActionBlockedMessage
         ? "deploy-checkout-disabled-reason"
         : undefined;
+    const previewStopTarget =
+        previewStatus?.number === undefined
+            ? undefined
+            : {
+                  number: previewStatus.number,
+                  title: previewStatus.title,
+              };
     const miraPullRequests = pullRequests.filter((pr) => isMiraPullRequest(pr));
     const externalPullRequests = pullRequests.filter((pr) => !isMiraPullRequest(pr));
 
@@ -655,6 +721,26 @@ export function PullRequests() {
                     return;
                 }
 
+                case "preview-start": {
+                    const preview = await startPullRequestPreview.mutateAsync({
+                        number: action.pr.number,
+                    });
+                    setLastResult(
+                        preview.url
+                            ? `PR #${action.pr.number} dev is running at ${preview.url}`
+                            : `PR #${action.pr.number} dev started`
+                    );
+                    break;
+                }
+
+                case "preview-stop": {
+                    await stopPullRequestPreview.mutateAsync({
+                        number: action.number,
+                    });
+                    setLastResult(`PR #${action.number} dev stopped`);
+                    break;
+                }
+
                 case "reject": {
                     const result = await rejectPullRequest.mutateAsync({
                         number: action.pr.number,
@@ -668,12 +754,113 @@ export function PullRequests() {
                     setLastResult(result?.deployment?.note ?? "Deploy scheduled");
                     break;
                 }
+
+                case "rollback": {
+                    const result = await rollbackDashboard.mutateAsync({
+                        targetCommit: action.release.commitSha,
+                    });
+                    setLastResult(
+                        result?.deployment?.note ??
+                            `Rollback to ${action.release.commitSha.slice(0, 8)} scheduled`
+                    );
+                    break;
+                }
             }
 
             setPendingAction(undefined);
         } catch (error_) {
             setActionError(error_ instanceof Error ? error_.message : "Action failed");
         }
+    }
+
+    /** Renders trusted PR dev controls for an eligible pull request. */
+    function renderPullRequestPreviewActions(pr: PullRequestSummary) {
+        if (pr.previewEligible !== true) return;
+        const isPreviewSlotActive =
+            previewStatus !== undefined &&
+            ACTIVE_PREVIEW_STATUSES.has(previewStatus.status);
+        const hasPullRequestPreviewSlot = previewStatus?.number === pr.number;
+        const isPreviewSlotBusy = isPreviewSlotActive && !hasPullRequestPreviewSlot;
+        const isPreviewTransitionInProgress =
+            hasPullRequestPreviewSlot &&
+            (previewStatus.status === "starting" || previewStatus.status === "stopping");
+        const isPreviewCommitCurrent =
+            previewStatus?.commitSha !== undefined &&
+            previewStatus.commitSha === pr.headRefOid;
+        const hasCurrentDevelopment =
+            isPreviewSlotActive && hasPullRequestPreviewSlot && isPreviewCommitCurrent;
+        const canStartDevelopment = !hasCurrentDevelopment;
+        const isPreviewActionDisabled =
+            isActionPending ||
+            isPreviewStatusLoading ||
+            Boolean(previewStatusError) ||
+            isPreviewSlotBusy ||
+            isPreviewTransitionInProgress;
+        let blockedMessage: string | undefined;
+        if (isPreviewStatusLoading) {
+            blockedMessage = "Loading PR dev status.";
+        } else if (previewStatusError) {
+            blockedMessage = `PR dev status is unavailable: ${previewStatusError.message}`;
+        } else if (isPreviewSlotBusy) {
+            blockedMessage = `PR #${previewStatus?.number} currently owns the dev slot. Stop it before starting another PR.`;
+        } else if (isPreviewTransitionInProgress) {
+            blockedMessage = "PR dev is currently changing state.";
+        }
+
+        return (
+            <>
+                {blockedMessage ? (
+                    <p className="text-xs text-primary-400 sm:basis-full">
+                        {blockedMessage}
+                    </p>
+                ) : undefined}
+                {hasPullRequestPreviewSlot &&
+                previewStatus.status === "running" &&
+                previewStatus.url ? (
+                    <a
+                        href={previewStatus.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-700 px-4 py-2 text-sm font-medium text-primary-100 transition-colors hover:bg-primary-600"
+                    >
+                        <ExternalLink className="size-4" />
+                        Open dev
+                    </a>
+                ) : undefined}
+                {canStartDevelopment ? (
+                    <Button
+                        variant="secondary"
+                        onClick={() =>
+                            setPendingAction({
+                                pr,
+                                type: "preview-start",
+                            })
+                        }
+                        disabled={isPreviewActionDisabled}
+                        title="Prod-like trusted dev with isolated Dashboard data and the live production Gateway"
+                    >
+                        <Play className="size-4" />
+                        Run in dev
+                    </Button>
+                ) : undefined}
+                {hasPullRequestPreviewSlot && previewStatus.status !== "stopped" ? (
+                    <Button
+                        variant="secondary"
+                        onClick={() =>
+                            setPendingAction({
+                                number: pr.number,
+                                title: pr.title,
+                                type: "preview-stop",
+                            })
+                        }
+                        disabled={isActionPending || isPreviewTransitionInProgress}
+                    >
+                        <Square className="size-4" />
+                        Stop dev
+                    </Button>
+                ) : undefined}
+            </>
+        );
     }
 
     /** Renders merge controls for a pull request. */
@@ -760,6 +947,7 @@ export function PullRequests() {
                             : "Update branch"}
                     </Button>
                 ) : undefined}
+                {renderPullRequestPreviewActions(pr)}
                 <Button
                     variant="primary"
                     onClick={() => setPendingAction({ type: "merge-deploy", pr })}
@@ -791,20 +979,7 @@ export function PullRequests() {
     }
 
     return (
-        <PageState
-            isLoading={isLoading}
-            loading={<LoadingState message="Loading pull requests..." size="lg" />}
-            error={error?.message ?? undefined}
-            errorView={
-                <div className="flex h-full min-h-0 flex-col items-center justify-center gap-4 p-3 sm:p-6">
-                    <p className="text-red-400">{error?.message}</p>
-                    <RefreshButton
-                        onClick={() => void refetchPullRequests()}
-                        label="Retry"
-                    />
-                </div>
-            }
-        >
+        <>
             <div className="space-y-4 p-3 sm:p-4 lg:p-6">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
@@ -813,9 +988,9 @@ export function PullRequests() {
                             Pull requests
                         </h2>
                         <p className="mt-1 max-w-2xl text-sm text-primary-400">
-                            Review open rajohan/Mira-Dashboard pull requests. Dashboard
-                            merge actions are enabled after review approval, passing CI,
-                            and a safe production checkout.
+                            Review or temporarily preview open rajohan/Mira-Dashboard pull
+                            requests. Merge actions are enabled after review approval,
+                            passing CI, and a safe production checkout.
                         </p>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:justify-items-end">
@@ -855,6 +1030,33 @@ export function PullRequests() {
                         <p className="text-sm text-red-300">{actionError}</p>
                     </Card>
                 ) : undefined}
+
+                <PullRequestPreviewCard
+                    error={previewStatusError ?? undefined}
+                    isStopPending={isActionPending}
+                    onStop={
+                        previewStopTarget === undefined
+                            ? undefined
+                            : () => {
+                                  setPendingAction({
+                                      ...previewStopTarget,
+                                      type: "preview-stop",
+                                  });
+                              }
+                    }
+                    preview={previewStatus}
+                />
+
+                <ProductionReleasesCard
+                    baseBranch={DEFAULT_BASE}
+                    checkout={productionCheckout}
+                    error={releaseStatusError ?? undefined}
+                    isActionPending={isActionPending}
+                    onRollback={(release) => {
+                        setPendingAction({ release, type: "rollback" });
+                    }}
+                    release={releaseStatus}
+                />
 
                 <Card variant="bordered" className="space-y-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -911,80 +1113,103 @@ export function PullRequests() {
                 </Card>
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
-                    <div className="space-y-4">
-                        {pullRequests.length === 0 ? (
-                            <Card variant="bordered">
-                                <CardTitle>No open PRs waiting</CardTitle>
-                                <p className="mt-2 text-sm text-primary-400">
-                                    New dashboard and dependency PRs will appear here for
-                                    review.
-                                </p>
-                            </Card>
-                        ) : undefined}
-
-                        {pullRequests.length > 0 && miraPullRequests.length === 0 ? (
-                            <Card variant="bordered">
-                                <CardTitle>No Mira-authored PRs waiting</CardTitle>
-                                <p className="mt-2 text-sm text-primary-400">
-                                    Autopilot changes will appear here when Mira opens a
-                                    dashboard PR for Raymond to review.
-                                </p>
-                            </Card>
-                        ) : undefined}
-
-                        {miraPullRequests.length > 0 ? (
-                            <section className="space-y-3" aria-label="Mira-authored PRs">
-                                <div>
-                                    <SectionHeader
-                                        title="Mira-authored PRs"
-                                        count={miraPullRequests.length}
-                                        badgeVariant="info"
-                                    />
-                                    <p className="mt-1 text-sm text-primary-400">
-                                        These can be merged, rejected, or merged and
-                                        deployed from the dashboard.
-                                    </p>
-                                </div>
-                                <div className="space-y-3">
-                                    {miraPullRequests.map((pr) => (
-                                        <PullRequestCard
-                                            key={pr.number}
-                                            pr={pr}
-                                            actions={renderPullRequestActions(pr)}
-                                        />
-                                    ))}
-                                </div>
-                            </section>
-                        ) : undefined}
-
-                        {externalPullRequests.length > 0 ? (
-                            <section
-                                className="space-y-3"
-                                aria-label="Dependency and external PRs"
+                    <PageState
+                        isLoading={isLoading}
+                        loading={
+                            <LoadingState message="Loading pull requests..." size="lg" />
+                        }
+                        error={error?.message ?? undefined}
+                        errorView={
+                            <Card
+                                variant="bordered"
+                                className="flex min-h-48 flex-col items-center justify-center gap-4"
                             >
-                                <div>
-                                    <SectionHeader
-                                        title="Dependency / external PRs"
-                                        count={externalPullRequests.length}
-                                        badgeVariant="default"
-                                    />
-                                    <p className="mt-1 text-sm text-primary-400">
-                                        These can be merged after the same review, CI, and
-                                        checkout gates as Mira-authored PRs.
+                                <p className="text-red-400">{error?.message}</p>
+                                <RefreshButton
+                                    onClick={() => void refetchPullRequests()}
+                                    label="Retry"
+                                />
+                            </Card>
+                        }
+                    >
+                        <div className="space-y-4">
+                            {pullRequests.length === 0 ? (
+                                <Card variant="bordered">
+                                    <CardTitle>No open PRs waiting</CardTitle>
+                                    <p className="mt-2 text-sm text-primary-400">
+                                        New dashboard and dependency PRs will appear here
+                                        for review.
                                     </p>
-                                </div>
-                                <div className="space-y-3">
-                                    {externalPullRequests.map((pr) => (
-                                        <PullRequestCard
-                                            key={pr.number}
-                                            pr={pr}
-                                            actions={renderPullRequestActions(pr)}
+                                </Card>
+                            ) : undefined}
+
+                            {pullRequests.length > 0 && miraPullRequests.length === 0 ? (
+                                <Card variant="bordered">
+                                    <CardTitle>No Mira-authored PRs waiting</CardTitle>
+                                    <p className="mt-2 text-sm text-primary-400">
+                                        Autopilot changes will appear here when Mira opens
+                                        a dashboard PR for Raymond to review.
+                                    </p>
+                                </Card>
+                            ) : undefined}
+
+                            {miraPullRequests.length > 0 ? (
+                                <section
+                                    className="space-y-3"
+                                    aria-label="Mira-authored PRs"
+                                >
+                                    <div>
+                                        <SectionHeader
+                                            title="Mira-authored PRs"
+                                            count={miraPullRequests.length}
+                                            badgeVariant="info"
                                         />
-                                    ))}
-                                </div>
-                            </section>
-                        ) : undefined}
-                    </div>
+                                        <p className="mt-1 text-sm text-primary-400">
+                                            These can be merged, rejected, or merged and
+                                            deployed from the dashboard.
+                                        </p>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {miraPullRequests.map((pr) => (
+                                            <PullRequestCard
+                                                key={pr.number}
+                                                pr={pr}
+                                                actions={renderPullRequestActions(pr)}
+                                            />
+                                        ))}
+                                    </div>
+                                </section>
+                            ) : undefined}
+
+                            {externalPullRequests.length > 0 ? (
+                                <section
+                                    className="space-y-3"
+                                    aria-label="Dependency and external PRs"
+                                >
+                                    <div>
+                                        <SectionHeader
+                                            title="Dependency / external PRs"
+                                            count={externalPullRequests.length}
+                                            badgeVariant="default"
+                                        />
+                                        <p className="mt-1 text-sm text-primary-400">
+                                            These can be merged after the same review, CI,
+                                            and checkout gates as Mira-authored PRs.
+                                        </p>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {externalPullRequests.map((pr) => (
+                                            <PullRequestCard
+                                                key={pr.number}
+                                                pr={pr}
+                                                actions={renderPullRequestActions(pr)}
+                                            />
+                                        ))}
+                                    </div>
+                                </section>
+                            ) : undefined}
+                        </div>
+                    </PageState>
                     <div className={pullRequests.length > 0 ? "xl:pt-15" : undefined}>
                         <RecentDeploysCard deployments={deployments} />
                     </div>
@@ -998,7 +1223,10 @@ export function PullRequests() {
                         confirmLabel={actionLabel(pendingAction)}
                         confirmLoadingLabel="Working"
                         loading={isActionPending}
-                        danger={pendingAction.type === "reject"}
+                        danger={
+                            pendingAction.type === "reject" ||
+                            pendingAction.type === "rollback"
+                        }
                         onCancel={() => {
                             if (isActionPending) {
                                 return;
@@ -1013,6 +1241,6 @@ export function PullRequests() {
                     />
                 )}
             </div>
-        </PageState>
+        </>
     );
 }

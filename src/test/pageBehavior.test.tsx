@@ -59,7 +59,6 @@ import {
 } from "../pages/Terminal";
 import { normalizeChatSearch } from "../router";
 import { authActions } from "../stores/authStore";
-import { appTimeZoneParts } from "../utils/date";
 import { parseLogLine } from "../utils/logUtilities";
 
 type FakeWebSocketListener = (event?: { data?: string }) => void;
@@ -103,6 +102,7 @@ const jobsApiState = {
 const logsApiState = {
     openclawHundredLineRequests: 0,
     simulateOpenclawTruncation: false,
+    unavailableReason: undefined as string | undefined,
 };
 
 function requestAnimationFrameForTest(callback: FrameRequestCallback): number {
@@ -1497,6 +1497,12 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (url === "/api/logs/info") {
+        if (logsApiState.unavailableReason) {
+            return Response.json({
+                logs: [],
+                unavailableReason: logsApiState.unavailableReason,
+            });
+        }
         return Response.json({
             logs: [
                 { name: "openclaw.log", size: 100 },
@@ -1733,6 +1739,36 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         });
     }
 
+    if (url === "/api/pull-requests/releases") {
+        return Response.json({
+            release: {
+                current: {
+                    builtAt: "2026-06-24T08:00:00.000Z",
+                    commitSha: "abc12345".repeat(5),
+                    commitTitle: "Current dashboard release",
+                    commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${"abc12345".repeat(5)}`,
+                    schema: {
+                        maximumCompatible: 31,
+                        minimumCompatible: 1,
+                        target: 31,
+                    },
+                },
+                previous: {
+                    builtAt: "2026-06-23T08:00:00.000Z",
+                    commitSha: "def45678".repeat(5),
+                    commitTitle: "Previous dashboard release",
+                    commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${"def45678".repeat(5)}`,
+                    schema: {
+                        maximumCompatible: 31,
+                        minimumCompatible: 1,
+                        target: 31,
+                    },
+                },
+                rollback: { available: true },
+            },
+        });
+    }
+
     if (method === "POST" && url === "/api/pull-requests/190/approve") {
         expect(parseRequestBody(init)).toEqual({ deploy: false });
         return Response.json({
@@ -1770,6 +1806,28 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                 updatedAt: "2026-06-24T08:15:00.000Z",
                 note: "Deploy scheduled",
             },
+        });
+    }
+
+    if (method === "POST" && url === "/api/pull-requests/releases/rollback") {
+        expect(parseRequestBody(init)).toEqual({
+            targetCommit: "def45678".repeat(5),
+        });
+        return Response.json({
+            isOk: true,
+            deployment: {
+                id: "rollback-1",
+                commit: "def45678".repeat(5),
+                status: "building",
+                updatedAt: "2026-06-24T08:16:00.000Z",
+                note: "Rollback to def45678 queued",
+            },
+        });
+    }
+
+    if (method === "GET" && url === "/api/pull-requests/preview") {
+        return Response.json({
+            preview: { status: "stopped" },
         });
     }
 
@@ -1975,6 +2033,7 @@ describe("Mira Dashboard pages", () => {
         terminalApiState.wasJobStopped = false;
         logsApiState.openclawHundredLineRequests = 0;
         logsApiState.simulateOpenclawTruncation = false;
+        logsApiState.unavailableReason = undefined;
         jobsApiState.cronName = "heartbeat";
         jobsApiState.heartbeatDisableIntent = undefined;
         jobsApiState.heartbeatEnabled = true;
@@ -2627,6 +2686,7 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getAllByText("Schedule: Every 1h").length).toBeGreaterThan(0);
         });
 
+        const disableDraftBeforeOpen = defaultDisableUntilDraft();
         await user.click(screen.getByLabelText("Enabled"));
         expect(screen.getByRole("heading", { name: "Disable job" })).toBeInTheDocument();
         const disabledUntilGroup = screen.getByRole("group", {
@@ -2636,10 +2696,16 @@ describe("Mira Dashboard pages", () => {
             name: /choose disabled until date, selected \d{2}\/\d{2}\/\d{4}/i,
         });
         const disableCommentInput = screen.getByLabelText("Comment");
-        const today = appTimeZoneParts(new Date());
-        expect(disabledUntilDateButton).toHaveTextContent(
-            `${String(today.day).padStart(2, "0")}/${String(today.month).padStart(2, "0")}/${today.year}`
+        const disableDraftAfterOpen = defaultDisableUntilDraft();
+        const expectedDisableDates = [disableDraftBeforeOpen, disableDraftAfterOpen].map(
+            ({ day, month, year }) =>
+                `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`
         );
+        expect(
+            expectedDisableDates.some((date) =>
+                disabledUntilDateButton.textContent?.includes(date)
+            )
+        ).toBe(true);
         expect(screen.getByTestId("date-time-picker-fields")).toHaveClass(
             "min-w-0",
             "grid-cols-1"
@@ -2747,6 +2813,8 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText("Expand backend coverage")).toBeInTheDocument();
             expect(screen.getByText("Bump dashboard dependency")).toBeInTheDocument();
             expect(screen.getByText("Deploy dashboard")).toBeInTheDocument();
+            expect(screen.getByText("Current dashboard release")).toBeInTheDocument();
+            expect(screen.getByText("Previous dashboard release")).toBeInTheDocument();
         });
         expect(screen.getAllByText("1 PR")).toHaveLength(2);
         expect(screen.getByText("Coverage body")).toBeInTheDocument();
@@ -2774,6 +2842,17 @@ describe("Mira Dashboard pages", () => {
             expect(screen.getByText("Deploy scheduled")).toBeInTheDocument();
         });
 
+        await user.click(screen.getByRole("button", { name: "Roll back to def45678" }));
+        expect(
+            screen.getByRole("heading", { name: "Roll back to def45678" })
+        ).toBeInTheDocument();
+        await user.click(
+            screen.getAllByRole("button", { name: "Roll back to def45678" }).at(-1)!
+        );
+        await waitFor(() => {
+            expect(screen.getByText("Rollback to def45678 queued")).toBeInTheDocument();
+        });
+
         await user.click(screen.getAllByRole("button", { name: "Merge only" })[0]!);
         expect(screen.getByRole("heading", { name: "Merge PR" })).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Merge PR" }));
@@ -2788,6 +2867,161 @@ describe("Mira Dashboard pages", () => {
         await user.click(screen.getByRole("button", { name: "Reject PR" }));
         await waitFor(() => {
             expect(screen.getByText("Rejected PR #190")).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("starts and stops an eligible trusted PR development environment", async () => {
+        const user = userEvent.setup();
+        let preview: Record<string, unknown> = { status: "stopped" };
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (method === "GET" && url === "/api/pull-requests") {
+                    return Response.json({
+                        pullRequests: [
+                            {
+                                additions: 12,
+                                author: { login: "mira-2026" },
+                                baseRefName: "main",
+                                body: "Trusted preview",
+                                changedFiles: 2,
+                                createdAt: "2026-06-24T08:00:00.000Z",
+                                deletions: 3,
+                                headRefName: "mira/trusted-preview",
+                                headRefOid: "a".repeat(40),
+                                isDraft: false,
+                                mergeable: "MERGEABLE",
+                                mergeStateStatus: "CLEAN",
+                                number: 335,
+                                previewEligible: true,
+                                reviewerApproved: true,
+                                reviewDecision: "APPROVED",
+                                statusCheckRollup: [
+                                    { conclusion: "SUCCESS", status: "COMPLETED" },
+                                ],
+                                title: "Trusted PR dev",
+                                updatedAt: "2026-06-24T08:05:00.000Z",
+                                url: "https://github.com/rajohan/Mira-Dashboard/pull/335",
+                            },
+                        ],
+                    });
+                }
+                if (method === "GET" && url === "/api/pull-requests/preview") {
+                    return Response.json({ preview });
+                }
+                if (method === "POST" && url === "/api/pull-requests/335/preview/start") {
+                    expect(parseRequestBody(init)).toEqual({});
+                    preview = {
+                        commitSha: "a".repeat(40),
+                        number: 335,
+                        status: "running",
+                        title: "Trusted PR dev",
+                        updatedAt: "2026-06-24T08:06:00.000Z",
+                        url: "https://dashboard.test:5173",
+                    };
+                    return Response.json({ isOk: true, preview });
+                }
+                if (method === "POST" && url === "/api/pull-requests/335/preview/stop") {
+                    expect(parseRequestBody(init)).toEqual({});
+                    preview = {
+                        ...preview,
+                        status: "stopped",
+                        updatedAt: "2026-06-24T08:07:00.000Z",
+                    };
+                    return Response.json({ isOk: true, preview });
+                }
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(PullRequests));
+
+        await waitFor(() => {
+            expect(screen.getByText("Trusted PR dev")).toBeInTheDocument();
+        });
+        await user.click(screen.getByRole("button", { name: "Run in dev" }));
+        expect(
+            screen.getByRole("heading", { name: "Run PR in dev" })
+        ).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Run PR in dev" }));
+        await waitFor(() => {
+            expect(
+                screen.getByText("PR #335 dev is running at https://dashboard.test:5173")
+            ).toBeInTheDocument();
+        });
+        expect(screen.getAllByRole("link", { name: "Open dev" })).toHaveLength(2);
+
+        await user.click(screen.getAllByRole("button", { name: "Stop dev" })[0]!);
+        expect(screen.getByRole("heading", { name: "Stop PR dev" })).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Stop PR dev" }));
+        await waitFor(() => {
+            expect(screen.getByText("PR #335 dev stopped")).toBeInTheDocument();
+        });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("keeps an active PR development stop control when GitHub listing fails", async () => {
+        const user = userEvent.setup();
+        let isPreviewRunning = true;
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (method === "GET" && url === "/api/pull-requests") {
+                    return Response.json(
+                        { error: "GitHub listing unavailable" },
+                        { status: 503 }
+                    );
+                }
+                if (method === "GET" && url === "/api/pull-requests/preview") {
+                    return Response.json({
+                        preview: {
+                            commitSha: "a".repeat(40),
+                            number: 335,
+                            status: isPreviewRunning ? "running" : "stopped",
+                            title: "Active PR dev",
+                            updatedAt: "2026-06-24T08:06:00.000Z",
+                            url: "https://dashboard.test:5173",
+                        },
+                    });
+                }
+                if (method === "POST" && url === "/api/pull-requests/335/preview/stop") {
+                    isPreviewRunning = false;
+                    return Response.json({
+                        isOk: true,
+                        preview: {
+                            commitSha: "a".repeat(40),
+                            number: 335,
+                            status: "stopped",
+                            title: "Active PR dev",
+                            updatedAt: "2026-06-24T08:07:00.000Z",
+                        },
+                    });
+                }
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(PullRequests));
+
+        await waitFor(() => {
+            expect(screen.getByText("GitHub listing unavailable")).toBeInTheDocument();
+            expect(screen.getByText(/PR #335: Active PR dev/)).toBeInTheDocument();
+        });
+        await user.click(screen.getByRole("button", { name: "Stop dev" }));
+        await user.click(screen.getByRole("button", { name: "Stop PR dev" }));
+        await waitFor(() => {
+            expect(screen.getByText("PR #335 dev stopped")).toBeInTheDocument();
         });
 
         view.unmount();
@@ -3478,6 +3712,21 @@ describe("Mira Dashboard pages", () => {
             expect(screen.queryByText(/Loading chat/)).not.toBeInTheDocument();
         });
         expect(view.router.state.location.search).toEqual({});
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("shows why logs are unavailable in isolated Dashboard dev", async () => {
+        logsApiState.unavailableReason =
+            "Host logs are unavailable in isolated Dashboard dev.";
+        const view = renderPage(createElement(Logs), { withSocket: true });
+
+        await waitFor(() => {
+            expect(
+                screen.getByText("Host logs are unavailable in isolated Dashboard dev.")
+            ).toBeInTheDocument();
+        });
 
         view.unmount();
         view.queryClient.clear();

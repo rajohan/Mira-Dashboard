@@ -1,10 +1,11 @@
 import { useNavigate } from "@tanstack/react-router";
-import { LogOut, Menu } from "lucide-react";
+import { Activity, LogOut, Menu } from "lucide-react";
 
 import { useHealth } from "../../hooks";
 import { useOpenClawSocket } from "../../hooks/useOpenClawSocket";
 import { authActions } from "../../stores/authStore";
 import { Button } from "../ui/Button";
+import { Dropdown } from "../ui/Dropdown";
 import { NotificationBell } from "./NotificationBell";
 
 /** Provides props for app header. */
@@ -34,23 +35,25 @@ export function AppHeader({
         : "unknown";
     const workerStatus = {
         offline: {
-            className: "border-red-500/40 bg-red-500/10 text-red-300",
             label: "Worker offline",
             symbol: "○",
         },
         ready: {
-            className: "border-green-500/40 bg-green-500/10 text-green-300",
             label: "Worker online",
             symbol: "●",
         },
         unknown: {
-            className: "border-primary-600 bg-primary-800 text-primary-300",
             label: "Worker status unavailable",
             symbol: "?",
         },
     }[workerState];
     const backendCommit = health?.releaseDetails.backendCommit || "unknown";
-    const frontendCommit = typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "dev";
+    const compiledFrontendCommit =
+        typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "dev";
+    const frontendCommit =
+        compiledFrontendCommit === "dev"
+            ? health?.releaseDetails.frontendCommit || "dev"
+            : compiledFrontendCommit;
     const hasVersionMismatch =
         backendCommit !== "unknown" &&
         frontendCommit !== "unknown" &&
@@ -58,6 +61,25 @@ export function AppHeader({
     const navigationToggleLabel = isSidebarOpen
         ? "Close navigation menu"
         : "Open navigation menu";
+    const isOverallHealthy =
+        isConnected &&
+        isBackendConnected &&
+        workerState === "ready" &&
+        !hasVersionMismatch;
+    const hasSystemError =
+        !isConnected || !isBackendConnected || workerState === "offline";
+    const systemStatusLabel = isOverallHealthy
+        ? "all systems online"
+        : hasSystemError
+          ? "one or more systems need attention"
+          : hasVersionMismatch
+            ? "version mismatch"
+            : "status unavailable";
+    const systemStatusClassName = isOverallHealthy
+        ? "border-green-500/40 bg-green-500/10 text-green-300 hover:bg-green-500/20"
+        : hasSystemError
+          ? "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20"
+          : "border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20";
 
     return (
         <header className="sticky top-0 z-20 border-b border-primary-700 bg-primary-950/95 p-3 backdrop-blur sm:px-6 sm:py-4">
@@ -78,59 +100,11 @@ export function AppHeader({
                     </h1>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-2 sm:gap-4">
-                    {hasVersionMismatch && (
-                        <span className="hidden rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200 sm:inline-flex">
-                            Version mismatch (FE {frontendCommit} / BE {backendCommit})
-                        </span>
-                    )}
-                    <div className="hidden items-center gap-2 text-xs sm:flex">
-                        <span
-                            className={[
-                                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1",
-                                isConnected
-                                    ? "border-green-500/40 bg-green-500/10 text-green-300"
-                                    : "border-red-500/40 bg-red-500/10 text-red-300",
-                            ].join(" ")}
-                            title={
-                                isConnected
-                                    ? "WebSocket connected"
-                                    : "WebSocket disconnected"
-                            }
-                        >
-                            <span className="font-medium">WS</span>
-                            <span>{isConnected ? "●" : "○"}</span>
-                        </span>
-                        <span
-                            className={[
-                                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1",
-                                isBackendConnected
-                                    ? "border-green-500/40 bg-green-500/10 text-green-300"
-                                    : "border-red-500/40 bg-red-500/10 text-red-300",
-                            ].join(" ")}
-                            title={
-                                isBackendConnected
-                                    ? "Backend connected"
-                                    : "Backend disconnected"
-                            }
-                        >
-                            <span className="font-medium">BE</span>
-                            <span>{isBackendConnected ? "●" : "○"}</span>
-                        </span>
-                        <span
-                            className={[
-                                "inline-flex items-center gap-1.5 rounded-md border px-2 py-1",
-                                workerStatus.className,
-                            ].join(" ")}
-                            title={workerStatus.label}
-                        >
-                            <span className="font-medium">WK</span>
-                            <span>{workerStatus.symbol}</span>
-                        </span>
-                    </div>
+                <div className="flex shrink-0 items-center gap-2">
                     <Button
                         variant="secondary"
                         size="sm"
+                        aria-label="Log out"
                         onClick={() => {
                             void (async () => {
                                 await authActions.logout();
@@ -139,8 +113,86 @@ export function AppHeader({
                         }}
                     >
                         <LogOut className="size-4" />
-                        Log out
+                        <span className="hidden sm:inline">Log out</span>
                     </Button>
+                    <Dropdown
+                        ariaLabel={`System status: ${systemStatusLabel}. Open details`}
+                        variant="ghost"
+                        triggerClassName={`gap-1 border px-1.5 py-1 ${systemStatusClassName}`}
+                        icon={
+                            <>
+                                <Activity aria-hidden="true" className="size-4" />
+                                <span aria-hidden="true">
+                                    {isOverallHealthy ? "●" : "○"}
+                                </span>
+                            </>
+                        }
+                        content={
+                            <div className="w-56 space-y-2 p-2 text-xs">
+                                <div className="font-medium text-primary-100">
+                                    System status
+                                </div>
+                                <div className="flex items-center justify-between gap-3 text-primary-300">
+                                    <span>WebSocket</span>
+                                    <span
+                                        className={
+                                            isConnected
+                                                ? "text-green-300"
+                                                : "text-red-300"
+                                        }
+                                    >
+                                        {isConnected ? "online ●" : "Offline ○"}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 text-primary-300">
+                                    <span>Backend</span>
+                                    <span
+                                        className={
+                                            isBackendConnected
+                                                ? "text-green-300"
+                                                : "text-red-300"
+                                        }
+                                    >
+                                        {isBackendConnected ? "online ●" : "Offline ○"}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 text-primary-300">
+                                    <span>Worker</span>
+                                    <span
+                                        className={
+                                            workerState === "ready"
+                                                ? "text-green-300"
+                                                : workerState === "offline"
+                                                  ? "text-red-300"
+                                                  : "text-primary-400"
+                                        }
+                                    >
+                                        {workerStatus.label.replace(/^Worker /u, "")}{" "}
+                                        {workerStatus.symbol}
+                                    </span>
+                                </div>
+                                {hasVersionMismatch ? (
+                                    <div className="space-y-1 border-t border-primary-700 pt-2 text-amber-200">
+                                        <div className="font-medium">
+                                            Version mismatch
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span>Frontend</span>
+                                            <span className="font-mono">
+                                                {frontendCommit}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span>Backend</span>
+                                            <span className="font-mono">
+                                                {backendCommit}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ) : undefined}
+                            </div>
+                        }
+                    />
                     <NotificationBell />
                 </div>
             </div>

@@ -20,6 +20,29 @@ export function resolveDashboardPort(value = process.env.PORT): number {
     return port > 0 && port <= 65_535 ? port : 3100;
 }
 
+/** Returns the explicit Dashboard bind host or the production-compatible default. */
+export function resolveDashboardHost(value = process.env.MIRA_DASHBOARD_HOST): string {
+    const host = value?.trim();
+    if (!host) {
+        return "0.0.0.0";
+    }
+    if (host.length > 253) {
+        throw new TypeError("MIRA_DASHBOARD_HOST must be a valid bind host");
+    }
+    for (const character of host) {
+        const codePoint = character.codePointAt(0);
+        if (
+            character === "/" ||
+            character === "\\" ||
+            codePoint === undefined ||
+            codePoint <= 0x20
+        ) {
+            throw new TypeError("MIRA_DASHBOARD_HOST must be a valid bind host");
+        }
+    }
+    return host;
+}
+
 /** Converts optional values to strings while preserving empty/undefined fallback behavior. */
 export function stringFallback(value?: unknown, fallback = ""): string {
     return String(value ?? fallback);

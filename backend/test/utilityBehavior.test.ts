@@ -10,6 +10,7 @@ import {
     isAllowedDashboardOrigin,
     readJson,
     readRequestBytes,
+    resolveDashboardCookieNames,
     sessionIdFromCookie,
     text,
     withCookie,
@@ -29,10 +30,20 @@ import {
     nonEmptyEnvironmentFallback,
     nullableString,
     objectFallback,
+    resolveDashboardHost,
     resolveDashboardPort,
     stringFallback,
 } from "../src/lib/values.ts";
-import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
+import {
+    isDevelopmentExternalNotificationSuppressed,
+    isDevelopmentGatewayMethodBlocked,
+    isDevelopmentGatewayProxyEventAllowed,
+    isDevelopmentGatewayProxyMethodAllowed,
+    isDevelopmentHostMutationBlocked,
+    requiresRecentMfaForGatewayMethod,
+    resetRequestPolicyForTests,
+    withRequestPolicy,
+} from "../src/requestPolicy.ts";
 import { isAllowedMutationSource, withRequestSecurity } from "../src/requestSecurity.ts";
 import { routes as appRoutes } from "../src/routes.ts";
 import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
@@ -40,7 +51,16 @@ import { isValidAgentId } from "../src/services/agents.ts";
 import { listAuditEvents } from "../src/services/auditEvents.ts";
 import { mapBackupJob } from "../src/services/backups.ts";
 import * as jobExecutionQueueModule from "../src/services/jobExecutionQueue.ts";
-import { getResolvedRoots, validatePrNumber } from "../src/services/pullRequests.ts";
+import { dashboardJobProfile } from "../src/services/jobWorker.ts";
+import {
+    parsePullRequestPreviewStatus,
+    pullRequestPreviewCandidate,
+} from "../src/services/pullRequestPreviews.ts";
+import {
+    getResolvedRoots,
+    parsePublicGithubPullRequests,
+    validatePrNumber,
+} from "../src/services/pullRequests.ts";
 
 function serverWithAddress(address: string): Server<unknown> {
     return {
@@ -72,6 +92,41 @@ async function callTestRoute(
 }
 
 describe("backend service utilities", () => {
+    it("maps credential-free public GitHub pull request metadata for dev previews", () => {
+        const commitSha = "a".repeat(40);
+        expect(
+            parsePublicGithubPullRequests([
+                {
+                    base: { ref: "main" },
+                    body: "Preview body",
+                    created_at: "2026-07-26T10:00:00.000Z",
+                    draft: false,
+                    head: { ref: "mira/preview", sha: commitSha },
+                    html_url: "https://github.com/rajohan/Mira-Dashboard/pull/335",
+                    number: 335,
+                    title: "Preview PR",
+                    updated_at: "2026-07-26T11:00:00.000Z",
+                    user: { login: "mira-2026" },
+                },
+            ])
+        ).toEqual([
+            expect.objectContaining({
+                author: { login: "mira-2026" },
+                baseRefName: "main",
+                canReviewerApprove: true,
+                headRefName: "mira/preview",
+                headRefOid: commitSha,
+                number: 335,
+                previewEligible: true,
+                reviewerApproved: false,
+                statusCheckRollup: [],
+            }),
+        ]);
+        expect(() => parsePublicGithubPullRequests([{ number: 335 }])).toThrow(
+            "GitHub public pull request response is invalid"
+        );
+    });
+
     it("compacts every heartbeat cache payload without dropping health failures", () => {
         const kopia = compactHeartbeatData("backup.kopia.status", {
             checkedAt: "checked",
@@ -411,6 +466,11 @@ describe("backend service utilities", () => {
             expect(resolveDashboardPort("0")).toBe(3100);
             expect(resolveDashboardPort("65536")).toBe(3100);
             expect(resolveDashboardPort("not-a-port")).toBe(3100);
+            expect(resolveDashboardHost(" 127.0.0.1 ")).toBe("127.0.0.1");
+            expect(resolveDashboardHost("")).toBe("0.0.0.0");
+            expect(() => resolveDashboardHost("bad host")).toThrow(
+                "MIRA_DASHBOARD_HOST must be a valid bind host"
+            );
         } finally {
             if (originalValue === undefined) {
                 delete process.env.MIRA_TEST_OPTIONAL_VALUE;
@@ -418,6 +478,111 @@ describe("backend service utilities", () => {
                 process.env.MIRA_TEST_OPTIONAL_VALUE = originalValue;
             }
         }
+    });
+
+    it("keeps dev host and Gateway controls guarded while isolated data remains mutable", () => {
+        const safeEnvironment = { MIRA_DASHBOARD_DEV_SAFE_MODE: "1" };
+        expect(
+            isDevelopmentHostMutationBlocked(
+                new Request("http://localhost/api/docker/update", {
+                    method: "POST",
+                }),
+                safeEnvironment
+            )
+        ).toBe(true);
+        expect(
+            isDevelopmentHostMutationBlocked(
+                new Request("http://localhost/api/pull-requests/335/approve", {
+                    method: "POST",
+                }),
+                safeEnvironment
+            )
+        ).toBe(true);
+        expect(
+            isDevelopmentHostMutationBlocked(
+                new Request("http://localhost/api/config", {
+                    method: "PUT",
+                }),
+                safeEnvironment
+            )
+        ).toBe(true);
+        expect(
+            isDevelopmentHostMutationBlocked(
+                new Request("http://localhost/api/cron/jobs/id/run", {
+                    method: "POST",
+                }),
+                safeEnvironment
+            )
+        ).toBe(true);
+        expect(
+            isDevelopmentHostMutationBlocked(
+                new Request("http://localhost/api/sessions/id", {
+                    method: "DELETE",
+                }),
+                safeEnvironment
+            )
+        ).toBe(true);
+        expect(
+            isDevelopmentHostMutationBlocked(
+                new Request("http://localhost/api/tasks", { method: "POST" }),
+                safeEnvironment
+            )
+        ).toBe(false);
+        expect(isDevelopmentExternalNotificationSuppressed(safeEnvironment)).toBe(true);
+        expect(isDevelopmentExternalNotificationSuppressed({})).toBe(false);
+        expect(
+            isDevelopmentHostMutationBlocked(
+                new Request("http://localhost/api/docker"),
+                safeEnvironment
+            )
+        ).toBe(false);
+        expect(
+            isDevelopmentHostMutationBlocked(
+                new Request("http://localhost/api/docker/update", {
+                    method: "POST",
+                }),
+                {}
+            )
+        ).toBe(false);
+        for (const method of [
+            "chat.abort",
+            "chat.history",
+            "chat.send",
+            "config.get",
+            "cron.list",
+            "models.list",
+            "sessions.list",
+            "sessions.patch",
+        ]) {
+            expect(isDevelopmentGatewayMethodBlocked(method, safeEnvironment)).toBe(
+                false
+            );
+        }
+        for (const method of [
+            "config.patch",
+            "cron.remove",
+            "sessions.compact",
+            "sessions.delete",
+        ]) {
+            expect(isDevelopmentGatewayMethodBlocked(method, safeEnvironment)).toBe(true);
+        }
+        expect(isDevelopmentGatewayProxyMethodAllowed("sessions.subscribe")).toBe(true);
+        expect(isDevelopmentGatewayProxyMethodAllowed("subscribe")).toBe(false);
+        expect(isDevelopmentGatewayProxyMethodAllowed("config.patch")).toBe(false);
+        expect(isDevelopmentGatewayProxyEventAllowed("session.message")).toBe(true);
+        expect(isDevelopmentGatewayProxyEventAllowed("plugin.approval.requested")).toBe(
+            false
+        );
+        expect(requiresRecentMfaForGatewayMethod("chat.history")).toBe(false);
+        expect(requiresRecentMfaForGatewayMethod("config.get")).toBe(true);
+        expect(requiresRecentMfaForGatewayMethod("cron.list")).toBe(true);
+        expect(isDevelopmentGatewayMethodBlocked("config.patch", {})).toBe(false);
+        expect(dashboardJobProfile({ MIRA_DASHBOARD_JOB_PROFILE: "isolated" })).toBe(
+            "isolated"
+        );
+        expect(dashboardJobProfile({ MIRA_DASHBOARD_JOB_PROFILE: "unknown" })).toBe(
+            "full"
+        );
     });
 
     it("maps operational errors without leaking unknown values", () => {
@@ -519,6 +684,56 @@ describe("backend service utilities", () => {
             } else {
                 process.env.MIRA_DASHBOARD_WORKTREE_ROOT = originalWorktreeRoot;
             }
+        }
+    });
+
+    it("validates queued pull request preview status payloads", () => {
+        expect(
+            pullRequestPreviewCandidate({
+                author: { login: "mira-2026" },
+                baseRefName: "main",
+                headRefOid: "a".repeat(40),
+                number: 335,
+                title: "Managed preview",
+            } as never)
+        ).toEqual({
+            authorLogin: "mira-2026",
+            baseRefName: "main",
+            commitSha: "a".repeat(40),
+            number: 335,
+            title: "Managed preview",
+        });
+
+        expect(
+            parsePullRequestPreviewStatus({
+                backendPort: 3101,
+                commitSha: "a".repeat(40),
+                frontendPort: 5173,
+                number: 335,
+                startedAt: "2026-07-26T12:00:00.000Z",
+                status: "running",
+                title: "Managed preview",
+                updatedAt: "2026-07-26T12:00:00.000Z",
+                url: "https://dashboard.example:5173",
+            })
+        ).toEqual({
+            backendPort: 3101,
+            commitSha: "a".repeat(40),
+            frontendPort: 5173,
+            number: 335,
+            startedAt: "2026-07-26T12:00:00.000Z",
+            status: "running",
+            title: "Managed preview",
+            updatedAt: "2026-07-26T12:00:00.000Z",
+            url: "https://dashboard.example:5173",
+        });
+        for (const value of [
+            undefined,
+            { status: "unknown" },
+            { number: 0, status: "running" },
+            { status: "failed", title: 42 },
+        ]) {
+            expect(() => parsePullRequestPreviewStatus(value)).toThrow();
         }
     });
 
@@ -658,6 +873,28 @@ describe("backend service utilities", () => {
                 })
             )
         ).toBeUndefined();
+    });
+
+    it("isolates configurable development cookie namespaces", () => {
+        expect(resolveDashboardCookieNames({})).toEqual({
+            pendingLogin: "mira_dashboard_pending_login",
+            session: "mira_dashboard_session",
+        });
+        expect(
+            resolveDashboardCookieNames({
+                MIRA_DASHBOARD_COOKIE_NAMESPACE: "mira_dashboard_dev_5173",
+            })
+        ).toEqual({
+            pendingLogin: "mira_dashboard_dev_5173_pending_login",
+            session: "mira_dashboard_dev_5173_session",
+        });
+        for (const namespace of ["Prod", "dev-cookie", "a".repeat(49)]) {
+            expect(() =>
+                resolveDashboardCookieNames({
+                    MIRA_DASHBOARD_COOKIE_NAMESPACE: namespace,
+                })
+            ).toThrow("MIRA_DASHBOARD_COOKIE_NAMESPACE");
+        }
     });
 
     it("validates allowed dashboard origins", () => {

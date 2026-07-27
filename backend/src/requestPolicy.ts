@@ -12,6 +12,10 @@ import {
     requiredAutomationScope,
 } from "./automationAuth.ts";
 import {
+    isDevelopmentGatewayMethodAllowed,
+    isGatewayMethodRecentMfaExempt,
+} from "./development/developmentGatewayPolicy.ts";
+import {
     authSession,
     HttpError,
     isTrustedProxyAddress,
@@ -95,14 +99,20 @@ const PUBLIC_API_METHODS = new Map<string, ReadonlySet<string>>([
     ["/api/auth/register-first-user", new Set(["POST"])],
     ["/api/auth/session", new Set(["GET", "HEAD"])],
 ]);
-const READ_ONLY_GATEWAY_METHODS = new Set([
-    "chat.history",
-    "chat.runtimeSnapshot",
-    "models.list",
-    "sessions.list",
-    "subscribe",
-    "unsubscribe",
-]);
+const DEVELOPMENT_BLOCKED_HOST_MUTATION_PATHS = [
+    "/api/backup",
+    "/api/backups",
+    "/api/config",
+    "/api/cron",
+    "/api/docker",
+    "/api/exec",
+    "/api/ops",
+    "/api/pull-requests",
+    "/api/restart",
+    "/api/sessions",
+    "/api/skills",
+    "/api/terminal",
+] as const;
 const rateLimitState: { bucketCleanupTimer: Timer | undefined } = {
     bucketCleanupTimer: undefined,
 };
@@ -136,6 +146,51 @@ function isAuthRoute(pathname: string): boolean {
 function isPublicApiRoute(request: Request): boolean {
     const pathname = new URL(request.url).pathname;
     return PUBLIC_API_METHODS.get(pathname)?.has(request.method.toUpperCase()) === true;
+}
+
+function isPathAtOrBelow(pathname: string, prefix: string): boolean {
+    return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+/** Blocks host and external-service mutations while preserving isolated dev data. */
+export function isDevelopmentHostMutationBlocked(
+    request: Request,
+    environment: Record<string, string | undefined> = process.env
+): boolean {
+    if (
+        environment.MIRA_DASHBOARD_DEV_SAFE_MODE !== "1" ||
+        SAFE_REQUEST_METHODS.has(request.method.toUpperCase())
+    ) {
+        return false;
+    }
+    const pathname = new URL(request.url).pathname;
+    return DEVELOPMENT_BLOCKED_HOST_MUTATION_PATHS.some((prefix) =>
+        isPathAtOrBelow(pathname, prefix)
+    );
+}
+
+/** Prevents isolated data mutations from notifying production integrations. */
+export function isDevelopmentExternalNotificationSuppressed(
+    environment: Record<string, string | undefined> = process.env
+): boolean {
+    return environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1";
+}
+
+export {
+    isDevelopmentGatewayMethodAllowed,
+    isDevelopmentGatewayProxyEventAllowed,
+    isDevelopmentGatewayProxyMethodAllowed,
+} from "./development/developmentGatewayPolicy.ts";
+
+/** Blocks Gateway calls outside the production-like Dashboard dev allowlist. */
+export function isDevelopmentGatewayMethodBlocked(
+    method: string,
+    environment: Record<string, string | undefined> = process.env
+): boolean {
+    return (
+        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
+        !isDevelopmentGatewayMethodAllowed(method)
+    );
 }
 
 function rateLimitKey(
@@ -306,7 +361,7 @@ export function requiresRecentMfa(request: Request): boolean {
 
 /** Requires fresh MFA for every Gateway RPC except the explicit read-only set. */
 export function requiresRecentMfaForGatewayMethod(method: string): boolean {
-    return !READ_ONLY_GATEWAY_METHODS.has(method);
+    return !isGatewayMethodRecentMfaExempt(method);
 }
 
 function writeRequestAudit(
@@ -365,6 +420,30 @@ function didWriteRequestAudit(
     }
 }
 
+function auditedForbiddenResponse(
+    actor: AuditActor,
+    request: Request,
+    requestId: string,
+    routePath: string,
+    automationScope: AutomationScope | undefined,
+    payload: Record<string, string>,
+    persistAuditEvent: typeof writeAuditEvent
+): Response {
+    const didRecordDenial = didWriteRequestAudit(
+        actor,
+        "denied",
+        request,
+        requestId,
+        routePath,
+        403,
+        automationScope,
+        persistAuditEvent
+    );
+    return didRecordDenial
+        ? json(payload, { status: 403 })
+        : json({ error: "Audit trail unavailable" }, { status: 503 });
+}
+
 function secureHandler(
     routePath: string,
     handler: BunHandler | Response,
@@ -408,22 +487,14 @@ function secureHandler(
                 automationPrincipal &&
                 (!automationScope || !automationPrincipal.scopes.has(automationScope))
             ) {
-                const didRecordDenial = didWriteRequestAudit(
+                return auditedForbiddenResponse(
                     requestActor(undefined, automationPrincipal),
-                    "denied",
                     request,
                     requestIdentifier,
                     routePath,
-                    403,
                     automationScope,
-                    persistAuditEvent
-                );
-                if (!didRecordDenial) {
-                    return json({ error: "Audit trail unavailable" }, { status: 503 });
-                }
-                return json(
                     { error: "Automation credential scope denied" },
-                    { status: 403 }
+                    persistAuditEvent
                 );
             }
             const isAuditedMutationRequest = isAuditedMutation(
@@ -444,6 +515,19 @@ function secureHandler(
                 ? { id: session.id, username: session.username }
                 : undefined;
             const actor = requestActor(user, automationPrincipal);
+            if (isApi && isDevelopmentHostMutationBlocked(request)) {
+                return auditedForbiddenResponse(
+                    actor,
+                    request,
+                    requestIdentifier,
+                    routePath,
+                    automationScope,
+                    {
+                        error: "Host-control actions are disabled in Dashboard dev",
+                    },
+                    persistAuditEvent
+                );
+            }
             const isPrivilegedRequest =
                 Boolean(session) && !automationPrincipal && requiresRecentMfa(request);
             if (
@@ -451,20 +535,12 @@ function secureHandler(
                 session &&
                 (!session.mfaEnabled || !hasRecentMfaVerification(session))
             ) {
-                const didRecordDenial = didWriteRequestAudit(
+                return auditedForbiddenResponse(
                     actor,
-                    "denied",
                     request,
                     requestIdentifier,
                     routePath,
-                    403,
                     automationScope,
-                    persistAuditEvent
-                );
-                if (!didRecordDenial) {
-                    return json({ error: "Audit trail unavailable" }, { status: 503 });
-                }
-                return json(
                     {
                         code: session.mfaEnabled
                             ? "step_up_required"
@@ -473,7 +549,7 @@ function secureHandler(
                             ? "Recent MFA verification is required"
                             : "Multi-factor authentication must be enabled",
                     },
-                    { status: 403 }
+                    persistAuditEvent
                 );
             }
             const isMutation = isAuditedMutationRequest || isPrivilegedRequest;

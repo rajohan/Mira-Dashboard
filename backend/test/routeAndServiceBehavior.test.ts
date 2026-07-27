@@ -1026,6 +1026,28 @@ describe("backend route and service behavior", () => {
             `Task assigned: #${id} Coverage route task updated. This task is assigned to Mira and may need attention when the current work is clear.`
         );
 
+        rememberEnvironment("MIRA_DASHBOARD_DEV_SAFE_MODE");
+        const previousDevelopmentSafeMode = process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+        const notificationsBeforeIsolatedUpdate = taskNotifications.length;
+        const isolatedPatch = await taskRoutes["/api/tasks/:id"].PATCH(
+            requestWithParameters(
+                `/api/tasks/${id}`,
+                { id: String(id) },
+                {
+                    body: JSON.stringify({ title: "Coverage route task updated" }),
+                    method: "PATCH",
+                }
+            )
+        );
+        expect(isolatedPatch.status).toBe(200);
+        expect(taskNotifications).toHaveLength(notificationsBeforeIsolatedUpdate);
+        if (previousDevelopmentSafeMode === undefined) {
+            delete process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+        } else {
+            process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = previousDevelopmentSafeMode;
+        }
+
         const invalidMove = await taskRoutes["/api/tasks/:id/move"].POST(
             requestWithParameters(
                 `/api/tasks/${id}/move`,
@@ -3118,13 +3140,31 @@ describe("backend route and service behavior", () => {
 
         rmSync(logsRoot, { force: true, recursive: true });
         const missingInfoRoot = await logRoutes["/api/logs/info"].GET();
-        await expect(missingInfoRoot.json()).resolves.toEqual({ logs: [] });
+        await expect(missingInfoRoot.json()).resolves.toEqual({
+            logs: [],
+            unavailableReason: "The log directory is unavailable.",
+        });
         const missingContentRoot = await logRoutes["/api/logs/content"].GET(
             new Request(
                 "https://test.local/api/logs/content?file=openclaw-2026-06-25.log"
             )
         );
         expect(missingContentRoot.status).toBe(404);
+    });
+
+    it("reports unavailable host logs explicitly in isolated Dashboard dev", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_DEV_SAFE_MODE");
+        rememberEnvironment("MIRA_DASHBOARD_LOGS_ROOT");
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+        delete process.env.MIRA_DASHBOARD_LOGS_ROOT;
+
+        const { logRoutes } = await import("../src/routes/logRoutes.ts");
+        const response = await logRoutes["/api/logs/info"].GET();
+
+        await expect(response.json()).resolves.toEqual({
+            logs: [],
+            unavailableReason: "Host logs are unavailable in isolated Dashboard dev.",
+        });
     });
 
     it("serves media from isolated OpenClaw roots while rejecting unsafe paths", async () => {
@@ -5058,6 +5098,52 @@ esac
             jobId: "cache.invalid-payload",
             message:
                 "Scheduled cache job cache.invalid-payload is missing actionPayload.key",
+            status: "failed",
+        });
+    });
+
+    it("limits isolated cache jobs and execution to the database-local producer", async () => {
+        const { registerCacheRefreshScheduledJobs } =
+            await import("../src/services/cacheRefresh.ts");
+        const { runScheduledJob, upsertScheduledJob } =
+            await import("../src/services/scheduledJobs.ts");
+
+        registerCacheRefreshScheduledJobs({
+            allowedKeys: ["database.summary"],
+            seedStrategy: "none",
+        });
+        expect(
+            database
+                .prepare(
+                    "SELECT id, enabled FROM scheduled_jobs WHERE action_key = 'cache.refresh' ORDER BY id"
+                )
+                .all()
+        ).toEqual([
+            { id: "cache.backup.kopia", enabled: 0 },
+            { id: "cache.backup.walg", enabled: 0 },
+            { id: "cache.database.summary", enabled: 1 },
+            { id: "cache.docker.summary", enabled: 0 },
+            { id: "cache.git", enabled: 0 },
+            { id: "cache.moltbook", enabled: 0 },
+            { id: "cache.quotas", enabled: 0 },
+            { id: "cache.system", enabled: 0 },
+            { id: "cache.weather", enabled: 0 },
+        ]);
+
+        upsertScheduledJob({
+            actionKey: "cache.refresh",
+            actionPayload: { key: "quotas.summary" },
+            description: "Unsafe in isolated development.",
+            enabled: false,
+            id: "cache.quotas",
+            intervalSeconds: 3600,
+            name: "Quota cache",
+            scheduleType: "interval",
+        });
+        await startTestScheduledExecutor();
+        await expect(runScheduledJob("cache.quotas")).resolves.toMatchObject({
+            jobId: "cache.quotas",
+            message: "Cache refresh is not allowed in this job profile: quotas.summary",
             status: "failed",
         });
     });

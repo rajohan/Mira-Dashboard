@@ -90,14 +90,17 @@ const SCHEMA_6_OPTIONS = {
     readLiveSchemaState: () => testLiveSchemaState(6),
 };
 
-function holdTransitionLock(releasesRoot: string): number {
+function holdTransitionLock(
+    releasesRoot: string,
+    mode: "exclusive" | "shared" = "exclusive"
+): number {
     const lockFileDescriptor = openSync(
         path.join(releasesRoot, RELEASE_TRANSITION_LOCK_FILE_NAME),
         "r+"
     );
     const result = spawnSync(
         RELEASE_TRANSITION_LOCK_PROGRAM,
-        ["--exclusive", "--nonblock", "3"],
+        [mode === "exclusive" ? "--exclusive" : "--shared", "--nonblock", "3"],
         {
             stdio: ["ignore", "ignore", "pipe", lockFileDescriptor],
         }
@@ -176,6 +179,7 @@ async function createManagedRelease(
     );
     for (const entrypoint of [
         "databasePreflight",
+        "pullRequestPreviewGatewayProxy",
         "releaseLifecycle",
         "resetDashboardPassword",
         "serverStart",
@@ -423,8 +427,19 @@ describe("Dashboard immutable release manager", () => {
             root,
             SCHEMA_6_OPTIONS
         );
+        await expect(
+            runReleaseLifecycleCommand(
+                ["rollback", FIRST_COMMIT, SECOND_COMMIT],
+                root,
+                SCHEMA_6_OPTIONS
+            )
+        ).rejects.toThrow("rollback slots changed");
+        await expect(readDashboardReleaseState(root)).resolves.toMatchObject({
+            current: { commitSha: SECOND_COMMIT },
+            previous: { commitSha: FIRST_COMMIT },
+        });
         const rolledBack = await runReleaseLifecycleCommand(
-            ["rollback"],
+            ["rollback", SECOND_COMMIT, FIRST_COMMIT],
             root,
             SCHEMA_6_OPTIONS
         );
@@ -459,10 +474,16 @@ describe("Dashboard immutable release manager", () => {
         ).rejects.toThrow("unexpected arguments");
         await expect(
             runReleaseLifecycleCommand(["rollback", FIRST_COMMIT], root)
-        ).rejects.toThrow("takes no commit SHA");
-        await expect(runReleaseLifecycleCommand(["rollback", ""], root)).rejects.toThrow(
-            "takes no commit SHA"
-        );
+        ).rejects.toThrow("requires expected current and target");
+        await expect(
+            runReleaseLifecycleCommand(
+                ["rollback", FIRST_COMMIT, SECOND_COMMIT, "extra"],
+                root
+            )
+        ).rejects.toThrow("requires expected current and target");
+        await expect(
+            runReleaseLifecycleCommand(["rollback", "", FIRST_COMMIT], root)
+        ).rejects.toThrow("requires expected current and target");
         await expect(runReleaseLifecycleCommand(["status", ""], root)).rejects.toThrow(
             "takes no commit SHA"
         );
@@ -831,6 +852,82 @@ describe("Dashboard immutable release manager", () => {
             } finally {
                 closeSync(lockFileDescriptor);
             }
+        }
+    );
+
+    it("rejects invalid release transition lock wait values", async () => {
+        const root = temporaryReleasesRoot();
+
+        for (const transitionLockWaitMs of [-1, NaN, Infinity]) {
+            await expect(
+                readDashboardReleaseState(root, { transitionLockWaitMs })
+            ).rejects.toThrow(
+                "Managed release transition lock wait must be a finite non-negative number"
+            );
+        }
+    });
+
+    it.skipIf(!isReleaseTransitionLockAvailable())(
+        "lets lifecycle transitions wait for an in-flight status reader",
+        async () => {
+            const root = temporaryReleasesRoot();
+            await createManagedRelease(root, FIRST_COMMIT);
+            await readDashboardReleaseState(root);
+            const lockFileDescriptor = holdTransitionLock(root, "shared");
+            const activation = runReleaseLifecycleCommand(
+                ["activate", FIRST_COMMIT],
+                root,
+                SCHEMA_6_OPTIONS
+            );
+            let isSettled = false;
+            void activation
+                .then(() => {
+                    isSettled = true;
+                })
+                .catch(() => {
+                    isSettled = true;
+                });
+
+            try {
+                await Bun.sleep(125);
+                expect(isSettled).toBe(false);
+            } finally {
+                closeSync(lockFileDescriptor);
+            }
+
+            await expect(activation).resolves.toMatchObject({
+                current: { commitSha: FIRST_COMMIT },
+            });
+        }
+    );
+
+    it.skipIf(!isReleaseTransitionLockAvailable())(
+        "lets lifecycle status wait for an in-flight transition",
+        async () => {
+            const root = temporaryReleasesRoot();
+            await createManagedRelease(root, FIRST_COMMIT);
+            await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+            const lockFileDescriptor = holdTransitionLock(root);
+            const status = runReleaseLifecycleCommand(["status"], root);
+            let isSettled = false;
+            void status
+                .then(() => {
+                    isSettled = true;
+                })
+                .catch(() => {
+                    isSettled = true;
+                });
+
+            try {
+                await Bun.sleep(125);
+                expect(isSettled).toBe(false);
+            } finally {
+                closeSync(lockFileDescriptor);
+            }
+
+            await expect(status).resolves.toMatchObject({
+                current: { commitSha: FIRST_COMMIT },
+            });
         }
     );
 

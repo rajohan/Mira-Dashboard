@@ -118,18 +118,16 @@ Run the same local gates before pushing another fix:
 ```bash
 bun run lint:frontend
 bun run lint:backend
-bun run build
+bun run build:frontend
+bun run build:backend
 bun run format:check
 git diff --check
 ```
 
-Backend:
+Backend coverage:
 
 ```bash
-cd backend
-bun run lint:backend
-bun run build
-bun run test:coverage
+bun run test:backend:coverage
 ```
 
 Remember that Codecov PR comments often discuss patch coverage, not total local

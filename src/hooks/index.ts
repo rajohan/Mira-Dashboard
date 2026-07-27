@@ -109,8 +109,12 @@ export type {
 } from "./useOpsActions";
 export { OPS_ACTIONS, useExecJob, useStartOpsAction } from "./useOpsActions";
 export type {
+    DashboardReleaseStatus,
+    DashboardReleaseSummary,
     DeploymentJob,
     ProductionCheckoutStatus,
+    PullRequestPreviewLifecycle,
+    PullRequestPreviewStatus,
     PullRequestSummary,
     WorktreeCleanupResult,
 } from "./usePullRequests";
@@ -120,11 +124,16 @@ export {
     pullRequestKeys,
     useApprovePullRequest,
     useApprovePullRequestReview,
+    useDashboardReleaseStatus,
     useDeployDashboard,
     useProductionCheckout,
     usePullRequestDeployments,
+    usePullRequestPreview,
     usePullRequests,
     useRejectPullRequest,
+    useRollbackDashboard,
+    useStartPullRequestPreview,
+    useStopPullRequestPreview,
     useUpdatePullRequestBranch,
 } from "./usePullRequests";
 export { hasQuotaStatus, useQuotas } from "./useQuotas";

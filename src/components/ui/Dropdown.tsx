@@ -22,6 +22,7 @@ interface DropdownProperties {
     align?: "left" | "right";
     variant?: "primary" | "secondary" | "ghost";
     size?: "sm" | "md";
+    triggerClassName?: string;
 }
 
 /** Renders the dropdown UI. */
@@ -34,6 +35,7 @@ export function Dropdown({
     align = "right",
     variant = "secondary",
     size = "sm",
+    triggerClassName,
 }: DropdownProperties) {
     const variantStyles = {
         primary: "bg-accent-500 text-white hover:bg-accent-600",
@@ -56,7 +58,8 @@ export function Dropdown({
                     "focus:outline-none data-focus:outline-none",
                     "disabled:cursor-not-allowed disabled:opacity-50",
                     variantStyles[variant],
-                    sizeStyles[size]
+                    sizeStyles[size],
+                    triggerClassName
                 )}
             >
                 {icon}

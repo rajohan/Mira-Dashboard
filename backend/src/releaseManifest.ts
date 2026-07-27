@@ -26,7 +26,7 @@ const RELEASE_STATIC_ARTIFACTS = [
     "bun.lock",
     "package.json",
 ] as const;
-const REQUIRED_RELEASE_ARTIFACTS = [
+const COMPATIBLE_REQUIRED_RELEASE_ARTIFACTS = [
     ...RELEASE_STATIC_ARTIFACTS,
     "backend/dist/build-identity.json",
     "backend/dist/databasePreflight.js",
@@ -36,6 +36,10 @@ const REQUIRED_RELEASE_ARTIFACTS = [
     "backend/dist/workerStart.js",
     "dist/build-identity.json",
     "dist/index.html",
+] as const;
+const CURRENT_BUILD_REQUIRED_RELEASE_ARTIFACTS = [
+    ...COMPATIBLE_REQUIRED_RELEASE_ARTIFACTS,
+    "backend/dist/pullRequestPreviewGatewayProxy.js",
 ] as const;
 const MAX_BUILD_IDENTITY_BYTES = 4096;
 const RUNTIME_RELEASE_VERIFICATION_CACHE_MS = 15_000;
@@ -438,6 +442,13 @@ export async function createReleaseManifest(
     );
 
     const artifactPaths = await listReleaseArtifactPaths(releaseRoot);
+    if (
+        CURRENT_BUILD_REQUIRED_RELEASE_ARTIFACTS.some(
+            (requiredPath) => !artifactPaths.includes(requiredPath)
+        )
+    ) {
+        throw new TypeError("Release manifest artifact inventory is invalid");
+    }
     const artifacts: ReleaseManifestArtifact[] = [];
     for (const relativePath of artifactPaths) {
         artifacts.push(await releaseArtifact(releaseRoot, relativePath));
@@ -607,7 +618,7 @@ export function parseReleaseManifest(value: unknown): DashboardReleaseManifest {
         artifactPaths.some(
             (artifactPath_, index) => artifactPath_ !== sortedArtifactPaths[index]
         ) ||
-        REQUIRED_RELEASE_ARTIFACTS.some(
+        COMPATIBLE_REQUIRED_RELEASE_ARTIFACTS.some(
             (requiredPath) => !artifactPaths.includes(requiredPath)
         )
     ) {

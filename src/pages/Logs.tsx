@@ -156,7 +156,11 @@ export function Logs() {
     const [availableLogFiles, setAvailableLogFiles] = useState<LogFile[]>(
         () => logsPageState.lastVisibleLogFiles
     );
-    const { data: logFiles } = useLogFiles();
+    const {
+        data: logFiles,
+        isSuccess: isLogFilesLoaded,
+        unavailableReason,
+    } = useLogFiles();
     const { refetch: refetchContent, isFetching: isLoadingContent } = useLogContent(
         selectedFile || undefined,
         lineCount,
@@ -165,6 +169,16 @@ export function Logs() {
 
     useEffect(() => {
         if (!Array.isArray(logFiles)) {
+            return;
+        }
+
+        if (unavailableReason) {
+            logsPageState.lastVisibleLogFiles = [];
+            setAvailableLogFiles([]);
+            if (logsCollection.isReady()) {
+                const keys = Array.from(logsCollection, ([key]) => String(key));
+                logsCollection.utils.writeDelete(keys);
+            }
             return;
         }
 
@@ -186,7 +200,7 @@ export function Logs() {
 
             return resolvedLogFiles;
         });
-    }, [logFiles]);
+    }, [logFiles, unavailableReason]);
 
     // Auto-select today's file
     useEffect(() => {
@@ -202,7 +216,12 @@ export function Logs() {
 
     // Subscribe to log stream once per connection
     useEffect(() => {
-        if (!isConnected || subscribedConnectionIdReference.current === connectionId) {
+        if (
+            !isLogFilesLoaded ||
+            unavailableReason ||
+            !isConnected ||
+            subscribedConnectionIdReference.current === connectionId
+        ) {
             return;
         }
 
@@ -215,7 +234,7 @@ export function Logs() {
                 subscribedConnectionIdReference.current = undefined;
             }
         })();
-    }, [isConnected, connectionId, request]);
+    }, [isConnected, connectionId, isLogFilesLoaded, request, unavailableReason]);
 
     /** Performs load log content. */
     const loadLogContent = async () => {
@@ -537,7 +556,12 @@ export function Logs() {
                     {filteredLogs.length === 0 ? (
                         <div className="py-8 text-center text-primary-400">
                             {liveLogs.length === 0
-                                ? "Waiting for logs..."
+                                ? unavailableReason ||
+                                  (isLogFilesLoaded && availableLogFiles.length === 0
+                                      ? "No log files are available."
+                                      : isLogFilesLoaded
+                                        ? "Waiting for logs..."
+                                        : "Checking log availability...")
                                 : "No logs match your filter."}
                         </div>
                     ) : (

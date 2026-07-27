@@ -3,6 +3,8 @@ import { useCacheEntry } from "./useCache";
 /** Represents the database overview API response. */
 export interface DatabaseOverviewResponse {
     checkedAt?: string;
+    mode?: "full" | "isolated";
+    postgresSnapshotCheckedAt?: string;
     overview: {
         totalDatabaseSizeBytes: number;
         managedDatabaseCount?: number;

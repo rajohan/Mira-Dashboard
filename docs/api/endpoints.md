@@ -238,16 +238,27 @@ upstream download metadata.
 
 ## Pull Requests And Deployments
 
-| Method | Path                                         | Purpose                                      |
-| ------ | -------------------------------------------- | -------------------------------------------- |
-| `GET`  | `/api/pull-requests`                         | Lists Dashboard PRs.                         |
-| `POST` | `/api/pull-requests/:number/approve`         | Queues merge, optionally followed by deploy. |
-| `POST` | `/api/pull-requests/:number/reject`          | Queues reject/close.                         |
-| `POST` | `/api/pull-requests/:number/review-approval` | Queues review approval.                      |
-| `POST` | `/api/pull-requests/:number/update-branch`   | Queues branch update.                        |
-| `POST` | `/api/pull-requests/deploy`                  | Queues deploy latest.                        |
-| `GET`  | `/api/pull-requests/deployments`             | Lists deploy jobs.                           |
-| `GET`  | `/api/pull-requests/production-checkout`     | Reads production checkout status.            |
+| Method | Path                                         | Purpose                                                    |
+| ------ | -------------------------------------------- | ---------------------------------------------------------- |
+| `GET`  | `/api/pull-requests`                         | Lists Dashboard PRs.                                       |
+| `POST` | `/api/pull-requests/:number/approve`         | Queues merge, optionally followed by deploy.               |
+| `POST` | `/api/pull-requests/:number/reject`          | Queues reject/close.                                       |
+| `POST` | `/api/pull-requests/:number/review-approval` | Queues review approval.                                    |
+| `POST` | `/api/pull-requests/:number/update-branch`   | Queues branch update.                                      |
+| `GET`  | `/api/pull-requests/preview`                 | Reads the single managed PR-dev slot.                      |
+| `POST` | `/api/pull-requests/:number/preview/start`   | Validates and queues trusted PR dev (`202 Starting`).      |
+| `POST` | `/api/pull-requests/:number/preview/stop`    | Stops PR dev while retaining isolated state.               |
+| `POST` | `/api/pull-requests/deploy`                  | Queues an atomic deploy of latest `main`.                  |
+| `GET`  | `/api/pull-requests/deployments`             | Lists deploy and rollback jobs.                            |
+| `GET`  | `/api/pull-requests/releases`                | Reads immutable `current`/`previous` release status.       |
+| `POST` | `/api/pull-requests/releases/rollback`       | Queues atomic rollback to the confirmed previous full SHA. |
+| `GET`  | `/api/pull-requests/production-checkout`     | Reads production checkout status.                          |
+
+Managed PR dev accepts only `main`-targeted PRs from the configured trusted
+authors. Start jobs pin the selected full head SHA and fail if the PR changes
+before the worker claims it. Dev uses isolated Dashboard state and reaches the
+live production Gateway only through the host-owned capability proxy; see [Local
+development](../development/local-dev.md#managed-pr-dev).
 
 ## Backups, Cache, Metrics, Ops
 
