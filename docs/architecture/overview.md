@@ -38,23 +38,23 @@ Mira Dashboard worker                         |
 
 Primary pages:
 
-| Path             | Purpose                                                    |
-| ---------------- | ---------------------------------------------------------- |
-| `/`              | Operations dashboard overview.                             |
-| `/tasks`         | Local task board and task updates.                         |
-| `/agents`        | Agent status and task history.                             |
-| `/sessions`      | OpenClaw session table and actions.                        |
-| `/chat`          | Gateway-backed chat UI.                                    |
-| `/logs`          | Log file browsing/tailing.                                 |
-| `/jobs`          | Dashboard scheduled jobs.                                  |
-| `/reports`       | Daily briefs, summaries, heartbeats, and custom reports.   |
-| `/pull-requests` | PR review, trusted PR dev, releases, deploy, and rollback. |
-| `/files`         | Workspace file browser/editor.                             |
-| `/docker`        | Docker state and managed updater.                          |
-| `/database`      | Postgres/PgBouncer and Dashboard SQLite overview.          |
-| `/moltbook`      | Moltbook dashboard.                                        |
-| `/settings`      | OpenClaw/Dashboard settings.                               |
-| `/terminal`      | Terminal helper/completion UI.                             |
+| Path        | Purpose                                                    |
+| ----------- | ---------------------------------------------------------- |
+| `/`         | Operations dashboard overview.                             |
+| `/tasks`    | Local task board and task updates.                         |
+| `/agents`   | Agent status and task history.                             |
+| `/sessions` | OpenClaw session table and actions.                        |
+| `/chat`     | Gateway-backed chat UI.                                    |
+| `/logs`     | Log file browsing/tailing.                                 |
+| `/jobs`     | Dashboard scheduled jobs.                                  |
+| `/reports`  | Daily briefs, summaries, heartbeats, and custom reports.   |
+| `/delivery` | PR review, trusted PR dev, releases, deploy, and rollback. |
+| `/files`    | Workspace file browser/editor.                             |
+| `/docker`   | Docker state and managed updater.                          |
+| `/database` | Postgres/PgBouncer and Dashboard SQLite overview.          |
+| `/moltbook` | Moltbook dashboard.                                        |
+| `/settings` | OpenClaw/Dashboard settings.                               |
+| `/terminal` | Terminal helper/completion UI.                             |
 
 ## Backend
 

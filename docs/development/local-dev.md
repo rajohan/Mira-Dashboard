@@ -47,8 +47,8 @@ Both start commands run:
 - a combined, isolated scheduler/worker;
 - the live production OpenClaw Gateway.
 
-There is no separate reduced preview mode and no permanent development systemd
-unit.
+The ordinary commands run directly from the repository or feature worktree in
+which they were started. There is no permanent development systemd unit.
 
 ## Isolated State
 
@@ -133,12 +133,17 @@ the frontend proxy strips non-dev Dashboard cookies before forwarding requests.
 
 ## Managed PR Dev
 
-The Pull requests page exposes one shared **PR dev** slot:
+The Delivery page exposes one shared **PR dev** slot:
 
 - Only PRs targeting `main` from the configured trusted-author allowlist can
   start.
+- The exact PR commit is checked out at
+  `/home/ubuntu/projects/mira-dashboard-preview`.
 - Dependencies install with frozen lockfiles and lifecycle scripts disabled.
 - Source and Git metadata are read-only inside a Bubblewrap sandbox.
+- Source watchers and frontend HMR are disabled because the managed checkout is
+  fixed and read-only. Ordinary `bun run dev` and `bun run dev:remote` still
+  provide frontend and backend hot reload from their current worktree.
 - State is stored under
   `/home/ubuntu/projects/mira-dashboard-preview-state/managed/states/pr-<number>/`.
 - Tailscale publishes HTTPS only after the managed frontend/backend pair is
@@ -147,10 +152,21 @@ The Pull requests page exposes one shared **PR dev** slot:
   capability proxy. Both enforce CPU, IO, memory, task, and four-hour runtime
   limits; no permanent unit file is installed.
 - Stop removes the owned Tailscale route, stops both transient units, and removes
-  materialized credentials while keeping the worktree and isolated state for a
-  faster restart.
+  materialized credentials while keeping the shared checkout and isolated PR
+  state for a faster restart while the PR remains open.
+- Merge or rejection through Delivery removes the closed PR's isolated state.
+  If that PR owns the slot, it also removes the shared checkout and active
+  preview record.
+- A successful Delivery refresh also reconciles a PR closed or merged directly
+  on GitHub. Cleanup is rechecked in the exclusive worker before any data is
+  removed, so a still-open PR is kept.
 - Status reconciliation performs the same unit, route, and credential cleanup
   if a transient unit exits, is collected, or reaches its four-hour limit.
+
+`managed/bun-cache` is a shared dependency cache retained between PRs to speed up
+frozen installs. `managed/installer-home` is an isolated, normally empty home
+directory for those installs; neither directory contains per-PR application
+state.
 
 The production backend decrypts its persisted Gateway token only when starting
 trusted PR dev. It atomically writes that token to an owner-only `0600` file
@@ -174,6 +190,7 @@ overrides include:
 ```text
 MIRA_DASHBOARD_DEV_FRONTEND_PORT
 MIRA_DASHBOARD_DEV_BACKEND_PORT
+MIRA_DASHBOARD_DEV_HOT_RELOAD
 MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN
 MIRA_DASHBOARD_DEV_STATE_ROOT
 MIRA_DASHBOARD_DEV_DB_SOURCE
@@ -182,6 +199,8 @@ MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE
 MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE
 MIRA_DASHBOARD_DEV_GATEWAY_URL
 MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE
+MIRA_DASHBOARD_PREVIEW_ROOT
+MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH
 ```
 
 Use overrides only with absolute, non-root state/source paths. The ordinary

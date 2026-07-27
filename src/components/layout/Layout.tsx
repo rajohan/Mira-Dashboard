@@ -6,10 +6,10 @@ import {
     Database,
     FileText,
     FolderOpen,
-    GitPullRequest,
     Home,
     MessageSquare,
     Newspaper,
+    Rocket,
     Settings,
     Terminal,
     Users,
@@ -24,7 +24,7 @@ import {
     useState,
 } from "react";
 
-import { PULL_REQUEST_NAV_REFRESH_MS, useCacheEntry, usePullRequests } from "../../hooks";
+import { DELIVERY_NAV_REFRESH_MS, useCacheEntry, usePullRequests } from "../../hooks";
 import { cn } from "../../utils/cn";
 import { AppHeader } from "./AppHeader";
 
@@ -37,7 +37,7 @@ const navItems = [
     { to: "/logs", icon: FileText, label: "Logs" },
     { to: "/jobs", icon: Clock3, label: "Jobs" },
     { to: "/reports", icon: Newspaper, label: "Reports" },
-    { to: "/pull-requests", icon: GitPullRequest, label: "PRs" },
+    { to: "/delivery", icon: Rocket, label: "Delivery" },
     { to: "/files", icon: FolderOpen, label: "Files" },
     { to: "/docker", icon: Boxes, label: "Docker" },
     { to: "/database", icon: Database, label: "Database" },
@@ -65,7 +65,7 @@ export function Layout({ children }: LayoutProperties) {
     const sidebarId = useId();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const { data: systemHost } = useCacheEntry<SystemHostCache>("system.host", 60_000);
-    const { data: pullRequests = [] } = usePullRequests(PULL_REQUEST_NAV_REFRESH_MS);
+    const { data: pullRequests = [] } = usePullRequests(DELIVERY_NAV_REFRESH_MS);
     const openClawVersion = systemHost?.data.version?.current;
     const openPullRequestCount = pullRequests.length;
 
@@ -120,7 +120,7 @@ export function Layout({ children }: LayoutProperties) {
                         >
                             <item.icon size={20} aria-hidden="true" />
                             <span>{item.label}</span>
-                            {item.to === "/pull-requests" && openPullRequestCount > 0 ? (
+                            {item.to === "/delivery" && openPullRequestCount > 0 ? (
                                 <span
                                     className={cn(
                                         "ml-auto min-w-5 rounded-full px-1.5 py-0.5 text-center text-xs font-semibold",

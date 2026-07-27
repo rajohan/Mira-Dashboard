@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, jest } from "bun:test";
 
-import { ProductionReleasesCard } from "../components/features/pullRequests/ProductionReleasesCard";
+import { ProductionReleasesCard } from "../components/features/delivery/ProductionReleasesCard";
 import type { DashboardReleaseStatus } from "../hooks";
 
 const CURRENT_COMMIT = "a".repeat(40);

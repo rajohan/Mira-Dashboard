@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, jest } from "bun:test";
 
-import { PullRequestPreviewCard } from "../components/features/pullRequests/PullRequestPreviewCard";
+import { PullRequestDevelopmentCard } from "../components/features/delivery/PullRequestDevelopmentCard";
 import type { PullRequestPreviewStatus } from "../hooks";
 
 function preview(
@@ -18,17 +18,19 @@ function preview(
     };
 }
 
-describe("PullRequestPreviewCard", () => {
+describe("PullRequestDevelopmentCard", () => {
     it("renders the available and unavailable preview states", () => {
-        const { rerender } = render(<PullRequestPreviewCard preview={undefined} />);
+        const { rerender } = render(<PullRequestDevelopmentCard preview={undefined} />);
 
         expect(screen.getByText("Available")).toBeInTheDocument();
+        expect(screen.getByText(/fixed PR commit/u)).toBeInTheDocument();
+        expect(screen.queryByText(/hot reload/iu)).not.toBeInTheDocument();
         expect(
             screen.getByText("Run an eligible trusted PR in dev from its card below.")
         ).toBeInTheDocument();
 
         rerender(
-            <PullRequestPreviewCard
+            <PullRequestDevelopmentCard
                 error={new Error("Preview status failed")}
                 preview={undefined}
             />
@@ -41,7 +43,7 @@ describe("PullRequestPreviewCard", () => {
     it("renders every managed lifecycle with bounded preview details", () => {
         const onStop = jest.fn();
         const { rerender } = render(
-            <PullRequestPreviewCard
+            <PullRequestDevelopmentCard
                 onStop={onStop}
                 preview={preview("running", {
                     url: "https://preview.example:5173",
@@ -60,19 +62,19 @@ describe("PullRequestPreviewCard", () => {
         expect(onStop).toHaveBeenCalledTimes(1);
 
         rerender(
-            <PullRequestPreviewCard onStop={onStop} preview={preview("starting")} />
+            <PullRequestDevelopmentCard onStop={onStop} preview={preview("starting")} />
         );
         expect(screen.getByText("Starting")).toBeInTheDocument();
         expect(screen.queryByRole("link", { name: /Open dev/u })).not.toBeInTheDocument();
 
         rerender(
-            <PullRequestPreviewCard onStop={onStop} preview={preview("stopping")} />
+            <PullRequestDevelopmentCard onStop={onStop} preview={preview("stopping")} />
         );
         expect(screen.getByText("Stopping")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Stop dev" })).toBeDisabled();
 
         rerender(
-            <PullRequestPreviewCard
+            <PullRequestDevelopmentCard
                 onStop={onStop}
                 preview={preview("failed", {
                     commitSha: undefined,
@@ -87,7 +89,9 @@ describe("PullRequestPreviewCard", () => {
         expect(screen.getByText("commit pending")).toBeInTheDocument();
         expect(screen.getByText("Preview worker failed")).toBeInTheDocument();
 
-        rerender(<PullRequestPreviewCard onStop={onStop} preview={preview("stopped")} />);
+        rerender(
+            <PullRequestDevelopmentCard onStop={onStop} preview={preview("stopped")} />
+        );
         expect(screen.getByText("Available")).toBeInTheDocument();
         expect(screen.queryByRole("button", { name: "Stop dev" })).toBeNull();
     });

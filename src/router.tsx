@@ -11,13 +11,13 @@ import { Agents } from "./pages/Agents";
 import { Chat } from "./pages/Chat";
 import { Dashboard } from "./pages/Dashboard";
 import { Database } from "./pages/Database";
+import { Delivery } from "./pages/Delivery";
 import { Docker } from "./pages/Docker";
 import { Files } from "./pages/Files";
 import { Jobs } from "./pages/Jobs";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Moltbook } from "./pages/Moltbook";
-import { PullRequests } from "./pages/PullRequests";
 import { Reports } from "./pages/Reports";
 import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
@@ -120,10 +120,10 @@ const reportsRoute = createRoute({
     component: Reports,
 });
 
-const pullRequestsRoute = createRoute({
+const deliveryRoute = createRoute({
     getParentRoute: () => authenticatedRoute,
-    path: "/pull-requests",
-    component: PullRequests,
+    path: "/delivery",
+    component: Delivery,
 });
 
 const filesRoute = createRoute({
@@ -183,7 +183,7 @@ const routeTree = rootRoute.addChildren([
         logsRoute,
         jobsRoute,
         reportsRoute,
-        pullRequestsRoute,
+        deliveryRoute,
         filesRoute,
         dockerRoute,
         databaseRoute,

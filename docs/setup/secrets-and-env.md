@@ -156,25 +156,28 @@ child environment forwards the two auth timing values unchanged, uses the
 production RP ID only to decide whether copied WebAuthn public credentials are
 compatible, and does not inherit other provider or host credentials.
 
-| Variable                                      | Default                                             | Purpose                                                                          |
-| --------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `MIRA_DASHBOARD_DEV_FRONTEND_PORT`            | `5173`                                              | Frontend hot-reload port.                                                        |
-| `MIRA_DASHBOARD_DEV_BACKEND_PORT`             | `3101`                                              | Backend restart-on-change port.                                                  |
-| `MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN`            | `http://localhost:5173`                             | Cookie/WebAuthn origin; remote dev derives the Tailscale HTTPS origin.           |
-| `MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID`    | production `MIRA_DASHBOARD_WEBAUTHN_RP_ID`          | Source snapshot RP used to retain or remove copied WebAuthn public credentials.  |
-| `MIRA_DASHBOARD_DEV_STATE_ROOT`               | `~/projects/mira-dashboard-dev-state/local`         | Owner-only isolated development state.                                           |
-| `MIRA_DASHBOARD_DEV_DB_SOURCE`                | `~/projects/mira-dashboard-state/mira-dashboard.db` | Production database used only to create a scrubbed WAL-consistent snapshot.      |
-| `MIRA_DASHBOARD_DEV_RELEASES_SOURCE`          | `~/projects/mira-dashboard-releases`                | Managed releases copied into isolated state.                                     |
-| `MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE`         | `~/.openclaw/workspace`                             | Workspace copied with secret and symlink filtering.                              |
-| `MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE`   | `~/.openclaw/openclaw.json`                         | Source for sanitized agent-only development config.                              |
-| `MIRA_DASHBOARD_DEV_GATEWAY_URL`              | `ws://127.0.0.1:18789`                              | Live production Gateway used by trusted dev.                                     |
-| `MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE`       | none                                                | Optional owner-only token file; local commands normally use Doppler environment. |
-| `MIRA_DASHBOARD_PREVIEW_GATEWAY_URL`          | `ws://127.0.0.1:18789`                              | Production Gateway used only by the host-owned PR-dev capability proxy.          |
-| `MIRA_DASHBOARD_PREVIEW_GATEWAY_TOKEN_FILE`   | `<managed-preview-root>/gateway.token`              | Disposable `0600` proxy credential mounted read-only into trusted PR dev.        |
-| `MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT`   | `18790`                                             | Loopback-only host proxy port; must differ from frontend/backend ports.          |
-| `MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_UNIT`   | `mira-dashboard-pr-preview-gateway.service`         | Transient proxy unit name; no permanent systemd unit file is installed.          |
-| `MIRA_DASHBOARD_PREVIEW_OPENCLAW_SOURCE_ROOT` | `/home/ubuntu/.openclaw`                            | Source root for managed PR workspace/config snapshots.                           |
-| `HOST` / `PORT` / `DASHBOARD_API_TARGET`      | `127.0.0.1` / `5173` / `http://127.0.0.1:3101`      | Child frontend bind and exact backend proxy target.                              |
+| Variable                                      | Default                                                      | Purpose                                                                                                            |
+| --------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `MIRA_DASHBOARD_DEV_FRONTEND_PORT`            | `5173`                                                       | Frontend hot-reload port.                                                                                          |
+| `MIRA_DASHBOARD_DEV_BACKEND_PORT`             | `3101`                                                       | Backend restart-on-change port.                                                                                    |
+| `MIRA_DASHBOARD_DEV_HOT_RELOAD`               | `1` when unset or empty                                      | Accepts only `0` or `1`; enables frontend HMR and backend/frontend source watchers, while managed PR dev sets `0`. |
+| `MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN`            | `http://localhost:5173`                                      | Cookie/WebAuthn origin; remote dev derives the Tailscale HTTPS origin.                                             |
+| `MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID`    | production `MIRA_DASHBOARD_WEBAUTHN_RP_ID`                   | Source snapshot RP used to retain or remove copied WebAuthn public credentials.                                    |
+| `MIRA_DASHBOARD_DEV_STATE_ROOT`               | `~/projects/mira-dashboard-dev-state/local`                  | Owner-only isolated development state.                                                                             |
+| `MIRA_DASHBOARD_DEV_DB_SOURCE`                | `~/projects/mira-dashboard-state/mira-dashboard.db`          | Production database used only to create a scrubbed WAL-consistent snapshot.                                        |
+| `MIRA_DASHBOARD_DEV_RELEASES_SOURCE`          | `~/projects/mira-dashboard-releases`                         | Managed releases copied into isolated state.                                                                       |
+| `MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE`         | `~/.openclaw/workspace`                                      | Workspace copied with secret and symlink filtering.                                                                |
+| `MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE`   | `~/.openclaw/openclaw.json`                                  | Source for sanitized agent-only development config.                                                                |
+| `MIRA_DASHBOARD_DEV_GATEWAY_URL`              | `ws://127.0.0.1:18789`                                       | Live production Gateway used by trusted dev.                                                                       |
+| `MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE`       | none                                                         | Optional owner-only token file; local commands normally use Doppler environment.                                   |
+| `MIRA_DASHBOARD_PREVIEW_ROOT`                 | `/home/ubuntu/projects/mira-dashboard-preview-state/managed` | Host-owned records, shared install cache, and isolated per-PR state.                                               |
+| `MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH`        | `/home/ubuntu/projects/mira-dashboard-preview`               | Single shared checkout reused by the managed PR-dev slot.                                                          |
+| `MIRA_DASHBOARD_PREVIEW_GATEWAY_URL`          | `ws://127.0.0.1:18789`                                       | Production Gateway used only by the host-owned PR-dev capability proxy.                                            |
+| `MIRA_DASHBOARD_PREVIEW_GATEWAY_TOKEN_FILE`   | `<managed-preview-root>/gateway.token`                       | Disposable `0600` proxy credential mounted read-only into trusted PR dev.                                          |
+| `MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT`   | `18790`                                                      | Loopback-only host proxy port; must differ from frontend/backend ports.                                            |
+| `MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_UNIT`   | `mira-dashboard-pr-preview-gateway.service`                  | Transient proxy unit name; no permanent systemd unit file is installed.                                            |
+| `MIRA_DASHBOARD_PREVIEW_OPENCLAW_SOURCE_ROOT` | `/home/ubuntu/.openclaw`                                     | Source root for managed PR workspace/config snapshots.                                                             |
+| `HOST` / `PORT` / `DASHBOARD_API_TARGET`      | `127.0.0.1` / `5173` / `http://127.0.0.1:3101`               | Child frontend bind and exact backend proxy target.                                                                |
 
 See [Local development](../development/local-dev.md) for snapshot contents,
 blocked production mutations, cookie isolation, and the managed trusted-PR

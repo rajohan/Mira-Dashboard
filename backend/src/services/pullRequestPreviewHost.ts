@@ -8,6 +8,7 @@ import {
     lstatSync,
     mkdirSync,
     openSync,
+    readdirSync,
     readSync,
     realpathSync,
     renameSync,
@@ -40,6 +41,9 @@ const COMMIT_PATTERN = /^[\da-f]{40}$/u;
 const UNIT_NAME_PATTERN = /^[A-Za-z0-9_.@-]+\.service$/u;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const DEFAULT_GATEWAY_PROXY_PORT = 18_790;
+const DEFAULT_PREVIEW_WORKTREE_PATH = "/home/ubuntu/projects/mira-dashboard-preview";
+const MANAGED_STATE_DIRECTORY_PATTERN = /^pr-([1-9]\d*)$/u;
+const PREVIEW_REFERENCE = "refs/mira-dashboard/previews/active";
 const PREVIEW_GATEWAY_PROXY_ENTRYPOINT = "pullRequestPreviewGatewayProxy.js";
 const PREVIEW_GATEWAY_PROXY_READY_TIMEOUT_MS = 45_000;
 const PREVIEW_GATEWAY_PROXY_READY_POLL_MS = 250;
@@ -81,6 +85,12 @@ export interface PullRequestPreviewCandidate {
     title: string;
 }
 
+export interface PullRequestPreviewCleanupResult {
+    message: string;
+    number: number;
+    status: "removed" | "skipped" | "warning";
+}
+
 export interface PullRequestPreviewConfig {
     allowedAuthors: ReadonlySet<string>;
     backendPort: number;
@@ -96,6 +106,7 @@ export interface PullRequestPreviewConfig {
     gatewayUpstreamTokenFile: string;
     gatewayUrl: string;
     gitCommonDirectory: string;
+    managedWorktreePath: string;
     openClawConfigSource?: string;
     previewRoot: string;
     recentAuthMinutes?: string;
@@ -105,7 +116,6 @@ export interface PullRequestPreviewConfig {
     stateFile: string;
     unitName: string;
     workspaceSource?: string;
-    worktreeRoot: string;
 }
 
 interface PullRequestPreviewRecord {
@@ -277,16 +287,28 @@ export function resolvePullRequestPreviewConfig(
         "MIRA_DASHBOARD_ROOT",
         environment.MIRA_DASHBOARD_ROOT?.trim() || "/home/ubuntu/projects/mira-dashboard"
     );
-    const worktreeRoot = absoluteNonRootPath(
-        "MIRA_DASHBOARD_WORKTREE_ROOT",
-        environment.MIRA_DASHBOARD_WORKTREE_ROOT?.trim() ||
-            "/home/ubuntu/projects/mira-dashboard-worktrees"
-    );
     const previewRoot = absoluteNonRootPath(
         "MIRA_DASHBOARD_PREVIEW_ROOT",
         environment.MIRA_DASHBOARD_PREVIEW_ROOT?.trim() ||
             "/home/ubuntu/projects/mira-dashboard-preview-state/managed"
     );
+    const managedWorktreePath = absoluteNonRootPath(
+        "MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH",
+        environment.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH?.trim() ||
+            DEFAULT_PREVIEW_WORKTREE_PATH
+    );
+    if (
+        [dashboardRoot, previewRoot].some(
+            (protectedRoot) =>
+                managedWorktreePath === protectedRoot ||
+                isPathStrictlyWithin(managedWorktreePath, protectedRoot) ||
+                isPathStrictlyWithin(protectedRoot, managedWorktreePath)
+        )
+    ) {
+        throw new TypeError(
+            "MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH must not overlap Dashboard source or preview state"
+        );
+    }
     const frontendPort = configuredPort(
         "MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT",
         environment.MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT,
@@ -368,6 +390,7 @@ export function resolvePullRequestPreviewConfig(
             dashboardRoot,
             environment.MIRA_DASHBOARD_PREVIEW_GIT_COMMON_DIR
         ),
+        managedWorktreePath,
         openClawConfigSource: openClawSourceRoot
             ? path.join(openClawSourceRoot, "openclaw.json")
             : undefined,
@@ -394,7 +417,6 @@ export function resolvePullRequestPreviewConfig(
         workspaceSource: openClawSourceRoot
             ? path.join(openClawSourceRoot, "workspace")
             : undefined,
-        worktreeRoot,
     };
 }
 
@@ -431,6 +453,15 @@ function ensureRealDirectory(directoryPath: string): void {
         throw new Error(`Preview path must be a real directory: ${directoryPath}`);
     }
     chmodSync(directoryPath, 0o700);
+}
+
+function ensureRealDirectoryPreservingExistingMode(directoryPath: string): void {
+    const didExist = existsSync(directoryPath);
+    mkdirSync(directoryPath, { mode: 0o700, recursive: true });
+    if (!isRealDirectory(directoryPath)) {
+        throw new Error(`Preview path must be a real directory: ${directoryPath}`);
+    }
+    if (!didExist) chmodSync(directoryPath, 0o700);
 }
 
 function materializeGatewayTokenFile(
@@ -696,8 +727,84 @@ function githubCommandEnvironment(): Record<string, string | undefined> {
     return environment;
 }
 
-function previewWorktreePath(config: PullRequestPreviewConfig, number: number): string {
-    return path.join(config.worktreeRoot, `preview-pr-${number}`);
+function previewWorktreePath(config: PullRequestPreviewConfig): string {
+    return config.managedWorktreePath;
+}
+
+async function unregisterMissingPreviewWorktree(
+    config: PullRequestPreviewConfig,
+    worktreePath: string,
+    signal?: AbortSignal
+): Promise<boolean> {
+    const resolvedWorktreePath = path.resolve(worktreePath);
+    const { stdout } = await runCommand(
+        "git",
+        ["-C", config.dashboardRoot, "worktree", "list", "--porcelain"],
+        { signal, timeoutMs: 30_000 }
+    );
+    const isRegistered = stdout
+        .split(/\r?\n/u)
+        .filter((line) => line.startsWith("worktree "))
+        .some(
+            (line) =>
+                path.resolve(line.slice("worktree ".length)) === resolvedWorktreePath
+        );
+    if (!isRegistered) return false;
+    await runCommand(
+        "git",
+        [
+            "-C",
+            config.dashboardRoot,
+            "worktree",
+            "remove",
+            "--force",
+            "--force",
+            resolvedWorktreePath,
+        ],
+        { signal, timeoutMs: 120_000 }
+    );
+    return true;
+}
+
+async function removePreviewWorktree(
+    config: PullRequestPreviewConfig,
+    worktreePath: string,
+    signal?: AbortSignal
+): Promise<boolean> {
+    const resolvedWorktreePath = path.resolve(worktreePath);
+    if (resolvedWorktreePath !== path.resolve(config.managedWorktreePath)) {
+        throw new Error("Refusing to remove an unmanaged preview worktree");
+    }
+    if (!existsSync(resolvedWorktreePath)) {
+        return unregisterMissingPreviewWorktree(config, resolvedWorktreePath, signal);
+    }
+    if (!isRealDirectory(resolvedWorktreePath)) {
+        throw new Error("Preview worktree path must be a real directory");
+    }
+    const { stdout: registeredRoot } = await runCommand(
+        "git",
+        ["-C", resolvedWorktreePath, "rev-parse", "--show-toplevel"],
+        { signal }
+    );
+    if (realpathSync(registeredRoot.trim()) !== realpathSync(resolvedWorktreePath)) {
+        throw new Error("Preview path is not the expected registered worktree");
+    }
+    await runCommand(
+        "git",
+        [
+            "-C",
+            config.dashboardRoot,
+            "worktree",
+            "remove",
+            "--force",
+            resolvedWorktreePath,
+        ],
+        { signal, timeoutMs: 120_000 }
+    );
+    if (existsSync(resolvedWorktreePath)) {
+        throw new Error("Git did not remove the managed preview worktree");
+    }
+    return true;
 }
 
 async function ensurePreviewWorktree(
@@ -706,12 +813,8 @@ async function ensurePreviewWorktree(
     commitSha: string,
     signal?: AbortSignal
 ): Promise<string> {
-    ensureRealDirectory(config.worktreeRoot);
-    const worktreePath = previewWorktreePath(config, number);
-    if (!isPathStrictlyWithin(worktreePath, config.worktreeRoot)) {
-        throw new Error("Preview worktree escaped the configured worktree root");
-    }
-    const previewReference = `refs/mira-dashboard/previews/pr-${number}`;
+    ensureRealDirectoryPreservingExistingMode(path.dirname(config.managedWorktreePath));
+    const worktreePath = previewWorktreePath(config);
     await runCommand(
         "git",
         [
@@ -721,7 +824,7 @@ async function ensurePreviewWorktree(
             "--force",
             "--no-tags",
             "origin",
-            `pull/${number}/head:${previewReference}`,
+            `pull/${number}/head:${PREVIEW_REFERENCE}`,
         ],
         {
             env: githubCommandEnvironment(),
@@ -731,7 +834,7 @@ async function ensurePreviewWorktree(
     );
     const { stdout: fetchedCommit } = await runCommand(
         "git",
-        ["-C", config.dashboardRoot, "rev-parse", previewReference],
+        ["-C", config.dashboardRoot, "rev-parse", PREVIEW_REFERENCE],
         { env: githubCommandEnvironment(), signal }
     );
     if (fetchedCommit.trim() !== commitSha) {
@@ -764,6 +867,7 @@ async function ensurePreviewWorktree(
             signal,
         });
     } else {
+        await unregisterMissingPreviewWorktree(config, worktreePath, signal);
         await runCommand(
             "git",
             [
@@ -961,6 +1065,73 @@ function managedStateRoot(config: PullRequestPreviewConfig, number: number): str
     return stateRoot;
 }
 
+/** Lists isolated PR state directories without following directory symlinks. */
+export function listManagedPullRequestPreviewStateNumbers(
+    config: PullRequestPreviewConfig = resolvePullRequestPreviewConfig()
+): number[] {
+    const statesRoot = path.join(config.previewRoot, "states");
+    if (!existsSync(statesRoot)) return [];
+    if (!isRealDirectory(config.previewRoot) || !isRealDirectory(statesRoot)) {
+        throw new Error("PR dev state roots must be real directories");
+    }
+    const resolvedPreviewRoot = realpathSync(config.previewRoot);
+    const resolvedStatesRoot = realpathSync(statesRoot);
+    if (!isPathStrictlyWithin(resolvedStatesRoot, resolvedPreviewRoot)) {
+        throw new Error("PR dev states escaped the configured preview root");
+    }
+    const numbers: number[] = [];
+    const stateEntries = readdirSync(statesRoot, { withFileTypes: true });
+    for (const entry of stateEntries) {
+        const match = MANAGED_STATE_DIRECTORY_PATTERN.exec(entry.name);
+        if (!match || !entry.isDirectory() || entry.isSymbolicLink()) continue;
+        const number = Number(match[1]);
+        if (!Number.isSafeInteger(number) || number <= 0 || number > 2_147_483_647) {
+            continue;
+        }
+        const stateRoot = path.join(statesRoot, entry.name);
+        if (
+            !isRealDirectory(stateRoot) ||
+            !isPathStrictlyWithin(realpathSync(stateRoot), resolvedStatesRoot)
+        ) {
+            throw new Error("PR dev state directory escaped the managed states root");
+        }
+        numbers.push(number);
+    }
+    return numbers.toSorted((left, right) => left - right);
+}
+
+function didRemoveManagedPreviewState(
+    config: PullRequestPreviewConfig,
+    number: number
+): boolean {
+    const stateRoot = managedStateRoot(config, number);
+    if (!existsSync(stateRoot)) return false;
+    const statesRoot = path.dirname(stateRoot);
+    if (
+        !isRealDirectory(config.previewRoot) ||
+        !isRealDirectory(statesRoot) ||
+        !isRealDirectory(stateRoot) ||
+        !isPathStrictlyWithin(
+            realpathSync(statesRoot),
+            realpathSync(config.previewRoot)
+        ) ||
+        !isPathStrictlyWithin(realpathSync(stateRoot), realpathSync(statesRoot))
+    ) {
+        throw new Error("PR dev state path must be a real directory");
+    }
+    rmSync(stateRoot, { force: true, recursive: true });
+    return true;
+}
+
+function didRemovePreviewRecord(config: PullRequestPreviewConfig): boolean {
+    if (!existsSync(config.stateFile)) return false;
+    if (!isRealRegularFile(config.stateFile)) {
+        throw new Error("PR dev record path must be a real regular file");
+    }
+    rmSync(config.stateFile, { force: true });
+    return true;
+}
+
 function previewGatewayProxyUrl(config: PullRequestPreviewConfig): string {
     return `ws://127.0.0.1:${config.gatewayProxyPort}/gateway`;
 }
@@ -1121,6 +1292,9 @@ export function buildPullRequestPreviewSandboxCommand(input: {
         "--setenv",
         "MIRA_DASHBOARD_DEV_GATEWAY_URL",
         previewGatewayProxyUrl(config),
+        "--setenv",
+        "MIRA_DASHBOARD_DEV_HOT_RELOAD",
+        "0",
         "--setenv",
         "MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN",
         publicOrigin,
@@ -1515,7 +1689,7 @@ async function waitForPreviewReady(
             });
             if (response.ok && state?.activeState === "active") return;
         } catch {
-            // The watched frontend/backend pair is still starting.
+            // The managed frontend/backend pair is still starting.
         }
         await Bun.sleep(PREVIEW_READY_POLL_MS);
     }
@@ -1617,7 +1791,7 @@ export async function startPullRequestPreview(
         isTailscaleServeOwned = false;
     }
     const publicOrigin = tailscaleRoute.url;
-    const worktreePath = previewWorktreePath(config, number);
+    const worktreePath = previewWorktreePath(config);
     const startingRecord: PullRequestPreviewRecord = {
         backendPort: config.backendPort,
         commitSha: pullRequest.commitSha,
@@ -1758,4 +1932,45 @@ export async function stopPullRequestPreview(
     };
     writePreviewRecord(config, stoppedRecord);
     return publicPreviewStatus(stoppedRecord);
+}
+
+/** Removes the shared checkout and isolated state after its owning PR closes. */
+export async function cleanupClosedPullRequestPreview(
+    number: number,
+    options: { config?: PullRequestPreviewConfig } = {}
+): Promise<PullRequestPreviewCleanupResult> {
+    let didRemove = false;
+    try {
+        const config = options.config ?? resolvePullRequestPreviewConfig();
+        const record = readPreviewRecord(config);
+        const hasManagedSlotOwnership = record?.number === number;
+        if (hasManagedSlotOwnership) {
+            await stopPullRequestPreview(number, { config });
+            didRemove =
+                (await removePreviewWorktree(config, previewWorktreePath(config))) ||
+                didRemove;
+            await runCommand("git", [
+                "-C",
+                config.dashboardRoot,
+                "update-ref",
+                "-d",
+                PREVIEW_REFERENCE,
+            ]);
+            didRemove = didRemovePreviewRecord(config) || didRemove;
+        }
+        didRemove = didRemoveManagedPreviewState(config, number) || didRemove;
+        return {
+            message: didRemove
+                ? `Removed managed PR dev data for #${number}`
+                : `No managed PR dev data found for #${number}`,
+            number,
+            status: didRemove ? "removed" : "skipped",
+        };
+    } catch (error) {
+        return {
+            message: `PR dev cleanup warning for #${number}: ${errorMessage(error, "cleanup failed")}`,
+            number,
+            status: "warning",
+        };
+    }
 }

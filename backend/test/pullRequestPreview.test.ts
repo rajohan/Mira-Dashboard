@@ -22,7 +22,9 @@ import * as jobExecutionQueue from "../src/services/jobExecutionQueue.ts";
 import * as previewHost from "../src/services/pullRequestPreviewHost.ts";
 import {
     buildPullRequestPreviewSandboxCommand,
+    cleanupClosedPullRequestPreview,
     getPullRequestPreviewStatus,
+    listManagedPullRequestPreviewStateNumbers,
     parsePreviewUnitState,
     type PullRequestPreviewConfig,
     resolvePullRequestPreviewConfig,
@@ -32,6 +34,7 @@ import {
 import {
     prepareAndStartPullRequestPreview,
     prepareAndStopPullRequestPreview,
+    reconcileClosedPullRequestPreview,
     registerPullRequestPreviewExecutionActions,
 } from "../src/services/pullRequestPreviews.ts";
 import type { PullRequestSummary } from "../src/services/pullRequests.ts";
@@ -83,10 +86,10 @@ function previewConfig(root: string): PullRequestPreviewConfig {
         gatewayUpstreamTokenFile: path.join(root, "preview", "gateway-upstream.token"),
         gatewayUrl: "ws://127.0.0.1:18789",
         gitCommonDirectory: path.join(root, "dashboard", ".git"),
+        managedWorktreePath: path.join(root, "managed-preview"),
         previewRoot: path.join(root, "preview"),
         stateFile: path.join(root, "preview", "active-preview.json"),
         unitName: "mira-dashboard-pr-preview.service",
-        worktreeRoot: path.join(root, "worktrees"),
     };
 }
 
@@ -152,8 +155,8 @@ describe("managed pull request preview", () => {
         try {
             const config = resolvePullRequestPreviewConfig({
                 MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
+                MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(root, "managed-preview"),
                 MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
                 PATH: path.join(root, "empty-bin"),
             });
 
@@ -163,8 +166,11 @@ describe("managed pull request preview", () => {
                 resolvePullRequestPreviewConfig({
                     BUN_BINARY: "bun",
                     MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
+                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
+                        root,
+                        "managed-preview"
+                    ),
                     MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
                     PATH: path.join(root, "empty-bin"),
                 })
             ).toThrow("bun executable must resolve to an absolute path");
@@ -181,8 +187,8 @@ describe("managed pull request preview", () => {
                 MIRA_DASHBOARD_PREVIEW_BACKEND_PORT: "4101",
                 MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT: "4173",
                 MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
+                MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(root, "managed-preview"),
                 MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
             });
             expect(config).toMatchObject({
                 backendPort: 4101,
@@ -196,6 +202,7 @@ describe("managed pull request preview", () => {
                     "gateway-upstream.token"
                 ),
                 gatewayUrl: "ws://127.0.0.1:18789",
+                managedWorktreePath: path.join(root, "managed-preview"),
                 previewRoot: path.join(root, "state"),
                 unitName: "mira-dashboard-pr-preview.service",
             });
@@ -204,8 +211,11 @@ describe("managed pull request preview", () => {
                 resolvePullRequestPreviewConfig({
                     BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
                     MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS: " , ",
+                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
+                        root,
+                        "managed-preview"
+                    ),
                     MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
                 })
             ).toThrow(
                 "MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS must contain at least one author"
@@ -216,23 +226,48 @@ describe("managed pull request preview", () => {
                     BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
                     MIRA_DASHBOARD_PREVIEW_BACKEND_PORT: "5173",
                     MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT: "5173",
+                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
+                        root,
+                        "managed-preview"
+                    ),
                     MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
                 },
                 {
                     BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
                     MIRA_DASHBOARD_PREVIEW_GATEWAY_URL: "https://gateway.example/ws",
+                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
+                        root,
+                        "managed-preview"
+                    ),
                     MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
                 },
                 {
                     BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
                     MIRA_DASHBOARD_PREVIEW_UNIT: "../preview.service",
+                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
+                        root,
+                        "managed-preview"
+                    ),
                     MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                    MIRA_DASHBOARD_WORKTREE_ROOT: path.join(root, "worktrees"),
                 },
             ]) {
                 expect(() => resolvePullRequestPreviewConfig(environment)).toThrow();
+            }
+            for (const managedWorktreePath of [
+                path.join(root, "dashboard"),
+                path.join(root, "dashboard", "preview"),
+                path.join(root, "state", "preview"),
+            ]) {
+                expect(() =>
+                    resolvePullRequestPreviewConfig({
+                        BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
+                        MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
+                        MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: managedWorktreePath,
+                        MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                    })
+                ).toThrow(
+                    "MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH must not overlap Dashboard source or preview state"
+                );
             }
         } finally {
             rmSync(root, { force: true, recursive: true });
@@ -248,7 +283,7 @@ describe("managed pull request preview", () => {
                 gatewayUrl: "wss://gateway.example/ws",
                 sourceWebAuthnRpId: "dashboard.example",
             };
-            const worktreePath = path.join(config.worktreeRoot, "preview-pr-335");
+            const worktreePath = config.managedWorktreePath;
             const stateRoot = path.join(config.previewRoot, "states", "pr-335");
             const command = buildPullRequestPreviewSandboxCommand({
                 config,
@@ -274,6 +309,8 @@ describe("managed pull request preview", () => {
                 "/run/mira-dashboard-preview/gateway.token",
                 "MIRA_DASHBOARD_DEV_GATEWAY_URL",
                 "ws://127.0.0.1:18790/gateway",
+                "MIRA_DASHBOARD_DEV_HOT_RELOAD",
+                "0",
                 "MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID",
                 "dashboard.example",
             ]) {
@@ -355,6 +392,28 @@ describe("managed pull request preview", () => {
         }
     });
 
+    it("returns a warning when closed-PR cleanup cannot read its preview record", async () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-cleanup-warning-"));
+        const config = previewConfig(root);
+        mkdirSync(config.previewRoot, { recursive: true });
+        writeFileSync(config.stateFile, "x".repeat(256 * 1024 + 1), {
+            mode: 0o600,
+        });
+
+        try {
+            await expect(
+                cleanupClosedPullRequestPreview(335, { config })
+            ).resolves.toMatchObject({
+                message: expect.stringContaining("Dashboard preview state is too large"),
+                number: 335,
+                status: "warning",
+            });
+            expect(existsSync(config.stateFile)).toBe(true);
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
     it("preserves preview state after a transient read failure", async () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-read-failure-"));
         const config = previewConfig(root);
@@ -401,6 +460,48 @@ describe("managed pull request preview", () => {
         }
     });
 
+    it("removes closed PR state without touching a shared checkout owned by another PR", async () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-closed-state-"));
+        const config = previewConfig(root);
+        const managedStatePath = path.join(config.previewRoot, "states", "pr-335");
+        mkdirSync(managedStatePath, { recursive: true });
+        writeFileSync(path.join(managedStatePath, "state.txt"), "managed\n");
+        mkdirSync(config.managedWorktreePath, { recursive: true });
+        writeFileSync(path.join(config.managedWorktreePath, "other-pr.txt"), "keep\n");
+
+        try {
+            await expect(
+                cleanupClosedPullRequestPreview(335, { config })
+            ).resolves.toMatchObject({
+                number: 335,
+                status: "removed",
+            });
+            expect(existsSync(managedStatePath)).toBe(false);
+            expect(existsSync(config.managedWorktreePath)).toBe(true);
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
+    it("lists only real isolated managed PR state directories", () => {
+        const root = mkdtempSync(path.join(tmpdir(), "mira-preview-state-list-"));
+        const config = previewConfig(root);
+        const statesRoot = path.join(config.previewRoot, "states");
+        const outsideState = path.join(root, "outside-state");
+        mkdirSync(path.join(statesRoot, "pr-341"), { recursive: true });
+        mkdirSync(path.join(statesRoot, "pr-335"), { recursive: true });
+        mkdirSync(path.join(statesRoot, "pr-0"), { recursive: true });
+        mkdirSync(path.join(statesRoot, "notes"), { recursive: true });
+        mkdirSync(outsideState, { recursive: true });
+        symlinkSync(outsideState, path.join(statesRoot, "pr-999"));
+
+        try {
+            expect(listManagedPullRequestPreviewStateNumbers(config)).toEqual([335, 341]);
+        } finally {
+            rmSync(root, { force: true, recursive: true });
+        }
+    });
+
     it("starts, reuses, updates, reports, and stops one trusted preview slot", async () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-lifecycle-"));
         const config = {
@@ -408,7 +509,7 @@ describe("managed pull request preview", () => {
             recentAuthMinutes: "10",
             sessionIdleMinutes: "60",
         };
-        const worktreePath = path.join(config.worktreeRoot, "preview-pr-335");
+        const worktreePath = config.managedWorktreePath;
         let expectedCommit = COMMIT;
         let shouldFailServeDisable = false;
         let shouldFailServeInspectionWhenEnabled = false;
@@ -417,10 +518,12 @@ describe("managed pull request preview", () => {
         let didProxyReceiveDisposableToken = false;
         let didProxyReceiveUpstreamToken = false;
         let didProxyStartWithStartingRecord = false;
+        let isMissingWorktreeRegistered = true;
         const activeUnits = new Set<string>();
         const commands: string[] = [];
         mkdirSync(config.dashboardRoot, { recursive: true });
         mkdirSync(config.gitCommonDirectory, { recursive: true });
+        chmodSync(root, 0o755);
 
         const processSpy = jest
             .spyOn(processModule, "runProcess")
@@ -540,11 +643,35 @@ describe("managed pull request preview", () => {
                 if (
                     executable === "git" &&
                     commandArguments.includes("worktree") &&
+                    commandArguments.includes("list")
+                ) {
+                    return {
+                        code: 0,
+                        stderr: "",
+                        stdout: isMissingWorktreeRegistered
+                            ? `worktree ${worktreePath}\nHEAD ${expectedCommit}\ndetached\n\n`
+                            : "",
+                    };
+                }
+                if (
+                    executable === "git" &&
+                    commandArguments.includes("worktree") &&
                     commandArguments.includes("add")
                 ) {
+                    if (isMissingWorktreeRegistered) {
+                        throw new Error("stale worktree registration was not cleared");
+                    }
                     mkdirSync(path.join(worktreePath, "backend"), {
                         recursive: true,
                     });
+                }
+                if (
+                    executable === "git" &&
+                    commandArguments.includes("worktree") &&
+                    commandArguments.includes("remove")
+                ) {
+                    isMissingWorktreeRegistered = false;
+                    rmSync(worktreePath, { force: true, recursive: true });
                 }
                 if (executable === "git" && commandArguments.includes("rev-parse")) {
                     return {
@@ -586,6 +713,17 @@ describe("managed pull request preview", () => {
                 status: "running",
                 url: "https://preview-node.ts.net:5173",
             });
+            expect(statSync(root).mode & 0o777).toBe(0o755);
+            const staleRemovalIndex = commands.findIndex((command) =>
+                command.includes(
+                    `worktree remove --force --force ${config.managedWorktreePath}`
+                )
+            );
+            const worktreeAddIndex = commands.findIndex((command) =>
+                command.includes(`worktree add --detach ${config.managedWorktreePath}`)
+            );
+            expect(staleRemovalIndex).toBeGreaterThanOrEqual(0);
+            expect(worktreeAddIndex).toBeGreaterThan(staleRemovalIndex);
             expect(prepareStateSpy).toHaveBeenCalledTimes(1);
             expect(protectFromCancellation).toHaveBeenCalledTimes(1);
             expect(fetchSpy).toHaveBeenCalledWith(
@@ -722,6 +860,7 @@ describe("managed pull request preview", () => {
             expect(commands).toContain(
                 `systemctl --user stop ${config.gatewayProxyUnitName}`
             );
+            expect(existsSync(worktreePath)).toBe(true);
 
             isServeEnabled = true;
             await expect(
@@ -830,6 +969,25 @@ describe("managed pull request preview", () => {
                 ownsTailscaleServe: false,
                 status: "stopped",
             });
+            const managedStatePath = path.join(config.previewRoot, "states", "pr-335");
+            mkdirSync(managedStatePath, { recursive: true });
+            writeFileSync(path.join(managedStatePath, "state.txt"), "managed\n");
+            await expect(
+                cleanupClosedPullRequestPreview(335, { config })
+            ).resolves.toMatchObject({
+                number: 335,
+                status: "removed",
+            });
+            expect(existsSync(worktreePath)).toBe(false);
+            expect(existsSync(managedStatePath)).toBe(false);
+            expect(existsSync(config.stateFile)).toBe(false);
+            expect(
+                commands.some((command) =>
+                    command.includes(
+                        `worktree remove --force ${config.managedWorktreePath}`
+                    )
+                )
+            ).toBe(true);
         } finally {
             processSpy.mockRestore();
             prepareStateSpy.mockRestore();
@@ -841,13 +999,23 @@ describe("managed pull request preview", () => {
     it("queues preview operations and registers guarded worker actions", async () => {
         const queuedStart = previewExecution("preview-start", "queued", "running");
         const queuedStop = previewExecution("preview-stop", "queued", "stopped");
+        const queuedCleanup = {
+            ...queuedStop,
+            actionKey: "dashboard.preview.cleanup",
+            id: "preview-cleanup",
+            payload: { number: 335 },
+        };
         const completedStart = previewExecution("preview-start", "success", "running");
         const completedStop = previewExecution("preview-stop", "success", "stopped");
         const enqueueSpy = jest
             .spyOn(jobExecutionQueue, "enqueueJobExecution")
-            .mockImplementation((input) =>
-                input.actionKey === "dashboard.preview.start" ? queuedStart : queuedStop
-            );
+            .mockImplementation((input) => {
+                if (input.actionKey === "dashboard.preview.start") return queuedStart;
+                if (input.actionKey === "dashboard.preview.cleanup") {
+                    return queuedCleanup;
+                }
+                return queuedStop;
+            });
         const executionsSpy = jest
             .spyOn(jobExecutionQueue, "listJobExecutions")
             .mockReturnValue([]);
@@ -885,12 +1053,25 @@ describe("managed pull request preview", () => {
         const listSpy = jest
             .spyOn(pullRequests, "listDashboardPullRequests")
             .mockResolvedValue([pullRequest]);
+        const isOpenSpy = jest
+            .spyOn(pullRequests, "isDashboardPullRequestOpen")
+            .mockResolvedValue(false);
         const startSpy = jest
             .spyOn(previewHost, "startPullRequestPreview")
             .mockResolvedValue({ number: 335, status: "running" });
         const stopSpy = jest
             .spyOn(previewHost, "stopPullRequestPreview")
             .mockResolvedValue({ number: 335, status: "stopped" });
+        const cleanupSpy = jest
+            .spyOn(previewHost, "cleanupClosedPullRequestPreview")
+            .mockResolvedValue({
+                message: "Removed managed PR dev data for #335",
+                number: 335,
+                status: "removed",
+            });
+        const stateNumbersSpy = jest
+            .spyOn(previewHost, "listManagedPullRequestPreviewStateNumbers")
+            .mockReturnValue([]);
         const statusSpy = jest
             .spyOn(previewHost, "getPullRequestPreviewStatus")
             .mockResolvedValue({ status: "stopped" });
@@ -996,6 +1177,53 @@ describe("managed pull request preview", () => {
                     updatedAt: queuedStart.queuedAt,
                 },
             });
+            const enqueueCallsBeforeReconciliation = enqueueSpy.mock.calls.length;
+            executionsSpy.mockReturnValue([]);
+            isOpenSpy.mockResolvedValueOnce(true);
+            await reconcileClosedPullRequestPreview([]);
+            expect(enqueueSpy).toHaveBeenCalledTimes(enqueueCallsBeforeReconciliation);
+            await reconcileClosedPullRequestPreview([]);
+            expect(enqueueSpy).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    actionKey: "dashboard.preview.cleanup",
+                    payload: { number: 335 },
+                    resourceClass: "exclusive",
+                })
+            );
+            expect(enqueueSpy).toHaveBeenCalledTimes(
+                enqueueCallsBeforeReconciliation + 1
+            );
+            stateNumbersSpy.mockReturnValueOnce([334]);
+            await reconcileClosedPullRequestPreview([pullRequest]);
+            expect(enqueueSpy).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    actionKey: "dashboard.preview.cleanup",
+                    payload: { number: 334 },
+                    resourceClass: "exclusive",
+                })
+            );
+            expect(enqueueSpy).toHaveBeenCalledTimes(
+                enqueueCallsBeforeReconciliation + 2
+            );
+            executionsSpy.mockReturnValue([queuedCleanup]);
+            await reconcileClosedPullRequestPreview([]);
+            expect(enqueueSpy).toHaveBeenCalledTimes(
+                enqueueCallsBeforeReconciliation + 2
+            );
+            executionsSpy.mockReturnValue([]);
+            const consoleErrorSpy = jest
+                .spyOn(console, "error")
+                .mockImplementation(noOperation);
+            statusSpy.mockRejectedValueOnce(new Error("preview status unavailable"));
+            await reconcileClosedPullRequestPreview([]);
+            expect(enqueueSpy).toHaveBeenCalledTimes(
+                enqueueCallsBeforeReconciliation + 2
+            );
+            expect(consoleErrorSpy).toHaveBeenCalledWith(
+                "[PullRequestPreview] Closed-PR reconciliation failed:",
+                "preview status unavailable"
+            );
+            consoleErrorSpy.mockRestore();
 
             for (const route of [
                 "/api/pull-requests/:number/preview/start",
@@ -1049,11 +1277,13 @@ describe("managed pull request preview", () => {
             });
 
             registerPullRequestPreviewExecutionActions();
+            const cleanupHandler = handlers.get("dashboard.preview.cleanup");
             const startHandler = handlers.get("dashboard.preview.start");
             const stopHandler = handlers.get("dashboard.preview.stop");
+            expect(cleanupHandler).toBeDefined();
             expect(startHandler).toBeDefined();
             expect(stopHandler).toBeDefined();
-            if (!startHandler || !stopHandler) {
+            if (!cleanupHandler || !startHandler || !stopHandler) {
                 throw new Error("Preview handlers were not registered");
             }
             await expect(
@@ -1089,6 +1319,30 @@ describe("managed pull request preview", () => {
                     protectFromCancellation: expect.any(Function),
                 })
             );
+            isOpenSpy.mockResolvedValueOnce(true);
+            await expect(
+                cleanupHandler(previewScheduledJob(335), undefined, context)
+            ).resolves.toMatchObject({
+                cleanup: {
+                    number: 335,
+                    status: "skipped",
+                },
+            });
+            expect(cleanupSpy).not.toHaveBeenCalled();
+            listSpy.mockResolvedValue([]);
+            statusSpy.mockResolvedValue({ status: "stopped" });
+            await expect(
+                cleanupHandler(previewScheduledJob(335), undefined, context)
+            ).resolves.toEqual({
+                cleanup: {
+                    message: "Removed managed PR dev data for #335",
+                    number: 335,
+                    status: "removed",
+                },
+                preview: { status: "stopped" },
+            });
+            expect(cleanupSpy).toHaveBeenCalledWith(335);
+            expect(protectFromCancellation).toHaveBeenCalledTimes(2);
 
             listSpy.mockResolvedValue([{ ...pullRequest, headRefOid: "b".repeat(40) }]);
             await expect(
@@ -1106,8 +1360,11 @@ describe("managed pull request preview", () => {
             waitSpy.mockRestore();
             registerSpy.mockRestore();
             listSpy.mockRestore();
+            isOpenSpy.mockRestore();
             startSpy.mockRestore();
             stopSpy.mockRestore();
+            cleanupSpy.mockRestore();
+            stateNumbersSpy.mockRestore();
             statusSpy.mockRestore();
         }
     });

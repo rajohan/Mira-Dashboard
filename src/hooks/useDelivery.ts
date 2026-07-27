@@ -145,21 +145,26 @@ interface PullRequestActionResponse {
     deployment?: DeploymentJob;
     deployError?: string;
     cleanup?: WorktreeCleanupResult;
+    previewCleanup?: {
+        message: string;
+        number: number;
+        status: "removed" | "skipped" | "warning";
+    };
     pullRequest?: PullRequestSummary;
 }
 
-/** Defines pull request keys. */
-export const pullRequestKeys = {
-    all: ["pull-requests"] as const,
-    list: () => [...pullRequestKeys.all, "list"] as const,
-    deployments: () => [...pullRequestKeys.all, "deployments"] as const,
-    preview: () => [...pullRequestKeys.all, "preview"] as const,
-    productionCheckout: () => [...pullRequestKeys.all, "production-checkout"] as const,
-    releaseStatus: () => [...pullRequestKeys.all, "releases"] as const,
+/** Defines delivery page query keys. */
+export const deliveryKeys = {
+    all: ["delivery"] as const,
+    list: () => [...deliveryKeys.all, "pull-requests"] as const,
+    deployments: () => [...deliveryKeys.all, "deployments"] as const,
+    preview: () => [...deliveryKeys.all, "preview"] as const,
+    productionCheckout: () => [...deliveryKeys.all, "production-checkout"] as const,
+    releaseStatus: () => [...deliveryKeys.all, "releases"] as const,
 };
 
-export const PULL_REQUEST_NAV_REFRESH_MS = 60_000;
-export const PULL_REQUEST_PAGE_REFRESH_MS = AUTO_REFRESH_MS;
+export const DELIVERY_NAV_REFRESH_MS = 60_000;
+export const DELIVERY_PAGE_REFRESH_MS = AUTO_REFRESH_MS;
 
 /** Fetches pull requests. */
 async function fetchPullRequests(): Promise<PullRequestSummary[]> {
@@ -280,19 +285,19 @@ async function stopPullRequestPreview(number: number): Promise<PullRequestPrevie
 }
 
 /** Provides pull requests. */
-export function usePullRequests(refreshInterval = PULL_REQUEST_PAGE_REFRESH_MS) {
+export function usePullRequests(refreshInterval = DELIVERY_PAGE_REFRESH_MS) {
     return useQuery({
-        queryKey: pullRequestKeys.list(),
+        queryKey: deliveryKeys.list(),
         queryFn: fetchPullRequests,
         staleTime: 10_000,
         refetchInterval: refreshInterval,
     });
 }
 
-/** Provides pull request deployments. */
-export function usePullRequestDeployments() {
+/** Provides Dashboard deployment and rollback jobs. */
+export function useDashboardDeployments() {
     return useQuery({
-        queryKey: pullRequestKeys.deployments(),
+        queryKey: deliveryKeys.deployments(),
         queryFn: fetchDeployments,
         staleTime: 5000,
         refetchInterval: AUTO_REFRESH_MS,
@@ -302,7 +307,7 @@ export function usePullRequestDeployments() {
 /** Provides production checkout. */
 export function useProductionCheckout() {
     return useQuery({
-        queryKey: pullRequestKeys.productionCheckout(),
+        queryKey: deliveryKeys.productionCheckout(),
         queryFn: fetchProductionCheckout,
         staleTime: 5000,
         refetchInterval: AUTO_REFRESH_MS,
@@ -312,7 +317,7 @@ export function useProductionCheckout() {
 /** Provides active and previous managed release status. */
 export function useDashboardReleaseStatus() {
     return useQuery({
-        queryKey: pullRequestKeys.releaseStatus(),
+        queryKey: deliveryKeys.releaseStatus(),
         queryFn: fetchDashboardReleaseStatus,
         staleTime: 5000,
         refetchInterval: AUTO_REFRESH_MS,
@@ -322,7 +327,7 @@ export function useDashboardReleaseStatus() {
 /** Provides the managed single-slot PR preview status. */
 export function usePullRequestPreview() {
     return useQuery({
-        queryKey: pullRequestKeys.preview(),
+        queryKey: deliveryKeys.preview(),
         queryFn: fetchPullRequestPreview,
         staleTime: 2000,
         refetchInterval: 5000,
@@ -337,15 +342,15 @@ export function useApprovePullRequest() {
         mutationFn: ({ number, willDeploy }: { number: number; willDeploy: boolean }) =>
             approvePullRequest(number, willDeploy),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: pullRequestKeys.list() });
+            void queryClient.invalidateQueries({ queryKey: deliveryKeys.list() });
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.deployments(),
+                queryKey: deliveryKeys.deployments(),
             });
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.productionCheckout(),
+                queryKey: deliveryKeys.productionCheckout(),
             });
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.releaseStatus(),
+                queryKey: deliveryKeys.releaseStatus(),
             });
         },
     });
@@ -361,7 +366,7 @@ export function useApprovePullRequestReview() {
             const updatedPullRequest = response.pullRequest;
             if (updatedPullRequest) {
                 queryClient.setQueryData<PullRequestSummary[]>(
-                    pullRequestKeys.list(),
+                    deliveryKeys.list(),
                     (current = []) =>
                         current.map((pullRequest) =>
                             pullRequest.number === updatedPullRequest.number
@@ -370,7 +375,7 @@ export function useApprovePullRequestReview() {
                         )
                 );
             }
-            void queryClient.invalidateQueries({ queryKey: pullRequestKeys.list() });
+            void queryClient.invalidateQueries({ queryKey: deliveryKeys.list() });
         },
     });
 }
@@ -385,7 +390,7 @@ export function useUpdatePullRequestBranch() {
             const updatedPullRequest = response.pullRequest;
             if (updatedPullRequest) {
                 queryClient.setQueryData<PullRequestSummary[]>(
-                    pullRequestKeys.list(),
+                    deliveryKeys.list(),
                     (current = []) =>
                         current.map((pullRequest) =>
                             pullRequest.number === updatedPullRequest.number
@@ -394,7 +399,7 @@ export function useUpdatePullRequestBranch() {
                         )
                 );
             }
-            void queryClient.invalidateQueries({ queryKey: pullRequestKeys.list() });
+            void queryClient.invalidateQueries({ queryKey: deliveryKeys.list() });
         },
     });
 }
@@ -407,7 +412,7 @@ export function useRejectPullRequest() {
         mutationFn: ({ number, comment }: { number: number; comment?: string }) =>
             rejectPullRequest(number, comment),
         onSuccess: () => {
-            void queryClient.invalidateQueries({ queryKey: pullRequestKeys.list() });
+            void queryClient.invalidateQueries({ queryKey: deliveryKeys.list() });
         },
     });
 }
@@ -420,13 +425,13 @@ export function useDeployDashboard() {
         mutationFn: deployDashboard,
         onSuccess: () => {
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.deployments(),
+                queryKey: deliveryKeys.deployments(),
             });
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.productionCheckout(),
+                queryKey: deliveryKeys.productionCheckout(),
             });
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.releaseStatus(),
+                queryKey: deliveryKeys.releaseStatus(),
             });
         },
     });
@@ -441,13 +446,13 @@ export function useRollbackDashboard() {
             rollbackDashboard(targetCommit),
         onSuccess: () => {
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.deployments(),
+                queryKey: deliveryKeys.deployments(),
             });
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.productionCheckout(),
+                queryKey: deliveryKeys.productionCheckout(),
             });
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.releaseStatus(),
+                queryKey: deliveryKeys.releaseStatus(),
             });
         },
     });
@@ -460,9 +465,9 @@ export function useStartPullRequestPreview() {
     return useMutation({
         mutationFn: ({ number }: { number: number }) => startPullRequestPreview(number),
         onSuccess: (preview) => {
-            queryClient.setQueryData(pullRequestKeys.preview(), preview);
+            queryClient.setQueryData(deliveryKeys.preview(), preview);
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.preview(),
+                queryKey: deliveryKeys.preview(),
             });
         },
     });
@@ -475,9 +480,9 @@ export function useStopPullRequestPreview() {
     return useMutation({
         mutationFn: ({ number }: { number: number }) => stopPullRequestPreview(number),
         onSuccess: (preview) => {
-            queryClient.setQueryData(pullRequestKeys.preview(), preview);
+            queryClient.setQueryData(deliveryKeys.preview(), preview);
             void queryClient.invalidateQueries({
-                queryKey: pullRequestKeys.preview(),
+                queryKey: deliveryKeys.preview(),
             });
         },
     });
