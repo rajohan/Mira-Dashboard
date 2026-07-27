@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 
 import gateway from "../gateway.ts";
 import { json } from "../http.ts";
@@ -107,12 +108,12 @@ async function getNetworkMetrics(): Promise<NetworkMetrics> {
         let didReadNetwork = false;
 
         if (os.platform() === "linux") {
+            const preferredInterface =
+                process.env.MIRA_DASHBOARD_NETWORK_INTERFACE?.trim() || "enp0s6";
             try {
                 // Prefer the VPS default Linux interface, but allow deployments to
                 // override it; if neither it nor another non-loopback interface is
                 // available, network metrics fall back through the route error path.
-                const preferredInterface =
-                    process.env.MIRA_DASHBOARD_NETWORK_INTERFACE?.trim() || "enp0s6";
                 const availableInterfaces = await readdir("/sys/class/net");
                 const interfaces = availableInterfaces.includes(preferredInterface)
                     ? [preferredInterface]
@@ -129,8 +130,42 @@ async function getNetworkMetrics(): Promise<NetworkMetrics> {
                     if (!Number.isNaN(txBytes)) uploadBytes += txBytes;
                 }
                 didReadNetwork = true;
-            } catch (error) {
-                console.error("[Metrics] network error:", safeErrorMessage(error));
+            } catch (sysError) {
+                try {
+                    const networkDeviceText = await Bun.file("/proc/net/dev").text();
+                    const rows = networkDeviceText.split("\n").flatMap((line) => {
+                        const separator = line.indexOf(":");
+                        if (separator === -1) return [];
+                        const name = line.slice(0, separator).trim();
+                        const fields = line
+                            .slice(separator + 1)
+                            .trim()
+                            .split(/\s+/u);
+                        const rxBytes = Number(fields[0]);
+                        const txBytes = Number(fields[8]);
+                        return name &&
+                            Number.isFinite(rxBytes) &&
+                            Number.isFinite(txBytes)
+                            ? [{ name, rxBytes, txBytes }]
+                            : [];
+                    });
+                    const nonLoopbackRows = rows.filter((row) => row.name !== "lo");
+                    const selectedRows = nonLoopbackRows.some(
+                        (row) => row.name === preferredInterface
+                    )
+                        ? nonLoopbackRows.filter((row) => row.name === preferredInterface)
+                        : nonLoopbackRows;
+                    for (const row of selectedRows) {
+                        downloadBytes += row.rxBytes;
+                        uploadBytes += row.txBytes;
+                    }
+                    didReadNetwork = selectedRows.length > 0;
+                } catch (procError) {
+                    console.error(
+                        "[Metrics] network error:",
+                        `${safeErrorMessage(sysError)}; ${safeErrorMessage(procError)}`
+                    );
+                }
             }
         } else {
             // Network byte counters are currently supported through Linux /sys only.
@@ -198,9 +233,14 @@ async function getSystemMetrics(): Promise<SystemMetricsResponse> {
 
     try {
         const isDarwin = os.platform() === "darwin";
+        const configuredDiskPath = process.env.MIRA_DASHBOARD_METRICS_DISK_PATH?.trim();
+        const diskPath =
+            configuredDiskPath && path.isAbsolute(configuredDiskPath)
+                ? path.resolve(configuredDiskPath)
+                : "/";
         const dfArguments = isDarwin
-            ? ["-k", "/"]
-            : ["-B1", "--output=size,used,pcent", "/"];
+            ? ["-k", diskPath]
+            : ["-B1", "--output=size,used,pcent", diskPath];
         const { code, stderr, stdout } = await runProcess("df", dfArguments, {
             timeoutMs: 5000,
         });

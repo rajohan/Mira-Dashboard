@@ -179,6 +179,7 @@ async function createManagedRelease(
     );
     for (const entrypoint of [
         "databasePreflight",
+        "pullRequestPreviewGatewayProxy",
         "releaseLifecycle",
         "resetDashboardPassword",
         "serverStart",

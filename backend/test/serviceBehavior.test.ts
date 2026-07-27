@@ -2561,14 +2561,14 @@ printf 'scheduled\n'
                 'current_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/current")'
             );
             expect(recoveryCommand).toContain(
-                'trusted_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous")'
+                'activation_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/previous")'
             );
             expect(recoveryCommand).toContain(
                 'candidate_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/releases/$candidate_commit")'
             );
-            expect(recoveryCommand).toContain('trusted_release="$candidate_release"');
+            expect(recoveryCommand).toContain('activation_release="$candidate_release"');
             expect(recoveryCommand).toContain(
-                'activation_output="$(run_lifecycle activate "$candidate_commit")"'
+                'activation_output="$(run_activation_lifecycle activate "$candidate_commit")"'
             );
             expect(recoveryCommand).toContain(
                 '[ "$activation_commit" = "$candidate_commit" ]'
@@ -2581,7 +2581,7 @@ printf 'scheduled\n'
             );
             expect(
                 recoveryCommand.indexOf(
-                    'activation_output="$(run_lifecycle activate "$candidate_commit")"'
+                    'activation_output="$(run_activation_lifecycle activate "$candidate_commit")"'
                 )
             ).toBeLessThan(
                 recoveryCommand.indexOf(
@@ -2589,7 +2589,10 @@ printf 'scheduled\n'
                 )
             );
             expect(recoveryCommand).toContain(
-                'run_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+                'run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+            );
+            expect(recoveryCommand).toContain(
+                'candidate_lifecycle="$candidate_release/backend/dist/releaseLifecycle.js"'
             );
             expect(
                 database

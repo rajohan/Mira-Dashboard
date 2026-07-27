@@ -169,7 +169,10 @@ compatible, and does not inherit other provider or host credentials.
 | `MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE`   | `~/.openclaw/openclaw.json`                         | Source for sanitized agent-only development config.                              |
 | `MIRA_DASHBOARD_DEV_GATEWAY_URL`              | `ws://127.0.0.1:18789`                              | Live production Gateway used by trusted dev.                                     |
 | `MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE`       | none                                                | Optional owner-only token file; local commands normally use Doppler environment. |
-| `MIRA_DASHBOARD_PREVIEW_GATEWAY_TOKEN_FILE`   | `<managed-preview-root>/gateway.token`              | Host-local `0600` token materialized by prod backend for trusted PR dev.         |
+| `MIRA_DASHBOARD_PREVIEW_GATEWAY_URL`          | `ws://127.0.0.1:18789`                              | Production Gateway used only by the host-owned PR-dev capability proxy.          |
+| `MIRA_DASHBOARD_PREVIEW_GATEWAY_TOKEN_FILE`   | `<managed-preview-root>/gateway.token`              | Disposable `0600` proxy credential mounted read-only into trusted PR dev.        |
+| `MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT`   | `18790`                                             | Loopback-only host proxy port; must differ from frontend/backend ports.          |
+| `MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_UNIT`   | `mira-dashboard-pr-preview-gateway.service`         | Transient proxy unit name; no permanent systemd unit file is installed.          |
 | `MIRA_DASHBOARD_PREVIEW_OPENCLAW_SOURCE_ROOT` | `/home/ubuntu/.openclaw`                            | Source root for managed PR workspace/config snapshots.                           |
 | `HOST` / `PORT` / `DASHBOARD_API_TARGET`      | `127.0.0.1` / `5173` / `http://127.0.0.1:3101`      | Child frontend bind and exact backend proxy target.                              |
 

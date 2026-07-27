@@ -30,6 +30,7 @@ export type {
 const PREVIEW_START_TIMEOUT_MS = 10 * 60 * 1000;
 const PREVIEW_STOP_TIMEOUT_MS = 60_000;
 const PREVIEW_WAIT_GRACE_MS = 5 * 60 * 1000;
+const COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const PREVIEW_LIFECYCLES = new Set<PullRequestPreviewLifecycle>([
     "failed",
     "running",
@@ -44,6 +45,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function executionPreviewNumber(value: unknown): number {
     return validatePrNumber(String(value));
+}
+
+function executionPreviewCommitSha(value: unknown): string {
+    if (typeof value !== "string" || !COMMIT_SHA_PATTERN.test(value)) {
+        throw new TypeError("Preview execution requires a full commit SHA");
+    }
+    return value;
 }
 
 /** Converts a GitHub PR summary into the constrained host-preview contract. */
@@ -135,9 +143,15 @@ export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewS
 
     const value = activeExecution.payload.number;
     const number = value === undefined ? preview.number : executionPreviewNumber(value);
+    const executionCommit =
+        activeExecution.actionKey === "dashboard.preview.start" &&
+        activeExecution.payload.commitSha !== undefined
+            ? executionPreviewCommitSha(activeExecution.payload.commitSha)
+            : undefined;
     const isSamePreview = number !== undefined && preview.number === number;
     return {
         ...(isSamePreview && preview),
+        ...(executionCommit && { commitSha: executionCommit }),
         ...(number !== undefined && { number }),
         status:
             activeExecution.actionKey === "dashboard.preview.start"
@@ -179,7 +193,10 @@ export async function prepareAndStartPullRequestPreview(
     const execution = enqueueJobExecution({
         actionKey: "dashboard.preview.start",
         displayName: `Start PR #${number} preview`,
-        payload: { number },
+        payload: {
+            commitSha: executionPreviewCommitSha(candidate.commitSha),
+            number,
+        },
         resourceClass: "exclusive",
         timeoutMs: PREVIEW_START_TIMEOUT_MS,
     });
@@ -216,8 +233,18 @@ export function registerPullRequestPreviewExecutionActions(): void {
         "dashboard.preview.start",
         async (job, signal, context) => {
             const number = executionPreviewNumber(job.actionPayload.number);
+            const expectedCommit = executionPreviewCommitSha(job.actionPayload.commitSha);
+            const candidate = await findPullRequest(number);
+            if (candidate.commitSha !== expectedCommit) {
+                throw Object.assign(
+                    new Error(
+                        `PR #${number} changed after its dev start was queued. Review the new head and start it again`
+                    ),
+                    { statusCode: 409 }
+                );
+            }
             return {
-                preview: await startPullRequestPreview(await findPullRequest(number), {
+                preview: await startPullRequestPreview(candidate, {
                     protectFromCancellation: () => context.protectFromCancellation(),
                     signal,
                 }),

@@ -12,6 +12,10 @@ import {
     requiredAutomationScope,
 } from "./automationAuth.ts";
 import {
+    isDevelopmentGatewayMethodAllowed,
+    isGatewayMethodRecentMfaExempt,
+} from "./development/developmentGatewayPolicy.ts";
+import {
     authSession,
     HttpError,
     isTrustedProxyAddress,
@@ -95,20 +99,6 @@ const PUBLIC_API_METHODS = new Map<string, ReadonlySet<string>>([
     ["/api/auth/register-first-user", new Set(["POST"])],
     ["/api/auth/session", new Set(["GET", "HEAD"])],
 ]);
-const READ_ONLY_GATEWAY_METHODS = new Set([
-    "chat.history",
-    "chat.runtimeSnapshot",
-    "models.list",
-    "sessions.list",
-    "subscribe",
-    "unsubscribe",
-]);
-const DEVELOPMENT_ALLOWED_GATEWAY_METHODS = new Set([
-    ...READ_ONLY_GATEWAY_METHODS,
-    "chat.abort",
-    "chat.send",
-    "sessions.patch",
-]);
 const DEVELOPMENT_BLOCKED_HOST_MUTATION_PATHS = [
     "/api/backup",
     "/api/backups",
@@ -179,14 +169,20 @@ export function isDevelopmentHostMutationBlocked(
     );
 }
 
-/** Allows only the live Gateway calls required by trusted PR dev chat. */
+export {
+    isDevelopmentGatewayMethodAllowed,
+    isDevelopmentGatewayProxyEventAllowed,
+    isDevelopmentGatewayProxyMethodAllowed,
+} from "./development/developmentGatewayPolicy.ts";
+
+/** Blocks Gateway calls outside the production-like Dashboard dev allowlist. */
 export function isDevelopmentGatewayMethodBlocked(
     method: string,
     environment: Record<string, string | undefined> = process.env
 ): boolean {
     return (
         environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
-        !DEVELOPMENT_ALLOWED_GATEWAY_METHODS.has(method)
+        !isDevelopmentGatewayMethodAllowed(method)
     );
 }
 
@@ -358,7 +354,7 @@ export function requiresRecentMfa(request: Request): boolean {
 
 /** Requires fresh MFA for every Gateway RPC except the explicit read-only set. */
 export function requiresRecentMfaForGatewayMethod(method: string): boolean {
-    return !READ_ONLY_GATEWAY_METHODS.has(method);
+    return !isGatewayMethodRecentMfaExempt(method);
 }
 
 function writeRequestAudit(

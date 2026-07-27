@@ -255,8 +255,10 @@ upstream download metadata.
 | `GET`  | `/api/pull-requests/production-checkout`     | Reads production checkout status.                          |
 
 Managed PR dev accepts only `main`-targeted PRs from the configured trusted
-authors. It uses isolated Dashboard state but the live production Gateway; see
-[Local development](../development/local-dev.md#managed-pr-dev).
+authors. Start jobs pin the selected full head SHA and fail if the PR changes
+before the worker claims it. Dev uses isolated Dashboard state and reaches the
+live production Gateway only through the host-owned capability proxy; see [Local
+development](../development/local-dev.md#managed-pr-dev).
 
 ## Backups, Cache, Metrics, Ops
 

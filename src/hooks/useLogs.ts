@@ -7,6 +7,7 @@ import { apiFetchRequired } from "./useApi";
 /** Represents the log files API response. */
 interface LogFilesResponse {
     logs: LogFile[];
+    unavailableReason?: string;
 }
 
 /** Represents the log content API response. */
@@ -46,7 +47,7 @@ function isLogFile(file: unknown): file is LogFile {
 }
 
 /** Fetches log files. */
-async function fetchLogFiles(): Promise<LogFile[]> {
+async function fetchLogFiles(): Promise<LogFilesResponse> {
     const data = await apiFetchRequired<LogFilesResponse>("/logs/info");
     const files = Array.isArray(data.logs) ? data.logs.filter(isLogFile) : [];
 
@@ -54,7 +55,13 @@ async function fetchLogFiles(): Promise<LogFile[]> {
         logFilesState.lastKnownLogFiles = files;
     }
 
-    return files;
+    return {
+        logs: files,
+        ...(typeof data.unavailableReason === "string" &&
+            data.unavailableReason.trim() && {
+                unavailableReason: data.unavailableReason.trim(),
+            }),
+    };
 }
 
 /** Fetches log content. */
@@ -79,12 +86,17 @@ async function fetchLogContent(file: string, lines: number): Promise<LogContentR
 // Hooks
 /** Provides log files. */
 export function useLogFiles() {
-    return useQuery({
+    const query = useQuery({
         queryKey: logKeys.files(),
         queryFn: fetchLogFiles,
-        placeholderData: () => logFilesState.lastKnownLogFiles,
+        placeholderData: () => ({ logs: logFilesState.lastKnownLogFiles }),
         staleTime: 60_000, // 1 minute
     });
+    return {
+        ...query,
+        data: query.data?.logs,
+        unavailableReason: query.data?.unavailableReason,
+    };
 }
 
 /** Provides log content. */

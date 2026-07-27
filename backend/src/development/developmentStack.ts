@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+    appendFileSync,
     chmodSync,
     cpSync,
     existsSync,
@@ -11,6 +12,7 @@ import {
     realpathSync,
     renameSync,
     rmSync,
+    statSync,
     symlinkSync,
     writeFileSync,
 } from "node:fs";
@@ -20,6 +22,7 @@ import path from "node:path";
 
 import { Database } from "bun:sqlite";
 
+import { formatOpenClawLogDate } from "../lib/logRoots.ts";
 import {
     type DevelopmentWorkspaceState,
     prepareDevelopmentOpenClawSnapshot,
@@ -35,6 +38,8 @@ const DEFAULT_FRONTEND_PORT = 5173;
 const DEFAULT_BACKEND_PORT = 3101;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const SECRET_KEY_BYTES = 32;
+const DEVELOPMENT_LOG_FIXTURE_INTERVAL_MS = 5000;
+const MAX_DEVELOPMENT_LOG_BYTES = 2 * 1024 * 1024;
 const ISOLATED_JOB_ACTION_KEYS = ["cache.refresh", "database.maintenance"] as const;
 const INHERITED_ENVIRONMENT_KEYS = [
     "COLORTERM",
@@ -81,6 +86,100 @@ export interface DevelopmentStateResult {
     database: "created-empty" | "reused" | "snapshot-created";
     releases: "copied" | "empty" | "reused";
     workspace: DevelopmentWorkspaceState;
+}
+
+function developmentLogsRoot(config: DevelopmentStackConfig): string {
+    return path.join(config.stateRoot, "logs");
+}
+
+interface DevelopmentLogFixtureEntry {
+    level: "DEBUG" | "ERROR" | "FATAL" | "INFO" | "TRACE" | "WARN";
+    message: string;
+}
+
+const DEVELOPMENT_LOG_FIXTURES = [
+    {
+        level: "TRACE",
+        message: "[dashboard-dev] Synthetic trace entry for virtualized history testing.",
+    },
+    {
+        level: "DEBUG",
+        message: "[gateway] Synthetic debug entry: capability proxy poll completed.",
+    },
+    {
+        level: "INFO",
+        message:
+            "[worker] Synthetic info entry: database.summary completed successfully.",
+    },
+    {
+        level: "WARN",
+        message:
+            "[sandbox] Synthetic warning entry for level-filter testing; no incident.",
+    },
+    {
+        level: "ERROR",
+        message: "[logs] Synthetic error entry for search/export testing; no incident.",
+    },
+    {
+        level: "FATAL",
+        message:
+            "[logs] Synthetic fatal entry for complete filter coverage; no incident.",
+    },
+] as const satisfies readonly DevelopmentLogFixtureEntry[];
+
+function developmentLogPath(
+    config: DevelopmentStackConfig,
+    timestamp = new Date()
+): string {
+    return path.join(
+        developmentLogsRoot(config),
+        `openclaw-${formatOpenClawLogDate(timestamp)}.log`
+    );
+}
+
+function appendDevelopmentLogEntry(
+    config: DevelopmentStackConfig,
+    entry: DevelopmentLogFixtureEntry,
+    timestamp = new Date()
+): void {
+    const logPath = developmentLogPath(config, timestamp);
+    if (existsSync(logPath) && statSync(logPath).size >= MAX_DEVELOPMENT_LOG_BYTES) {
+        return;
+    }
+    appendFileSync(
+        logPath,
+        `${JSON.stringify({
+            0: entry.message,
+            _meta: {
+                date: timestamp.toISOString(),
+                logLevelName: entry.level,
+            },
+        })}\n`,
+        { encoding: "utf8", mode: 0o600 }
+    );
+    chmodSync(logPath, 0o600);
+}
+
+function prepareDevelopmentLog(config: DevelopmentStackConfig): void {
+    const logsRoot = developmentLogsRoot(config);
+    mkdirSync(logsRoot, { mode: 0o700, recursive: true });
+    chmodSync(logsRoot, 0o700);
+    const timestamp = new Date();
+    const logPath = developmentLogPath(config, timestamp);
+    if (!existsSync(logPath) || statSync(logPath).size < 1024) {
+        for (let index = 0; index < 24; index += 1) {
+            appendDevelopmentLogEntry(
+                config,
+                DEVELOPMENT_LOG_FIXTURES[index % DEVELOPMENT_LOG_FIXTURES.length]!,
+                new Date(timestamp.getTime() - (24 - index) * 1000)
+            );
+        }
+    }
+    appendDevelopmentLogEntry(config, {
+        level: "INFO",
+        message:
+            "[dashboard-dev] Isolated Dashboard dev log started; host logs are not mounted.",
+    });
 }
 
 interface DevelopmentStateMarker {
@@ -772,6 +871,7 @@ export function developmentBackendEnvironment(
     const gatewayToken = developmentGatewayToken(config);
     return {
         ...inheritedChildEnvironment(),
+        BUN_BINARY: process.execPath,
         HOME: config.openClawHome,
         MIRA_DASHBOARD_ALLOWED_ORIGINS: config.publicOrigin,
         MIRA_DASHBOARD_COOKIE_NAMESPACE: `mira_dashboard_dev_${config.frontendPort}`,
@@ -779,13 +879,15 @@ export function developmentBackendEnvironment(
         MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
         MIRA_DASHBOARD_DISABLE_SCHEDULER: "0",
         MIRA_DASHBOARD_EXECUTION_ROLE: "combined",
-        MIRA_DASHBOARD_FRONTEND_PATH: path.join(config.repositoryRoot, "dist"),
+        MIRA_DASHBOARD_FRONTEND_PATH: config.repositoryRoot,
         MIRA_DASHBOARD_HOST: config.backendHost,
         MIRA_DASHBOARD_JOB_PROFILE: "isolated",
         MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE: path.join(
             config.stateRoot,
             "log-rotation.lock"
         ),
+        MIRA_DASHBOARD_LOGS_ROOT: developmentLogsRoot(config),
+        MIRA_DASHBOARD_METRICS_DISK_PATH: config.repositoryRoot,
         MIRA_DASHBOARD_OPENCLAW_HOME: config.openClawClientHome,
         MIRA_DASHBOARD_RELEASE_ROOT: config.repositoryRoot,
         MIRA_DASHBOARD_RELEASES_ROOT: config.releaseRoot,
@@ -832,6 +934,7 @@ export async function runDevelopmentStack(
     config: DevelopmentStackConfig
 ): Promise<number> {
     const state = prepareDevelopmentState(config);
+    prepareDevelopmentLog(config);
     const bun = Bun.which("bun") || process.execPath;
     const backend = Bun.spawn([bun, "--watch", "src/serverStart.ts"], {
         cwd: path.join(config.repositoryRoot, "backend"),
@@ -847,6 +950,19 @@ export async function runDevelopmentStack(
         stdin: "inherit",
         stdout: "inherit",
     });
+    let developmentLogFixtureIndex = 0;
+    const developmentLogFixtureTimer = setInterval(() => {
+        try {
+            const entry =
+                DEVELOPMENT_LOG_FIXTURES[
+                    developmentLogFixtureIndex % DEVELOPMENT_LOG_FIXTURES.length
+                ]!;
+            developmentLogFixtureIndex += 1;
+            appendDevelopmentLogEntry(config, entry);
+        } catch (error) {
+            console.error("[DevelopmentLogs] Failed to append fixture entry:", error);
+        }
+    }, DEVELOPMENT_LOG_FIXTURE_INTERVAL_MS);
     let isStopRequested = false;
     let isChildrenStopping = false;
     const stopChildren = () => {
@@ -879,6 +995,7 @@ export async function runDevelopmentStack(
         developmentChildExit(frontend, "frontend"),
     ];
     const exited = await Promise.race(childExits);
+    clearInterval(developmentLogFixtureTimer);
     stopChildren();
     await Promise.allSettled([backend.exited, frontend.exited]);
     process.removeListener("SIGINT", handleSignal);

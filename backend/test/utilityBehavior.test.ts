@@ -36,7 +36,10 @@ import {
 } from "../src/lib/values.ts";
 import {
     isDevelopmentGatewayMethodBlocked,
+    isDevelopmentGatewayProxyEventAllowed,
+    isDevelopmentGatewayProxyMethodAllowed,
     isDevelopmentHostMutationBlocked,
+    requiresRecentMfaForGatewayMethod,
     resetRequestPolicyForTests,
     withRequestPolicy,
 } from "../src/requestPolicy.ts";
@@ -542,6 +545,8 @@ describe("backend service utilities", () => {
             "chat.abort",
             "chat.history",
             "chat.send",
+            "config.get",
+            "cron.list",
             "models.list",
             "sessions.list",
             "sessions.patch",
@@ -558,6 +563,16 @@ describe("backend service utilities", () => {
         ]) {
             expect(isDevelopmentGatewayMethodBlocked(method, safeEnvironment)).toBe(true);
         }
+        expect(isDevelopmentGatewayProxyMethodAllowed("sessions.subscribe")).toBe(true);
+        expect(isDevelopmentGatewayProxyMethodAllowed("subscribe")).toBe(false);
+        expect(isDevelopmentGatewayProxyMethodAllowed("config.patch")).toBe(false);
+        expect(isDevelopmentGatewayProxyEventAllowed("session.message")).toBe(true);
+        expect(isDevelopmentGatewayProxyEventAllowed("plugin.approval.requested")).toBe(
+            false
+        );
+        expect(requiresRecentMfaForGatewayMethod("chat.history")).toBe(false);
+        expect(requiresRecentMfaForGatewayMethod("config.get")).toBe(true);
+        expect(requiresRecentMfaForGatewayMethod("cron.list")).toBe(true);
         expect(isDevelopmentGatewayMethodBlocked("config.patch", {})).toBe(false);
         expect(dashboardJobProfile({ MIRA_DASHBOARD_JOB_PROFILE: "isolated" })).toBe(
             "isolated"

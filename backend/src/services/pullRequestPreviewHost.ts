@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
     chmodSync,
     closeSync,
@@ -28,6 +29,7 @@ import {
 } from "./pullRequestPreviewPolicy.ts";
 
 const PREVIEW_UNIT = "mira-dashboard-pr-preview.service";
+const PREVIEW_GATEWAY_PROXY_UNIT = "mira-dashboard-pr-preview-gateway.service";
 const PREVIEW_RECORD_FILE = "active-preview.json";
 const PREVIEW_RECORD_FORMAT_VERSION = 1;
 const PREVIEW_READY_TIMEOUT_MS = 90_000;
@@ -37,6 +39,13 @@ const MAX_PREVIEW_RECORD_BYTES = 256 * 1024;
 const COMMIT_PATTERN = /^[\da-f]{40}$/u;
 const UNIT_NAME_PATTERN = /^[A-Za-z0-9_.@-]+\.service$/u;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
+const DEFAULT_GATEWAY_PROXY_PORT = 18_790;
+const PREVIEW_GATEWAY_PROXY_ENTRYPOINT = "pullRequestPreviewGatewayProxy.js";
+const PREVIEW_GATEWAY_PROXY_READY_TIMEOUT_MS = 45_000;
+const PREVIEW_GATEWAY_PROXY_READY_POLL_MS = 250;
+const PREVIEW_START_RECONCILIATION_GRACE_MS =
+    PREVIEW_GATEWAY_PROXY_READY_TIMEOUT_MS + 30_000;
+const PREVIEW_STOP_RECONCILIATION_GRACE_MS = 60_000;
 const MAX_GATEWAY_TOKEN_BYTES = 16 * 1024;
 const SAFE_INSTALL_ENVIRONMENT_KEYS = [
     "HTTP_PROXY",
@@ -79,7 +88,12 @@ export interface PullRequestPreviewConfig {
     dashboardRoot: string;
     databaseTemplate?: string;
     frontendPort: number;
+    gatewayProxyEntrypoint: string;
+    gatewayProxyIdentityFile: string;
+    gatewayProxyPort: number;
+    gatewayProxyUnitName: string;
     gatewayTokenFile: string;
+    gatewayUpstreamTokenFile: string;
     gatewayUrl: string;
     gitCommonDirectory: string;
     openClawConfigSource?: string;
@@ -233,6 +247,20 @@ function gitCommonDirectory(
     return explicit || path.join(dashboardRoot, ".git");
 }
 
+function defaultGatewayProxyEntrypoint(): string {
+    const runtimeEntrypoint = process.argv[1];
+    if (runtimeEntrypoint && path.isAbsolute(runtimeEntrypoint)) {
+        const builtEntrypoint = path.join(
+            path.dirname(runtimeEntrypoint),
+            PREVIEW_GATEWAY_PROXY_ENTRYPOINT
+        );
+        if (isRealRegularFile(builtEntrypoint)) {
+            return builtEntrypoint;
+        }
+    }
+    return path.resolve(import.meta.dirname, "..", "pullRequestPreviewGatewayProxy.ts");
+}
+
 /** Resolves the single-slot managed PR preview host contract. */
 export function resolvePullRequestPreviewConfig(
     environment: Record<string, string | undefined> = process.env
@@ -261,13 +289,31 @@ export function resolvePullRequestPreviewConfig(
         environment.MIRA_DASHBOARD_PREVIEW_BACKEND_PORT,
         3101
     );
-    if (frontendPort === backendPort) {
-        throw new TypeError("Dashboard preview frontend and backend ports must differ");
+    const gatewayProxyPort = configuredPort(
+        "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT",
+        environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT,
+        DEFAULT_GATEWAY_PROXY_PORT
+    );
+    if (new Set([frontendPort, backendPort, gatewayProxyPort]).size !== 3) {
+        throw new TypeError(
+            "Dashboard preview frontend, backend, and Gateway proxy ports must differ"
+        );
     }
     const unitName = environment.MIRA_DASHBOARD_PREVIEW_UNIT?.trim() || PREVIEW_UNIT;
     if (!UNIT_NAME_PATTERN.test(unitName)) {
         throw new TypeError(
             "MIRA_DASHBOARD_PREVIEW_UNIT must be a valid .service unit name"
+        );
+    }
+    const gatewayProxyUnitName =
+        environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_UNIT?.trim() ||
+        PREVIEW_GATEWAY_PROXY_UNIT;
+    if (
+        gatewayProxyUnitName === unitName ||
+        !UNIT_NAME_PATTERN.test(gatewayProxyUnitName)
+    ) {
+        throw new TypeError(
+            "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_UNIT must be a distinct valid .service unit name"
         );
     }
     const allowedAuthors = resolvePullRequestPreviewAllowedAuthors(
@@ -289,11 +335,20 @@ export function resolvePullRequestPreviewConfig(
                 "/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db"
         ),
         frontendPort,
+        gatewayProxyEntrypoint: absoluteNonRootPath(
+            "MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_ENTRYPOINT",
+            environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_ENTRYPOINT?.trim() ||
+                defaultGatewayProxyEntrypoint()
+        ),
+        gatewayProxyIdentityFile: path.join(previewRoot, "gateway-proxy-identity.json"),
+        gatewayProxyPort,
+        gatewayProxyUnitName,
         gatewayTokenFile:
             optionalAbsoluteNonRootPath(
                 "MIRA_DASHBOARD_PREVIEW_GATEWAY_TOKEN_FILE",
                 environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_TOKEN_FILE
             ) || path.join(previewRoot, "gateway.token"),
+        gatewayUpstreamTokenFile: path.join(previewRoot, "gateway-upstream.token"),
         gatewayUrl:
             configuredGatewayUrl(environment.MIRA_DASHBOARD_PREVIEW_GATEWAY_URL) ||
             DEFAULT_GATEWAY_URL,
@@ -349,6 +404,15 @@ function isRealRegularFile(filePath: string): boolean {
     }
 }
 
+function ensurePrivateSingleLinkFile(filePath: string, label: string): void {
+    if (!existsSync(filePath)) return;
+    const stat = lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+        throw new Error(`${label} must be a single-link real regular file`);
+    }
+    chmodSync(filePath, 0o600);
+}
+
 function ensureRealDirectory(directoryPath: string): void {
     mkdirSync(directoryPath, { mode: 0o700, recursive: true });
     if (!isRealDirectory(directoryPath)) {
@@ -357,9 +421,10 @@ function ensureRealDirectory(directoryPath: string): void {
     chmodSync(directoryPath, 0o700);
 }
 
-function materializeGatewayToken(
-    config: PullRequestPreviewConfig,
-    tokenValue: string | undefined
+function materializeGatewayTokenFile(
+    filePath: string,
+    tokenValue: string | undefined,
+    label: string
 ): void {
     const token = tokenValue?.trim();
     if (
@@ -367,15 +432,12 @@ function materializeGatewayToken(
         Buffer.byteLength(token) > MAX_GATEWAY_TOKEN_BYTES ||
         /[\r\n\0]/u.test(token)
     ) {
-        throw new Error("A valid persisted Gateway token is required for PR dev");
+        throw new Error(`${label} must be a valid single-line token`);
     }
-    const tokenDirectory = path.dirname(config.gatewayTokenFile);
+    const tokenDirectory = path.dirname(filePath);
     ensureRealDirectory(tokenDirectory);
-    if (
-        existsSync(config.gatewayTokenFile) &&
-        !isRealRegularFile(config.gatewayTokenFile)
-    ) {
-        throw new Error("PR dev Gateway token path must be a real regular file");
+    if (existsSync(filePath) && !isRealRegularFile(filePath)) {
+        throw new Error(`${label} path must be a real regular file`);
     }
     const temporaryPath = path.join(
         tokenDirectory,
@@ -387,11 +449,33 @@ function materializeGatewayToken(
             flag: "wx",
             mode: 0o600,
         });
-        renameSync(temporaryPath, config.gatewayTokenFile);
-        chmodSync(config.gatewayTokenFile, 0o600);
+        renameSync(temporaryPath, filePath);
+        chmodSync(filePath, 0o600);
     } finally {
         rmSync(temporaryPath, { force: true });
     }
+}
+
+function materializeGatewayCredentials(
+    config: PullRequestPreviewConfig,
+    upstreamToken: string | undefined
+): void {
+    if (
+        path.resolve(config.gatewayTokenFile) ===
+        path.resolve(config.gatewayUpstreamTokenFile)
+    ) {
+        throw new Error("PR dev client and upstream Gateway token paths must differ");
+    }
+    materializeGatewayTokenFile(
+        config.gatewayUpstreamTokenFile,
+        upstreamToken,
+        "Persisted Gateway token"
+    );
+    materializeGatewayTokenFile(
+        config.gatewayTokenFile,
+        randomBytes(32).toString("base64url"),
+        "PR dev Gateway proxy token"
+    );
 }
 
 function isPathStrictlyWithin(candidate: string, root: string): boolean {
@@ -832,12 +916,29 @@ async function disableOwnedTailscaleServe(
     await runCommand("sudo", ["-n", "tailscale", "serve", `--https=${port}`, "off"]);
 }
 
-function removeMaterializedGatewayToken(config: PullRequestPreviewConfig): void {
-    if (!existsSync(config.gatewayTokenFile)) return;
-    if (!isRealRegularFile(config.gatewayTokenFile)) {
-        throw new Error("PR dev Gateway token path must be a real regular file");
+function removeMaterializedGatewayTokenFile(filePath: string, label: string): void {
+    if (!existsSync(filePath)) return;
+    if (!isRealRegularFile(filePath)) {
+        throw new Error(`${label} path must be a real regular file`);
     }
-    rmSync(config.gatewayTokenFile, { force: true });
+    rmSync(filePath, { force: true });
+}
+
+function removeMaterializedGatewayCredentials(config: PullRequestPreviewConfig): void {
+    const errors: Error[] = [];
+    for (const [filePath, label] of [
+        [config.gatewayTokenFile, "PR dev Gateway proxy token"],
+        [config.gatewayUpstreamTokenFile, "PR dev upstream Gateway token"],
+    ] as const) {
+        try {
+            removeMaterializedGatewayTokenFile(filePath, label);
+        } catch (error) {
+            errors.push(error instanceof Error ? error : new Error(String(error)));
+        }
+    }
+    if (errors.length > 0) {
+        throw new AggregateError(errors, "PR dev Gateway credential cleanup failed");
+    }
 }
 
 function managedStateRoot(config: PullRequestPreviewConfig, number: number): string {
@@ -846,6 +947,10 @@ function managedStateRoot(config: PullRequestPreviewConfig, number: number): str
         throw new Error("Preview state escaped the configured preview root");
     }
     return stateRoot;
+}
+
+function previewGatewayProxyUrl(config: PullRequestPreviewConfig): string {
+    return `ws://127.0.0.1:${config.gatewayProxyPort}/gateway`;
 }
 
 async function preparePreviewState(
@@ -859,7 +964,7 @@ async function preparePreviewState(
         MIRA_DASHBOARD_DEV_BACKEND_PORT: String(config.backendPort),
         MIRA_DASHBOARD_DEV_FRONTEND_PORT: String(config.frontendPort),
         MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE: config.gatewayTokenFile,
-        MIRA_DASHBOARD_DEV_GATEWAY_URL: config.gatewayUrl,
+        MIRA_DASHBOARD_DEV_GATEWAY_URL: previewGatewayProxyUrl(config),
         MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: publicOrigin,
         MIRA_DASHBOARD_DEV_STATE_OWNER: `managed-pr-${number}`,
         MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
@@ -922,6 +1027,8 @@ export function buildPullRequestPreviewSandboxCommand(input: {
         "--share-net",
         "--die-with-parent",
         "--new-session",
+        "--cap-drop",
+        "ALL",
         "--ro-bind",
         "/usr",
         "/usr",
@@ -940,6 +1047,11 @@ export function buildPullRequestPreviewSandboxCommand(input: {
         "/dev",
         "--tmpfs",
         "/tmp",
+        "--dir",
+        "/etc",
+        "--ro-bind",
+        "/etc/resolv.conf",
+        "/etc/resolv.conf",
         "--dir",
         "/home",
         "--dir",
@@ -996,7 +1108,7 @@ export function buildPullRequestPreviewSandboxCommand(input: {
         sandboxGatewayTokenFile,
         "--setenv",
         "MIRA_DASHBOARD_DEV_GATEWAY_URL",
-        config.gatewayUrl,
+        previewGatewayProxyUrl(config),
         "--setenv",
         "MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN",
         publicOrigin,
@@ -1049,11 +1161,61 @@ async function startPreviewUnit(
             "--property=MemoryMax=3G",
             "--property=TasksMax=256",
             "--property=KillMode=control-group",
-            "--property=NoNewPrivileges=yes",
+            // This host uses setuid bubblewrap because unprivileged user
+            // namespaces are disabled. NoNewPrivileges would block bwrap
+            // before it creates the sandbox; bwrap drops all child capabilities.
             "--property=RuntimeMaxSec=4h",
             "--property=TimeoutStopSec=20s",
             "--",
             ...sandboxCommand,
+        ],
+        {
+            env: process.env,
+            signal,
+            timeoutMs: 30_000,
+        }
+    );
+}
+
+async function startPreviewGatewayProxyUnit(
+    config: PullRequestPreviewConfig,
+    signal?: AbortSignal
+): Promise<void> {
+    if (!isRealRegularFile(config.gatewayProxyEntrypoint)) {
+        throw new Error(
+            `Trusted PR dev Gateway proxy entrypoint is unavailable: ${config.gatewayProxyEntrypoint}`
+        );
+    }
+    ensureRealDirectory(path.dirname(config.gatewayProxyIdentityFile));
+    ensurePrivateSingleLinkFile(
+        config.gatewayProxyIdentityFile,
+        "PR dev Gateway proxy identity"
+    );
+    await runCommand(
+        "systemd-run",
+        [
+            "--user",
+            `--unit=${config.gatewayProxyUnitName}`,
+            "--collect",
+            "--quiet",
+            "--property=CPUWeight=20",
+            "--property=IOWeight=20",
+            "--property=MemoryHigh=256M",
+            "--property=MemoryMax=512M",
+            "--property=TasksMax=64",
+            "--property=KillMode=control-group",
+            "--property=NoNewPrivileges=yes",
+            "--property=RuntimeMaxSec=4h",
+            "--property=TimeoutStopSec=10s",
+            `--setenv=MIRA_DASHBOARD_PREVIEW_GATEWAY_CLIENT_TOKEN_FILE=${config.gatewayTokenFile}`,
+            `--setenv=MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_IDENTITY_FILE=${config.gatewayProxyIdentityFile}`,
+            `--setenv=MIRA_DASHBOARD_PREVIEW_GATEWAY_PROXY_PORT=${config.gatewayProxyPort}`,
+            `--setenv=MIRA_DASHBOARD_PREVIEW_GATEWAY_UPSTREAM_TOKEN_FILE=${config.gatewayUpstreamTokenFile}`,
+            `--setenv=MIRA_DASHBOARD_PREVIEW_GATEWAY_UPSTREAM_URL=${config.gatewayUrl}`,
+            "--setenv=NODE_ENV=production",
+            "--",
+            config.bunExecutable,
+            config.gatewayProxyEntrypoint,
         ],
         {
             env: process.env,
@@ -1078,15 +1240,13 @@ export function parsePreviewUnitState(output: string): SystemdUnitState {
     };
 }
 
-async function previewUnitState(
-    config: PullRequestPreviewConfig
-): Promise<SystemdUnitState | undefined> {
+async function systemdUnitState(unitName: string): Promise<SystemdUnitState | undefined> {
     const result = await runProcess(
         "systemctl",
         [
             "--user",
             "show",
-            config.unitName,
+            unitName,
             "--property=ActiveState",
             "--property=SubState",
             "--property=Result",
@@ -1099,6 +1259,12 @@ async function previewUnitState(
         }
     );
     return result.code === 0 ? parsePreviewUnitState(result.stdout) : undefined;
+}
+
+async function previewUnitState(
+    config: PullRequestPreviewConfig
+): Promise<SystemdUnitState | undefined> {
+    return systemdUnitState(config.unitName);
 }
 
 function lifecycleFromUnit(
@@ -1159,53 +1325,149 @@ export async function getPullRequestPreviewStatus(
     const record = readPreviewRecord(config);
     if (!record) return { status: "stopped" };
     const unitState = await previewUnitState(config);
+    const isManagedLifecycle =
+        record.status === "running" || record.status === "starting";
+    const proxyUnitState = isManagedLifecycle
+        ? await systemdUnitState(config.gatewayProxyUnitName)
+        : undefined;
+    const isUnitTerminal =
+        !unitState || ["failed", "inactive"].includes(unitState.activeState || "");
+    const isProxyUnitTerminal =
+        !proxyUnitState ||
+        ["failed", "inactive"].includes(proxyUnitState.activeState || "");
+    const recordUpdatedAt = Date.parse(record.updatedAt);
+    const currentTimestamp = Date.now();
+    const recordAgeMs =
+        Number.isFinite(recordUpdatedAt) && recordUpdatedAt <= currentTimestamp
+            ? currentTimestamp - recordUpdatedAt
+            : Infinity;
+    const isRecentStartup =
+        record.status === "starting" &&
+        recordAgeMs < PREVIEW_START_RECONCILIATION_GRACE_MS;
+    const isStaleStopping =
+        record.status === "stopping" &&
+        recordAgeMs >= PREVIEW_STOP_RECONCILIATION_GRACE_MS;
     if (
-        unitState &&
-        (record.status === "running" || record.status === "starting") &&
-        ["failed", "inactive"].includes(unitState.activeState || "")
+        isStaleStopping ||
+        (isManagedLifecycle &&
+            !isRecentStartup &&
+            (isUnitTerminal || isProxyUnitTerminal))
     ) {
-        const cleanupErrors: string[] = [];
-        let isTailscaleServeOwned = record.ownsTailscaleServe;
-        try {
-            removeMaterializedGatewayToken(config);
-        } catch (error) {
-            cleanupErrors.push(errorMessage(error, "token cleanup failed"));
-        }
-        try {
-            await disableOwnedTailscaleServe(config, isTailscaleServeOwned);
-            isTailscaleServeOwned = false;
-        } catch (error) {
-            cleanupErrors.push(errorMessage(error, "Serve cleanup failed"));
-        }
+        const cleanup = await cleanupPreviewResources(config, record.ownsTailscaleServe);
+        const reconciledUnitState =
+            !unitState || isStaleStopping
+                ? {
+                      activeState: "inactive",
+                      result: "success",
+                      subState: "dead",
+                  }
+                : unitState;
+        const reconciledMessage =
+            cleanup.errors.length > 0
+                ? `Preview stopped outside the managed workflow. Cleanup: ${cleanup.errors.join(". ")}`
+                : isStaleStopping
+                  ? undefined
+                  : record.message;
         const reconciledRecord: PullRequestPreviewRecord = {
             ...record,
-            ...(cleanupErrors.length > 0 && {
-                message: `Preview stopped outside the managed workflow. Cleanup: ${cleanupErrors.join(". ")}`,
-            }),
-            ownsTailscaleServe: isTailscaleServeOwned,
+            message: reconciledMessage,
+            ownsTailscaleServe: cleanup.ownsTailscaleServe,
             status:
-                cleanupErrors.length > 0
+                cleanup.errors.length > 0
                     ? "failed"
-                    : lifecycleFromUnit(unitState, record.status),
+                    : isStaleStopping
+                      ? "stopped"
+                      : lifecycleFromUnit(reconciledUnitState, record.status),
             updatedAt: new Date().toISOString(),
         };
         writePreviewRecord(config, reconciledRecord);
         return publicPreviewStatus(
             reconciledRecord,
-            cleanupErrors.length > 0 ? undefined : unitState
+            cleanup.errors.length > 0 ? undefined : reconciledUnitState
         );
     }
     return publicPreviewStatus(record, unitState);
 }
 
-async function stopUnit(config: PullRequestPreviewConfig): Promise<void> {
-    const state = await previewUnitState(config);
+async function stopSystemdUnit(unitName: string): Promise<void> {
+    const state = await systemdUnitState(unitName);
     if (!state || ["inactive", "failed"].includes(state.activeState || "")) {
         return;
     }
-    await runCommand("systemctl", ["--user", "stop", config.unitName], {
+    await runCommand("systemctl", ["--user", "stop", unitName], {
         env: process.env,
         timeoutMs: 30_000,
+    });
+}
+
+async function stopPreviewUnit(config: PullRequestPreviewConfig): Promise<void> {
+    await stopSystemdUnit(config.unitName);
+}
+
+async function stopPreviewGatewayProxyUnit(
+    config: PullRequestPreviewConfig
+): Promise<void> {
+    await stopSystemdUnit(config.gatewayProxyUnitName);
+}
+
+async function cleanupPreviewResources(
+    config: PullRequestPreviewConfig,
+    isTailscaleServeOwned: boolean
+): Promise<{ errors: string[]; ownsTailscaleServe: boolean }> {
+    const errors: string[] = [];
+    for (const [cleanup, fallback] of [
+        [() => stopPreviewUnit(config), "preview service stop failed"],
+        [() => stopPreviewGatewayProxyUnit(config), "Gateway proxy stop failed"],
+    ] as const) {
+        try {
+            await cleanup();
+        } catch (error) {
+            errors.push(errorMessage(error, fallback));
+        }
+    }
+    try {
+        removeMaterializedGatewayCredentials(config);
+    } catch (error) {
+        errors.push(errorMessage(error, "Gateway credential cleanup failed"));
+    }
+    let isTailscaleServeStillOwned = isTailscaleServeOwned;
+    try {
+        await disableOwnedTailscaleServe(config, isTailscaleServeOwned);
+        isTailscaleServeStillOwned = false;
+    } catch (error) {
+        errors.push(errorMessage(error, "Serve cleanup failed"));
+    }
+    return { errors, ownsTailscaleServe: isTailscaleServeStillOwned };
+}
+
+async function waitForPreviewGatewayProxyReady(
+    config: PullRequestPreviewConfig,
+    signal?: AbortSignal
+): Promise<void> {
+    const deadline = Date.now() + PREVIEW_GATEWAY_PROXY_READY_TIMEOUT_MS;
+    const healthUrl = `http://127.0.0.1:${config.gatewayProxyPort}/health`;
+    while (Date.now() < deadline) {
+        if (signal?.aborted) {
+            throw new DOMException("Preview Gateway proxy startup aborted", "AbortError");
+        }
+        const state = await systemdUnitState(config.gatewayProxyUnitName);
+        if (!state || ["failed", "inactive"].includes(state.activeState || "")) {
+            throw new Error(
+                `Preview Gateway proxy stopped during startup (${state?.result || state?.activeState || "unit missing"})`
+            );
+        }
+        try {
+            const response = await fetch(healthUrl, {
+                signal: AbortSignal.timeout(2000),
+            });
+            if (response.ok && state.activeState === "active") return;
+        } catch {
+            // The proxy is still connecting to the production Gateway.
+        }
+        await Bun.sleep(PREVIEW_GATEWAY_PROXY_READY_POLL_MS);
+    }
+    throw Object.assign(new Error("Timed out waiting for the PR dev Gateway proxy"), {
+        statusCode: 504,
     });
 }
 
@@ -1347,9 +1609,13 @@ export async function startPullRequestPreview(
         url: publicOrigin,
         worktreePath,
     };
-    writePreviewRecord(config, startingRecord);
     try {
-        await stopUnit(config);
+        const staleResourceCleanup = await cleanupPreviewResources(config, false);
+        if (staleResourceCleanup.errors.length > 0) {
+            throw new Error(
+                `Could not clean stale PR dev resources: ${staleResourceCleanup.errors.join(". ")}`
+            );
+        }
         const preparedWorktree = await ensurePreviewWorktree(
             config,
             number,
@@ -1358,7 +1624,8 @@ export async function startPullRequestPreview(
         );
         await installPreviewDependencies(config, preparedWorktree, signal);
         const stateRoot = await preparePreviewState(config, number, publicOrigin);
-        materializeGatewayToken(
+        writePreviewRecord(config, startingRecord);
+        materializeGatewayCredentials(
             config,
             (options.readGatewayToken || getPersistedGatewayToken)()
         );
@@ -1370,6 +1637,12 @@ export async function startPullRequestPreview(
             worktreePath: preparedWorktree,
         });
         options.protectFromCancellation?.();
+        await startPreviewGatewayProxyUnit(config, signal);
+        await waitForPreviewGatewayProxyReady(config, signal);
+        removeMaterializedGatewayTokenFile(
+            config.gatewayUpstreamTokenFile,
+            "PR dev upstream Gateway token"
+        );
         await startPreviewUnit(config, sandboxCommand, signal);
         await waitForPreviewReady(config, signal);
         await enableTailscaleServe(
@@ -1396,32 +1669,15 @@ export async function startPullRequestPreview(
         writePreviewRecord(config, runningRecord);
         return publicPreviewStatus(runningRecord, await previewUnitState(config));
     } catch (error) {
-        const cleanupErrors: string[] = [];
-        try {
-            await stopUnit(config);
-        } catch (cleanupError) {
-            cleanupErrors.push(errorMessage(cleanupError, "service stop failed"));
-        }
-        try {
-            removeMaterializedGatewayToken(config);
-        } catch (cleanupError) {
-            cleanupErrors.push(errorMessage(cleanupError, "token cleanup failed"));
-        }
-        let didCleanupRoute = false;
-        try {
-            await disableOwnedTailscaleServe(config, isTailscaleServeOwned);
-            didCleanupRoute = true;
-        } catch (cleanupError) {
-            cleanupErrors.push(errorMessage(cleanupError, "Serve cleanup failed"));
-        }
+        const cleanup = await cleanupPreviewResources(config, isTailscaleServeOwned);
         const startupMessage = errorMessage(error, "PR preview startup failed");
         const failedRecord: PullRequestPreviewRecord = {
             ...startingRecord,
             message:
-                cleanupErrors.length > 0
-                    ? `${startupMessage}. Cleanup: ${cleanupErrors.join(". ")}`
+                cleanup.errors.length > 0
+                    ? `${startupMessage}. Cleanup: ${cleanup.errors.join(". ")}`
                     : startupMessage,
-            ownsTailscaleServe: isTailscaleServeOwned && !didCleanupRoute,
+            ownsTailscaleServe: cleanup.ownsTailscaleServe,
             status: "failed",
             updatedAt: new Date().toISOString(),
         };
@@ -1453,11 +1709,27 @@ export async function stopPullRequestPreview(
         status: "stopping",
         updatedAt: new Date().toISOString(),
     });
-    await stopUnit(config);
-    removeMaterializedGatewayToken(config);
-    await disableOwnedTailscaleServe(config, record.ownsTailscaleServe);
+    const cleanup = await cleanupPreviewResources(config, record.ownsTailscaleServe);
+    if (cleanup.errors.length > 0) {
+        const failedRecord: PullRequestPreviewRecord = {
+            ...record,
+            message: `PR dev stop cleanup failed: ${cleanup.errors.join(". ")}`,
+            ownsTailscaleServe: cleanup.ownsTailscaleServe,
+            status: "failed",
+            updatedAt: new Date().toISOString(),
+        };
+        writePreviewRecord(config, failedRecord);
+        throw Object.assign(
+            new AggregateError(
+                cleanup.errors.map((message) => new Error(message)),
+                failedRecord.message
+            ),
+            { statusCode: 500 }
+        );
+    }
     const stoppedRecord: PullRequestPreviewRecord = {
         ...record,
+        message: undefined,
         ownsTailscaleServe: false,
         status: "stopped",
         updatedAt: new Date().toISOString(),

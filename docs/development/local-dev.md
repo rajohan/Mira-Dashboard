@@ -143,20 +143,28 @@ The Pull requests page exposes one shared **PR dev** slot:
   `/home/ubuntu/projects/mira-dashboard-preview-state/managed/states/pr-<number>/`.
 - Tailscale publishes HTTPS only after the managed frontend/backend pair is
   locally ready.
-- A transient user unit enforces CPU, IO, memory, task, and four-hour runtime
-  limits.
-- Stop removes the owned Tailscale route and materialized Gateway-token file,
-  while keeping the worktree and isolated state for a faster restart.
-- Status reconciliation performs the same route/token cleanup if the transient
-  unit exits or reaches its four-hour limit.
+- Separate transient user units run the sandbox and a host-owned Gateway
+  capability proxy. Both enforce CPU, IO, memory, task, and four-hour runtime
+  limits; no permanent unit file is installed.
+- Stop removes the owned Tailscale route, stops both transient units, and removes
+  materialized credentials while keeping the worktree and isolated state for a
+  faster restart.
+- Status reconciliation performs the same unit, route, and credential cleanup
+  if a transient unit exits, is collected, or reaches its four-hour limit.
 
 The production backend decrypts its persisted Gateway token only when starting
-trusted PR dev. It atomically writes an owner-only `0600` file outside the
-repository and mounts that file read-only into the sandbox. The value is never
-sent to the browser or included in the unit command. Trusted PR code can read
-the token inside its sandbox because direct production-Gateway compatibility
-requires it; this is why untrusted authors are rejected rather than given a
-partial mode.
+trusted PR dev. It atomically writes that token to an owner-only `0600` file
+outside the repository for the host-owned proxy, then removes the file as soon
+as the proxy has authenticated. The production token is never mounted into the
+sandbox, sent to the browser, or included in a unit command.
+
+The sandbox instead receives a separate random `0600` proxy-token file. That
+credential works only against the loopback proxy, which forwards the explicit
+read/chat/session allowlist, including redacted config reads and cron listing,
+while rejecting config writes, cron mutations, destructive-session, and other
+host-capability RPCs. Unrelated Gateway event families are filtered at the same
+boundary. A PR can read its disposable proxy token, but cannot use it to
+authenticate directly to the production Gateway.
 
 ## Overrides
 

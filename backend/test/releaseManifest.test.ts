@@ -81,6 +81,10 @@ function temporaryReleaseRoot(): string {
         "export {};\n"
     );
     writeFileSync(
+        path.join(root, "backend", "dist", "pullRequestPreviewGatewayProxy.js"),
+        "export {};\n"
+    );
+    writeFileSync(
         path.join(root, "backend", "dist", "resetDashboardPassword.js"),
         "export {};\n"
     );
@@ -200,6 +204,7 @@ describe("Dashboard release manifest", () => {
             "backend/config/log-rotation.json",
             "backend/dist/build-identity.json",
             "backend/dist/databasePreflight.js",
+            "backend/dist/pullRequestPreviewGatewayProxy.js",
             "backend/dist/releaseLifecycle.js",
             "backend/dist/resetDashboardPassword.js",
             "backend/dist/serverStart.js",
@@ -229,6 +234,20 @@ describe("Dashboard release manifest", () => {
         expect(
             readFileSync(path.join(root, RELEASE_MANIFEST_FILE_NAME), "utf8")
         ).toEndWith("\n");
+    });
+
+    it("continues to parse v2 releases built before the preview proxy entrypoint", async () => {
+        const root = temporaryReleaseRoot();
+        const manifest = await createReleaseManifest(manifestOptions(root));
+        const legacyManifest = {
+            ...manifest,
+            artifacts: manifest.artifacts.filter(
+                (artifact) =>
+                    artifact.path !== "backend/dist/pullRequestPreviewGatewayProxy.js"
+            ),
+        };
+
+        expect(parseReleaseManifest(legacyManifest)).toEqual(legacyManifest);
     });
 
     it("refuses to write a manifest larger than the loader accepts", async () => {
@@ -328,6 +347,7 @@ describe("Dashboard release manifest", () => {
 
     it("requires every runtime and recovery entrypoint", async () => {
         for (const relativePath of [
+            "backend/dist/pullRequestPreviewGatewayProxy.js",
             "backend/dist/resetDashboardPassword.js",
             "backend/dist/workerStart.js",
         ]) {

@@ -102,6 +102,7 @@ const jobsApiState = {
 const logsApiState = {
     openclawHundredLineRequests: 0,
     simulateOpenclawTruncation: false,
+    unavailableReason: undefined as string | undefined,
 };
 
 function requestAnimationFrameForTest(callback: FrameRequestCallback): number {
@@ -1496,6 +1497,12 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (url === "/api/logs/info") {
+        if (logsApiState.unavailableReason) {
+            return Response.json({
+                logs: [],
+                unavailableReason: logsApiState.unavailableReason,
+            });
+        }
         return Response.json({
             logs: [
                 { name: "openclaw.log", size: 100 },
@@ -2026,6 +2033,7 @@ describe("Mira Dashboard pages", () => {
         terminalApiState.wasJobStopped = false;
         logsApiState.openclawHundredLineRequests = 0;
         logsApiState.simulateOpenclawTruncation = false;
+        logsApiState.unavailableReason = undefined;
         jobsApiState.cronName = "heartbeat";
         jobsApiState.heartbeatDisableIntent = undefined;
         jobsApiState.heartbeatEnabled = true;
@@ -3704,6 +3712,21 @@ describe("Mira Dashboard pages", () => {
             expect(screen.queryByText(/Loading chat/)).not.toBeInTheDocument();
         });
         expect(view.router.state.location.search).toEqual({});
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("shows why logs are unavailable in isolated Dashboard dev", async () => {
+        logsApiState.unavailableReason =
+            "Host logs are unavailable in isolated Dashboard dev.";
+        const view = renderPage(createElement(Logs), { withSocket: true });
+
+        await waitFor(() => {
+            expect(
+                screen.getByText("Host logs are unavailable in isolated Dashboard dev.")
+            ).toBeInTheDocument();
+        });
 
         view.unmount();
         view.queryClient.clear();

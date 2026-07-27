@@ -3118,13 +3118,31 @@ describe("backend route and service behavior", () => {
 
         rmSync(logsRoot, { force: true, recursive: true });
         const missingInfoRoot = await logRoutes["/api/logs/info"].GET();
-        await expect(missingInfoRoot.json()).resolves.toEqual({ logs: [] });
+        await expect(missingInfoRoot.json()).resolves.toEqual({
+            logs: [],
+            unavailableReason: "The log directory is unavailable.",
+        });
         const missingContentRoot = await logRoutes["/api/logs/content"].GET(
             new Request(
                 "https://test.local/api/logs/content?file=openclaw-2026-06-25.log"
             )
         );
         expect(missingContentRoot.status).toBe(404);
+    });
+
+    it("reports unavailable host logs explicitly in isolated Dashboard dev", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_DEV_SAFE_MODE");
+        rememberEnvironment("MIRA_DASHBOARD_LOGS_ROOT");
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+        delete process.env.MIRA_DASHBOARD_LOGS_ROOT;
+
+        const { logRoutes } = await import("../src/routes/logRoutes.ts");
+        const response = await logRoutes["/api/logs/info"].GET();
+
+        await expect(response.json()).resolves.toEqual({
+            logs: [],
+            unavailableReason: "Host logs are unavailable in isolated Dashboard dev.",
+        });
     });
 
     it("serves media from isolated OpenClaw roots while rejecting unsafe paths", async () => {
@@ -5075,10 +5093,20 @@ esac
         expect(
             database
                 .prepare(
-                    "SELECT id FROM scheduled_jobs WHERE action_key = 'cache.refresh' ORDER BY id"
+                    "SELECT id, enabled FROM scheduled_jobs WHERE action_key = 'cache.refresh' ORDER BY id"
                 )
                 .all()
-        ).toEqual([{ id: "cache.database.summary" }]);
+        ).toEqual([
+            { id: "cache.backup.kopia", enabled: 0 },
+            { id: "cache.backup.walg", enabled: 0 },
+            { id: "cache.database.summary", enabled: 1 },
+            { id: "cache.docker.summary", enabled: 0 },
+            { id: "cache.git", enabled: 0 },
+            { id: "cache.moltbook", enabled: 0 },
+            { id: "cache.quotas", enabled: 0 },
+            { id: "cache.system", enabled: 0 },
+            { id: "cache.weather", enabled: 0 },
+        ]);
 
         upsertScheduledJob({
             actionKey: "cache.refresh",

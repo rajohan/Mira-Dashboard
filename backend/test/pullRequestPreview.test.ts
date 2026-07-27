@@ -68,7 +68,19 @@ function previewConfig(root: string): PullRequestPreviewConfig {
         bunExecutable: "/home/ubuntu/.bun/bin/bun",
         dashboardRoot: path.join(root, "dashboard"),
         frontendPort: 5173,
+        gatewayProxyEntrypoint: path.resolve(
+            import.meta.dirname,
+            "../src/pullRequestPreviewGatewayProxy.ts"
+        ),
+        gatewayProxyIdentityFile: path.join(
+            root,
+            "preview",
+            "gateway-proxy-identity.json"
+        ),
+        gatewayProxyPort: 18_790,
+        gatewayProxyUnitName: "mira-dashboard-pr-preview-gateway.service",
         gatewayTokenFile: path.join(root, "preview", "gateway.token"),
+        gatewayUpstreamTokenFile: path.join(root, "preview", "gateway-upstream.token"),
         gatewayUrl: "ws://127.0.0.1:18789",
         gitCommonDirectory: path.join(root, "dashboard", ".git"),
         previewRoot: path.join(root, "preview"),
@@ -97,7 +109,7 @@ function previewExecution(
         leaseOwner: undefined,
         message: undefined,
         output: { preview: { number: 335, status: previewStatus } },
-        payload: { number: 335 },
+        payload: { commitSha: COMMIT, number: 335 },
         priority: 0,
         queuedAt: "2026-07-26T00:00:00.000Z",
         resourceClass: "exclusive",
@@ -110,10 +122,10 @@ function previewExecution(
     };
 }
 
-function previewScheduledJob(number: unknown): ScheduledJob {
+function previewScheduledJob(number: unknown, commitSha: unknown = COMMIT): ScheduledJob {
     return {
         actionKey: "dashboard.preview.start",
-        actionPayload: { number },
+        actionPayload: { commitSha, number },
         cronExpression: undefined,
         createdAt: "2026-07-26T00:00:00.000Z",
         description: "PR preview",
@@ -149,7 +161,14 @@ describe("managed pull request preview", () => {
             expect(config).toMatchObject({
                 backendPort: 4101,
                 frontendPort: 4173,
+                gatewayProxyPort: 18_790,
+                gatewayProxyUnitName: "mira-dashboard-pr-preview-gateway.service",
                 gatewayTokenFile: path.join(root, "state", "gateway.token"),
+                gatewayUpstreamTokenFile: path.join(
+                    root,
+                    "state",
+                    "gateway-upstream.token"
+                ),
                 gatewayUrl: "ws://127.0.0.1:18789",
                 previewRoot: path.join(root, "state"),
                 unitName: "mira-dashboard-pr-preview.service",
@@ -221,10 +240,13 @@ describe("managed pull request preview", () => {
                 "--clearenv",
                 "--ro-bind",
                 "--bind",
+                "/etc/resolv.conf",
                 "MIRA_DASHBOARD_DEV_STATE_OWNER",
                 "managed-pr-335",
                 "MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE",
                 "/run/mira-dashboard-preview/gateway.token",
+                "MIRA_DASHBOARD_DEV_GATEWAY_URL",
+                "ws://127.0.0.1:18790/gateway",
             ]) {
                 expect(command).toContain(value);
             }
@@ -245,6 +267,8 @@ describe("managed pull request preview", () => {
             expect(command).not.toContain("/state");
             expect(command).not.toContain("MIRA_GITHUB_TOKEN");
             expect(command).not.toContain("OPENCLAW_GATEWAY_TOKEN");
+            expect(command).not.toContain(config.gatewayUpstreamTokenFile);
+            expect(command).not.toContain(config.gatewayUrl);
             expect(command.at(-1)).toBe(
                 path.join(worktreePath, "scripts", "developmentStack.ts")
             );
@@ -360,7 +384,11 @@ describe("managed pull request preview", () => {
         let shouldFailServeDisable = false;
         let shouldFailServeInspectionWhenEnabled = false;
         let isServeEnabled = false;
-        let isUnitActive = false;
+        let isPreviewUnitCollected = false;
+        let didProxyReceiveDisposableToken = false;
+        let didProxyReceiveUpstreamToken = false;
+        let didProxyStartWithStartingRecord = false;
+        const activeUnits = new Set<string>();
         const commands: string[] = [];
         mkdirSync(config.dashboardRoot, { recursive: true });
         mkdirSync(config.gitCommonDirectory, { recursive: true });
@@ -423,16 +451,50 @@ describe("managed pull request preview", () => {
                     isServeEnabled = !commandArguments.includes("off");
                 }
                 if (executable === "systemd-run") {
-                    isUnitActive = true;
+                    const unitArgument = commandArguments.find((argument) =>
+                        argument.startsWith("--unit=")
+                    );
+                    if (unitArgument) {
+                        activeUnits.add(unitArgument.slice("--unit=".length));
+                    }
+                    if (
+                        commandArguments.includes(`--unit=${config.gatewayProxyUnitName}`)
+                    ) {
+                        didProxyStartWithStartingRecord =
+                            JSON.parse(readFileSync(config.stateFile, "utf8")).status ===
+                            "starting";
+                        didProxyReceiveDisposableToken =
+                            readFileSync(config.gatewayTokenFile, "utf8").trim() !==
+                            "persisted-gateway-token";
+                        didProxyReceiveUpstreamToken =
+                            readFileSync(
+                                config.gatewayUpstreamTokenFile,
+                                "utf8"
+                            ).trim() === "persisted-gateway-token";
+                    }
+                    if (commandArguments.includes(`--unit=${config.unitName}`)) {
+                        isPreviewUnitCollected = false;
+                    }
                 }
                 if (executable === "systemctl" && commandArguments.includes("stop")) {
-                    isUnitActive = false;
+                    activeUnits.delete(
+                        commandArguments[commandArguments.indexOf("stop") + 1] || ""
+                    );
                 }
                 if (executable === "systemctl" && commandArguments.includes("show")) {
+                    const shownUnit =
+                        commandArguments[commandArguments.indexOf("show") + 1];
+                    if (isPreviewUnitCollected && shownUnit === config.unitName) {
+                        return {
+                            code: 1,
+                            stderr: "Unit could not be found",
+                            stdout: "",
+                        };
+                    }
                     return {
                         code: 0,
                         stderr: "",
-                        stdout: isUnitActive
+                        stdout: activeUnits.has(shownUnit || "")
                             ? "ActiveState=active\nSubState=running\nResult=success\n"
                             : "ActiveState=inactive\nSubState=dead\nResult=success\n",
                     };
@@ -501,9 +563,13 @@ describe("managed pull request preview", () => {
                 "http://127.0.0.1:5173/api/health/ready",
                 expect.objectContaining({ signal: expect.any(AbortSignal) })
             );
-            expect(readFileSync(config.gatewayTokenFile, "utf8")).toBe(
-                "persisted-gateway-token\n"
+            expect(readFileSync(config.gatewayTokenFile, "utf8")).not.toContain(
+                "persisted-gateway-token"
             );
+            expect(existsSync(config.gatewayUpstreamTokenFile)).toBe(false);
+            expect(didProxyStartWithStartingRecord).toBe(true);
+            expect(didProxyReceiveDisposableToken).toBe(true);
+            expect(didProxyReceiveUpstreamToken).toBe(true);
             expect(statSync(config.gatewayTokenFile).mode & 0o777).toBe(0o600);
             expect(commands).toContain(
                 "sudo -n tailscale serve --bg --https=5173 http://127.0.0.1:5173"
@@ -511,6 +577,14 @@ describe("managed pull request preview", () => {
             expect(commands.some((command) => command.startsWith("systemd-run "))).toBe(
                 true
             );
+            const gatewayProxyCommand = commands.find(
+                (command) =>
+                    command.startsWith("systemd-run ") &&
+                    command.includes(`--unit=${config.gatewayProxyUnitName}`)
+            );
+            expect(gatewayProxyCommand).toContain(config.gatewayUpstreamTokenFile);
+            expect(gatewayProxyCommand).toContain(config.gatewayProxyEntrypoint);
+            expect(gatewayProxyCommand).not.toContain("persisted-gateway-token");
             expect(
                 commands.findIndex((command) => command.startsWith("systemd-run "))
             ).toBeLessThan(
@@ -565,17 +639,19 @@ describe("managed pull request preview", () => {
                     ...interruptedAfterServeRecord,
                     ownsTailscaleServe: true,
                     status: "starting",
+                    updatedAt: "2026-07-26T00:00:00.000Z",
                 })}\n`,
                 { mode: 0o600 }
             );
             isServeEnabled = true;
-            isUnitActive = false;
+            activeUnits.clear();
             await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
                 commitSha: COMMIT,
                 status: "stopped",
             });
             expect(isServeEnabled).toBe(false);
             expect(existsSync(config.gatewayTokenFile)).toBe(false);
+            expect(existsSync(config.gatewayUpstreamTokenFile)).toBe(false);
             expect(JSON.parse(readFileSync(config.stateFile, "utf8"))).toMatchObject({
                 ownsTailscaleServe: false,
                 status: "stopped",
@@ -611,7 +687,12 @@ describe("managed pull request preview", () => {
             });
             expect(isServeEnabled).toBe(false);
             expect(existsSync(config.gatewayTokenFile)).toBe(false);
+            expect(existsSync(config.gatewayUpstreamTokenFile)).toBe(false);
             expect(commands).toContain("sudo -n tailscale serve --https=5173 off");
+            expect(commands).toContain(`systemctl --user stop ${config.unitName}`);
+            expect(commands).toContain(
+                `systemctl --user stop ${config.gatewayProxyUnitName}`
+            );
 
             isServeEnabled = true;
             await expect(
@@ -641,13 +722,15 @@ describe("managed pull request preview", () => {
                     command.includes(`checkout --detach ${expectedCommit}`)
                 )
             ).toBe(true);
-            isUnitActive = false;
+            isPreviewUnitCollected = true;
+            activeUnits.delete(config.unitName);
             await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
                 number: 335,
                 status: "stopped",
             });
             expect(isServeEnabled).toBe(false);
             expect(existsSync(config.gatewayTokenFile)).toBe(false);
+            expect(existsSync(config.gatewayUpstreamTokenFile)).toBe(false);
 
             expectedCommit = "c".repeat(40);
             shouldFailServeDisable = true;
@@ -671,6 +754,45 @@ describe("managed pull request preview", () => {
                 commitSha: expectedCommit,
                 ownsTailscaleServe: true,
                 status: "failed",
+            });
+            await expect(stopPullRequestPreview(335, { config })).rejects.toThrow(
+                "PR dev stop cleanup failed"
+            );
+            expect(JSON.parse(readFileSync(config.stateFile, "utf8"))).toMatchObject({
+                ownsTailscaleServe: true,
+                status: "failed",
+            });
+            shouldFailServeDisable = false;
+            shouldFailServeInspectionWhenEnabled = false;
+            await expect(stopPullRequestPreview(335, { config })).resolves.toMatchObject({
+                status: "stopped",
+            });
+            expect(isServeEnabled).toBe(false);
+
+            const stoppedRecord = JSON.parse(
+                readFileSync(config.stateFile, "utf8")
+            ) as Record<string, unknown>;
+            writeFileSync(
+                config.stateFile,
+                `${JSON.stringify({
+                    ...stoppedRecord,
+                    ownsTailscaleServe: true,
+                    status: "stopping",
+                    updatedAt: "2026-07-26T00:00:00.000Z",
+                })}\n`,
+                { mode: 0o600 }
+            );
+            isServeEnabled = true;
+            activeUnits.add(config.unitName);
+            activeUnits.add(config.gatewayProxyUnitName);
+            await expect(getPullRequestPreviewStatus(config)).resolves.toMatchObject({
+                status: "stopped",
+            });
+            expect(activeUnits.size).toBe(0);
+            expect(isServeEnabled).toBe(false);
+            expect(JSON.parse(readFileSync(config.stateFile, "utf8"))).toMatchObject({
+                ownsTailscaleServe: false,
+                status: "stopped",
             });
         } finally {
             processSpy.mockRestore();
@@ -776,7 +898,7 @@ describe("managed pull request preview", () => {
                 1,
                 expect.objectContaining({
                     actionKey: "dashboard.preview.start",
-                    payload: { number: 335 },
+                    payload: { commitSha: COMMIT, number: 335 },
                     resourceClass: "exclusive",
                 })
             );
@@ -922,6 +1044,12 @@ describe("managed pull request preview", () => {
                     protectFromCancellation: expect.any(Function),
                 })
             );
+
+            listSpy.mockResolvedValue([{ ...pullRequest, headRefOid: "b".repeat(40) }]);
+            await expect(
+                startHandler(previewScheduledJob(335, COMMIT), undefined, context)
+            ).rejects.toMatchObject({ statusCode: 409 });
+            expect(startSpy).toHaveBeenCalledTimes(1);
 
             listSpy.mockResolvedValue([]);
             await expect(

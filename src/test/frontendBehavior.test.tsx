@@ -909,6 +909,7 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(screen.getByText("WebSocket")).toBeInTheDocument();
             expect(screen.getAllByText("Backend")).toHaveLength(2);
             expect(screen.getByText("Worker")).toBeInTheDocument();
+            expect(screen.getAllByText("online ●")).toHaveLength(2);
             expect(screen.getByText("Frontend")).toBeInTheDocument();
             expect(screen.getByText("Version mismatch")).toBeInTheDocument();
             expect(screen.queryByText(/Version mismatch \(FE/u)).not.toBeInTheDocument();

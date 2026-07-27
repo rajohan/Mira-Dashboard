@@ -12,6 +12,8 @@ function checkTestOutput(): number {
     const disallowedPatterns = [
         /not wrapped in act/i,
         /current testing environment is not configured to support act/i,
+        /panic\(main thread\):/i,
+        /oh no: Bun has crashed/i,
     ];
     const matchedPattern = disallowedPatterns.find((pattern) => pattern.test(output));
 

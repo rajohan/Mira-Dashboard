@@ -51,6 +51,12 @@ export function Database() {
                     {error.message}
                 </Alert>
             )}
+            {data.mode === "isolated" && (
+                <Alert variant="info">
+                    Dashboard SQLite is refreshed inside PR dev. PostgreSQL and PgBouncer
+                    values are the isolated snapshot from preview startup.
+                </Alert>
+            )}
 
             <Card variant="bordered" className="p-2">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

@@ -3,7 +3,11 @@ import path from "node:path";
 
 import { json } from "../http.ts";
 import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
-import { formatOpenClawLogDate, resolveRealLogsDirectory } from "../lib/logRoots.ts";
+import {
+    formatOpenClawLogDate,
+    logUnavailableReason,
+    resolveRealLogsDirectory,
+} from "../lib/logRoots.ts";
 import { lineEntriesFromLogRead, type LogRead } from "../lib/logTail.ts";
 
 const MIN_LOG_TAIL_BYTES = 64 * 1024;
@@ -27,6 +31,15 @@ interface LogFile {
 interface LogContent {
     content: string;
     lineIds: string[];
+}
+
+function unavailableLogInfoResponse(
+    reason = logUnavailableReason() || "The log directory is unavailable."
+): Response {
+    return json({
+        logs: [],
+        unavailableReason: reason,
+    });
 }
 
 function isLogNotFoundErrorCode(code: string | undefined): boolean {
@@ -139,12 +152,17 @@ function lineContentWithIds(read: LogRead, lines: number | undefined): LogConten
 
 function logInfoResponse(): Response {
     try {
+        const unavailableReason = logUnavailableReason();
+        if (unavailableReason) {
+            return unavailableLogInfoResponse(unavailableReason);
+        }
+
         let realRoot: string;
         try {
             realRoot = resolveRealLogsDirectory();
         } catch (error) {
             if (isLogNotFoundErrorCode((error as NodeJS.ErrnoException).code)) {
-                return json({ logs: [] });
+                return unavailableLogInfoResponse();
             }
             throw error;
         }
@@ -154,7 +172,7 @@ function logInfoResponse(): Response {
             names = fs.readdirSync(realRoot);
         } catch (error) {
             if (isLogNotFoundErrorCode((error as NodeJS.ErrnoException).code)) {
-                return json({ logs: [] });
+                return unavailableLogInfoResponse();
             }
             throw error;
         }

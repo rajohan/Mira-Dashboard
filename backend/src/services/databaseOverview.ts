@@ -622,3 +622,90 @@ export async function getDatabaseOverview() {
         sqlite,
     };
 }
+
+type DatabaseOverviewResult = Awaited<ReturnType<typeof getDatabaseOverview>>;
+type DatabaseOverviewSnapshot = DatabaseOverviewResult & {
+    checkedAt?: string;
+};
+
+function isDatabaseOverviewSnapshot(value: unknown): value is DatabaseOverviewSnapshot {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const candidate = value as Partial<DatabaseOverviewSnapshot>;
+    return (
+        Boolean(candidate.overview) &&
+        typeof candidate.overview === "object" &&
+        Array.isArray(candidate.databases) &&
+        Array.isArray(candidate.deadTuples) &&
+        Array.isArray(candidate.topQueries) &&
+        Array.isArray(candidate.pgbouncerPools) &&
+        Array.isArray(candidate.pgbouncerStats)
+    );
+}
+
+/** Refreshes only the isolated Dashboard SQLite metrics while retaining copied host data. */
+export function getIsolatedDatabaseOverview(snapshot: unknown) {
+    const sqlite = getDashboardSqliteOverview();
+    const previous: DatabaseOverviewSnapshot = isDatabaseOverviewSnapshot(snapshot)
+        ? snapshot
+        : {
+              overview: {
+                  totalDatabaseSizeBytes: 0,
+                  managedDatabaseCount: 1,
+                  totalManagedDatabaseSizeBytes: sqlite.storageBytes,
+                  totalBackends: 0,
+                  averageCacheHitRatio: 0,
+                  connections: {},
+                  pgStatStatementsEnabled: false,
+                  torrentCounts: { bitmagnet: 0, comet: 0 },
+                  pgbouncer: {
+                      clientConnections: 0,
+                      serverConnections: 0,
+                      waitingClients: 0,
+                      maxWait: 0,
+                      avgQueryTime: 0,
+                      avgTransactionTime: 0,
+                  },
+                  maintenance: {
+                      status: "not_assessed",
+                      hintCount: 0,
+                      requiresBloatReview: false,
+                      isBloatAssessmentIncomplete: true,
+                      unassessedTableCount: 0,
+                      unassessedPhysicalBytes: 0,
+                      slowQueryCount: 0,
+                      highDeadTupleTableCount: 0,
+                      physicalTableBytes: 0,
+                      estimatedReclaimableBytes: 0,
+                      estimatedReclaimablePercent: 0,
+                      reviewThresholdBytes: BLOAT_REVIEW_BYTES,
+                      reviewMinimumBytes: BLOAT_REVIEW_MINIMUM_BYTES,
+                      reviewThresholdPercent: BLOAT_REVIEW_PERCENT,
+                  },
+              },
+              databases: [],
+              deadTuples: [],
+              bloatEstimates: [],
+              topQueries: [],
+              pgbouncerPools: [],
+              pgbouncerStats: [],
+              sqlite,
+          };
+    const { checkedAt: postgresSnapshotCheckedAt, ...previousOverview } = previous;
+    const totalDatabaseSizeBytes =
+        Number(previousOverview.overview.totalDatabaseSizeBytes) || 0;
+
+    return {
+        ...previousOverview,
+        mode: "isolated" as const,
+        ...(postgresSnapshotCheckedAt && {
+            postgresSnapshotCheckedAt,
+        }),
+        overview: {
+            ...previousOverview.overview,
+            managedDatabaseCount: previousOverview.databases.length + 1,
+            totalDatabaseSizeBytes,
+            totalManagedDatabaseSizeBytes: totalDatabaseSizeBytes + sqlite.storageBytes,
+        },
+        sqlite,
+    };
+}

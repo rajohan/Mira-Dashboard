@@ -48,7 +48,12 @@ export function AppHeader({
         },
     }[workerState];
     const backendCommit = health?.releaseDetails.backendCommit || "unknown";
-    const frontendCommit = typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "dev";
+    const compiledFrontendCommit =
+        typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : "dev";
+    const frontendCommit =
+        compiledFrontendCommit === "dev"
+            ? health?.releaseDetails.frontendCommit || "dev"
+            : compiledFrontendCommit;
     const hasVersionMismatch =
         backendCommit !== "unknown" &&
         frontendCommit !== "unknown" &&
@@ -136,7 +141,7 @@ export function AppHeader({
                                                 : "text-red-300"
                                         }
                                     >
-                                        {isConnected ? "Online ●" : "Offline ○"}
+                                        {isConnected ? "online ●" : "Offline ○"}
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between gap-3 text-primary-300">
@@ -148,7 +153,7 @@ export function AppHeader({
                                                 : "text-red-300"
                                         }
                                     >
-                                        {isBackendConnected ? "Online ●" : "Offline ○"}
+                                        {isBackendConnected ? "online ●" : "Offline ○"}
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between gap-3 text-primary-300">
