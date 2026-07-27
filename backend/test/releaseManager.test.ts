@@ -38,6 +38,7 @@ import {
     RELEASE_TRANSITION_LOCK_FILE_NAME,
     RELEASE_TRANSITION_LOCK_PROGRAM,
     resolveDashboardReleasesRoot,
+    restoreDashboardReleaseAfterFailedActivation,
     rollbackDashboardRelease,
 } from "../src/releaseManager.ts";
 import {
@@ -380,6 +381,74 @@ describe("Dashboard immutable release manager", () => {
         ).toEqual([]);
     });
 
+    it("restores the exact release slots that preceded a failed activation", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await createManagedRelease(root, THIRD_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(THIRD_COMMIT, root, SCHEMA_6_OPTIONS);
+
+        const restored = await restoreDashboardReleaseAfterFailedActivation(
+            {
+                ...SCHEMA_6_OPTIONS,
+                expected: {
+                    candidateCommitSha: THIRD_COMMIT,
+                    previousCommitSha: FIRST_COMMIT,
+                    rollbackCommitSha: SECOND_COMMIT,
+                },
+            },
+            root
+        );
+
+        expect(restored.current?.commitSha).toBe(SECOND_COMMIT);
+        expect(restored.previous?.commitSha).toBe(FIRST_COMMIT);
+        expect(readlinkSync(path.join(root, "current"))).toBe(
+            `releases/${SECOND_COMMIT}`
+        );
+        expect(readlinkSync(path.join(root, "previous"))).toBe(
+            `releases/${FIRST_COMMIT}`
+        );
+        await expect(
+            restoreDashboardReleaseAfterFailedActivation(
+                {
+                    ...SCHEMA_6_OPTIONS,
+                    expected: {
+                        candidateCommitSha: THIRD_COMMIT,
+                        previousCommitSha: FIRST_COMMIT,
+                        rollbackCommitSha: SECOND_COMMIT,
+                    },
+                },
+                root
+            )
+        ).rejects.toThrow("slots changed");
+        await expect(readDashboardReleaseState(root)).resolves.toMatchObject({
+            current: { commitSha: SECOND_COMMIT },
+            previous: { commitSha: FIRST_COMMIT },
+        });
+    });
+
+    it("removes the previous slot when the failed activation had no older release", async () => {
+        const root = temporaryReleasesRoot();
+        await createManagedRelease(root, FIRST_COMMIT);
+        await createManagedRelease(root, SECOND_COMMIT);
+        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS);
+
+        const restored = await runReleaseLifecycleCommand(
+            ["restore", SECOND_COMMIT, FIRST_COMMIT],
+            root,
+            SCHEMA_6_OPTIONS
+        );
+
+        expect(restored).toMatchObject({
+            current: { commitSha: FIRST_COMMIT },
+            previous: undefined,
+        });
+        expect(existsSync(path.join(root, "previous"))).toBe(false);
+    });
+
     it("removes an orphaned previous link during first activation", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);
@@ -484,6 +553,15 @@ describe("Dashboard immutable release manager", () => {
         await expect(
             runReleaseLifecycleCommand(["rollback", "", FIRST_COMMIT], root)
         ).rejects.toThrow("requires expected current and target");
+        await expect(
+            runReleaseLifecycleCommand(["restore", FIRST_COMMIT], root)
+        ).rejects.toThrow("requires expected candidate and rollback");
+        await expect(
+            runReleaseLifecycleCommand(
+                ["restore", FIRST_COMMIT, SECOND_COMMIT, THIRD_COMMIT, "extra"],
+                root
+            )
+        ).rejects.toThrow("requires expected candidate and rollback");
         await expect(runReleaseLifecycleCommand(["status", ""], root)).rejects.toThrow(
             "takes no commit SHA"
         );
@@ -781,7 +859,7 @@ describe("Dashboard immutable release manager", () => {
         symlinkSync(`releases/${SECOND_COMMIT}`, path.join(root, "previous"), "dir");
 
         await expect(readDashboardReleaseState(root)).rejects.toThrow(
-            "requires activate or rollback to recover"
+            "requires activate, restore, or rollback to recover"
         );
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(true);
 

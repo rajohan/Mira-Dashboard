@@ -1635,6 +1635,37 @@ describe("backend service behavior", () => {
         const { cancelJobExecution } =
             await import("../src/services/jobExecutionQueue.ts");
 
+        const failedRuntimeId = `test-runtime-failed-${Bun.randomUUIDv7()}`;
+        database
+            .prepare(
+                `INSERT INTO deployment_jobs
+                 (id, status, started_at, updated_at, commit_sha, commit_title, note, stdout, stderr)
+                 VALUES (?, 'failed', ?, ?, ?, ?, ?, NULL, NULL)`
+            )
+            .run(
+                failedRuntimeId,
+                "2026-07-27T12:30:00.000Z",
+                "2026-07-27T12:32:00.000Z",
+                previousCommit,
+                "Previous dashboard release",
+                "Release readiness failed; automatic rollback restored the exact pre-deploy release slots"
+            );
+        try {
+            await expect(getDashboardReleaseStatus()).resolves.toMatchObject({
+                rollback: {
+                    available: false,
+                    reason: "Previous release failed its latest runtime readiness check",
+                },
+            });
+            await expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
+                "Previous release is not eligible for rollback: Previous release failed its latest runtime readiness check"
+            );
+        } finally {
+            database
+                .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                .run(failedRuntimeId);
+        }
+
         const status = await getDashboardReleaseStatus();
         expect(status).toMatchObject({
             current: {
@@ -1960,6 +1991,9 @@ printf 'scheduled\n'
             expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
                 `--unit=mira-dashboard-deploy-${rollback.id}\n`
             );
+            expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
+                "--expand-environment=no\n"
+            );
             expect(
                 reconcileOrphanedDeploymentCutovers(
                     new Date().toISOString(),
@@ -1972,6 +2006,9 @@ printf 'scheduled\n'
             );
             expect(recoveryGuardian).not.toContain(
                 'if run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+            );
+            expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
+                "--expand-environment=no\n"
             );
         } finally {
             database
@@ -2294,6 +2331,7 @@ printf 'scheduled\n'
         const candidateTemplate = path.join(fakeRoot, "candidate-template");
         const openClawHome = path.join(fakeRoot, "state", "openclaw-client");
         const logRotationLockFile = path.join(fakeRoot, "state", "log-rotation.lock");
+        const priorPreviousCommit = "b".repeat(40);
         const oldCommit = "c".repeat(40);
         const candidateCommit = "d".repeat(40);
         const gitLog = path.join(fakeRoot, "git.log");
@@ -2312,7 +2350,17 @@ printf 'scheduled\n'
         await createReleaseFixture(oldReleasePath, oldCommit, {
             commitTitle: "Previous dashboard commit",
         });
+        await createReleaseFixture(
+            managedReleasePath(releasesRoot, priorPreviousCommit),
+            priorPreviousCommit,
+            { commitTitle: "Older dashboard commit" }
+        );
         symlinkSync(`releases/${oldCommit}`, path.join(releasesRoot, "current"), "dir");
+        symlinkSync(
+            `releases/${priorPreviousCommit}`,
+            path.join(releasesRoot, "previous"),
+            "dir"
+        );
         writeFileSync(
             path.join(fakeBin, "git"),
             String.raw`#!/usr/bin/env bash
@@ -2496,6 +2544,7 @@ printf 'scheduled\n'
             );
             const restartCommand = await Bun.file(systemdLog).text();
             expect(restartCommand).toContain("--collect");
+            expect(restartCommand).toContain("--expand-environment=no");
             expect(restartCommand).toContain(
                 "/usr/local/bin/doppler run --config prd --project rajohan"
             );
@@ -2525,12 +2574,14 @@ printf 'scheduled\n'
                 restartCommand.indexOf("if restart_services")
             );
             expect(restartCommand).toContain(
-                `rollback '${candidateCommit}' '${oldCommit}'`
+                `restore '${candidateCommit}' '${oldCommit}' '${priorPreviousCommit}'`
             );
             const automaticRollbackLine = restartCommand
                 .split("\n")
                 .find((line) =>
-                    line.includes(`rollback '${candidateCommit}' '${oldCommit}'`)
+                    line.includes(
+                        `restore '${candidateCommit}' '${oldCommit}' '${priorPreviousCommit}'`
+                    )
                 );
             expect(automaticRollbackLine).toContain(
                 `${releasesRoot}/releases/${candidateCommit}/backend/dist/releaseLifecycle.js`
@@ -2543,7 +2594,9 @@ printf 'scheduled\n'
             expect(readlinkSync(path.join(releasesRoot, "current"))).toBe(
                 `releases/${oldCommit}`
             );
-            expect(existsSync(path.join(releasesRoot, "previous"))).toBe(false);
+            expect(readlinkSync(path.join(releasesRoot, "previous"))).toBe(
+                `releases/${priorPreviousCommit}`
+            );
             const publishedReleasePath = managedReleasePath(
                 releasesRoot,
                 candidateCommit
@@ -2572,6 +2625,7 @@ printf 'scheduled\n'
             ).toBe(1);
             const recoveryCommand = await Bun.file(systemdLog).text();
             expect(recoveryCommand).toContain(`mira-dashboard-deploy-recovery-${job.id}`);
+            expect(recoveryCommand).toContain("--expand-environment=no");
             expect(recoveryCommand).toContain(
                 'current_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/current")'
             );

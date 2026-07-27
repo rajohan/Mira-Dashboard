@@ -632,6 +632,49 @@ export function readDeploymentJobs(): DeploymentJob[] {
     ).map((row) => mapDeploymentJob(row));
 }
 
+interface DeploymentRuntimeResultRow {
+    note: string | null;
+    status: DeploymentJob["status"];
+}
+
+/**
+ * Rejects a previous slot whose latest meaningful runtime result failed
+ * readiness. Build failures and cancelled jobs do not disqualify an otherwise
+ * verified immutable release.
+ */
+function rollbackIneligibilityReason(
+    commitSha: string,
+    excludedJobId?: string
+): string | undefined {
+    const row = database
+        .prepare(
+            `
+            SELECT status, note
+            FROM deployment_jobs
+            WHERE commit_sha = ?
+              ${excludedJobId ? "AND id <> ?" : ""}
+              AND (
+                  status = 'isOk'
+                  OR (
+                      status = 'failed'
+                      AND (
+                          note LIKE 'Release readiness failed%'
+                          OR note LIKE 'Rollback target failed readiness%'
+                          OR note LIKE 'Interrupted release cutover recovered; automatic rollback restored%'
+                      )
+                  )
+              )
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            `
+        )
+        .get(commitSha, ...(excludedJobId ? [excludedJobId] : [])) as
+        DeploymentRuntimeResultRow | undefined;
+    return row?.status === "failed"
+        ? "Previous release failed its latest runtime readiness check"
+        : undefined;
+}
+
 function dashboardReleaseSummary(
     release: ManagedDashboardRelease
 ): DashboardReleaseSummary {
@@ -657,16 +700,22 @@ export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatu
         current !== undefined &&
         previous !== undefined &&
         current.commitSha !== previous.commitSha;
+    const runtimeIneligibilityReason =
+        isRollbackAvailable && previous
+            ? rollbackIneligibilityReason(previous.commitSha)
+            : undefined;
 
     return {
         current,
         previous,
         rollback: {
-            available: isRollbackAvailable,
-            ...(!isRollbackAvailable && {
-                reason: current
-                    ? "No distinct previous release is available"
-                    : "No active managed release is available",
+            available: isRollbackAvailable && !runtimeIneligibilityReason,
+            ...((!isRollbackAvailable || runtimeIneligibilityReason) && {
+                reason:
+                    runtimeIneligibilityReason ??
+                    (current
+                        ? "No distinct previous release is available"
+                        : "No active managed release is available"),
             }),
         },
     };
@@ -1830,6 +1879,7 @@ async function scheduleReleaseCutover(
     candidateCommit: string,
     preActivationCommit: string,
     rollbackCommit: string,
+    preActivationPreviousCommit: string | undefined,
     signal?: AbortSignal
 ): Promise<CommandResult> {
     if (!job.commit || !FULL_COMMIT_SHA_PATTERN.test(job.commit)) {
@@ -1849,6 +1899,21 @@ async function scheduleReleaseCutover(
         !FULL_COMMIT_SHA_PATTERN.test(rollbackCommit)
     ) {
         throw new TypeError("Release cutover requires a distinct full rollback commit");
+    }
+    if (
+        preActivationPreviousCommit !== undefined &&
+        (preActivationPreviousCommit === preActivationCommit ||
+            !FULL_COMMIT_SHA_PATTERN.test(preActivationPreviousCommit))
+    ) {
+        throw new TypeError(
+            "Release cutover requires a distinct full pre-activation previous SHA"
+        );
+    }
+    const isNewActivation = candidateCommit !== preActivationCommit;
+    if (isNewActivation && rollbackCommit !== preActivationCommit) {
+        throw new TypeError(
+            "New release cutover requires the pre-activation current release as rollback target"
+        );
     }
     const releasesRoot = resolveDashboardReleasesRoot();
     const activationLifecycleCommand = path.join(
@@ -1875,6 +1940,17 @@ async function scheduleReleaseCutover(
         releasesRoot,
         guardedLifecycleCommand
     );
+    const restoreCommand = isNewActivation
+        ? [
+              guardedLifecycleEnvironment,
+              "restore",
+              shellQuote(candidateCommit),
+              shellQuote(rollbackCommit),
+              ...(preActivationPreviousCommit
+                  ? [shellQuote(preActivationPreviousCommit)]
+                  : []),
+          ].join(" ")
+        : `${guardedLifecycleEnvironment} rollback ${shellQuote(candidateCommit)} ${shellQuote(rollbackCommit)}`;
     const candidateShort = candidateCommit.slice(0, 8);
     const rollbackShort = rollbackCommit.slice(0, 8);
     const okJob: DeploymentJob = {
@@ -1891,7 +1967,7 @@ async function scheduleReleaseCutover(
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: `Release readiness failed; automatic rollback restored ${rollbackShort}`,
+        note: `Release readiness failed; automatic rollback restored the exact pre-deploy release slots with ${rollbackShort} active`,
     };
     const rollbackFailedJob: DeploymentJob = {
         ...job,
@@ -1917,7 +1993,7 @@ async function scheduleReleaseCutover(
         `      ${deploymentJobUpdateCommand(okWithRetentionWarningJob)}`,
         "    fi",
         "  else",
-        `    if ${guardedLifecycleEnvironment} rollback ${shellQuote(candidateCommit)} ${shellQuote(rollbackCommit)} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
+        `    if ${restoreCommand} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
         `      ${deploymentJobUpdateCommand(rolledBackJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
@@ -1933,6 +2009,7 @@ async function scheduleReleaseCutover(
         [
             "--user",
             "--collect",
+            "--expand-environment=no",
             `--unit=mira-dashboard-deploy-${job.id}`,
             "--description=Mira Dashboard atomic release cutover",
             "/bin/bash",
@@ -2029,6 +2106,7 @@ async function scheduleReleaseRollback(
         [
             "--user",
             "--collect",
+            "--expand-environment=no",
             `--unit=mira-dashboard-deploy-${job.id}`,
             "--description=Mira Dashboard atomic release rollback",
             "/bin/bash",
@@ -2162,6 +2240,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
             "systemd-run",
             "--user",
             "--collect",
+            "--expand-environment=no",
             `--unit=mira-dashboard-deploy-recovery-${job.id}`,
             "--description=Mira Dashboard orphaned release rollback",
             "/bin/bash",
@@ -2255,6 +2334,7 @@ async function runDeploymentJob(
             expectedCommit,
             currentState.current.commitSha,
             rollbackRelease.commitSha,
+            currentState.previous?.commitSha,
             signal
         );
         return true;
@@ -2298,6 +2378,15 @@ async function runRollbackJob(
         }
         if (state.current.commitSha === state.previous.commitSha) {
             throw new Error("Managed release rollback requires two distinct releases");
+        }
+        const runtimeIneligibilityReason = rollbackIneligibilityReason(
+            state.previous.commitSha,
+            job.id
+        );
+        if (runtimeIneligibilityReason) {
+            throw new Error(
+                `Previous release is not eligible for rollback: ${runtimeIneligibilityReason}`
+            );
         }
         assertDashboardReleaseHostRuntimeCompatible(state.previous);
 
@@ -2462,6 +2551,17 @@ export async function prepareAndStartRollback(
             throw Object.assign(
                 new Error(
                     "Rollback target changed. Refresh release status and confirm the current previous release"
+                ),
+                { statusCode: 409 }
+            );
+        }
+        const runtimeIneligibilityReason = rollbackIneligibilityReason(
+            state.previous.commitSha
+        );
+        if (runtimeIneligibilityReason) {
+            throw Object.assign(
+                new Error(
+                    `Previous release is not eligible for rollback: ${runtimeIneligibilityReason}`
                 ),
                 { statusCode: 409 }
             );
