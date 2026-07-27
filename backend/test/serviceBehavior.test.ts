@@ -2001,11 +2001,12 @@ printf 'scheduled\n'
                 )
             ).toBe(1);
             const recoveryGuardian = readFileSync(systemdScriptLog, "utf8");
+            expect(recoveryGuardian).toContain("recovery_mode='rollback'");
             expect(recoveryGuardian).toContain(
-                'if run_activation_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+                'run_activation_lifecycle rollback "$candidate_commit" "$rollback_commit"'
             );
-            expect(recoveryGuardian).not.toContain(
-                'if run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+            expect(recoveryGuardian).toContain(
+                "if restore_failed_candidate && restart_services"
             );
             expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
                 "--expand-environment=no\n"
@@ -2334,6 +2335,7 @@ printf 'scheduled\n'
         const priorPreviousCommit = "b".repeat(40);
         const oldCommit = "c".repeat(40);
         const candidateCommit = "d".repeat(40);
+        const gitHeadFile = path.join(fakeRoot, "git-head");
         const gitLog = path.join(fakeRoot, "git.log");
         const bunLog = path.join(fakeRoot, "bun.log");
         const systemctlLog = path.join(fakeRoot, "systemctl.log");
@@ -2361,19 +2363,21 @@ printf 'scheduled\n'
             path.join(releasesRoot, "previous"),
             "dir"
         );
+        writeFileSync(gitHeadFile, candidateCommit);
         writeFileSync(
             path.join(fakeBin, "git"),
             String.raw`#!/usr/bin/env bash
 set -euo pipefail
+head_commit=$(<${JSON.stringify(gitHeadFile)})
 printf '%s\n' "$*" >> ${JSON.stringify(gitLog)}
 if [[ "$*" == "rev-parse --show-toplevel" ]]; then
   printf '%s\n' ${JSON.stringify(fakeRoot)}
 elif [[ "$*" == "rev-parse --abbrev-ref HEAD" ]]; then
   printf 'main\n'
 elif [[ "$*" == "rev-parse --short HEAD" ]]; then
-  printf '%s\n' ${JSON.stringify(candidateCommit.slice(0, 8))}
+  printf '%.8s\n' "$head_commit"
 elif [[ "$*" == "rev-parse HEAD" ]]; then
-  printf '%s\n' ${JSON.stringify(candidateCommit)}
+  printf '%s\n' "$head_commit"
 elif [[ "$*" == "rev-parse --abbrev-ref --symbolic-full-name ${"@{u}"}" ]]; then
   printf 'origin/main\n'
 elif [[ "$*" == "status --short" ]]; then
@@ -2396,7 +2400,7 @@ fi
             String.raw`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s|%s\n' "$PWD" "$*" >> ${JSON.stringify(bunLog)}
-if [[ "$*" == "install --frozen-lockfile" || "$*" == "run deploy:prepare" ]]; then
+if [[ "$*" == "install --frozen-lockfile" || "$*" == "run deploy:prepare" || "$*" == "dist/databasePreflight.js" ]]; then
   printf 'ok\n'
 else
   echo "unexpected bun args: $*" >&2
@@ -2483,6 +2487,8 @@ printf 'scheduled\n'
             resourceClass: "light",
             timeoutMs: 1000,
         });
+        const createdDeploymentIds = [job.id];
+        const failedRuntimeId = `test-runtime-failed-${Bun.randomUUIDv7()}`;
 
         try {
             await waitFor(() => {
@@ -2612,6 +2618,16 @@ printf 'scheduled\n'
             ).toBe(false);
             expect(getJobExecution(deploymentExecution.id)).toMatchObject({
                 cancellable: false,
+                output: {
+                    deploymentId: job.id,
+                    releaseCutover: {
+                        candidateCommit,
+                        formatVersion: 1,
+                        preActivationCommit: oldCommit,
+                        preActivationPreviousCommit: priorPreviousCommit,
+                        rollbackCommit: oldCommit,
+                    },
+                },
                 status: "success",
             });
             expect(getJobExecution(followUpExecution.id)).toMatchObject({
@@ -2658,7 +2674,14 @@ printf 'scheduled\n'
                 )
             );
             expect(recoveryCommand).toContain(
-                'run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit" && restart_services'
+                'run_candidate_lifecycle restore "$candidate_commit" "$rollback_commit" "$pre_activation_previous_commit"'
+            );
+            expect(recoveryCommand).toContain(`expected_rollback_commit='${oldCommit}'`);
+            expect(recoveryCommand).toContain(
+                `pre_activation_previous_commit='${priorPreviousCommit}'`
+            );
+            expect(recoveryCommand).toContain(
+                "automatic rollback restored the exact pre-deploy release slots"
             );
             expect(recoveryCommand).toContain(
                 'candidate_lifecycle="$candidate_release/backend/dist/releaseLifecycle.js"'
@@ -2692,17 +2715,125 @@ printf 'scheduled\n'
             expect(getJobExecution(followUpExecution.id)).toMatchObject({
                 status: "success",
             });
+
+            database.prepare("DELETE FROM deployment_lock WHERE job_id = ?").run(job.id);
+            writeFileSync(gitHeadFile, oldCommit);
+            writeFileSync(systemdLog, "");
+            const redeploy = startDeployLatest();
+            createdDeploymentIds.push(redeploy.id);
+            const redeployExecution = database
+                .prepare(
+                    `SELECT id
+                     FROM job_executions
+                     WHERE action_key = 'dashboard.deploy'
+                       AND json_extract(payload_json, '$.deploymentId') = ?`
+                )
+                .get(redeploy.id) as { id: string };
+            await waitFor(() => {
+                const row = database
+                    .prepare("SELECT status FROM deployment_jobs WHERE id = ?")
+                    .get(redeploy.id) as { status: string } | undefined;
+                return row?.status === "restart-scheduled" && existsSync(systemdLog);
+            }, 5000);
+            await waitFor(
+                () => getJobExecution(redeployExecution.id)?.status === "success",
+                5000
+            );
+            const redeployCommand = await Bun.file(systemdLog).text();
+            expect(redeployCommand).toContain(
+                `rollback '${oldCommit}' '${priorPreviousCommit}'`
+            );
+            expect(redeployCommand).toContain(
+                "Release readiness failed; automatic rollback activated the previous verified release bbbbbbbb"
+            );
+            expect(redeployCommand).not.toContain(
+                "automatic rollback restored the exact pre-deploy release slots"
+            );
+            expect(getJobExecution(redeployExecution.id)).toMatchObject({
+                output: {
+                    deploymentId: redeploy.id,
+                    releaseCutover: {
+                        candidateCommit: oldCommit,
+                        formatVersion: 1,
+                        preActivationCommit: oldCommit,
+                        preActivationPreviousCommit: priorPreviousCommit,
+                        rollbackCommit: priorPreviousCommit,
+                    },
+                },
+                status: "success",
+            });
+
+            database
+                .prepare(
+                    `UPDATE deployment_jobs
+                     SET status = 'failed',
+                         updated_at = ?,
+                         note = 'Detached restart failed'
+                     WHERE id = ?`
+                )
+                .run(new Date().toISOString(), redeploy.id);
+            database
+                .prepare("DELETE FROM deployment_lock WHERE job_id = ?")
+                .run(redeploy.id);
+            database
+                .prepare(
+                    `INSERT INTO deployment_jobs (
+                         id, status, started_at, updated_at, commit_sha,
+                         commit_title, note, stdout, stderr
+                     ) VALUES (?, 'failed', ?, ?, ?, ?, ?, NULL, NULL)`
+                )
+                .run(
+                    failedRuntimeId,
+                    new Date().toISOString(),
+                    new Date().toISOString(),
+                    priorPreviousCommit,
+                    "Known bad fallback",
+                    "Release readiness failed; automatic rollback completed"
+                );
+            const blockedRedeploy = startDeployLatest();
+            createdDeploymentIds.push(blockedRedeploy.id);
+            const blockedExecution = database
+                .prepare(
+                    `SELECT id
+                     FROM job_executions
+                     WHERE action_key = 'dashboard.deploy'
+                       AND json_extract(payload_json, '$.deploymentId') = ?`
+                )
+                .get(blockedRedeploy.id) as { id: string };
+            await waitFor(
+                () => getJobExecution(blockedExecution.id)?.status === "failed",
+                5000
+            );
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(blockedRedeploy.id)
+            ).toEqual({
+                note: "Automatic redeploy fallback is not eligible: Previous release failed its latest runtime readiness check",
+                status: "failed",
+            });
         } finally {
             database
                 .prepare("DELETE FROM job_executions WHERE id = ?")
                 .run(followUpExecution.id);
-            database.prepare("DELETE FROM deployment_lock WHERE job_id = ?").run(job.id);
-            database.prepare("DELETE FROM deployment_jobs WHERE id = ?").run(job.id);
             database
-                .prepare(
-                    "DELETE FROM job_executions WHERE action_key = 'dashboard.deploy' AND payload_json LIKE ?"
-                )
-                .run(`%${job.id}%`);
+                .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                .run(failedRuntimeId);
+            for (const deploymentId of createdDeploymentIds) {
+                database
+                    .prepare("DELETE FROM deployment_lock WHERE job_id = ?")
+                    .run(deploymentId);
+                database
+                    .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                    .run(deploymentId);
+                database
+                    .prepare(
+                        `DELETE FROM job_executions
+                         WHERE action_key = 'dashboard.deploy'
+                           AND json_extract(payload_json, '$.deploymentId') = ?`
+                    )
+                    .run(deploymentId);
+            }
         }
     });
 

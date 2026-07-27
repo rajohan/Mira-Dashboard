@@ -22,6 +22,13 @@ import {
     resolveDashboardReleasesRoot,
 } from "../releaseManager.ts";
 import {
+    DEPLOYMENT_RUNTIME_FAILURE_NOTE_PATTERNS,
+    DEPLOYMENT_RUNTIME_FAILURE_NOTE_PREDICATE_SQL,
+    ORPHANED_CUTOVER_READINESS_FAILURE_NOTE_PREFIX,
+    RELEASE_READINESS_FAILURE_NOTE_PREFIX,
+    ROLLBACK_READINESS_FAILURE_NOTE_PREFIX,
+} from "./deploymentRuntimeResults.ts";
+import {
     enqueueJobExecution,
     JOB_WORKER_HEARTBEAT_MAX_AGE_MS,
     type JobExecution,
@@ -78,6 +85,8 @@ const PUBLIC_PR_FAILURE_CACHE_MS = 30_000;
 const PUBLIC_GITHUB_API_TIMEOUT_MS = 15_000;
 const DEPLOYMENT_RESTART_STATUS_POLL_MS = 1000;
 const DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS = 2 * 60 * 1000;
+const MAX_DEPLOYMENT_CUTOVER_CONTEXT_BYTES = 4096;
+const DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION = 1;
 const DEPLOYMENT_WORKER_STABILITY_SECONDS =
     Math.ceil(JOB_WORKER_HEARTBEAT_MAX_AGE_MS / 1000) + 1;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
@@ -374,7 +383,120 @@ interface DeploymentLockRow {
 
 interface DeploymentLockExecutionRow {
     action_key: string;
+    output_json: string;
     status: JobExecution["status"];
+}
+
+interface DeploymentCutoverContext {
+    candidateCommit: string;
+    formatVersion: typeof DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION;
+    preActivationCommit: string;
+    preActivationPreviousCommit?: string;
+    rollbackCommit: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function createDeploymentCutoverContext(
+    candidateCommit: string,
+    preActivationCommit: string,
+    rollbackCommit: string,
+    preActivationPreviousCommit: string | undefined
+): DeploymentCutoverContext {
+    if (
+        !FULL_COMMIT_SHA_PATTERN.test(candidateCommit) ||
+        !FULL_COMMIT_SHA_PATTERN.test(preActivationCommit) ||
+        !FULL_COMMIT_SHA_PATTERN.test(rollbackCommit)
+    ) {
+        throw new TypeError("Release cutover context requires full commit SHAs");
+    }
+    if (rollbackCommit === candidateCommit) {
+        throw new TypeError(
+            "Release cutover context requires a distinct rollback commit"
+        );
+    }
+    if (
+        preActivationPreviousCommit !== undefined &&
+        (preActivationPreviousCommit === preActivationCommit ||
+            !FULL_COMMIT_SHA_PATTERN.test(preActivationPreviousCommit))
+    ) {
+        throw new TypeError(
+            "Release cutover context requires a distinct full pre-activation previous SHA"
+        );
+    }
+    if (candidateCommit === preActivationCommit) {
+        if (rollbackCommit !== preActivationPreviousCommit) {
+            throw new TypeError(
+                "Redeploy cutover context requires the pre-activation previous release as rollback target"
+            );
+        }
+    } else if (rollbackCommit !== preActivationCommit) {
+        throw new TypeError(
+            "New release cutover context requires the pre-activation current release as rollback target"
+        );
+    }
+    return {
+        candidateCommit,
+        formatVersion: DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION,
+        preActivationCommit,
+        ...(preActivationPreviousCommit && { preActivationPreviousCommit }),
+        rollbackCommit,
+    };
+}
+
+function parseDeploymentCutoverContext(
+    outputJson: string,
+    expectedDeploymentId: string,
+    expectedCandidateCommit: string
+): DeploymentCutoverContext | undefined {
+    if (Buffer.byteLength(outputJson, "utf8") > MAX_DEPLOYMENT_CUTOVER_CONTEXT_BYTES) {
+        return undefined;
+    }
+    let output: unknown;
+    try {
+        output = JSON.parse(outputJson) as unknown;
+    } catch {
+        return undefined;
+    }
+    if (
+        !isRecord(output) ||
+        output.deploymentId !== expectedDeploymentId ||
+        !isRecord(output.releaseCutover)
+    ) {
+        return undefined;
+    }
+    const value = output.releaseCutover;
+    const allowedKeys = new Set([
+        "candidateCommit",
+        "formatVersion",
+        "preActivationCommit",
+        "preActivationPreviousCommit",
+        "rollbackCommit",
+    ]);
+    if (
+        Object.keys(value).some((key) => !allowedKeys.has(key)) ||
+        value.formatVersion !== DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION ||
+        typeof value.candidateCommit !== "string" ||
+        value.candidateCommit !== expectedCandidateCommit ||
+        typeof value.preActivationCommit !== "string" ||
+        typeof value.rollbackCommit !== "string" ||
+        (value.preActivationPreviousCommit !== undefined &&
+            typeof value.preActivationPreviousCommit !== "string")
+    ) {
+        return undefined;
+    }
+    try {
+        return createDeploymentCutoverContext(
+            value.candidateCommit,
+            value.preActivationCommit,
+            value.rollbackCommit,
+            value.preActivationPreviousCommit
+        );
+    } catch {
+        return undefined;
+    }
 }
 
 /** Checks whether an active deployment lock row is stale enough to replace. */
@@ -398,7 +520,7 @@ function readDeploymentLockExecution(
 ): DeploymentLockExecutionRow | undefined {
     return database
         .prepare(
-            `SELECT action_key, status
+            `SELECT action_key, output_json, status
              FROM job_executions
              WHERE json_valid(payload_json)
                AND (
@@ -658,9 +780,7 @@ function rollbackIneligibilityReason(
                   OR (
                       status = 'failed'
                       AND (
-                          note LIKE 'Release readiness failed%'
-                          OR note LIKE 'Rollback target failed readiness%'
-                          OR note LIKE 'Interrupted release cutover recovered; automatic rollback restored%'
+                          ${DEPLOYMENT_RUNTIME_FAILURE_NOTE_PREDICATE_SQL}
                       )
                   )
               )
@@ -668,8 +788,11 @@ function rollbackIneligibilityReason(
             LIMIT 1
             `
         )
-        .get(commitSha, ...(excludedJobId ? [excludedJobId] : [])) as
-        DeploymentRuntimeResultRow | undefined;
+        .get(
+            commitSha,
+            ...(excludedJobId ? [excludedJobId] : []),
+            ...DEPLOYMENT_RUNTIME_FAILURE_NOTE_PATTERNS
+        ) as DeploymentRuntimeResultRow | undefined;
     return row?.status === "failed"
         ? "Previous release failed its latest runtime readiness check"
         : undefined;
@@ -1876,12 +1999,15 @@ async function assertManagedDashboardServiceContract(
 /** Schedules detached service restart, commit-bound readiness, and rollback. */
 async function scheduleReleaseCutover(
     job: DeploymentJob,
-    candidateCommit: string,
-    preActivationCommit: string,
-    rollbackCommit: string,
-    preActivationPreviousCommit: string | undefined,
+    cutover: DeploymentCutoverContext,
     signal?: AbortSignal
 ): Promise<CommandResult> {
+    const {
+        candidateCommit,
+        preActivationCommit,
+        preActivationPreviousCommit,
+        rollbackCommit,
+    } = cutover;
     if (!job.commit || !FULL_COMMIT_SHA_PATTERN.test(job.commit)) {
         throw new TypeError("Release cutover requires a full candidate commit");
     }
@@ -1967,13 +2093,15 @@ async function scheduleReleaseCutover(
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: `Release readiness failed; automatic rollback restored the exact pre-deploy release slots with ${rollbackShort} active`,
+        note: isNewActivation
+            ? `${RELEASE_READINESS_FAILURE_NOTE_PREFIX}; automatic rollback restored the exact pre-deploy release slots with ${rollbackShort} active`
+            : `${RELEASE_READINESS_FAILURE_NOTE_PREFIX}; automatic rollback activated the previous verified release ${rollbackShort}`,
     };
     const rollbackFailedJob: DeploymentJob = {
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: `Release readiness failed and automatic rollback to ${rollbackShort} failed`,
+        note: `${RELEASE_READINESS_FAILURE_NOTE_PREFIX} and automatic rollback to ${rollbackShort} failed`,
     };
     const activationFailedJob: DeploymentJob = {
         ...job,
@@ -2068,13 +2196,13 @@ async function scheduleReleaseRollback(
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: `Rollback target failed readiness. Original release ${originalShort} was restored automatically`,
+        note: `${ROLLBACK_READINESS_FAILURE_NOTE_PREFIX}. Original release ${originalShort} was restored automatically`,
     };
     const restorationFailedJob: DeploymentJob = {
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: `Rollback target failed readiness and restoration of ${originalShort} failed`,
+        note: `${ROLLBACK_READINESS_FAILURE_NOTE_PREFIX} and restoration of ${originalShort} failed`,
     };
     const transitionFailedJob: DeploymentJob = {
         ...job,
@@ -2137,15 +2265,30 @@ function didScheduleOrphanedReleaseCutoverRecovery(
 
     const releasesRoot = resolveDashboardReleasesRoot();
     const recoveryExecution = readDeploymentLockExecution(cutover.id);
-    const rollbackLifecycleFunction =
-        recoveryExecution?.action_key === "dashboard.rollback"
-            ? "run_activation_lifecycle"
-            : "run_candidate_lifecycle";
+    const isRollbackAction = recoveryExecution?.action_key === "dashboard.rollback";
+    const persistedCutover =
+        recoveryExecution?.action_key === "dashboard.deploy"
+            ? parseDeploymentCutoverContext(
+                  recoveryExecution.output_json,
+                  cutover.id,
+                  candidateCommit
+              )
+            : undefined;
+    const willRestoreExactPreActivationSlots =
+        persistedCutover !== undefined &&
+        persistedCutover.candidateCommit !== persistedCutover.preActivationCommit;
+    const recoveryMode = willRestoreExactPreActivationSlots
+        ? "restore"
+        : isRollbackAction
+          ? "rollback"
+          : "legacy-rollback";
     const rolledBackJob: DeploymentJob = {
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: "Interrupted release cutover recovered; automatic rollback restored the previous verified release",
+        note: willRestoreExactPreActivationSlots
+            ? `${ORPHANED_CUTOVER_READINESS_FAILURE_NOTE_PREFIX} the exact pre-deploy release slots`
+            : `${ORPHANED_CUTOVER_READINESS_FAILURE_NOTE_PREFIX} the previous verified release`,
     };
     const activationNotAppliedJob: DeploymentJob = {
         ...job,
@@ -2164,6 +2307,11 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         ...releaseCutoverShellFunctions(),
         `releases_root=${shellQuote(releasesRoot)}`,
         `candidate_commit=${shellQuote(candidateCommit)}`,
+        `recovery_mode=${shellQuote(recoveryMode)}`,
+        `expected_rollback_commit=${shellQuote(persistedCutover?.rollbackCommit ?? "")}`,
+        `pre_activation_previous_commit=${shellQuote(
+            persistedCutover?.preActivationPreviousCommit ?? ""
+        )}`,
         `bun_executable=${shellQuote(resolveBunExecutable())}`,
         "resolve_trusted_lifecycles() {",
         '  candidate_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/releases/$candidate_commit") || return 1',
@@ -2201,6 +2349,25 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         "  NODE_ENV=production \\",
         '  "$bun_executable" "$candidate_lifecycle" "$@"',
         "}",
+        "restore_failed_candidate() {",
+        '  case "$recovery_mode" in',
+        "    restore)",
+        '      [ "$rollback_commit" = "$expected_rollback_commit" ] || return 1',
+        '      if [ -n "$pre_activation_previous_commit" ]; then',
+        '        run_candidate_lifecycle restore "$candidate_commit" "$rollback_commit" "$pre_activation_previous_commit"',
+        "      else",
+        '        run_candidate_lifecycle restore "$candidate_commit" "$rollback_commit"',
+        "      fi",
+        "      ;;",
+        "    rollback)",
+        '      run_activation_lifecycle rollback "$candidate_commit" "$rollback_commit"',
+        "      ;;",
+        "    legacy-rollback)",
+        '      run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit"',
+        "      ;;",
+        "    *) return 1 ;;",
+        "  esac",
+        "}",
         "resolve_trusted_lifecycles || exit 1",
         'if activation_output="$(run_activation_lifecycle activate "$candidate_commit")"; then',
         '  activation_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
@@ -2212,7 +2379,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         '  rollback_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.previous.commitSha // empty\')"',
         '  [[ "$rollback_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
         '  [ "$rollback_commit" != "$candidate_commit" ] || exit 1',
-        `  if ${rollbackLifecycleFunction} rollback "$candidate_commit" "$rollback_commit" && restart_services && ready_for_commit "\${rollback_commit:0:8}"; then`,
+        '  if restore_failed_candidate && restart_services && ready_for_commit "${rollback_commit:0:8}"; then',
         `    ${deploymentJobUpdateCommand(rolledBackJob)}`,
         "  else",
         "    exit 1",
@@ -2269,8 +2436,9 @@ function didScheduleOrphanedReleaseCutoverRecovery(
 /** Runs deployment work after the API has returned a job to the caller. */
 async function runDeploymentJob(
     job: DeploymentJob,
+    persistCutover: (cutover: DeploymentCutoverContext) => void,
     signal?: AbortSignal
-): Promise<boolean> {
+): Promise<DeploymentCutoverContext | undefined> {
     let currentJob = job;
     const dashboardRoot = getDashboardRoot();
     const releasesRoot = resolveDashboardReleasesRoot();
@@ -2290,6 +2458,26 @@ async function runDeploymentJob(
             timeoutMs: 30_000,
         });
         const expectedCommit = commitSha.trim();
+        const isRedeploy = currentState.current.commitSha === expectedCommit;
+        const rollbackRelease = isRedeploy ? currentState.previous : currentState.current;
+        if (!rollbackRelease || rollbackRelease.commitSha === expectedCommit) {
+            throw new Error(
+                "Managed deployment requires a distinct verified rollback release"
+            );
+        }
+        if (isRedeploy) {
+            const runtimeIneligibilityReason = rollbackIneligibilityReason(
+                rollbackRelease.commitSha,
+                job.id
+            );
+            if (runtimeIneligibilityReason) {
+                throw new Error(
+                    `Automatic redeploy fallback is not eligible: ${runtimeIneligibilityReason}`
+                );
+            }
+        }
+        assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
+
         const candidate = await stageDashboardRelease(expectedCommit, {
             bunExecutable: resolveBunExecutable(),
             commandRunner: async (command, arguments_, options) =>
@@ -2309,16 +2497,13 @@ async function runDeploymentJob(
             worktreeRoot: getDashboardWorktreeRoot(),
         });
         currentJob = refreshDeploymentHeartbeat(currentJob);
-        const rollbackRelease =
-            currentState.current.commitSha === expectedCommit
-                ? currentState.previous
-                : currentState.current;
-        if (!rollbackRelease || rollbackRelease.commitSha === expectedCommit) {
-            throw new Error(
-                "Managed deployment requires a distinct verified rollback release"
-            );
-        }
-        assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
+        const releaseCutover = createDeploymentCutoverContext(
+            expectedCommit,
+            currentState.current.commitSha,
+            rollbackRelease.commitSha,
+            currentState.previous?.commitSha
+        );
+        persistCutover(releaseCutover);
 
         const restartScheduled: DeploymentJob = {
             ...currentJob,
@@ -2329,15 +2514,8 @@ async function runDeploymentJob(
             note: "Immutable release published. Detached activation and rollback check scheduled",
         };
         writeDeploymentJob(restartScheduled);
-        await scheduleReleaseCutover(
-            restartScheduled,
-            expectedCommit,
-            currentState.current.commitSha,
-            rollbackRelease.commitSha,
-            currentState.previous?.commitSha,
-            signal
-        );
-        return true;
+        await scheduleReleaseCutover(restartScheduled, releaseCutover, signal);
+        return releaseCutover;
     } catch (error) {
         const failed: DeploymentJob = {
             ...currentJob,
@@ -2350,7 +2528,7 @@ async function runDeploymentJob(
         } finally {
             releaseDeploymentLock(job.id);
         }
-        return false;
+        return undefined;
     }
 }
 
@@ -2883,15 +3061,24 @@ export function registerPullRequestExecutionActions(): void {
             });
         }
         context.protectFromCancellation();
-        const isSuccess = await runDeploymentJob(deployment, signal);
-        if (!isSuccess) {
+        const releaseCutover = await runDeploymentJob(
+            deployment,
+            (nextCutover) => {
+                context.updateOutput({
+                    deploymentId,
+                    releaseCutover: nextCutover,
+                });
+            },
+            signal
+        );
+        if (!releaseCutover) {
             throw new ScheduledJobActionError("Dashboard deploy failed", {
                 deploymentId,
             });
         }
         const resumeWorkerClaims = context.pauseWorkerClaims();
         resumeWorkerClaimsWhenDeploymentRestartSettles(deploymentId, resumeWorkerClaims);
-        return { deploymentId };
+        return { deploymentId, releaseCutover };
     });
     registerScheduledJobAction("dashboard.rollback", async (job, signal, context) => {
         const deploymentId = job.actionPayload.deploymentId;

@@ -28,6 +28,7 @@ import {
     secureSqliteFilePermissions,
     sqliteBackupDirectory,
 } from "../src/databaseStorage.ts";
+import { RELEASE_READINESS_FAILURE_NOTE_PREFIX } from "../src/services/deploymentRuntimeResults.ts";
 import { pruneDatabaseHistory } from "../src/services/sqliteMaintenance.ts";
 import {
     createVerifiedSqliteBackup,
@@ -1037,6 +1038,61 @@ describe("Dashboard SQLite lifecycle", () => {
                     )
                     .get(cappedTaskId, cappedTaskId)
             ).toEqual({ events: 5000, updates: 5000 });
+        } finally {
+            database.close();
+        }
+    });
+
+    it("preserves the latest meaningful runtime result for managed release slots", () => {
+        const root = temporaryRoot("mira-db-release-runtime-retention-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        const now = new Date("2026-07-27T12:00:00.000Z");
+        const protectedFailedCommit = "a".repeat(40);
+        const protectedReadyCommit = "b".repeat(40);
+        const unprotectedCommit = "c".repeat(40);
+        try {
+            applyDatabaseMigrations(database, databasePath);
+            database
+                .prepare(
+                    `INSERT INTO deployment_jobs (
+                         id, status, started_at, updated_at, commit_sha, note
+                     ) VALUES
+                       ('protected-readiness-failure', 'failed', ?, ?, ?, ?),
+                       ('newer-build-failure', 'failed', ?, ?, ?, 'Build failed'),
+                       ('superseded-readiness-failure', 'failed', ?, ?, ?, ?),
+                       ('protected-ready', 'isOk', ?, ?, ?, 'Release ready'),
+                       ('unprotected-readiness-failure', 'failed', ?, ?, ?, ?)`
+                )
+                .run(
+                    "2026-01-01T00:00:00.000Z",
+                    "2026-01-01T00:01:00.000Z",
+                    protectedFailedCommit,
+                    `${RELEASE_READINESS_FAILURE_NOTE_PREFIX}; automatic rollback completed`,
+                    "2026-01-02T00:00:00.000Z",
+                    "2026-01-02T00:01:00.000Z",
+                    protectedFailedCommit,
+                    "2026-01-01T00:00:00.000Z",
+                    "2026-01-01T00:01:00.000Z",
+                    protectedReadyCommit,
+                    `${RELEASE_READINESS_FAILURE_NOTE_PREFIX}; automatic rollback completed`,
+                    "2026-01-03T00:00:00.000Z",
+                    "2026-01-03T00:01:00.000Z",
+                    protectedReadyCommit,
+                    "2026-01-01T00:00:00.000Z",
+                    "2026-01-01T00:01:00.000Z",
+                    unprotectedCommit,
+                    `${RELEASE_READINESS_FAILURE_NOTE_PREFIX}; automatic rollback completed`
+                );
+
+            const changes = pruneDatabaseHistory(database, now, {
+                protectedDeploymentCommits: [protectedFailedCommit, protectedReadyCommit],
+            });
+
+            expect(changes.deploymentJobs).toBe(3);
+            expect(
+                database.query("SELECT id FROM deployment_jobs ORDER BY id").all()
+            ).toEqual([{ id: "protected-readiness-failure" }, { id: "protected-ready" }]);
         } finally {
             database.close();
         }
