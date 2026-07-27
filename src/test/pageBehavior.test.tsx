@@ -38,12 +38,12 @@ import { Agents } from "../pages/Agents";
 import { Chat } from "../pages/Chat";
 import { Dashboard } from "../pages/Dashboard";
 import { Database } from "../pages/Database";
+import { Delivery } from "../pages/Delivery";
 import { Docker } from "../pages/Docker";
 import { Files } from "../pages/Files";
 import { defaultDisableUntilDraft, Jobs } from "../pages/Jobs";
 import { Logs } from "../pages/Logs";
 import { Moltbook } from "../pages/Moltbook";
-import { Delivery } from "../pages/Delivery";
 import { Sessions } from "../pages/Sessions";
 import {
     errorMessage,
