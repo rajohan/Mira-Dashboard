@@ -294,7 +294,7 @@ function normalizedCheckValue(value: unknown): string {
 function deploymentVariant(status: DeploymentJob["status"]) {
     if (status === "isOk") return "success" as const;
     if (status === "failed") return "error" as const;
-    if (status === "restart-scheduled") return "warning" as const;
+    if (status === "verifying") return "warning" as const;
     return "info" as const;
 }
 

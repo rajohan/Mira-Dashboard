@@ -348,6 +348,21 @@ function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
     };
 }
 
+interface PublicDeploymentJob extends Omit<DeploymentJob, "status"> {
+    status: "building" | "verifying" | "isOk" | "failed";
+}
+
+/**
+ * Keeps the persisted cutover protocol compatible with the previous release
+ * while exposing the work actually in progress to operators.
+ */
+function publicDeploymentJob(job: DeploymentJob): PublicDeploymentJob {
+    return {
+        ...job,
+        status: job.status === "restart-scheduled" ? "verifying" : job.status,
+    };
+}
+
 /** Reads one deployment job. */
 function readDeploymentJob(jobId: string): DeploymentJob | undefined {
     const row = database
@@ -734,7 +749,7 @@ function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
 }
 
 /** Performs read deployment jobs. */
-export function readDeploymentJobs(): DeploymentJob[] {
+export function readDeploymentJobs(): PublicDeploymentJob[] {
     return (
         database
             .prepare(
@@ -755,7 +770,7 @@ export function readDeploymentJobs(): DeploymentJob[] {
                 `
             )
             .all(RECENT_DEPLOYMENTS_LIMIT) as unknown as DeploymentJobRow[]
-    ).map((row) => mapDeploymentJob(row));
+    ).map((row) => publicDeploymentJob(mapDeploymentJob(row)));
 }
 
 interface DeploymentRuntimeResultRow {
@@ -1861,7 +1876,10 @@ function shellQuote(value: string): string {
 function deploymentJobUpdateCommand(job: DeploymentJob): string {
     const script = `
 import { Database } from "bun:sqlite";
-const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
+const job = {
+    ...JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}"),
+    updatedAt: new Date().toISOString(),
+};
 const database = new Database(process.env.MIRA_DEPLOYMENT_DB);
 const sqlNull = JSON.parse("null");
 function sqlNullable(value) {
@@ -2105,11 +2123,11 @@ async function scheduleReleaseCutover(
         ...job,
         status: "isOk",
         updatedAt: dateToISOString(new Date()),
-        note: "Atomic release activated. Web, worker, and commit readiness passed",
+        note: `Atomic release activated. Web, worker, commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS}-second worker stability checks passed`,
     };
     const okWithRetentionWarningJob: DeploymentJob = {
         ...okJob,
-        note: "Atomic release activated and ready; release retention cleanup failed",
+        note: `Atomic release activated and verified, including ${DEPLOYMENT_WORKER_STABILITY_SECONDS}-second worker stability; release retention cleanup failed`,
     };
     const rolledBackJob: DeploymentJob = {
         ...job,
@@ -2212,7 +2230,7 @@ async function scheduleReleaseRollback(
         ...job,
         status: "isOk",
         updatedAt: dateToISOString(new Date()),
-        note: `Atomic rollback activated ${targetShort}. Web, worker, and commit readiness passed`,
+        note: `Atomic rollback activated ${targetShort}. Web, worker, commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS}-second worker stability checks passed`,
     };
     const restoredJob: DeploymentJob = {
         ...job,
@@ -2322,7 +2340,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         ...job,
         status: "isOk",
         updatedAt: dateToISOString(new Date()),
-        note: "Interrupted release cutover recovered; active candidate passed restart and commit-bound readiness",
+        note: `Interrupted release cutover recovered; active candidate passed restart, commit-bound readiness, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS}-second worker stability`,
     };
     const script = [
         "sleep 1",
@@ -2527,16 +2545,16 @@ async function runDeploymentJob(
         );
         persistCutover(releaseCutover);
 
-        const restartScheduled: DeploymentJob = {
+        const cutoverJob: DeploymentJob = {
             ...currentJob,
             status: "restart-scheduled",
             updatedAt: dateToISOString(new Date()),
             commit: candidate.manifest.commitSha,
             commitTitle: candidate.manifest.commitTitle,
-            note: "Immutable release published. Detached activation and rollback check scheduled",
+            note: `Release published. Activating it, restarting services, then verifying web, worker, deployed commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS} seconds of worker stability; automatic rollback is armed`,
         };
-        writeDeploymentJob(restartScheduled);
-        await scheduleReleaseCutover(restartScheduled, releaseCutover, signal);
+        writeDeploymentJob(cutoverJob);
+        await scheduleReleaseCutover(cutoverJob, releaseCutover, signal);
         return releaseCutover;
     } catch (error) {
         const failed: DeploymentJob = {
@@ -2590,17 +2608,17 @@ async function runRollbackJob(
         }
         assertDashboardReleaseHostRuntimeCompatible(state.previous);
 
-        const restartScheduled: DeploymentJob = {
+        const cutoverJob: DeploymentJob = {
             ...currentJob,
             status: "restart-scheduled",
             updatedAt: dateToISOString(new Date()),
             commit: state.previous.commitSha,
             commitTitle: state.previous.manifest.commitTitle,
-            note: "Verified rollback target. Detached atomic rollback and readiness check scheduled",
+            note: `Rollback target verified. Activating it, restarting services, then verifying web, worker, deployed commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS} seconds of worker stability; automatic restoration is armed`,
         };
-        writeDeploymentJob(restartScheduled);
+        writeDeploymentJob(cutoverJob);
         await scheduleReleaseRollback(
-            restartScheduled,
+            cutoverJob,
             state.previous.commitSha,
             state.current.commitSha,
             signal

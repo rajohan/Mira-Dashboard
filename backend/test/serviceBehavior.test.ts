@@ -1571,7 +1571,7 @@ describe("backend service behavior", () => {
             )
             .run(
                 newerId,
-                "done",
+                "restart-scheduled",
                 "2026-06-24T11:00:00.000Z",
                 "2026-06-24T11:01:00.000Z",
                 "def456",
@@ -1591,7 +1591,7 @@ describe("backend service behavior", () => {
             );
             expect(jobs.find((job) => job.id === newerId)).toMatchObject({
                 id: newerId,
-                status: "done",
+                status: "verifying",
                 commit: "def456",
                 commitTitle: "Newer deploy",
                 note: "newer note",
@@ -1971,7 +1971,10 @@ printf 'scheduled\n'
                     .get(rollback.id) as
                     { note: string | null; status: string } | undefined;
                 return (
-                    row?.status === "restart-scheduled" && existsSync(systemdScriptLog)
+                    row?.status === "restart-scheduled" &&
+                    row.note ===
+                        "Rollback target verified. Activating it, restarting services, then verifying web, worker, deployed commit, and 31 seconds of worker stability; automatic restoration is armed" &&
+                    existsSync(systemdScriptLog)
                 );
             }, 5000);
             await waitFor(
@@ -1992,6 +1995,10 @@ printf 'scheduled\n'
             expect(guardian).toContain(
                 "Original release cccccccc was restored automatically"
             );
+            expect(guardian).toContain(
+                "Atomic rollback activated dddddddd. Web, worker, commit, and 31-second worker stability checks passed"
+            );
+            expect(guardian).toContain("updatedAt: new Date().toISOString()");
             expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
                 `--unit=mira-dashboard-deploy-${rollback.id}\n`
             );
@@ -2531,7 +2538,7 @@ printf 'scheduled\n'
             expect(row).toEqual({
                 commit_sha: candidateCommit,
                 commit_title: "Deployable dashboard commit",
-                note: "Immutable release published. Detached activation and rollback check scheduled",
+                note: "Release published. Activating it, restarting services, then verifying web, worker, deployed commit, and 31 seconds of worker stability; automatic rollback is armed",
                 status: "restart-scheduled",
             });
             await expect(Bun.file(gitLog).text()).resolves.toContain(
@@ -2571,6 +2578,10 @@ printf 'scheduled\n'
             expect(restartCommand).toContain("worker_identity");
             expect(restartCommand).toContain("ExecMainStartTimestampMonotonic");
             expect(restartCommand).toContain("sleep 31");
+            expect(restartCommand).toContain(
+                "Atomic release activated. Web, worker, commit, and 31-second worker stability checks passed"
+            );
+            expect(restartCommand).toContain("updatedAt: new Date().toISOString()");
             expect(restartCommand).toContain(".checks.release.backendCommit");
             expect(restartCommand).toContain("releaseLifecycle.js");
             expect(restartCommand).toContain(
@@ -2666,7 +2677,7 @@ printf 'scheduled\n'
                 'if restart_services && ready_for_commit "${candidate_commit:0:8}"; then'
             );
             expect(recoveryCommand).toContain(
-                "Interrupted release cutover recovered; active candidate passed restart and commit-bound readiness"
+                "Interrupted release cutover recovered; active candidate passed restart, commit-bound readiness, and 31-second worker stability"
             );
             expect(
                 recoveryCommand.indexOf(

@@ -1802,7 +1802,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
             deployment: {
                 id: "deploy-2",
                 commit: "def456",
-                status: "restart-scheduled",
+                status: "verifying",
                 updatedAt: "2026-06-24T08:15:00.000Z",
                 note: "Deploy scheduled",
             },
@@ -3295,6 +3295,44 @@ describe("Mira Dashboard pages", () => {
             ).length
         ).toBeGreaterThan(1);
 
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("labels post-restart deployment checks as verifying", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                if (url === "/api/pull-requests/deployments") {
+                    return Response.json({
+                        deployments: [
+                            {
+                                id: "deploy-verifying",
+                                commit: "abc123",
+                                commitTitle: "Verify deployment status",
+                                status: "verifying",
+                                updatedAt: "2026-06-24T08:10:00.000Z",
+                                note: "Restarting services and verifying readiness",
+                            },
+                        ],
+                    });
+                }
+
+                const method = init?.method ?? "GET";
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Delivery));
+
+        await waitFor(() => {
+            expect(
+                screen.getByText("Restarting services and verifying readiness")
+            ).toBeInTheDocument();
+            expect(screen.getByText("verifying")).toBeInTheDocument();
+        });
         view.unmount();
         view.queryClient.clear();
     });
