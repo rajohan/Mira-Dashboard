@@ -2,38 +2,53 @@
 
 Production separates source control, immutable code, and persistent state:
 
-| Purpose                                           | Path                                                         |
-| ------------------------------------------------- | ------------------------------------------------------------ |
-| Control checkout and deployment scripts           | `/home/ubuntu/projects/mira-dashboard`                       |
-| Temporary detached build worktrees                | `/home/ubuntu/projects/mira-dashboard-worktrees/`            |
-| Shared managed PR-dev checkout                    | `/home/ubuntu/projects/mira-dashboard-preview`               |
-| Managed PR-dev state and dependency cache         | `/home/ubuntu/projects/mira-dashboard-preview-state/managed` |
-| Immutable releases and `current`/`previous` links | `/home/ubuntu/projects/mira-dashboard-releases`              |
-| Persistent production state                       | `/home/ubuntu/projects/mira-dashboard-state`                 |
+```text
+/home/ubuntu/projects/mira-dashboard/
+├── production/
+│   ├── checkout/
+│   ├── releases/
+│   └── state/
+└── development/
+    ├── preview/
+    ├── state/
+    │   ├── local/
+    │   └── preview/
+    └── worktrees/
+```
+
+| Purpose                                           | Path                                                             |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| Control checkout and deployment scripts           | `/home/ubuntu/projects/mira-dashboard/production/checkout`       |
+| Temporary detached build worktrees                | `/home/ubuntu/projects/mira-dashboard/development/worktrees/`    |
+| Shared managed PR-dev checkout                    | `/home/ubuntu/projects/mira-dashboard/development/preview`       |
+| Managed PR-dev state and dependency cache         | `/home/ubuntu/projects/mira-dashboard/development/state/preview` |
+| Immutable releases and `current`/`previous` links | `/home/ubuntu/projects/mira-dashboard/production/releases`       |
+| Persistent production state                       | `/home/ubuntu/projects/mira-dashboard/production/state`          |
 
 Web and worker execute from:
 
 ```text
-/home/ubuntu/projects/mira-dashboard-releases/current/backend
+/home/ubuntu/projects/mira-dashboard/production/releases/current/backend
 ```
 
 `current` and `previous` are atomic relative symlinks to full-SHA directories
-below `mira-dashboard-releases/releases/`. Production never builds in, writes
-to, or executes backend code from the control checkout.
+below `production/releases/releases/`. Production never builds in, writes to,
+or executes backend code from the control checkout.
 
 ## Persistent State
 
 Mutable state is deliberately outside both Git and every release:
 
-| State                              | Stable path                                                    |
-| ---------------------------------- | -------------------------------------------------------------- |
-| SQLite database                    | `/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db` |
-| SQLite WAL and shared-memory files | next to the database                                           |
-| Restore-verified SQLite backups    | `/home/ubuntu/projects/mira-dashboard-state/backups/`          |
-| Dashboard Gateway device identity  | `/home/ubuntu/projects/mira-dashboard-state/openclaw-client/`  |
-| Log-rotation lock                  | `/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock` |
+| State                              | Stable path                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------- |
+| SQLite database                    | `/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db` |
+| SQLite WAL and shared-memory files | next to the database                                                      |
+| Restore-verified SQLite backups    | `/home/ubuntu/projects/mira-dashboard/production/state/backups/`          |
+| Dashboard Gateway device identity  | `/home/ubuntu/projects/mira-dashboard/production/state/openclaw-client/`  |
+| Log-rotation lock                  | `/home/ubuntu/projects/mira-dashboard/production/state/log-rotation.lock` |
 
-The backup directory is derived from `dirname(MIRA_DASHBOARD_DB_PATH)`, so
+The backup directory is derived from the production state root (or from
+`dirname(MIRA_DASHBOARD_DB_PATH)` when that advanced override is used), so
 pre-deploy and pre-migration snapshots automatically stay under the state root.
 Kopia mounts `/home/ubuntu/projects` as its projects source; the separate state
 directory remains in that backup scope.
@@ -42,20 +57,18 @@ directory remains in that backup scope.
 application configuration, is listed in every release manifest, and is copied
 and checksum-verified with the other immutable release artifacts.
 
-Both managed units set the stable paths explicitly:
+Both managed units set one stable project root:
 
 ```text
-MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
-MIRA_DASHBOARD_OPENCLAW_HOME=/home/ubuntu/projects/mira-dashboard-state/openclaw-client
-MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock
-MIRA_DASHBOARD_RELEASE_ROOT=/home/ubuntu/projects/mira-dashboard-releases/current
-MIRA_DASHBOARD_RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
+MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
 ```
 
-Their Doppler command selectively preserves these five values plus `NODE_ENV`,
+The backend derives every production and development path in the layout above
+from that root. Their Doppler command preserves it plus `NODE_ENV`,
 `MIRA_DASHBOARD_EXECUTION_ROLE`, `MIRA_DASHBOARD_ENABLE_JOB_SCOPES`, and
 `MIRA_DASHBOARD_JOB_SCOPE_OWNER`, so production secrets cannot replace
-unit-owned state, release paths, or orchestration policy.
+unit-owned paths or orchestration policy. Fine-grained path variables remain
+available only as explicit development, test, and recovery overrides.
 
 The OpenClaw home preserves the signed Gateway device identity across releases.
 Secrets remain in Doppler `rajohan/prd`; tracked unit files contain no secret
@@ -67,7 +80,7 @@ The Dashboard worker owns the deployment:
 
 1. Require a clean control checkout and fast-forward `main`.
 2. Create a detached build worktree below
-   `/home/ubuntu/projects/mira-dashboard-worktrees/`.
+   `/home/ubuntu/projects/mira-dashboard/development/worktrees/`.
 3. Install frozen frontend and backend dependencies.
 4. Run `deploy:prepare` against the stable production database.
 5. Verify the release manifest, component identities, schema contract, and
@@ -84,9 +97,9 @@ The Dashboard worker owns the deployment:
 11. On success, retain `current`, `previous`, and one additional newest
     verified release.
 
-The executor fails closed unless both units already run from managed
-`current/backend` with the exact stable state paths. A deployment never modifies
-the running release.
+The executor fails closed unless both units use the expected project root and
+run from managed `current/backend`. A deployment never modifies the running
+release.
 
 ## Restart And Smoke Test
 
@@ -119,8 +132,9 @@ First confirm no deployment or rollback action is running:
 
 ```bash
 set -euo pipefail
-RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
-DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
+RELEASES_ROOT="$MIRA_DASHBOARD_PROJECT_ROOT/production/releases"
+DATABASE_PATH="$MIRA_DASHBOARD_PROJECT_ROOT/production/state/mira-dashboard.db"
 
 assert_no_active_release_action() {
   local active_action
@@ -157,9 +171,7 @@ CURRENT_LIFECYCLE="$CURRENT_RELEASE/backend/dist/releaseLifecycle.js"
 test -f "$CURRENT_LIFECYCLE"
 test ! -L "$CURRENT_LIFECYCLE"
 STATUS="$(
-  env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-    MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-    NODE_ENV=production \
+  env NODE_ENV=production \
     bun "$CURRENT_LIFECYCLE" status
 )"
 TARGET_SHA="$(jq --raw-output '.previous.commitSha // empty' <<<"$STATUS")"
@@ -189,16 +201,12 @@ ready_for_commit() {
 }
 
 assert_no_active_release_action
-env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
+env NODE_ENV=production \
   bun "$CURRENT_LIFECYCLE" rollback "$CURRENT_SHA" "$TARGET_SHA"
 systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 if ! ready_for_commit "$TARGET_SHA"; then
   echo "Rollback target failed readiness. Restoring $CURRENT_SHA" >&2
-  env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-    MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-    NODE_ENV=production \
+  env NODE_ENV=production \
     bun "$CURRENT_LIFECYCLE" rollback "$TARGET_SHA" "$CURRENT_SHA"
   systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
   ready_for_commit "$CURRENT_SHA"

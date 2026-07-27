@@ -29,10 +29,12 @@ systemctl --user status openclaw-gateway.service
 Production checkout path:
 
 ```bash
-mkdir -p /home/ubuntu/projects
-cd /home/ubuntu/projects
-git clone https://github.com/rajohan/Mira-Dashboard.git mira-dashboard
-cd mira-dashboard
+install -d -m 0755 \
+  /home/ubuntu/projects/mira-dashboard/production \
+  /home/ubuntu/projects/mira-dashboard/development
+git clone https://github.com/rajohan/Mira-Dashboard.git \
+  /home/ubuntu/projects/mira-dashboard/production/checkout
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
 ```
 
 Install dependencies:
@@ -47,9 +49,10 @@ Create the managed runtime roots:
 
 ```bash
 install -d -m 0755 \
-  /home/ubuntu/projects/mira-dashboard-worktrees \
-  /home/ubuntu/projects/mira-dashboard-releases
-install -d -m 0700 /home/ubuntu/projects/mira-dashboard-state
+  /home/ubuntu/projects/mira-dashboard/development/state \
+  /home/ubuntu/projects/mira-dashboard/development/worktrees \
+  /home/ubuntu/projects/mira-dashboard/production/releases
+install -d -m 0700 /home/ubuntu/projects/mira-dashboard/production/state
 ```
 
 ## Publish The Initial Managed Release
@@ -58,11 +61,8 @@ Build, preflight, checksum, and publish the checked-out commit from an isolated
 worktree:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
-RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
-DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
-OPENCLAW_CLIENT_HOME=/home/ubuntu/projects/mira-dashboard-state/openclaw-client
-LOG_ROTATION_LOCK=/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock
+export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
+cd "$MIRA_DASHBOARD_PROJECT_ROOT/production/checkout"
 CANDIDATE_SHA="$(git rev-parse HEAD)"
 
 # A new host has no live database to preflight yet. Initialize and migrate the
@@ -70,7 +70,6 @@ CANDIDATE_SHA="$(git rev-parse HEAD)"
 (
   cd backend
   env \
-    MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
     NODE_ENV=production \
     bun -e '
       const { database } = await import("./src/database.ts");
@@ -86,10 +85,6 @@ CANDIDATE_SHA="$(git rev-parse HEAD)"
 )
 
 env \
-  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  MIRA_DASHBOARD_OPENCLAW_HOME="$OPENCLAW_CLIENT_HOME" \
-  MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE="$LOG_ROTATION_LOCK" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
   bun backend/src/releaseDeployment.ts stage "$CANDIDATE_SHA"
 ```
@@ -97,12 +92,8 @@ env \
 Activate it before installing/starting the managed systemd units:
 
 ```bash
-RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
-DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
 CANDIDATE_SHA="$(git rev-parse HEAD)"
 env \
-  MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
   NODE_ENV=production \
   bun backend/src/releaseLifecycle.ts activate "$CANDIDATE_SHA"
 ```
@@ -142,7 +133,7 @@ The Dashboard does not trust localhost as an identity. From the Dashboard
 checkout, provision four independent caller credentials:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
 install -d -m 0700 /home/ubuntu/.config/mira-dashboard/automation
 bun scripts/provisionDashboardAutomationCredential.ts heartbeat
 bun scripts/provisionDashboardAutomationCredential.ts daily-summary
@@ -172,7 +163,7 @@ must target `ubuntu`'s user manager.
 Install the tracked web and worker units:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
 install -d -m 0755 /home/ubuntu/.config/systemd/user
 install -m 0644 systemd/mira-dashboard.service \
   /home/ubuntu/.config/systemd/user/mira-dashboard.service

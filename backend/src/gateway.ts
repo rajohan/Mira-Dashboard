@@ -5,6 +5,10 @@ import Path from "node:path";
 import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
+import {
+    configuredDashboardProjectPaths,
+    resolveDashboardProjectPaths,
+} from "./lib/dashboardPaths.ts";
 import { errorMessage } from "./lib/errors.ts";
 import {
     type DeviceIdentity,
@@ -31,11 +35,13 @@ function defaultOpenClawHome(): string {
         : Path.join(process.cwd(), "data", "openclaw");
 }
 
-const DEFAULT_DASHBOARD_OPENCLAW_HOME = Path.join(
-    process.cwd(),
-    "data",
-    "openclaw-client"
-);
+const DEFAULT_DASHBOARD_OPENCLAW_HOME =
+    (
+        configuredDashboardProjectPaths() ??
+        (process.env.NODE_ENV === "production"
+            ? resolveDashboardProjectPaths()
+            : undefined)
+    )?.productionOpenClawHome ?? Path.join(process.cwd(), "data", "openclaw-client");
 
 /** Performs load or create dashboard device IDentity. */
 function loadOrCreateDashboardDeviceIdentity(

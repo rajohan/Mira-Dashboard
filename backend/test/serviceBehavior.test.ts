@@ -18,7 +18,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
-import { database, getMiraDatabasePath, sqlNullable } from "../src/database.ts";
+import { database, sqlNullable } from "../src/database.ts";
 import * as processModule from "../src/lib/processes.ts";
 import {
     ensureDashboardReleaseLayout,
@@ -45,6 +45,35 @@ function createTemporaryRoot(prefix: string): string {
         rmSync(root, { force: true, recursive: true });
     });
     return root;
+}
+
+async function executeSuccessfulGuardianPath(script: string): Promise<void> {
+    const firstLifecycleBranch = script.indexOf("\nif MIRA_DASHBOARD_RELEASES_ROOT=");
+    if (firstLifecycleBranch === -1) {
+        throw new Error("Guardian fixture is missing its lifecycle branch");
+    }
+    const executableScript = [
+        "restart_services() { return 0; }",
+        "ready_for_commit() { return 0; }",
+        script.slice(firstLifecycleBranch + 1),
+    ].join("\n");
+    const child = Bun.spawn(["/bin/bash", "-lc", executableScript], {
+        env: process.env,
+        stderr: "pipe",
+        stdout: "pipe",
+    });
+    const [exitCode, stderr, stdout] = await Promise.all([
+        child.exited,
+        new Response(child.stderr).text(),
+        new Response(child.stdout).text(),
+    ]);
+    if (exitCode !== 0) {
+        throw new Error(
+            `Guardian fixture failed with exit code ${exitCode}: ${
+                stderr.trim() || stdout.trim()
+            }`
+        );
+    }
 }
 
 function readableUtf8Stream(value: string): ReadableStream<Uint8Array> {
@@ -1571,7 +1600,7 @@ describe("backend service behavior", () => {
             )
             .run(
                 newerId,
-                "restart-scheduled",
+                "verifying",
                 "2026-06-24T11:00:00.000Z",
                 "2026-06-24T11:01:00.000Z",
                 "def456",
@@ -1869,15 +1898,22 @@ describe("backend service behavior", () => {
 
     it("hands manual rollback to a detached readiness-bound guardian", async () => {
         rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_PROJECT_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE");
+        rememberEnvironment("MIRA_DASHBOARD_PREVIEW_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH");
+        rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
         const fakeRoot = createTemporaryRoot("mira-release-rollback-root-");
         const fakeBin = createTemporaryRoot("mira-release-rollback-bin-");
         const releasesRoot = path.join(fakeRoot, "managed-releases");
         const openClawHome = path.join(fakeRoot, "state", "openclaw-client");
         const logRotationLockFile = path.join(fakeRoot, "state", "log-rotation.lock");
+        const previewRoot = path.join(fakeRoot, "preview-state");
+        const previewWorktreePath = path.join(fakeRoot, "preview");
+        const worktreeRoot = path.join(fakeRoot, "worktrees");
         const systemdScriptLog = path.join(fakeRoot, "rollback-guardian.sh");
         const systemdArgumentsLog = path.join(fakeRoot, "rollback-systemd-run.args");
         const currentCommit = "c".repeat(40);
@@ -1923,8 +1959,8 @@ else
   scope_owner="mira-dashboard.service"
 fi
 printf '%s\n' \
-  "Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=$execution_role MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=$scope_owner MIRA_DASHBOARD_DB_PATH=${getMiraDatabasePath()} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${releasesRoot}/current MIRA_DASHBOARD_RELEASES_ROOT=${releasesRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_EXECUTION_ROLE,MIRA_DASHBOARD_ENABLE_JOB_SCOPES,MIRA_DASHBOARD_JOB_SCOPE_OWNER,MIRA_DASHBOARD_DB_PATH,MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE,MIRA_DASHBOARD_OPENCLAW_HOME,MIRA_DASHBOARD_RELEASE_ROOT,MIRA_DASHBOARD_RELEASES_ROOT -- bun $entrypoint ; }" \
+  "Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=$execution_role MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=$scope_owner MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_EXECUTION_ROLE,MIRA_DASHBOARD_ENABLE_JOB_SCOPES,MIRA_DASHBOARD_JOB_SCOPE_OWNER,MIRA_DASHBOARD_PROJECT_ROOT -- bun $entrypoint ; }" \
   "WorkingDirectory=${releasesRoot}/current/backend"
 `
         );
@@ -1942,10 +1978,14 @@ printf 'scheduled\n'
         chmodSync(path.join(fakeBin, "systemctl"), 0o755);
         chmodSync(path.join(fakeBin, "systemd-run"), 0o755);
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_PROJECT_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openClawHome;
         process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = logRotationLockFile;
+        process.env.MIRA_DASHBOARD_PREVIEW_ROOT = previewRoot;
+        process.env.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH = previewWorktreePath;
+        process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
 
         const { prepareAndStartRollback, registerPullRequestExecutionActions } =
             await import("../src/services/pullRequests.ts");
@@ -1971,7 +2011,7 @@ printf 'scheduled\n'
                     .get(rollback.id) as
                     { note: string | null; status: string } | undefined;
                 return (
-                    row?.status === "restart-scheduled" &&
+                    row?.status === "verifying" &&
                     row.note ===
                         "Rollback target verified. Activating it, restarting services, then verifying web, worker, deployed commit, and 31 seconds of worker stability; automatic restoration is armed" &&
                     existsSync(systemdScriptLog)
@@ -1983,6 +2023,13 @@ printf 'scheduled\n'
             );
 
             const guardian = readFileSync(systemdScriptLog, "utf8");
+            const scheduledUpdatedAt = (
+                database
+                    .prepare(
+                        "SELECT updated_at AS updatedAt FROM deployment_jobs WHERE id = ?"
+                    )
+                    .get(rollback.id) as { updatedAt: string }
+            ).updatedAt;
             expect(guardian).toContain(
                 `${releasesRoot}/releases/${currentCommit}/backend/dist/releaseLifecycle.js`
             );
@@ -2021,6 +2068,28 @@ printf 'scheduled\n'
             );
             expect(readFileSync(systemdArgumentsLog, "utf8")).toContain(
                 "--expand-environment=no\n"
+            );
+            await executeSuccessfulGuardianPath(guardian);
+            const completedRollback = database
+                .prepare(
+                    `SELECT status, note, updated_at AS updatedAt
+                     FROM deployment_jobs
+                     WHERE id = ?`
+                )
+                .get(rollback.id) as {
+                note: string;
+                status: string;
+                updatedAt: string;
+            };
+            expect(completedRollback).toMatchObject({
+                note: "Atomic rollback activated dddddddd. Web, worker, commit, and 31-second worker stability checks passed",
+                status: "isOk",
+            });
+            expect(new Date(completedRollback.updatedAt).toISOString()).toBe(
+                completedRollback.updatedAt
+            );
+            expect(Date.parse(completedRollback.updatedAt)).toBeGreaterThan(
+                Date.parse(scheduledUpdatedAt)
             );
         } finally {
             database
@@ -2330,11 +2399,14 @@ printf 'scheduled\n'
 
     it("publishes an immutable release and hands activation to detached cutover", async () => {
         rememberEnvironment("PATH");
+        rememberEnvironment("MIRA_DASHBOARD_PROJECT_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_WORKTREE_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
         rememberEnvironment("MIRA_DASHBOARD_OPENCLAW_HOME");
         rememberEnvironment("MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE");
+        rememberEnvironment("MIRA_DASHBOARD_PREVIEW_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH");
         rememberEnvironment("PORT");
         const fakeRoot = createTemporaryRoot("mira-pr-deploy-root-");
         const fakeBin = createTemporaryRoot("mira-pr-deploy-bin-");
@@ -2343,6 +2415,8 @@ printf 'scheduled\n'
         const candidateTemplate = path.join(fakeRoot, "candidate-template");
         const openClawHome = path.join(fakeRoot, "state", "openclaw-client");
         const logRotationLockFile = path.join(fakeRoot, "state", "log-rotation.lock");
+        const previewRoot = path.join(fakeRoot, "preview-state");
+        const previewWorktreePath = path.join(fakeRoot, "preview");
         const priorPreviousCommit = "b".repeat(40);
         const oldCommit = "c".repeat(40);
         const candidateCommit = "d".repeat(40);
@@ -2413,6 +2487,8 @@ set -euo pipefail
 printf '%s|%s\n' "$PWD" "$*" >> ${JSON.stringify(bunLog)}
 if [[ "$*" == "install --frozen-lockfile" || "$*" == "run deploy:prepare" || "$*" == "dist/databasePreflight.js" ]]; then
   printf 'ok\n'
+elif [[ "$1" == "-e" || "$1" == */releaseLifecycle.js ]]; then
+  exec ${JSON.stringify(process.execPath)} "$@"
 else
   echo "unexpected bun args: $*" >&2
   exit 2
@@ -2442,8 +2518,8 @@ else
   scope_owner="mira-dashboard.service"
 fi
 printf '%s\n' \
-  "Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=$execution_role MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=$scope_owner MIRA_DASHBOARD_DB_PATH=${getMiraDatabasePath()} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${releasesRoot}/current MIRA_DASHBOARD_RELEASES_ROOT=${releasesRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_EXECUTION_ROLE,MIRA_DASHBOARD_ENABLE_JOB_SCOPES,MIRA_DASHBOARD_JOB_SCOPE_OWNER,MIRA_DASHBOARD_DB_PATH,MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE,MIRA_DASHBOARD_OPENCLAW_HOME,MIRA_DASHBOARD_RELEASE_ROOT,MIRA_DASHBOARD_RELEASES_ROOT -- bun $entrypoint ; }" \
+  "Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=$execution_role MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=$scope_owner MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_EXECUTION_ROLE,MIRA_DASHBOARD_ENABLE_JOB_SCOPES,MIRA_DASHBOARD_JOB_SCOPE_OWNER,MIRA_DASHBOARD_PROJECT_ROOT -- bun $entrypoint ; }" \
   'WorkingDirectory=${releasesRoot}/current/backend'
 `
         );
@@ -2462,11 +2538,14 @@ printf 'scheduled\n'
         chmodSync(path.join(fakeBin, "systemctl"), 0o755);
         chmodSync(path.join(fakeBin, "systemd-run"), 0o755);
         process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`;
+        process.env.MIRA_DASHBOARD_PROJECT_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.MIRA_DASHBOARD_WORKTREE_ROOT = worktreeRoot;
         process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
         process.env.MIRA_DASHBOARD_OPENCLAW_HOME = openClawHome;
         process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE = logRotationLockFile;
+        process.env.MIRA_DASHBOARD_PREVIEW_ROOT = previewRoot;
+        process.env.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH = previewWorktreePath;
         process.env.PORT = "4310";
 
         const { registerPullRequestExecutionActions, startDeployLatest } =
@@ -2515,7 +2594,7 @@ printf 'scheduled\n'
                           status: string;
                       }
                     | undefined;
-                return row?.status === "restart-scheduled" && existsSync(systemdLog);
+                return row?.status === "verifying" && existsSync(systemdLog);
             }, 5000);
             await waitFor(
                 () => getJobExecution(deploymentExecution.id)?.status === "success",
@@ -2539,8 +2618,15 @@ printf 'scheduled\n'
                 commit_sha: candidateCommit,
                 commit_title: "Deployable dashboard commit",
                 note: "Release published. Activating it, restarting services, then verifying web, worker, deployed commit, and 31 seconds of worker stability; automatic rollback is armed",
-                status: "restart-scheduled",
+                status: "verifying",
             });
+            const scheduledUpdatedAt = (
+                database
+                    .prepare(
+                        "SELECT updated_at AS updatedAt FROM deployment_jobs WHERE id = ?"
+                    )
+                    .get(job.id) as { updatedAt: string }
+            ).updatedAt;
             await expect(Bun.file(gitLog).text()).resolves.toContain(
                 "pull --ff-only origin main"
             );
@@ -2707,7 +2793,7 @@ printf 'scheduled\n'
                     .get(job.id)
             ).toEqual({
                 note: "Detached release guardian ended without a terminal result; automatic rollback recovery scheduled",
-                status: "restart-scheduled",
+                status: "verifying",
             });
             expect(
                 database
@@ -2748,7 +2834,7 @@ printf 'scheduled\n'
                 const row = database
                     .prepare("SELECT status FROM deployment_jobs WHERE id = ?")
                     .get(redeploy.id) as { status: string } | undefined;
-                return row?.status === "restart-scheduled" && existsSync(systemdLog);
+                return row?.status === "verifying" && existsSync(systemdLog);
             }, 5000);
             await waitFor(
                 () => getJobExecution(redeployExecution.id)?.status === "success",
@@ -2827,6 +2913,28 @@ printf 'scheduled\n'
                 note: "Automatic redeploy fallback is not eligible: Previous release failed its latest runtime readiness check",
                 status: "failed",
             });
+            await executeSuccessfulGuardianPath(restartCommand);
+            const completedDeployment = database
+                .prepare(
+                    `SELECT status, note, updated_at AS updatedAt
+                     FROM deployment_jobs
+                     WHERE id = ?`
+                )
+                .get(job.id) as {
+                note: string;
+                status: string;
+                updatedAt: string;
+            };
+            expect(completedDeployment).toMatchObject({
+                note: "Atomic release activated. Web, worker, commit, and 31-second worker stability checks passed",
+                status: "isOk",
+            });
+            expect(new Date(completedDeployment.updatedAt).toISOString()).toBe(
+                completedDeployment.updatedAt
+            );
+            expect(Date.parse(completedDeployment.updatedAt)).toBeGreaterThan(
+                Date.parse(scheduledUpdatedAt)
+            );
         } finally {
             database
                 .prepare("DELETE FROM job_executions WHERE id = ?")
@@ -3602,7 +3710,7 @@ fi
             branch: "main",
             dirty: true,
             exists: true,
-            remote: "https://example.com/mira-dashboard.git",
+            remote: "https://example.com/checkout.git",
             statusSummary: {
                 conflicted: 1,
                 deleted: 1,
@@ -5840,7 +5948,7 @@ fi
             runProcessSpy.mock.calls[0] ?? [];
         expect(sudoCommand).toBe("sudo");
         expect(sudoArguments).toContain(
-            "--preserve-env=LANG,NODE_ENV,TZ,MIRA_DASHBOARD_DB_PATH,MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE"
+            "--preserve-env=LANG,NODE_ENV,TZ,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_DB_PATH,MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE"
         );
         expect(sudoOptions?.env).toMatchObject({
             MIRA_DASHBOARD_DB_PATH: configuredDatabasePath,

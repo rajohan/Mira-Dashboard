@@ -51,7 +51,7 @@ It is a Bun-native application with:
 Production uses `mira-dashboard.service` plus
 `mira-dashboard-worker.service`. Both run through Doppler `rajohan/prd` from
 the immutable release selected by
-`/home/ubuntu/projects/mira-dashboard-releases/current`; the Git checkout is
+`/home/ubuntu/projects/mira-dashboard/production/releases/current`; the Git checkout is
 only the deployment control plane.
 
 ## Documentation Rules

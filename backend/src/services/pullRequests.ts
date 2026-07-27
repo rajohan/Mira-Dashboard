@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { database, getMiraDatabasePath, sqlNullable } from "../database.ts";
+import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { errorMessage } from "../lib/errors.ts";
 import {
     killProcessGroup,
@@ -95,7 +96,7 @@ const DEPLOYMENT_WORKER_STABILITY_SECONDS =
     Math.ceil(JOB_WORKER_HEARTBEAT_MAX_AGE_MS / 1000) + 1;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
-const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
+const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "verifying"]);
 const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
 const publicPullRequestCache: {
@@ -132,14 +133,14 @@ export function getResolvedRoots() {
 function getDashboardRoot(): string {
     return resolveConfiguredRoot(
         "MIRA_DASHBOARD_ROOT",
-        "/home/ubuntu/projects/mira-dashboard"
+        resolveDashboardProjectPaths().productionCheckoutRoot
     );
 }
 
 function getDashboardWorktreeRoot(): string {
     return resolveConfiguredRoot(
         "MIRA_DASHBOARD_WORKTREE_ROOT",
-        "/home/ubuntu/projects/mira-dashboard-worktrees"
+        resolveDashboardProjectPaths().developmentWorktreeRoot
     );
 }
 
@@ -210,7 +211,7 @@ interface PublicGitHubPullRequest {
 /** Represents deployment job. */
 interface DeploymentJob {
     id: string;
-    status: "building" | "restart-scheduled" | "isOk" | "failed";
+    status: "building" | "verifying" | "isOk" | "failed";
     startedAt: string;
     updatedAt: string;
     commit?: string;
@@ -345,21 +346,6 @@ function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
         note: row.note ?? undefined,
         stdout: row.stdout ?? undefined,
         stderr: row.stderr ?? undefined,
-    };
-}
-
-interface PublicDeploymentJob extends Omit<DeploymentJob, "status"> {
-    status: "building" | "verifying" | "isOk" | "failed";
-}
-
-/**
- * Keeps the persisted cutover protocol compatible with the previous release
- * while exposing the work actually in progress to operators.
- */
-function publicDeploymentJob(job: DeploymentJob): PublicDeploymentJob {
-    return {
-        ...job,
-        status: job.status === "restart-scheduled" ? "verifying" : job.status,
     };
 }
 
@@ -749,7 +735,7 @@ function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
 }
 
 /** Performs read deployment jobs. */
-export function readDeploymentJobs(): PublicDeploymentJob[] {
+export function readDeploymentJobs(): DeploymentJob[] {
     return (
         database
             .prepare(
@@ -770,7 +756,7 @@ export function readDeploymentJobs(): PublicDeploymentJob[] {
                 `
             )
             .all(RECENT_DEPLOYMENTS_LIMIT) as unknown as DeploymentJobRow[]
-    ).map((row) => publicDeploymentJob(mapDeploymentJob(row)));
+    ).map((row) => mapDeploymentJob(row));
 }
 
 interface DeploymentRuntimeResultRow {
@@ -2289,7 +2275,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
     cutover: OrphanedDeploymentCutover
 ): boolean {
     const job = readDeploymentJob(cutover.id);
-    if (!job || job.status !== "restart-scheduled") {
+    if (!job || job.status !== "verifying") {
         return false;
     }
     const candidateCommit = cutover.candidateCommit ?? job.commit;
@@ -2547,7 +2533,7 @@ async function runDeploymentJob(
 
         const cutoverJob: DeploymentJob = {
             ...currentJob,
-            status: "restart-scheduled",
+            status: "verifying",
             updatedAt: dateToISOString(new Date()),
             commit: candidate.manifest.commitSha,
             commitTitle: candidate.manifest.commitTitle,
@@ -2610,7 +2596,7 @@ async function runRollbackJob(
 
         const cutoverJob: DeploymentJob = {
             ...currentJob,
-            status: "restart-scheduled",
+            status: "verifying",
             updatedAt: dateToISOString(new Date()),
             commit: state.previous.commitSha,
             commitTitle: state.previous.manifest.commitTitle,

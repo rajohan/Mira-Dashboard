@@ -1726,9 +1726,9 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     if (url === "/api/pull-requests/production-checkout") {
         return Response.json({
             checkout: {
-                root: "/home/ubuntu/projects/mira-dashboard",
-                expectedRoot: "/home/ubuntu/projects/mira-dashboard",
-                worktreeRoot: "/home/ubuntu/projects/mira-dashboard",
+                root: "/srv/mira-dashboard/production/checkout",
+                expectedRoot: "/srv/mira-dashboard/production/checkout",
+                worktreeRoot: "/srv/mira-dashboard/production/checkout",
                 branch: "main",
                 expectedBranch: "main",
                 head: "abc123",
@@ -2939,6 +2939,71 @@ describe("Mira Dashboard pages", () => {
         view.queryClient.clear();
     });
 
+    it("shows production-only PR dev controls without a host-path error", async () => {
+        const originalFetch = fetch;
+        let view: ReturnType<typeof renderPage> | undefined;
+        try {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                    const url = String(input);
+                    if (url === "/api/pull-requests") {
+                        return Response.json({
+                            pullRequests: [
+                                {
+                                    author: { login: "mira-2026" },
+                                    baseRefName: "main",
+                                    createdAt: "2026-06-24T08:00:00.000Z",
+                                    headRefName: "mira/dev-safe-preview",
+                                    headRefOid: "a".repeat(40),
+                                    isDraft: false,
+                                    number: 342,
+                                    previewEligible: true,
+                                    title: "Dev-safe preview controls",
+                                    updatedAt: "2026-06-24T08:05:00.000Z",
+                                    url: "https://github.com/rajohan/Mira-Dashboard/pull/342",
+                                },
+                            ],
+                        });
+                    }
+                    if (url === "/api/pull-requests/preview") {
+                        return Response.json({
+                            preview: {
+                                controlsAvailable: false,
+                                message:
+                                    "PR dev controls are available only from the production Dashboard.",
+                                status: "stopped",
+                            },
+                        });
+                    }
+                    const method = init?.method ?? "GET";
+                    return apiResponse(url, method, init);
+                }),
+                writable: true,
+            });
+
+            view = renderPage(createElement(Delivery));
+
+            expect(await screen.findByText("View only")).toBeInTheDocument();
+            expect(
+                screen.getAllByText(
+                    "PR dev controls are available only from the production Dashboard."
+                )
+            ).toHaveLength(2);
+            expect(screen.getByRole("button", { name: "Run in dev" })).toBeDisabled();
+            expect(screen.queryByText(/must not overlap Dashboard source/u)).toBeNull();
+            expect(screen.queryByText(/PR dev status is unavailable/u)).toBeNull();
+        } finally {
+            view?.unmount();
+            view?.queryClient.clear();
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
+    });
+
     it("starts and stops an eligible trusted PR development environment", async () => {
         const user = userEvent.setup();
         let preview: Record<string, unknown> = { status: "stopped" };
@@ -3248,55 +3313,63 @@ describe("Mira Dashboard pages", () => {
     });
 
     it("explains when deploy actions are blocked by the production checkout", async () => {
-        Object.defineProperty(globalThis, "fetch", {
-            configurable: true,
-            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-                const url = String(input);
-                if (url === "/api/pull-requests/production-checkout") {
-                    return Response.json({
-                        checkout: {
-                            root: "/home/ubuntu/projects/mira-dashboard",
-                            expectedRoot: "/home/ubuntu/projects/mira-dashboard",
-                            worktreeRoot:
-                                "/home/ubuntu/projects/mira-dashboard-worktrees",
-                            branch: "main",
-                            expectedBranch: "main",
-                            head: "abc123",
-                            isClean: false,
-                            isProductionRoot: true,
-                            isSafeForDeploy: false,
-                            statusShort: " M src/App.tsx",
-                        },
-                    });
-                }
+        const originalFetch = fetch;
+        let view: ReturnType<typeof renderPage> | undefined;
+        try {
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                    const url = String(input);
+                    if (url === "/api/pull-requests/production-checkout") {
+                        return Response.json({
+                            checkout: {
+                                root: "/srv/mira-dashboard/production/checkout",
+                                expectedRoot: "/srv/mira-dashboard/production/checkout",
+                                worktreeRoot: "/srv/mira-dashboard/development/worktrees",
+                                branch: "main",
+                                expectedBranch: "main",
+                                head: "abc123",
+                                isClean: false,
+                                isProductionRoot: true,
+                                isSafeForDeploy: false,
+                                statusShort: " M src/App.tsx",
+                            },
+                        });
+                    }
 
-                const method = init?.method ?? "GET";
-                return apiResponse(url, method, init);
-            }),
-            writable: true,
-        });
+                    const method = init?.method ?? "GET";
+                    return apiResponse(url, method, init);
+                }),
+                writable: true,
+            });
 
-        const view = renderPage(createElement(Delivery));
+            view = renderPage(createElement(Delivery));
 
-        await waitFor(() => {
-            expect(screen.getByText("Dirty checkout")).toBeInTheDocument();
-        });
-        const deployButton = screen.getByRole("button", {
-            name: "Deploy latest main",
-        });
-        expect(deployButton).toBeDisabled();
-        expect(deployButton).toHaveAttribute(
-            "aria-describedby",
-            "deploy-checkout-disabled-reason"
-        );
-        expect(
-            screen.getAllByText(
-                "Deploy and merge are blocked until local changes in the production checkout are resolved."
-            ).length
-        ).toBeGreaterThan(1);
-
-        view.unmount();
-        view.queryClient.clear();
+            await waitFor(() => {
+                expect(screen.getByText("Dirty checkout")).toBeInTheDocument();
+            });
+            const deployButton = screen.getByRole("button", {
+                name: "Deploy latest main",
+            });
+            expect(deployButton).toBeDisabled();
+            expect(deployButton).toHaveAttribute(
+                "aria-describedby",
+                "deploy-checkout-disabled-reason"
+            );
+            expect(
+                screen.getAllByText(
+                    "Deploy and merge are blocked until local changes in the production checkout are resolved."
+                ).length
+            ).toBeGreaterThan(1);
+        } finally {
+            view?.unmount();
+            view?.queryClient.clear();
+            Object.defineProperty(globalThis, "fetch", {
+                configurable: true,
+                value: originalFetch,
+                writable: true,
+            });
+        }
     });
 
     it("labels post-restart deployment checks as verifying", async () => {

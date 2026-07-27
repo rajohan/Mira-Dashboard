@@ -38,6 +38,24 @@ describe("PullRequestDevelopmentCard", () => {
 
         expect(screen.getByText("Status unavailable")).toBeInTheDocument();
         expect(screen.getByText("Preview status failed")).toBeInTheDocument();
+
+        rerender(
+            <PullRequestDevelopmentCard
+                preview={{
+                    controlsAvailable: false,
+                    message:
+                        "PR dev controls are available only from the production Dashboard.",
+                    status: "stopped",
+                }}
+            />
+        );
+
+        expect(screen.getByText("View only")).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                "PR dev controls are available only from the production Dashboard."
+            )
+        ).toBeInTheDocument();
     });
 
     it("renders every managed lifecycle with bounded preview details", () => {

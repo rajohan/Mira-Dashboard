@@ -234,14 +234,14 @@ run automatic `VACUUM`.
 List scheduled job tables:
 
 ```bash
-sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+sqlite3 /home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db \
   "SELECT id, name, enabled, schedule_type, next_run_at, updated_at FROM scheduled_jobs ORDER BY id;"
 ```
 
 Inspect recent runs:
 
 ```bash
-sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+sqlite3 /home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db \
   "SELECT job_id, status, started_at, finished_at FROM scheduled_job_runs ORDER BY id DESC LIMIT 20;"
 ```
 
@@ -249,7 +249,7 @@ Inspect SQLite lifecycle state:
 
 ```bash
 set -euo pipefail
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 sqlite3 -readonly "$db_path" \
   "SELECT version, name, applied_at FROM schema_migrations ORDER BY version;"
 sqlite3 -readonly "$db_path" \
@@ -259,6 +259,6 @@ sqlite3 -readonly "$db_path" \
 Inspect cache freshness:
 
 ```bash
-sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+sqlite3 /home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db \
   "SELECT key, status, updated_at FROM cache_entries ORDER BY updated_at DESC LIMIT 30;"
 ```

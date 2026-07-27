@@ -110,7 +110,7 @@ when enabled, rotates the current session, and revokes every other session.
 Forgotten-password recovery is intentionally host-local:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard-releases/current/backend
+cd /home/ubuntu/projects/mira-dashboard/production/releases/current/backend
 bun run auth:reset-password -- --username <username>
 ```
 
@@ -187,13 +187,13 @@ profile per OpenClaw caller. On the current host the runtime layout is:
 The directory must be owned by the OpenClaw user with mode `0700`; every token
 file must be a regular, non-symlink file owned by that user with mode `0600`.
 The tracked Dashboard helper
-`/home/ubuntu/projects/mira-dashboard/scripts/provisionDashboardAutomationCredential.ts`
+`/home/ubuntu/projects/mira-dashboard/production/checkout/scripts/provisionDashboardAutomationCredential.ts`
 writes the full token directly to the correct file and prints only the
 hash-only Dashboard configuration entry. It refuses to overwrite an existing
 file. Run it once for each profile from an untracked host shell:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
 bun scripts/provisionDashboardAutomationCredential.ts heartbeat
 bun scripts/provisionDashboardAutomationCredential.ts daily-summary
 bun scripts/provisionDashboardAutomationCredential.ts daily-brief
@@ -204,7 +204,7 @@ Combine the four printed objects into the JSON array stored as
 `MIRA_DASHBOARD_AUTOMATION_CREDENTIALS` in Doppler. The full tokens remain only
 in the client files; they are not stored in Doppler, SQLite, prompts, cron
 payloads, unit files, or command arguments. The caller wrapper
-`/home/ubuntu/projects/mira-dashboard/scripts/miraDashboardApi.ts` reads the
+`/home/ubuntu/projects/mira-dashboard/production/checkout/scripts/miraDashboardApi.ts` reads the
 selected file only after checking type, ownership, exact mode, size, and token
 format. Request bodies come from standard input and the token is attached only
 as an `Authorization` header. The wrapper resolves its loopback origin from the

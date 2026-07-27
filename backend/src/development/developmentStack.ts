@@ -25,6 +25,7 @@ import path from "node:path";
 
 import { Database } from "bun:sqlite";
 
+import { dashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { formatOpenClawLogDate } from "../lib/logRoots.ts";
 import {
     type DevelopmentWorkspaceState,
@@ -393,10 +394,14 @@ export function resolveDevelopmentStackConfig(
     if (!hostHome) {
         throw new Error("Could not resolve the host home for development snapshots");
     }
+    const hostDashboardPaths = dashboardProjectPaths(
+        environment.MIRA_DASHBOARD_PROJECT_ROOT?.trim() ||
+            path.join(hostHome, "projects", "mira-dashboard")
+    );
     const stateRoot = absoluteNonRootPath(
         "MIRA_DASHBOARD_DEV_STATE_ROOT",
         environment.MIRA_DASHBOARD_DEV_STATE_ROOT,
-        path.join(hostHome, "projects", "mira-dashboard-dev-state", "local")
+        hostDashboardPaths.developmentLocalStateRoot
     );
     if (!stateRoot) {
         throw new Error("Development state root could not be resolved");
@@ -428,7 +433,7 @@ export function resolveDevelopmentStackConfig(
         databaseSource: absoluteNonRootPath(
             "MIRA_DASHBOARD_DEV_DB_SOURCE",
             environment.MIRA_DASHBOARD_DEV_DB_SOURCE,
-            path.join(hostHome, "projects", "mira-dashboard-state", "mira-dashboard.db")
+            hostDashboardPaths.productionDatabasePath
         ),
         frontendHost: configuredHost(
             "MIRA_DASHBOARD_DEV_FRONTEND_HOST",
@@ -457,7 +462,7 @@ export function resolveDevelopmentStackConfig(
         releaseSource: absoluteNonRootPath(
             "MIRA_DASHBOARD_DEV_RELEASES_SOURCE",
             environment.MIRA_DASHBOARD_DEV_RELEASES_SOURCE,
-            path.join(hostHome, "projects", "mira-dashboard-releases")
+            hostDashboardPaths.productionReleasesRoot
         ),
         repositoryRoot: resolvedRepoRoot,
         rpId: publicOrigin.hostname.toLowerCase(),
@@ -562,6 +567,111 @@ function runIfTableExists(
     }
 }
 
+interface CompletedDeploymentHistoryRow {
+    commit_sha: null | string;
+    commit_title: null | string;
+    id: string;
+    note: null | string;
+    started_at: string;
+    status: "failed" | "isOk";
+    stderr: null | string;
+    stdout: null | string;
+    updated_at: string;
+}
+
+/**
+ * Restores terminal release history into snapshots created by older Dashboard
+ * versions without refreshing any mutable development data.
+ */
+function backfillCompletedDeploymentHistory(
+    sourcePath: string,
+    targetPath: string
+): void {
+    if (!isRealRegularFile(sourcePath)) {
+        throw new Error(
+            `MIRA_DASHBOARD_DEV_DB_SOURCE must be a real regular file: ${sourcePath}`
+        );
+    }
+    if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+        throw new Error("Development database source and target must be distinct");
+    }
+
+    const target = new Database(targetPath);
+    try {
+        if (!hasTable(target, "deployment_jobs")) return;
+        target.run("DELETE FROM deployment_jobs WHERE status NOT IN ('isOk', 'failed')");
+        const existing = target
+            .query(
+                "SELECT 1 FROM deployment_jobs WHERE status IN ('isOk', 'failed') LIMIT 1"
+            )
+            .get();
+        if (existing) return;
+
+        const source = new Database(sourcePath, { readonly: true });
+        let rows: CompletedDeploymentHistoryRow[];
+        try {
+            if (!hasTable(source, "deployment_jobs")) return;
+            rows = source
+                .query(
+                    `SELECT
+                         id,
+                         status,
+                         started_at,
+                         updated_at,
+                         commit_sha,
+                         commit_title,
+                         note,
+                         stdout,
+                         stderr
+                     FROM deployment_jobs
+                     WHERE status IN ('isOk', 'failed')
+                     ORDER BY started_at, id`
+                )
+                .all() as CompletedDeploymentHistoryRow[];
+        } finally {
+            source.close();
+        }
+        if (rows.length === 0) return;
+
+        target.run("BEGIN IMMEDIATE");
+        try {
+            const insert = target.prepare(
+                `INSERT INTO deployment_jobs (
+                     id,
+                     status,
+                     started_at,
+                     updated_at,
+                     commit_sha,
+                     commit_title,
+                     note,
+                     stdout,
+                     stderr
+                 )
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            );
+            for (const row of rows) {
+                insert.run(
+                    row.id,
+                    row.status,
+                    row.started_at,
+                    row.updated_at,
+                    row.commit_sha,
+                    row.commit_title,
+                    row.note,
+                    row.stdout,
+                    row.stderr
+                );
+            }
+            target.run("COMMIT");
+        } catch (error) {
+            if (target.inTransaction) target.run("ROLLBACK");
+            throw error;
+        }
+    } finally {
+        target.close();
+    }
+}
+
 function scrubDevelopmentDatabase(
     databasePath: string,
     shouldPreserveWebAuthnCredentials: boolean
@@ -613,7 +723,11 @@ function scrubDevelopmentDatabase(
             database.run("DELETE FROM app_config WHERE key = 'gateway_token'");
         }
         runIfTableExists(database, "deployment_lock", "DELETE FROM deployment_lock");
-        runIfTableExists(database, "deployment_jobs", "DELETE FROM deployment_jobs");
+        runIfTableExists(
+            database,
+            "deployment_jobs",
+            "DELETE FROM deployment_jobs WHERE status NOT IN ('isOk', 'failed')"
+        );
         runIfTableExists(database, "job_executions", "DELETE FROM job_executions");
         runIfTableExists(
             database,
@@ -898,6 +1012,9 @@ export function prepareDevelopmentState(
         database = "snapshot-created";
     } else {
         database = "created-empty";
+    }
+    if (config.databaseSource && isRealRegularFile(config.databasePath)) {
+        backfillCompletedDeploymentHistory(config.databaseSource, config.databasePath);
     }
 
     let releases: DevelopmentStateResult["releases"];

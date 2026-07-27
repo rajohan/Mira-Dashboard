@@ -94,6 +94,7 @@ export type PullRequestPreviewLifecycle =
 export interface PullRequestPreviewStatus {
     backendPort?: number;
     commitSha?: string;
+    controlsAvailable?: boolean;
     frontendPort?: number;
     message?: string;
     number?: number;

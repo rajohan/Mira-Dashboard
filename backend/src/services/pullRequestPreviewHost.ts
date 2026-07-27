@@ -22,6 +22,7 @@ import {
     prepareDevelopmentState,
     resolveDevelopmentStackConfig,
 } from "../development/developmentStack.ts";
+import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
 import {
@@ -41,7 +42,6 @@ const COMMIT_PATTERN = /^[\da-f]{40}$/u;
 const UNIT_NAME_PATTERN = /^[A-Za-z0-9_.@-]+\.service$/u;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const DEFAULT_GATEWAY_PROXY_PORT = 18_790;
-const DEFAULT_PREVIEW_WORKTREE_PATH = "/home/ubuntu/projects/mira-dashboard-preview";
 const MANAGED_STATE_DIRECTORY_PATTERN = /^pr-([1-9]\d*)$/u;
 const PREVIEW_REFERENCE = "refs/mira-dashboard/previews/active";
 const PREVIEW_GATEWAY_PROXY_ENTRYPOINT = "pullRequestPreviewGatewayProxy.js";
@@ -67,6 +67,7 @@ export type PullRequestPreviewLifecycle =
 export interface PullRequestPreviewStatus {
     backendPort?: number;
     commitSha?: string;
+    controlsAvailable?: boolean;
     frontendPort?: number;
     message?: string;
     number?: number;
@@ -283,19 +284,20 @@ function defaultGatewayProxyEntrypoint(): string {
 export function resolvePullRequestPreviewConfig(
     environment: Record<string, string | undefined> = process.env
 ): PullRequestPreviewConfig {
+    const projectPaths = resolveDashboardProjectPaths(environment);
     const dashboardRoot = absoluteNonRootPath(
         "MIRA_DASHBOARD_ROOT",
-        environment.MIRA_DASHBOARD_ROOT?.trim() || "/home/ubuntu/projects/mira-dashboard"
+        environment.MIRA_DASHBOARD_ROOT?.trim() || projectPaths.productionCheckoutRoot
     );
     const previewRoot = absoluteNonRootPath(
         "MIRA_DASHBOARD_PREVIEW_ROOT",
         environment.MIRA_DASHBOARD_PREVIEW_ROOT?.trim() ||
-            "/home/ubuntu/projects/mira-dashboard-preview-state/managed"
+            projectPaths.developmentPreviewStateRoot
     );
     const managedWorktreePath = absoluteNonRootPath(
         "MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH",
         environment.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH?.trim() ||
-            DEFAULT_PREVIEW_WORKTREE_PATH
+            projectPaths.developmentPreviewRoot
     );
     if (
         [dashboardRoot, previewRoot].some(
@@ -366,7 +368,7 @@ export function resolvePullRequestPreviewConfig(
         databaseTemplate: optionalAbsoluteNonRootPath(
             "MIRA_DASHBOARD_PREVIEW_DB_TEMPLATE",
             environment.MIRA_DASHBOARD_PREVIEW_DB_TEMPLATE?.trim() ||
-                "/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db"
+                projectPaths.productionDatabasePath
         ),
         frontendPort,
         gatewayProxyEntrypoint: absoluteNonRootPath(
@@ -402,7 +404,7 @@ export function resolvePullRequestPreviewConfig(
         releaseSource: optionalAbsoluteNonRootPath(
             "MIRA_DASHBOARD_PREVIEW_RELEASES_SOURCE",
             environment.MIRA_DASHBOARD_PREVIEW_RELEASES_SOURCE?.trim() ||
-                "/home/ubuntu/projects/mira-dashboard-releases"
+                projectPaths.productionReleasesRoot
         ),
         sessionIdleMinutes: optionalEnvironmentValue(
             "MIRA_DASHBOARD_SESSION_IDLE_MINUTES",

@@ -11,7 +11,7 @@ backend/data/mira-dashboard.db
 That default is for development. Production units set:
 
 ```text
-/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 ```
 
 The `-wal`/`-shm` sidecars and `backups/` directory stay below the same
@@ -122,7 +122,7 @@ legacy reusable session ids do not survive the upgrade.
 The deploy flow uses one combined build/preflight command before restart:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
 /usr/local/bin/doppler run --config prd --project rajohan -- \
   bun run deploy:prepare
 ```
@@ -153,7 +153,7 @@ history.
 
 Snapshots live below `dirname(MIRA_DASHBOARD_DB_PATH)/backups/`. This is
 `backend/data/backups/` in development and
-`/home/ubuntu/projects/mira-dashboard-state/backups/` in production:
+`/home/ubuntu/projects/mira-dashboard/production/state/backups/` in production:
 
 | Kind            | Maximum age | Maximum count |
 | --------------- | ----------- | ------------- |
@@ -171,7 +171,7 @@ Use the same explicit path as the managed production units:
 
 ```bash
 set -euo pipefail
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 sqlite3 -readonly "$db_path" ".tables"
 sqlite3 -readonly "$db_path" "PRAGMA integrity_check;"
 sqlite3 -readonly "$db_path" \
@@ -197,8 +197,8 @@ Use this only when Raymond explicitly wants to re-run setup.
 
 ```bash
 set -euo pipefail
-backend_dir=/home/ubuntu/projects/mira-dashboard-releases/current/backend
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+backend_dir=/home/ubuntu/projects/mira-dashboard/production/releases/current/backend
+db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 cd "$backend_dir"
 /usr/local/bin/doppler run --config prd --project rajohan -- \
   env MIRA_DASHBOARD_DB_PATH="$db_path" bun run db:preflight

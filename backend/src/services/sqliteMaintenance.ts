@@ -237,14 +237,14 @@ export function pruneDatabaseHistory(
             changes.deploymentJobs = databaseConnection
                 .prepare(
                     `DELETE FROM deployment_jobs
-                     WHERE status NOT IN ('building', 'restart-scheduled')
+                     WHERE status NOT IN ('building', 'verifying')
                        ${protectedJobClause}
                        AND (
                            started_at < ?
                            OR id IN (
                                SELECT id
                                FROM deployment_jobs
-                               WHERE status NOT IN ('building', 'restart-scheduled')
+                               WHERE status NOT IN ('building', 'verifying')
                                ORDER BY started_at DESC, id DESC
                                LIMIT -1 OFFSET 500
                            )

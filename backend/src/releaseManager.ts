@@ -12,6 +12,10 @@ import {
 } from "./database.ts";
 import { readAppliedDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
 import type { DatabaseMigrationIdentity } from "./databaseMigrations/index.ts";
+import {
+    configuredDashboardProjectPaths,
+    resolveDashboardProjectPaths,
+} from "./lib/dashboardPaths.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
@@ -23,8 +27,6 @@ import {
     verifyReleaseBuildIdentities,
 } from "./releaseManifest.ts";
 
-export const DEFAULT_DASHBOARD_RELEASES_ROOT =
-    "/home/ubuntu/projects/mira-dashboard-releases";
 export const MANAGED_RELEASES_DIRECTORY_NAME = "releases";
 
 const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
@@ -368,7 +370,8 @@ async function writeReleaseTransitionJournal(
 
 export function resolveDashboardReleasesRoot(
     configuredRoot = process.env.MIRA_DASHBOARD_RELEASES_ROOT ??
-        DEFAULT_DASHBOARD_RELEASES_ROOT
+        configuredDashboardProjectPaths()?.productionReleasesRoot ??
+        resolveDashboardProjectPaths({}).productionReleasesRoot
 ): string {
     return resolveAbsoluteNonRootPath(configuredRoot, "Dashboard releases root");
 }

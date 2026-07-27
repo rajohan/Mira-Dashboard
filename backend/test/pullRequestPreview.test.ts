@@ -32,6 +32,7 @@ import {
     stopPullRequestPreview,
 } from "../src/services/pullRequestPreviewHost.ts";
 import {
+    getPullRequestPreviewStatus as getManagedPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
     prepareAndStopPullRequestPreview,
     reconcileClosedPullRequestPreview,
@@ -150,6 +151,39 @@ function previewScheduledJob(number: unknown, commitSha: unknown = COMMIT): Sche
 }
 
 describe("managed pull request preview", () => {
+    it("keeps host preview controls out of isolated Dashboard dev", async () => {
+        const previousSafeMode = process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+        const statusSpy = jest.spyOn(previewHost, "getPullRequestPreviewStatus");
+        const executionsSpy = jest.spyOn(jobExecutionQueue, "listJobExecutions");
+        const stateNumbersSpy = jest.spyOn(
+            previewHost,
+            "listManagedPullRequestPreviewStateNumbers"
+        );
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+
+        try {
+            await expect(getManagedPullRequestPreviewStatus()).resolves.toEqual({
+                controlsAvailable: false,
+                message:
+                    "PR dev controls are available only from the production Dashboard.",
+                status: "stopped",
+            });
+            await reconcileClosedPullRequestPreview([]);
+            expect(statusSpy).not.toHaveBeenCalled();
+            expect(executionsSpy).not.toHaveBeenCalled();
+            expect(stateNumbersSpy).not.toHaveBeenCalled();
+        } finally {
+            if (previousSafeMode === undefined) {
+                delete process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+            } else {
+                process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = previousSafeMode;
+            }
+            statusSpy.mockRestore();
+            executionsSpy.mockRestore();
+            stateNumbersSpy.mockRestore();
+        }
+    });
+
     it("uses the running Bun executable when the service PATH does not expose Bun", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-bun-path-"));
         try {
@@ -182,6 +216,23 @@ describe("managed pull request preview", () => {
     it("resolves a single-slot host contract without accepting ambiguous config", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-config-"));
         try {
+            const rootOnlyConfig = resolvePullRequestPreviewConfig({
+                BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
+                MIRA_DASHBOARD_PROJECT_ROOT: root,
+            });
+            expect(rootOnlyConfig).toMatchObject({
+                dashboardRoot: path.join(root, "production", "checkout"),
+                databaseTemplate: path.join(
+                    root,
+                    "production",
+                    "state",
+                    "mira-dashboard.db"
+                ),
+                managedWorktreePath: path.join(root, "development", "preview"),
+                previewRoot: path.join(root, "development", "state", "preview"),
+                releaseSource: path.join(root, "production", "releases"),
+            });
+
             const config = resolvePullRequestPreviewConfig({
                 BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
                 MIRA_DASHBOARD_PREVIEW_BACKEND_PORT: "4101",

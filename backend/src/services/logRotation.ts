@@ -3,6 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { database } from "../database.ts";
+import {
+    configuredDashboardProjectPaths,
+    resolveDashboardProjectPaths,
+} from "../lib/dashboardPaths.ts";
 import { runProcess } from "../lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "../lib/safePath.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
@@ -73,13 +77,21 @@ const ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT = [
     "LANG",
     "NODE_ENV",
     "TZ",
+    "MIRA_DASHBOARD_PROJECT_ROOT",
     "MIRA_DASHBOARD_DB_PATH",
     "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE",
 ] as const;
 
 function resolveLogRotationLockFile(): string {
     return resolveAbsoluteNonRootPath(
-        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE?.trim() || DEFAULT_LOCK_FILE,
+        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE?.trim() ||
+            (
+                configuredDashboardProjectPaths() ??
+                (process.env.NODE_ENV === "production"
+                    ? resolveDashboardProjectPaths()
+                    : undefined)
+            )?.productionLogRotationLockFile ||
+            DEFAULT_LOCK_FILE,
         "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE"
     );
 }

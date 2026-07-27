@@ -119,7 +119,7 @@ worktree, then finish with a read-only check that production is still clean
 `main`:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
 git status --short --branch
 ```
 

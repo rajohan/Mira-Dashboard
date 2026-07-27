@@ -39,6 +39,8 @@ const PREVIEW_ACTION_KEYS = new Set([
     "dashboard.preview.start",
     "dashboard.preview.stop",
 ]);
+const PREVIEW_CONTROLS_UNAVAILABLE_MESSAGE =
+    "PR dev controls are available only from the production Dashboard.";
 const COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const PREVIEW_LIFECYCLES = new Set<PullRequestPreviewLifecycle>([
     "failed",
@@ -92,6 +94,12 @@ export function parsePullRequestPreviewStatus(value: unknown): PullRequestPrevie
     if (!isRecord(value) || !PREVIEW_LIFECYCLES.has(value.status as never)) {
         throw new Error("Preview execution returned an invalid status");
     }
+    if (
+        value.controlsAvailable !== undefined &&
+        typeof value.controlsAvailable !== "boolean"
+    ) {
+        throw new Error("Preview execution returned invalid control availability");
+    }
     const status = value.status as PullRequestPreviewLifecycle;
     const number = value.number;
     if (number !== undefined && (!Number.isSafeInteger(number) || Number(number) <= 0)) {
@@ -115,6 +123,9 @@ export function parsePullRequestPreviewStatus(value: unknown): PullRequestPrevie
         }),
         ...(typeof value.commitSha === "string" && {
             commitSha: value.commitSha,
+        }),
+        ...(typeof value.controlsAvailable === "boolean" && {
+            controlsAvailable: value.controlsAvailable,
         }),
         ...(typeof value.frontendPort === "number" && {
             frontendPort: value.frontendPort,
@@ -140,6 +151,13 @@ function previewFromExecution(execution: JobExecution): PullRequestPreviewStatus
 
 /** Reads the current preview state, including queued lifecycle transitions. */
 export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewStatus> {
+    if (process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1") {
+        return {
+            controlsAvailable: false,
+            message: PREVIEW_CONTROLS_UNAVAILABLE_MESSAGE,
+            status: "stopped",
+        };
+    }
     const preview = await readPullRequestPreviewStatus();
     const activeExecution = listJobExecutions(200).find(
         (execution) =>
@@ -175,6 +193,7 @@ export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewS
 export async function reconcileClosedPullRequestPreview(
     openPullRequests: readonly PullRequestSummary[]
 ): Promise<void> {
+    if (process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1") return;
     try {
         if (
             listJobExecutions(200).some(

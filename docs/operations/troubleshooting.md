@@ -9,7 +9,7 @@ curl --fail http://127.0.0.1:3100/api/health/live
 curl --fail http://127.0.0.1:3100/api/health/ready
 systemctl --user status mira-dashboard.service --no-pager
 journalctl --user -u mira-dashboard.service -n 160 --no-pager
-git -C /home/ubuntu/projects/mira-dashboard status --short --branch
+git -C /home/ubuntu/projects/mira-dashboard/production/checkout status --short --branch
 ```
 
 Expected production checkout state:
@@ -102,7 +102,7 @@ layout unless a deliberate migration requires otherwise.
 ## Frontend Not Built Or Serving Old Assets
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
 /usr/local/bin/doppler run --config prd --project rajohan -- \
   bun run deploy:prepare
 systemctl --user restart mira-dashboard.service

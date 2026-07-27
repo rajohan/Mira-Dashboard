@@ -60,11 +60,12 @@ Use only when Raymond wants to re-run bootstrap.
 
 ```bash
 set -euo pipefail
-backend_dir=/home/ubuntu/projects/mira-dashboard-releases/current/backend
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
+backend_dir="$MIRA_DASHBOARD_PROJECT_ROOT/production/releases/current/backend"
+db_path="$MIRA_DASHBOARD_PROJECT_ROOT/production/state/mira-dashboard.db"
 cd "$backend_dir"
 /usr/local/bin/doppler run --config prd --project rajohan -- \
-  env MIRA_DASHBOARD_DB_PATH="$db_path" bun run db:preflight
+  env NODE_ENV=production bun run db:preflight
 sqlite3 -cmd ".timeout 5000" "$db_path" "DELETE FROM auth_sessions; DELETE FROM users;"
 sqlite3 -cmd ".timeout 5000" "$db_path" "PRAGMA integrity_check;"
 curl http://127.0.0.1:3100/api/auth/bootstrap
@@ -73,7 +74,7 @@ curl http://127.0.0.1:3100/api/auth/bootstrap
 To force Gateway token entry during bootstrap too:
 
 ```bash
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+db_path="$MIRA_DASHBOARD_PROJECT_ROOT/production/state/mira-dashboard.db"
 sqlite3 "$db_path" "DELETE FROM app_config WHERE key='gateway_token';"
 ```
 
@@ -84,15 +85,15 @@ watched by the web service, or unauthenticated reset endpoint. Use the
 host-local interactive command from an SSH/console TTY:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard-releases/current/backend
-MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
-  bun run auth:reset-password -- --username <username>
+export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
+cd "$MIRA_DASHBOARD_PROJECT_ROOT/production/releases/current/backend"
+bun run auth:reset-password -- --username <username>
 ```
 
 The single standalone `--` ends Bun script options; `--username` is passed to
-the reset program. The package script preserves the explicit stable database
-path through Doppler and defaults to the same production path when it is not
-already set. The program reads the new password twice with terminal echo
+the reset program. The package script preserves the project root through
+Doppler, and the backend derives the stable database path. The program reads
+the new password twice with terminal echo
 disabled, preserves MFA, revokes every session and pending ceremony, clears
 authentication cooldowns, and appends an audit event. It never accepts password
 material through command arguments or environment variables.
@@ -101,8 +102,7 @@ Only when all registered second factors are also lost, run the deliberate
 break-glass variant:
 
 ```bash
-MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
-  bun run auth:reset-password -- --username <username> --reset-mfa
+bun run auth:reset-password -- --username <username> --reset-mfa
 ```
 
 `--reset-mfa` deletes registered WebAuthn credentials, encrypted TOTP factors,
@@ -113,7 +113,7 @@ recovery codes offline.
 ## Inspect Gateway Token Metadata Without Printing It
 
 ```bash
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 sqlite3 "$db_path" \
   "SELECT key, length(value), updated_at FROM app_config WHERE key='gateway_token';"
 ```
@@ -134,7 +134,7 @@ Use the tracked workspace provisioner; it writes the full token directly to
 the file and prints only the Dashboard-side hash/scopes object:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
 bun scripts/provisionDashboardAutomationCredential.ts <profile>
 ```
 
@@ -200,7 +200,7 @@ is compatible with its schema. Never overwrite the live database or remove
 ```bash
 set -euo pipefail
 backup_path=/absolute/path/to/selected/mira-dashboard-....db
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 test -f "$backup_path"
 test "$(sqlite3 -readonly "$backup_path" "PRAGMA quick_check;")" = "ok"
 has_migration_history="$(
@@ -279,11 +279,10 @@ Inspect the `database.maintenance` job on Jobs and the Database page's attention
 list. A manual deploy preflight can create and restore-verify a fresh snapshot:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard-releases/current/backend
+cd /home/ubuntu/projects/mira-dashboard/production/releases/current/backend
 /usr/local/bin/doppler run --config prd --project rajohan -- \
-  env \
-    MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
-    bun run db:preflight
+  env MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard \
+    NODE_ENV=production bun run db:preflight
 ```
 
 “Reusable space” is SQLite freelist capacity that can be reused by future
@@ -341,20 +340,20 @@ Delete the smoke report from the UI or with `DELETE /api/reports/:id`.
 Dashboard PR worktrees live under:
 
 ```text
-/home/ubuntu/projects/mira-dashboard-worktrees
+/home/ubuntu/projects/mira-dashboard/development/worktrees
 ```
 
 List:
 
 ```bash
-git -C /home/ubuntu/projects/mira-dashboard worktree list
+git -C /home/ubuntu/projects/mira-dashboard/production/checkout worktree list
 ```
 
 Remove only clean, known worktrees:
 
 ```bash
-git -C /home/ubuntu/projects/mira-dashboard worktree remove /home/ubuntu/projects/mira-dashboard-worktrees/<name>
-git -C /home/ubuntu/projects/mira-dashboard worktree prune
+git -C /home/ubuntu/projects/mira-dashboard/production/checkout worktree remove /home/ubuntu/projects/mira-dashboard/development/worktrees/<name>
+git -C /home/ubuntu/projects/mira-dashboard/production/checkout worktree prune
 ```
 
 ## Docker Compose Validation

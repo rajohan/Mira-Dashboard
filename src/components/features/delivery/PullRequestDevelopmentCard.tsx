@@ -58,6 +58,7 @@ export function PullRequestDevelopmentCard({
 }) {
     const status = preview?.status ?? "stopped";
     const hasPreview = preview?.number !== undefined;
+    const areControlsAvailable = preview?.controlsAvailable !== false;
 
     return (
         <Card variant="bordered" className="space-y-3">
@@ -73,10 +74,25 @@ export function PullRequestDevelopmentCard({
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                    <Badge variant={error ? "error" : previewVariant(status)}>
-                        {error ? "Status unavailable" : previewLabel(status)}
+                    <Badge
+                        variant={
+                            error
+                                ? "error"
+                                : areControlsAvailable
+                                  ? previewVariant(status)
+                                  : "default"
+                        }
+                    >
+                        {error
+                            ? "Status unavailable"
+                            : areControlsAvailable
+                              ? previewLabel(status)
+                              : "View only"}
                     </Badge>
-                    {hasPreview && status !== "stopped" && onStop ? (
+                    {hasPreview &&
+                    areControlsAvailable &&
+                    status !== "stopped" &&
+                    onStop ? (
                         <Button
                             variant="secondary"
                             size="sm"
@@ -123,7 +139,7 @@ export function PullRequestDevelopmentCard({
                         <p className="mt-2 text-xs text-red-300">{preview.message}</p>
                     ) : undefined}
                 </div>
-            ) : (
+            ) : areControlsAvailable ? (
                 <div className="space-y-1 text-sm text-primary-400">
                     <p>Run an eligible trusted PR in dev from its card below.</p>
                     <p className="text-xs text-primary-500">
@@ -131,6 +147,11 @@ export function PullRequestDevelopmentCard({
                         backup actions stay blocked.
                     </p>
                 </div>
+            ) : (
+                <p className="text-sm text-primary-400">
+                    {preview?.message ??
+                        "PR dev controls are available only from the production Dashboard."}
+                </p>
             )}
         </Card>
     );
