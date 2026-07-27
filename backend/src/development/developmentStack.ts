@@ -1089,7 +1089,7 @@ export async function runDevelopmentStack(
         [
             `Mira Dashboard development stack: ${config.publicOrigin}`,
             `Frontend${config.hotReload ? " HMR" : ""}: ${config.frontendHost}:${config.frontendPort}`,
-            `Backend${config.hotReload ? " HMR" : ""}: ${config.backendHost}:${config.backendPort}`,
+            `Backend${config.hotReload ? " restart-on-change" : ""}: ${config.backendHost}:${config.backendPort}`,
             `Hot reload: ${config.hotReload ? "enabled" : "disabled"}.`,
             `State: ${config.stateRoot} (database ${state.database}, workspace ${state.workspace}, releases ${state.releases})`,
             `Gateway: ${config.gatewayUrl}`,

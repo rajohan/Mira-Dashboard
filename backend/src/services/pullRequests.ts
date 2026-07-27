@@ -1487,6 +1487,24 @@ async function getPullRequest(
     );
 }
 
+/** Checks the PR lifecycle without filtering by its current base branch. */
+export async function isDashboardPullRequestOpen(
+    number: number,
+    signal?: AbortSignal
+): Promise<boolean> {
+    const result = await runGhJson<{ state?: unknown }>(
+        ["pr", "view", String(number), "--repo", DASHBOARD_REPO, "--json", "state"],
+        signal
+    );
+    if (
+        typeof result.state !== "string" ||
+        !["CLOSED", "MERGED", "OPEN"].includes(result.state)
+    ) {
+        throw new Error("GitHub returned an invalid pull request state");
+    }
+    return result.state === "OPEN";
+}
+
 /** Validates pr number. */
 export function validatePrNumber(value: unknown): number {
     if (typeof value !== "string" || !/^\d+$/u.test(value)) {
@@ -2831,6 +2849,8 @@ export async function approvePullRequest(
             { signal: options.signal, timeoutMs: 120_000 }
         );
         cleanup = await cleanupPullRequestWorktree(pr.headRefName, options.signal);
+        // The production entry point runs this inside the exclusive github.merge job,
+        // which shares the single-capacity worker with every preview lifecycle action.
         previewCleanup = await cleanupClosedPullRequestPreview(number);
 
         try {
@@ -2964,6 +2984,8 @@ export async function rejectPullRequest(
         { signal, timeoutMs: 60_000 }
     );
     const cleanup = await cleanupPullRequestWorktree(pr.headRefName, signal);
+    // The production entry point runs this inside the exclusive github.reject job,
+    // which shares the single-capacity worker with every preview lifecycle action.
     const previewCleanup = await cleanupClosedPullRequestPreview(number);
 
     return {

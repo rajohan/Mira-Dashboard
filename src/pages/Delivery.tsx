@@ -755,9 +755,11 @@ export function Delivery() {
                         number: action.pr.number,
                     });
                     setLastResult(
-                        preview.url
-                            ? `PR #${action.pr.number} dev ${isRebuild ? "rebuilt" : "is running"} at ${preview.url}`
-                            : `PR #${action.pr.number} dev ${isRebuild ? "rebuilt" : "started"}`
+                        preview.status === "starting"
+                            ? `PR #${action.pr.number} dev ${isRebuild ? "rebuild" : "start"} queued`
+                            : preview.url
+                              ? `PR #${action.pr.number} dev ${isRebuild ? "rebuilt" : "is running"} at ${preview.url}`
+                              : `PR #${action.pr.number} dev ${isRebuild ? "rebuilt" : "started"}`
                     );
                     break;
                 }

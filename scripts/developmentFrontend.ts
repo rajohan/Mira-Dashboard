@@ -94,7 +94,7 @@ function upgradeWebSocket(
 }
 
 const server = Bun.serve<WebSocketProxyData>({
-    development: isHotReloadEnabled ? { console: true, hmr: true } : false,
+    development: { console: true, hmr: isHotReloadEnabled },
     fetch(request, server) {
         const url = new URL(request.url);
         if (url.pathname === "/ws") {

@@ -3091,7 +3091,16 @@ describe("Mira Dashboard pages", () => {
                         commitSha: "a".repeat(40),
                         updatedAt: "2026-06-24T08:07:00.000Z",
                     };
-                    return Response.json({ isOk: true, preview });
+                    return Response.json({
+                        isOk: true,
+                        preview: {
+                            commitSha: "a".repeat(40),
+                            number: 335,
+                            status: "starting",
+                            title: "Trusted PR dev",
+                            updatedAt: "2026-06-24T08:06:30.000Z",
+                        },
+                    });
                 }
                 return apiResponse(url, method, init);
             }),
@@ -3115,9 +3124,7 @@ describe("Mira Dashboard pages", () => {
         await user.click(screen.getByRole("button", { name: "Rebuild PR dev" }));
 
         await waitFor(() => {
-            expect(
-                screen.getByText("PR #335 dev rebuilt at https://dashboard.test:5173")
-            ).toBeInTheDocument();
+            expect(screen.getByText("PR #335 dev rebuild queued")).toBeInTheDocument();
         });
         expect(startCalls).toBe(1);
         expect(

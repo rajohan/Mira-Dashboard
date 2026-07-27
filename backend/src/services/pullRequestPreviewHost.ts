@@ -8,6 +8,7 @@ import {
     lstatSync,
     mkdirSync,
     openSync,
+    readdirSync,
     readSync,
     realpathSync,
     renameSync,
@@ -41,6 +42,7 @@ const UNIT_NAME_PATTERN = /^[A-Za-z0-9_.@-]+\.service$/u;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const DEFAULT_GATEWAY_PROXY_PORT = 18_790;
 const DEFAULT_PREVIEW_WORKTREE_PATH = "/home/ubuntu/projects/mira-dashboard-preview";
+const MANAGED_STATE_DIRECTORY_PATTERN = /^pr-([1-9]\d*)$/u;
 const PREVIEW_REFERENCE = "refs/mira-dashboard/previews/active";
 const PREVIEW_GATEWAY_PROXY_ENTRYPOINT = "pullRequestPreviewGatewayProxy.js";
 const PREVIEW_GATEWAY_PROXY_READY_TIMEOUT_MS = 45_000;
@@ -453,6 +455,15 @@ function ensureRealDirectory(directoryPath: string): void {
     chmodSync(directoryPath, 0o700);
 }
 
+function ensureRealDirectoryPreservingExistingMode(directoryPath: string): void {
+    const didExist = existsSync(directoryPath);
+    mkdirSync(directoryPath, { mode: 0o700, recursive: true });
+    if (!isRealDirectory(directoryPath)) {
+        throw new Error(`Preview path must be a real directory: ${directoryPath}`);
+    }
+    if (!didExist) chmodSync(directoryPath, 0o700);
+}
+
 function materializeGatewayTokenFile(
     filePath: string,
     tokenValue: string | undefined,
@@ -720,6 +731,41 @@ function previewWorktreePath(config: PullRequestPreviewConfig): string {
     return config.managedWorktreePath;
 }
 
+async function unregisterMissingPreviewWorktree(
+    config: PullRequestPreviewConfig,
+    worktreePath: string,
+    signal?: AbortSignal
+): Promise<boolean> {
+    const resolvedWorktreePath = path.resolve(worktreePath);
+    const { stdout } = await runCommand(
+        "git",
+        ["-C", config.dashboardRoot, "worktree", "list", "--porcelain"],
+        { signal, timeoutMs: 30_000 }
+    );
+    const isRegistered = stdout
+        .split(/\r?\n/u)
+        .filter((line) => line.startsWith("worktree "))
+        .some(
+            (line) =>
+                path.resolve(line.slice("worktree ".length)) === resolvedWorktreePath
+        );
+    if (!isRegistered) return false;
+    await runCommand(
+        "git",
+        [
+            "-C",
+            config.dashboardRoot,
+            "worktree",
+            "remove",
+            "--force",
+            "--force",
+            resolvedWorktreePath,
+        ],
+        { signal, timeoutMs: 120_000 }
+    );
+    return true;
+}
+
 async function removePreviewWorktree(
     config: PullRequestPreviewConfig,
     worktreePath: string,
@@ -729,7 +775,9 @@ async function removePreviewWorktree(
     if (resolvedWorktreePath !== path.resolve(config.managedWorktreePath)) {
         throw new Error("Refusing to remove an unmanaged preview worktree");
     }
-    if (!existsSync(resolvedWorktreePath)) return false;
+    if (!existsSync(resolvedWorktreePath)) {
+        return unregisterMissingPreviewWorktree(config, resolvedWorktreePath, signal);
+    }
     if (!isRealDirectory(resolvedWorktreePath)) {
         throw new Error("Preview worktree path must be a real directory");
     }
@@ -765,7 +813,7 @@ async function ensurePreviewWorktree(
     commitSha: string,
     signal?: AbortSignal
 ): Promise<string> {
-    ensureRealDirectory(path.dirname(config.managedWorktreePath));
+    ensureRealDirectoryPreservingExistingMode(path.dirname(config.managedWorktreePath));
     const worktreePath = previewWorktreePath(config);
     await runCommand(
         "git",
@@ -819,6 +867,7 @@ async function ensurePreviewWorktree(
             signal,
         });
     } else {
+        await unregisterMissingPreviewWorktree(config, worktreePath, signal);
         await runCommand(
             "git",
             [
@@ -1016,13 +1065,58 @@ function managedStateRoot(config: PullRequestPreviewConfig, number: number): str
     return stateRoot;
 }
 
+/** Lists isolated PR state directories without following directory symlinks. */
+export function listManagedPullRequestPreviewStateNumbers(
+    config: PullRequestPreviewConfig = resolvePullRequestPreviewConfig()
+): number[] {
+    const statesRoot = path.join(config.previewRoot, "states");
+    if (!existsSync(statesRoot)) return [];
+    if (!isRealDirectory(config.previewRoot) || !isRealDirectory(statesRoot)) {
+        throw new Error("PR dev state roots must be real directories");
+    }
+    const resolvedPreviewRoot = realpathSync(config.previewRoot);
+    const resolvedStatesRoot = realpathSync(statesRoot);
+    if (!isPathStrictlyWithin(resolvedStatesRoot, resolvedPreviewRoot)) {
+        throw new Error("PR dev states escaped the configured preview root");
+    }
+    const numbers: number[] = [];
+    const stateEntries = readdirSync(statesRoot, { withFileTypes: true });
+    for (const entry of stateEntries) {
+        const match = MANAGED_STATE_DIRECTORY_PATTERN.exec(entry.name);
+        if (!match || !entry.isDirectory() || entry.isSymbolicLink()) continue;
+        const number = Number(match[1]);
+        if (!Number.isSafeInteger(number) || number <= 0 || number > 2_147_483_647) {
+            continue;
+        }
+        const stateRoot = path.join(statesRoot, entry.name);
+        if (
+            !isRealDirectory(stateRoot) ||
+            !isPathStrictlyWithin(realpathSync(stateRoot), resolvedStatesRoot)
+        ) {
+            throw new Error("PR dev state directory escaped the managed states root");
+        }
+        numbers.push(number);
+    }
+    return numbers.toSorted((left, right) => left - right);
+}
+
 function didRemoveManagedPreviewState(
     config: PullRequestPreviewConfig,
     number: number
 ): boolean {
     const stateRoot = managedStateRoot(config, number);
     if (!existsSync(stateRoot)) return false;
-    if (!isRealDirectory(stateRoot)) {
+    const statesRoot = path.dirname(stateRoot);
+    if (
+        !isRealDirectory(config.previewRoot) ||
+        !isRealDirectory(statesRoot) ||
+        !isRealDirectory(stateRoot) ||
+        !isPathStrictlyWithin(
+            realpathSync(statesRoot),
+            realpathSync(config.previewRoot)
+        ) ||
+        !isPathStrictlyWithin(realpathSync(stateRoot), realpathSync(statesRoot))
+    ) {
         throw new Error("PR dev state path must be a real directory");
     }
     rmSync(stateRoot, { force: true, recursive: true });
@@ -1845,11 +1939,11 @@ export async function cleanupClosedPullRequestPreview(
     number: number,
     options: { config?: PullRequestPreviewConfig } = {}
 ): Promise<PullRequestPreviewCleanupResult> {
-    const config = options.config ?? resolvePullRequestPreviewConfig();
-    const record = readPreviewRecord(config);
-    const hasManagedSlotOwnership = record?.number === number;
     let didRemove = false;
     try {
+        const config = options.config ?? resolvePullRequestPreviewConfig();
+        const record = readPreviewRecord(config);
+        const hasManagedSlotOwnership = record?.number === number;
         if (hasManagedSlotOwnership) {
             await stopPullRequestPreview(number, { config });
             didRemove =

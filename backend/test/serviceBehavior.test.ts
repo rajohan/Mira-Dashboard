@@ -107,6 +107,10 @@ set -euo pipefail
 if [[ "$1" == "api" && "$2" == "graphql" && "$*" == *"--paginate"* && "$*" == *"-F owner=rajohan"* && "$*" == *"-F name=Mira-Dashboard"* && "$*" == *"-f query="* && "$*" == *"--jq"* ]]; then
   printf '%s\n' '{"number":1,"title":"Ready PR","body":"","url":"https://github.test/pr/1","headRefName":"ready","headRefOid":"head1","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T08:00:00.000Z","updatedAt":"2026-06-24T09:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","submittedAt":"2026-06-24T08:30:00.000Z","author":{"login":"rajohan"}}]},"additions":1,"deletions":0,"changedFiles":1,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T08:45:00.000Z"}]}'
   printf '%s\n' '{"number":2,"title":"Blocked cached PR","body":"","url":"https://github.test/pr/2","headRefName":"blocked","headRefOid":"head2","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:00:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"APPROVED","latestOpinionatedReviews":{"nodes":[]},"additions":2,"deletions":1,"changedFiles":2,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T10:45:00.000Z"}]}'
+elif [[ "$1 $2 $3" == "pr view 2" && "$*" == *"--json state"* ]]; then
+  printf '%s\n' '{"state":"OPEN"}'
+elif [[ "$1 $2 $3" == "pr view 99" && "$*" == *"--json state"* ]]; then
+  printf '%s\n' '{"state":"CLOSED"}'
 elif [[ "$1 $2 $3" == "pr view 2" ]]; then
   printf '%s\n' '{"number":2,"title":"Blocked refreshed PR","body":"","url":"https://github.test/pr/2","headRefName":"blocked","headRefOid":"head2b","baseRefName":"main","author":{"login":"mira-2026"},"createdAt":"2026-06-24T10:00:00.000Z","updatedAt":"2026-06-24T11:30:00.000Z","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"APPROVED","reviews":[],"additions":3,"deletions":1,"changedFiles":2,"statusCheckRollup":[{"name":"ci","conclusion":"success","completedAt":"2026-06-24T11:15:00.000Z"}]}'
 else
@@ -2937,8 +2941,11 @@ fi
         process.env.MIRA_DASHBOARD_ROOT = fakeRoot;
         process.env.RAJOHAN_GITHUB_USERNAME = "rajohan";
 
-        const { listDashboardPullRequests, validatePrNumber } =
-            await import("../src/services/pullRequests.ts");
+        const {
+            isDashboardPullRequestOpen,
+            listDashboardPullRequests,
+            validatePrNumber,
+        } = await import("../src/services/pullRequests.ts");
 
         const pullRequests = await listDashboardPullRequests();
         expect(pullRequests.map((pullRequest) => pullRequest.number)).toEqual([2, 1]);
@@ -2954,6 +2961,8 @@ fi
             reviewerApproved: true,
             canReviewerApprove: false,
         });
+        await expect(isDashboardPullRequestOpen(2)).resolves.toBe(true);
+        await expect(isDashboardPullRequestOpen(99)).resolves.toBe(false);
         expect(validatePrNumber("42")).toBe(42);
         for (const value of ["0", "-1", "1.5", "abc", 1]) {
             expect(() => validatePrNumber(value)).toThrow("Invalid pull request number");

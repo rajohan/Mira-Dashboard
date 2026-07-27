@@ -7,6 +7,7 @@ import {
 import {
     cleanupClosedPullRequestPreview,
     getPullRequestPreviewStatus as readPullRequestPreviewStatus,
+    listManagedPullRequestPreviewStateNumbers,
     type PullRequestPreviewCandidate,
     type PullRequestPreviewLifecycle,
     type PullRequestPreviewStatus,
@@ -14,6 +15,7 @@ import {
     stopPullRequestPreview,
 } from "./pullRequestPreviewHost.ts";
 import {
+    isDashboardPullRequestOpen,
     listDashboardPullRequests,
     type PullRequestSummary,
     validatePrNumber,
@@ -167,8 +169,8 @@ export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewS
 }
 
 /**
- * Queues cleanup when a successful, exhaustive open-PR listing no longer
- * contains the PR that owns the managed slot.
+ * Queues cleanup when a successful production-base listing omits retained
+ * preview data and an unfiltered GitHub lookup confirms that the PR is closed.
  */
 export async function reconcileClosedPullRequestPreview(
     openPullRequests: readonly PullRequestSummary[]
@@ -184,19 +186,30 @@ export async function reconcileClosedPullRequestPreview(
             return;
         }
         const preview = await readPullRequestPreviewStatus();
-        if (
-            preview.number === undefined ||
-            openPullRequests.some((pullRequest) => pullRequest.number === preview.number)
-        ) {
+        const openPullRequestNumbers = new Set(
+            openPullRequests.map((pullRequest) => pullRequest.number)
+        );
+        const cleanupCandidates = [
+            ...(preview.number !== undefined &&
+            !openPullRequestNumbers.has(preview.number)
+                ? [preview.number]
+                : []),
+            ...listManagedPullRequestPreviewStateNumbers().filter(
+                (number) => !openPullRequestNumbers.has(number)
+            ),
+        ];
+        const uniqueCleanupCandidates = new Set(cleanupCandidates);
+        for (const number of uniqueCleanupCandidates) {
+            if (await isDashboardPullRequestOpen(number)) continue;
+            enqueueJobExecution({
+                actionKey: "dashboard.preview.cleanup",
+                displayName: `Clean up closed PR #${number} preview`,
+                payload: { number },
+                resourceClass: "exclusive",
+                timeoutMs: PREVIEW_STOP_TIMEOUT_MS,
+            });
             return;
         }
-        enqueueJobExecution({
-            actionKey: "dashboard.preview.cleanup",
-            displayName: `Clean up closed PR #${preview.number} preview`,
-            payload: { number: preview.number },
-            resourceClass: "exclusive",
-            timeoutMs: PREVIEW_STOP_TIMEOUT_MS,
-        });
     } catch (error) {
         console.error(
             "[PullRequestPreview] Closed-PR reconciliation failed:",
@@ -277,11 +290,7 @@ export function registerPullRequestPreviewExecutionActions(): void {
         "dashboard.preview.cleanup",
         async (job, _signal, context) => {
             const number = executionPreviewNumber(job.actionPayload.number);
-            const openPullRequests = await listDashboardPullRequests();
-            const isStillOpen = openPullRequests.some(
-                (pullRequest) => pullRequest.number === number
-            );
-            if (isStillOpen) {
+            if (await isDashboardPullRequestOpen(number)) {
                 return {
                     cleanup: {
                         message: `PR #${number} is still open; managed PR dev data was kept`,
