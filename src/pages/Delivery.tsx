@@ -4,6 +4,7 @@ import {
     GitBranch,
     GitMerge,
     Play,
+    RefreshCw,
     Rocket,
     Square,
     XCircle,
@@ -16,6 +17,7 @@ import remarkGfm from "remark-gfm";
 
 import { ProductionReleasesCard } from "../components/features/delivery/ProductionReleasesCard";
 import { PullRequestDevelopmentCard } from "../components/features/delivery/PullRequestDevelopmentCard";
+import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
@@ -29,7 +31,6 @@ import type {
     ProductionCheckoutStatus,
     PullRequestPreviewStatus,
     PullRequestSummary,
-    WorktreeCleanupResult,
 } from "../hooks";
 import {
     useApprovePullRequest,
@@ -54,6 +55,7 @@ type PendingAction =
     | { type: "merge"; pr: PullRequestSummary }
     | { type: "merge-deploy"; pr: PullRequestSummary }
     | { type: "review-approve"; pr: PullRequestSummary }
+    | { type: "preview-rebuild"; pr: PullRequestSummary }
     | { type: "preview-start"; pr: PullRequestSummary }
     | { number: number; title?: string; type: "preview-stop" }
     | { type: "reject"; pr: PullRequestSummary }
@@ -65,6 +67,7 @@ type UnhandledPendingActionType = Exclude<
     | "deploy"
     | "merge"
     | "merge-deploy"
+    | "preview-rebuild"
     | "preview-start"
     | "preview-stop"
     | "reject"
@@ -424,6 +427,9 @@ function actionLabel(action: Exclude<PendingAction, undefined>) {
         case "preview-start": {
             return "Run PR in dev";
         }
+        case "preview-rebuild": {
+            return "Rebuild PR dev";
+        }
         case "preview-stop": {
             return "Stop PR dev";
         }
@@ -452,11 +458,14 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
             return `Approve PR #${action.pr.number}: ${action.pr.title}?\n\nThis approves the PR on GitHub. It does not merge or deploy.`;
         }
         case "preview-start": {
-            return `Run PR #${action.pr.number} in dev: ${action.pr.title}?\n\nThis runs the trusted PR over Tailscale HTTPS with hot reload, an isolated Dashboard database, a writable workspace snapshot, and an isolated scheduler/worker without host or backup jobs. It connects to the live production Gateway so chat and session changes can affect production data. The dev environment stops automatically after four hours.`;
+            return `Run PR #${action.pr.number} in dev: ${action.pr.title}?\n\nThis runs the fixed PR commit over Tailscale HTTPS without source watchers, using an isolated Dashboard database, a writable workspace snapshot, and an isolated scheduler/worker without host or backup jobs. It connects to the live production Gateway so chat and session changes can affect production data. The dev environment stops automatically after four hours.`;
+        }
+        case "preview-rebuild": {
+            return `Rebuild PR dev for #${action.pr.number}: ${action.pr.title}?\n\nThis replaces the running dev environment with the latest PR head while keeping the same isolation and live production Gateway connection. The rebuilt environment stops automatically after four hours.`;
         }
         case "preview-stop": {
             const title = action.title ? `: ${action.title}` : "";
-            return `Stop PR dev for #${action.number}${title}?\n\nIts isolated database, workspace snapshot, and worktree are kept for a faster later restart.`;
+            return `Stop PR dev for #${action.number}${title}?\n\nThe shared checkout and isolated PR state are kept while the PR remains open for a faster later restart.`;
         }
         case "reject": {
             return `Reject PR #${action.pr.number}: ${action.pr.title}?\n\nThis closes the PR with a dashboard rejection comment. It does not delete the branch.`;
@@ -470,10 +479,17 @@ function actionMessage(action: Exclude<PendingAction, undefined>) {
     }
 }
 
-/** Performs action result message. */
-function actionResultMessage(message: string, cleanup?: WorktreeCleanupResult) {
-    if (!cleanup) return message;
-    return `${message}\n${cleanup.message}`;
+/** Combines an action result with any best-effort cleanup outcomes. */
+function actionResultMessage(
+    message: string,
+    ...cleanupResults: Array<{ message: string } | undefined>
+) {
+    return [
+        message,
+        ...cleanupResults
+            .filter((cleanup) => cleanup !== undefined)
+            .map((cleanup) => cleanup.message),
+    ].join("\n");
 }
 
 /** Normalizes pull request body. */
@@ -695,7 +711,13 @@ export function Delivery() {
                         number: action.pr.number,
                         willDeploy: false,
                     });
-                    setLastResult(actionResultMessage(result.message, result.cleanup));
+                    setLastResult(
+                        actionResultMessage(
+                            result.message,
+                            result.cleanup,
+                            result.previewCleanup
+                        )
+                    );
                     break;
                 }
 
@@ -707,7 +729,13 @@ export function Delivery() {
                     const message = result.deployError
                         ? `${result.message}: ${result.deployError}`
                         : result.deployment?.note || result.message;
-                    setLastResult(actionResultMessage(message, result.cleanup));
+                    setLastResult(
+                        actionResultMessage(
+                            message,
+                            result.cleanup,
+                            result.previewCleanup
+                        )
+                    );
                     break;
                 }
 
@@ -720,14 +748,16 @@ export function Delivery() {
                     return;
                 }
 
+                case "preview-rebuild":
                 case "preview-start": {
+                    const isRebuild = action.type === "preview-rebuild";
                     const preview = await startPullRequestPreview.mutateAsync({
                         number: action.pr.number,
                     });
                     setLastResult(
                         preview.url
-                            ? `PR #${action.pr.number} dev is running at ${preview.url}`
-                            : `PR #${action.pr.number} dev started`
+                            ? `PR #${action.pr.number} dev ${isRebuild ? "rebuilt" : "is running"} at ${preview.url}`
+                            : `PR #${action.pr.number} dev ${isRebuild ? "rebuilt" : "started"}`
                     );
                     break;
                 }
@@ -744,7 +774,13 @@ export function Delivery() {
                     const result = await rejectPullRequest.mutateAsync({
                         number: action.pr.number,
                     });
-                    setLastResult(actionResultMessage(result.message, result.cleanup));
+                    setLastResult(
+                        actionResultMessage(
+                            result.message,
+                            result.cleanup,
+                            result.previewCleanup
+                        )
+                    );
                     break;
                 }
 
@@ -790,6 +826,8 @@ export function Delivery() {
             previewStatus.commitSha === pr.headRefOid;
         const hasCurrentDevelopment =
             isPreviewSlotActive && hasPullRequestPreviewSlot && isPreviewCommitCurrent;
+        const isRebuildDevelopment =
+            isPreviewSlotActive && hasPullRequestPreviewSlot && !isPreviewCommitCurrent;
         const canStartDevelopment = !hasCurrentDevelopment;
         const isPreviewActionDisabled =
             isActionPending ||
@@ -829,14 +867,24 @@ export function Delivery() {
                         onClick={() =>
                             setPendingAction({
                                 pr,
-                                type: "preview-start",
+                                type: isRebuildDevelopment
+                                    ? "preview-rebuild"
+                                    : "preview-start",
                             })
                         }
                         disabled={isPreviewActionDisabled}
-                        title="Prod-like trusted dev with isolated Dashboard data and the live production Gateway"
+                        title={
+                            isRebuildDevelopment
+                                ? "Rebuild trusted PR dev at the latest PR commit"
+                                : "Prod-like trusted dev with isolated Dashboard data and the live production Gateway"
+                        }
                     >
-                        <Play className="size-4" />
-                        Run in dev
+                        {isRebuildDevelopment ? (
+                            <RefreshCw className="size-4" />
+                        ) : (
+                            <Play className="size-4" />
+                        )}
+                        {isRebuildDevelopment ? "Rebuild dev" : "Run in dev"}
                     </Button>
                 ) : undefined}
                 {hasPullRequestPreviewSlot && previewStatus.status !== "stopped" ? (
@@ -1017,20 +1065,25 @@ export function Delivery() {
                 </div>
 
                 {lastResult ? (
-                    <Card
-                        variant="bordered"
-                        className="border-green-500/30 bg-green-500/10"
+                    <Alert
+                        variant="success"
+                        dismissLabel="Dismiss action result"
+                        onDismiss={() => setLastResult(undefined)}
                     >
                         <p className="text-sm whitespace-pre-line text-green-300">
                             {lastResult}
                         </p>
-                    </Card>
+                    </Alert>
                 ) : undefined}
 
                 {actionError ? (
-                    <Card variant="bordered" className="border-red-500/30 bg-red-500/10">
+                    <Alert
+                        variant="error"
+                        dismissLabel="Dismiss action error"
+                        onDismiss={() => setActionError(undefined)}
+                    >
                         <p className="text-sm text-red-300">{actionError}</p>
-                    </Card>
+                    </Alert>
                 ) : undefined}
 
                 <PullRequestDevelopmentCard

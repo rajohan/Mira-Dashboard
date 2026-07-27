@@ -70,6 +70,7 @@ export interface DevelopmentStackConfig {
     frontendPort: number;
     gatewayTokenFile?: string;
     gatewayUrl: string;
+    hotReload: boolean;
     openClawClientHome: string;
     openClawConfigSource?: string;
     openClawHome: string;
@@ -269,6 +270,18 @@ function configuredStateOwner(value: string | undefined, fallback: string): stri
     return owner;
 }
 
+function isEnvironmentFlagEnabled(
+    name: string,
+    value: string | undefined,
+    isEnabledByDefault: boolean
+): boolean {
+    const configured = value?.trim();
+    if (!configured) return isEnabledByDefault;
+    if (configured === "1") return true;
+    if (configured === "0") return false;
+    throw new TypeError(`${name} must be 0 or 1`);
+}
+
 function absoluteNonRootPath(
     name: string,
     value: string | undefined,
@@ -425,6 +438,11 @@ export function resolveDevelopmentStackConfig(
         frontendPort,
         gatewayTokenFile,
         gatewayUrl: gatewayUrl || DEFAULT_GATEWAY_URL,
+        hotReload: isEnvironmentFlagEnabled(
+            "MIRA_DASHBOARD_DEV_HOT_RELOAD",
+            environment.MIRA_DASHBOARD_DEV_HOT_RELOAD,
+            true
+        ),
         openClawClientHome: path.join(stateRoot, "openclaw-client"),
         openClawConfigSource: absoluteNonRootPath(
             "MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE",
@@ -993,6 +1011,7 @@ function frontendEnvironment(config: DevelopmentStackConfig): Record<string, str
         DASHBOARD_API_TARGET: config.apiTarget,
         HOST: config.frontendHost,
         MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: `mira_dashboard_dev_${config.frontendPort}`,
+        MIRA_DASHBOARD_DEV_HOT_RELOAD: config.hotReload ? "1" : "0",
         MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: config.publicOrigin,
         PORT: String(config.frontendPort),
     };
@@ -1013,27 +1032,31 @@ function stopChild(child: DevelopmentChild): void {
     }
 }
 
-/** Starts watched frontend/backend children and keeps their lifecycle coupled. */
+/** Starts frontend/backend children and keeps their lifecycle coupled. */
 export async function runDevelopmentStack(
     config: DevelopmentStackConfig
 ): Promise<number> {
     const state = prepareDevelopmentState(config);
     prepareDevelopmentLog(config);
     const bun = Bun.which("bun") || process.execPath;
-    const backend = Bun.spawn([bun, "--watch", "src/serverStart.ts"], {
+    const watchArguments = config.hotReload ? ["--watch"] : [];
+    const backend = Bun.spawn([bun, ...watchArguments, "src/serverStart.ts"], {
         cwd: path.join(config.repositoryRoot, "backend"),
         env: developmentBackendEnvironment(config),
         stderr: "inherit",
         stdin: "inherit",
         stdout: "inherit",
     });
-    const frontend = Bun.spawn([bun, "--watch", "scripts/developmentFrontend.ts"], {
-        cwd: config.repositoryRoot,
-        env: frontendEnvironment(config),
-        stderr: "inherit",
-        stdin: "inherit",
-        stdout: "inherit",
-    });
+    const frontend = Bun.spawn(
+        [bun, ...watchArguments, "scripts/developmentFrontend.ts"],
+        {
+            cwd: config.repositoryRoot,
+            env: frontendEnvironment(config),
+            stderr: "inherit",
+            stdin: "inherit",
+            stdout: "inherit",
+        }
+    );
     let developmentLogFixtureIndex = 0;
     const developmentLogFixtureTimer = setInterval(() => {
         try {
@@ -1065,8 +1088,9 @@ export async function runDevelopmentStack(
     console.log(
         [
             `Mira Dashboard development stack: ${config.publicOrigin}`,
-            `Frontend HMR: ${config.frontendHost}:${config.frontendPort}`,
-            `Backend HMR: ${config.backendHost}:${config.backendPort}`,
+            `Frontend${config.hotReload ? " HMR" : ""}: ${config.frontendHost}:${config.frontendPort}`,
+            `Backend${config.hotReload ? " HMR" : ""}: ${config.backendHost}:${config.backendPort}`,
+            `Hot reload: ${config.hotReload ? "enabled" : "disabled"}.`,
             `State: ${config.stateRoot} (database ${state.database}, workspace ${state.workspace}, releases ${state.releases})`,
             `Gateway: ${config.gatewayUrl}`,
             "Isolated scheduler/worker enabled.",

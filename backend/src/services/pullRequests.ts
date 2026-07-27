@@ -36,6 +36,10 @@ import {
     registerQueuedJobCancellationHandler,
 } from "./jobExecutionQueue.ts";
 import {
+    cleanupClosedPullRequestPreview,
+    type PullRequestPreviewCleanupResult,
+} from "./pullRequestPreviewHost.ts";
+import {
     isPullRequestPreviewAuthorAllowed,
     resolvePullRequestPreviewAllowedAuthors,
 } from "./pullRequestPreviewPolicy.ts";
@@ -2800,6 +2804,7 @@ export async function approvePullRequest(
     let deployError: string | undefined;
     let deployment: DeploymentJob | undefined;
     let cleanup: WorktreeCleanupResult;
+    let previewCleanup: PullRequestPreviewCleanupResult;
 
     try {
         if (options.lockHeldBy) {
@@ -2826,6 +2831,7 @@ export async function approvePullRequest(
             { signal: options.signal, timeoutMs: 120_000 }
         );
         cleanup = await cleanupPullRequestWorktree(pr.headRefName, options.signal);
+        previewCleanup = await cleanupClosedPullRequestPreview(number);
 
         try {
             await syncMain(options.signal);
@@ -2859,6 +2865,7 @@ export async function approvePullRequest(
         deployment,
         deployError,
         cleanup,
+        previewCleanup,
         syncError,
     };
 }
@@ -2957,11 +2964,13 @@ export async function rejectPullRequest(
         { signal, timeoutMs: 60_000 }
     );
     const cleanup = await cleanupPullRequestWorktree(pr.headRefName, signal);
+    const previewCleanup = await cleanupClosedPullRequestPreview(number);
 
     return {
         isOk: true,
         message: `PR #${number} closed`,
         cleanup,
+        previewCleanup,
     };
 }
 

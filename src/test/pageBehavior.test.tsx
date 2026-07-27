@@ -3015,13 +3015,25 @@ describe("Mira Dashboard pages", () => {
         expect(
             screen.getByRole("heading", { name: "Run PR in dev" })
         ).toBeInTheDocument();
+        expect(screen.getByText(/without source watchers/u)).toBeInTheDocument();
+        expect(screen.queryByText(/with hot reload/u)).not.toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Run PR in dev" }));
         await waitFor(() => {
             expect(
                 screen.getByText("PR #335 dev is running at https://dashboard.test:5173")
             ).toBeInTheDocument();
         });
+        await user.click(screen.getByRole("button", { name: "Dismiss action result" }));
+        expect(
+            screen.queryByText("PR #335 dev is running at https://dashboard.test:5173")
+        ).not.toBeInTheDocument();
         expect(screen.getAllByRole("link", { name: "Open dev" })).toHaveLength(2);
+        expect(
+            screen.queryByRole("button", { name: "Run in dev" })
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "Rebuild dev" })
+        ).not.toBeInTheDocument();
 
         await user.click(screen.getAllByRole("button", { name: "Stop dev" })[0]!);
         expect(screen.getByRole("heading", { name: "Stop PR dev" })).toBeInTheDocument();
@@ -3029,6 +3041,88 @@ describe("Mira Dashboard pages", () => {
         await waitFor(() => {
             expect(screen.getByText("PR #335 dev stopped")).toBeInTheDocument();
         });
+
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("labels an active PR dev update as a rebuild", async () => {
+        const user = userEvent.setup();
+        let startCalls = 0;
+        let preview: Record<string, unknown> = {
+            commitSha: "b".repeat(40),
+            number: 335,
+            status: "running",
+            title: "Trusted PR dev",
+            updatedAt: "2026-06-24T08:06:00.000Z",
+            url: "https://dashboard.test:5173",
+        };
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? "GET";
+                if (method === "GET" && url === "/api/pull-requests") {
+                    return Response.json({
+                        pullRequests: [
+                            {
+                                author: { login: "mira-2026" },
+                                baseRefName: "main",
+                                createdAt: "2026-06-24T08:00:00.000Z",
+                                headRefName: "mira/trusted-preview",
+                                headRefOid: "a".repeat(40),
+                                isDraft: false,
+                                number: 335,
+                                previewEligible: true,
+                                title: "Trusted PR dev",
+                                updatedAt: "2026-06-24T08:05:00.000Z",
+                                url: "https://github.com/rajohan/Mira-Dashboard/pull/335",
+                            },
+                        ],
+                    });
+                }
+                if (method === "GET" && url === "/api/pull-requests/preview") {
+                    return Response.json({ preview });
+                }
+                if (method === "POST" && url === "/api/pull-requests/335/preview/start") {
+                    startCalls += 1;
+                    preview = {
+                        ...preview,
+                        commitSha: "a".repeat(40),
+                        updatedAt: "2026-06-24T08:07:00.000Z",
+                    };
+                    return Response.json({ isOk: true, preview });
+                }
+                return apiResponse(url, method, init);
+            }),
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Delivery));
+
+        expect(
+            await screen.findByRole("button", { name: "Rebuild dev" })
+        ).toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "Run in dev" })
+        ).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Rebuild dev" }));
+        expect(
+            screen.getByRole("heading", { name: "Rebuild PR dev" })
+        ).toBeInTheDocument();
+        expect(screen.getByText(/latest PR head/u)).toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Rebuild PR dev" }));
+
+        await waitFor(() => {
+            expect(
+                screen.getByText("PR #335 dev rebuilt at https://dashboard.test:5173")
+            ).toBeInTheDocument();
+        });
+        expect(startCalls).toBe(1);
+        expect(
+            screen.queryByRole("button", { name: "Rebuild dev" })
+        ).not.toBeInTheDocument();
 
         view.unmount();
         view.queryClient.clear();

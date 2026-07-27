@@ -16,6 +16,7 @@ const cookieNamespace =
 const forwardedProtocol = createDevelopmentForwardedProtocolResolver(
     process.env.MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN
 );
+const isHotReloadEnabled = process.env.MIRA_DASHBOARD_DEV_HOT_RELOAD !== "0";
 
 interface WebSocketProxyData {
     backend?: WebSocket;
@@ -93,10 +94,7 @@ function upgradeWebSocket(
 }
 
 const server = Bun.serve<WebSocketProxyData>({
-    development: {
-        console: true,
-        hmr: true,
-    },
+    development: isHotReloadEnabled ? { console: true, hmr: true } : false,
     fetch(request, server) {
         const url = new URL(request.url);
         if (url.pathname === "/ws") {

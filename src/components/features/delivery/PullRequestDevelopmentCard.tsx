@@ -68,8 +68,8 @@ export function PullRequestDevelopmentCard({
                         PR dev
                     </CardTitle>
                     <p className="mt-1 text-sm text-primary-400">
-                        One prod-like HTTPS dev slot with hot reload, isolated Dashboard
-                        data, and the live production Gateway.
+                        One prod-like HTTPS dev slot at a fixed PR commit, with isolated
+                        Dashboard data and the live production Gateway.
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">

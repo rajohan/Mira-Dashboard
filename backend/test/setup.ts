@@ -9,10 +9,17 @@ const preloadDatabaseRoot = mkdtempSync(
 );
 const originalDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH;
 const originalAutomationCredentials = process.env.MIRA_DASHBOARD_AUTOMATION_CREDENTIALS;
+const originalPreviewRoot = process.env.MIRA_DASHBOARD_PREVIEW_ROOT;
+const originalPreviewWorktreePath = process.env.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH;
 const originalSecretEncryptionKey = process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY;
 
 process.env.NODE_ENV = "test";
 process.env.MIRA_DASHBOARD_DB_PATH = path.join(preloadDatabaseRoot, "dashboard.db");
+process.env.MIRA_DASHBOARD_PREVIEW_ROOT = path.join(preloadDatabaseRoot, "preview-state");
+process.env.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH = path.join(
+    preloadDatabaseRoot,
+    "preview-worktree"
+);
 process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY = new Uint8Array(32).fill(7).toBase64();
 delete process.env.MIRA_DASHBOARD_AUTOMATION_CREDENTIALS;
 
@@ -26,6 +33,16 @@ afterAll(() => {
         delete process.env.MIRA_DASHBOARD_AUTOMATION_CREDENTIALS;
     } else {
         process.env.MIRA_DASHBOARD_AUTOMATION_CREDENTIALS = originalAutomationCredentials;
+    }
+    if (originalPreviewRoot === undefined) {
+        delete process.env.MIRA_DASHBOARD_PREVIEW_ROOT;
+    } else {
+        process.env.MIRA_DASHBOARD_PREVIEW_ROOT = originalPreviewRoot;
+    }
+    if (originalPreviewWorktreePath === undefined) {
+        delete process.env.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH;
+    } else {
+        process.env.MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH = originalPreviewWorktreePath;
     }
     if (originalSecretEncryptionKey === undefined) {
         delete process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY;

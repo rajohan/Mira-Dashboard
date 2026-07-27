@@ -2,12 +2,14 @@
 
 Production separates source control, immutable code, and persistent state:
 
-| Purpose                                           | Path                                              |
-| ------------------------------------------------- | ------------------------------------------------- |
-| Control checkout and deployment scripts           | `/home/ubuntu/projects/mira-dashboard`            |
-| Temporary detached build worktrees                | `/home/ubuntu/projects/mira-dashboard-worktrees/` |
-| Immutable releases and `current`/`previous` links | `/home/ubuntu/projects/mira-dashboard-releases`   |
-| Persistent production state                       | `/home/ubuntu/projects/mira-dashboard-state`      |
+| Purpose                                           | Path                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------ |
+| Control checkout and deployment scripts           | `/home/ubuntu/projects/mira-dashboard`                       |
+| Temporary detached build worktrees                | `/home/ubuntu/projects/mira-dashboard-worktrees/`            |
+| Shared managed PR-dev checkout                    | `/home/ubuntu/projects/mira-dashboard-preview`               |
+| Managed PR-dev state and dependency cache         | `/home/ubuntu/projects/mira-dashboard-preview-state/managed` |
+| Immutable releases and `current`/`previous` links | `/home/ubuntu/projects/mira-dashboard-releases`              |
+| Persistent production state                       | `/home/ubuntu/projects/mira-dashboard-state`                 |
 
 Web and worker execute from:
 

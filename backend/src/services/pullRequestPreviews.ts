@@ -1,9 +1,11 @@
+import { errorMessage } from "../lib/errors.ts";
 import {
     enqueueJobExecution,
     type JobExecution,
     listJobExecutions,
 } from "./jobExecutionQueue.ts";
 import {
+    cleanupClosedPullRequestPreview,
     getPullRequestPreviewStatus as readPullRequestPreviewStatus,
     type PullRequestPreviewCandidate,
     type PullRequestPreviewLifecycle,
@@ -30,6 +32,11 @@ export type {
 const PREVIEW_START_TIMEOUT_MS = 30 * 60 * 1000;
 const PREVIEW_STOP_TIMEOUT_MS = 6 * 60 * 1000;
 const PREVIEW_WAIT_GRACE_MS = 5 * 60 * 1000;
+const PREVIEW_ACTION_KEYS = new Set([
+    "dashboard.preview.cleanup",
+    "dashboard.preview.start",
+    "dashboard.preview.stop",
+]);
 const COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const PREVIEW_LIFECYCLES = new Set<PullRequestPreviewLifecycle>([
     "failed",
@@ -135,9 +142,7 @@ export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewS
     const activeExecution = listJobExecutions(200).find(
         (execution) =>
             ["queued", "running"].includes(execution.status) &&
-            ["dashboard.preview.start", "dashboard.preview.stop"].includes(
-                execution.actionKey
-            )
+            PREVIEW_ACTION_KEYS.has(execution.actionKey)
     );
     if (!activeExecution) return preview;
 
@@ -159,6 +164,45 @@ export async function getPullRequestPreviewStatus(): Promise<PullRequestPreviewS
                 : "stopping",
         updatedAt: activeExecution.startedAt || activeExecution.queuedAt,
     };
+}
+
+/**
+ * Queues cleanup when a successful, exhaustive open-PR listing no longer
+ * contains the PR that owns the managed slot.
+ */
+export async function reconcileClosedPullRequestPreview(
+    openPullRequests: readonly PullRequestSummary[]
+): Promise<void> {
+    try {
+        if (
+            listJobExecutions(200).some(
+                (execution) =>
+                    ["queued", "running"].includes(execution.status) &&
+                    PREVIEW_ACTION_KEYS.has(execution.actionKey)
+            )
+        ) {
+            return;
+        }
+        const preview = await readPullRequestPreviewStatus();
+        if (
+            preview.number === undefined ||
+            openPullRequests.some((pullRequest) => pullRequest.number === preview.number)
+        ) {
+            return;
+        }
+        enqueueJobExecution({
+            actionKey: "dashboard.preview.cleanup",
+            displayName: `Clean up closed PR #${preview.number} preview`,
+            payload: { number: preview.number },
+            resourceClass: "exclusive",
+            timeoutMs: PREVIEW_STOP_TIMEOUT_MS,
+        });
+    } catch (error) {
+        console.error(
+            "[PullRequestPreview] Closed-PR reconciliation failed:",
+            errorMessage(error, "preview cleanup reconciliation failed")
+        );
+    }
 }
 
 /** Queues one managed preview startup in the dedicated production worker. */
@@ -227,8 +271,33 @@ export async function prepareAndStopPullRequestPreview(
     );
 }
 
-/** Registers host preview start/stop actions only in the full production worker. */
+/** Registers host preview lifecycle actions only in the full production worker. */
 export function registerPullRequestPreviewExecutionActions(): void {
+    registerScheduledJobAction(
+        "dashboard.preview.cleanup",
+        async (job, _signal, context) => {
+            const number = executionPreviewNumber(job.actionPayload.number);
+            const openPullRequests = await listDashboardPullRequests();
+            const isStillOpen = openPullRequests.some(
+                (pullRequest) => pullRequest.number === number
+            );
+            if (isStillOpen) {
+                return {
+                    cleanup: {
+                        message: `PR #${number} is still open; managed PR dev data was kept`,
+                        number,
+                        status: "skipped",
+                    },
+                    preview: await readPullRequestPreviewStatus(),
+                };
+            }
+            context.protectFromCancellation();
+            return {
+                cleanup: await cleanupClosedPullRequestPreview(number),
+                preview: await readPullRequestPreviewStatus(),
+            };
+        }
+    );
     registerScheduledJobAction(
         "dashboard.preview.start",
         async (job, signal, context) => {

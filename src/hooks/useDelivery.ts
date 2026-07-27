@@ -145,6 +145,11 @@ interface PullRequestActionResponse {
     deployment?: DeploymentJob;
     deployError?: string;
     cleanup?: WorktreeCleanupResult;
+    previewCleanup?: {
+        message: string;
+        number: number;
+        status: "removed" | "skipped" | "warning";
+    };
     pullRequest?: PullRequestSummary;
 }
 

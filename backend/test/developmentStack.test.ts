@@ -168,6 +168,7 @@ describe("development stack", () => {
                 frontendHost: "127.0.0.1",
                 frontendPort: 5173,
                 gatewayUrl: "ws://127.0.0.1:18789",
+                hotReload: true,
                 publicOrigin: "http://localhost:5173",
                 releaseSource: path.join(root, "projects", "mira-dashboard-releases"),
                 rpId: "localhost",
@@ -187,6 +188,7 @@ describe("development stack", () => {
                     MIRA_DASHBOARD_DEV_FRONTEND_PORT: "4173",
                     MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE: tokenFile,
                     MIRA_DASHBOARD_DEV_GATEWAY_URL: "wss://gateway.example/ws",
+                    MIRA_DASHBOARD_DEV_HOT_RELOAD: "0",
                     MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: "https://dashboard.example:4173",
                     MIRA_DASHBOARD_DEV_STATE_ROOT: path.join(root, "state"),
                 },
@@ -197,6 +199,7 @@ describe("development stack", () => {
                 frontendPort: 4173,
                 gatewayTokenFile: tokenFile,
                 gatewayUrl: "wss://gateway.example/ws",
+                hotReload: false,
                 rpId: "dashboard.example",
             });
 
@@ -218,6 +221,10 @@ describe("development stack", () => {
                 {
                     HOME: root,
                     MIRA_DASHBOARD_DEV_GATEWAY_URL: "https://gateway.example",
+                },
+                {
+                    HOME: root,
+                    MIRA_DASHBOARD_DEV_HOT_RELOAD: "true",
                 },
             ]) {
                 expect(() => resolveDevelopmentStackConfig(environment, root)).toThrow();
@@ -616,7 +623,7 @@ describe("development stack", () => {
         }
     });
 
-    it("couples watched frontend and backend child lifecycles", async () => {
+    it("couples frontend and backend child lifecycles without watchers when disabled", async () => {
         const root = temporaryRoot("mira-development-processes-");
         const gatewayTokenFile = path.join(root, "gateway.token");
         writeFileSync(gatewayTokenFile, "development-gateway-token\n", {
@@ -641,6 +648,7 @@ describe("development stack", () => {
             {
                 HOME: root,
                 MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE: gatewayTokenFile,
+                MIRA_DASHBOARD_DEV_HOT_RELOAD: "0",
                 MIRA_DASHBOARD_DEV_STATE_ROOT: path.join(root, "state"),
             },
             root
@@ -660,6 +668,10 @@ describe("development stack", () => {
             backend.complete(7);
             await expect(running).resolves.toBe(7);
             expect(spawnSpy).toHaveBeenCalledTimes(2);
+            expect(spawnSpy.mock.calls[0]?.[0]).toEqual([
+                expect.any(String),
+                "src/serverStart.ts",
+            ]);
             expect(spawnSpy.mock.calls[0]?.[1]).toMatchObject({
                 cwd: path.join(root, "backend"),
                 env: expect.objectContaining({
@@ -667,10 +679,15 @@ describe("development stack", () => {
                     MIRA_DASHBOARD_JOB_PROFILE: "isolated",
                 }),
             });
+            expect(spawnSpy.mock.calls[1]?.[0]).toEqual([
+                expect.any(String),
+                "scripts/developmentFrontend.ts",
+            ]);
             expect(spawnSpy.mock.calls[1]?.[1]).toMatchObject({
                 cwd: root,
                 env: expect.objectContaining({
                     DASHBOARD_API_TARGET: "http://127.0.0.1:3101",
+                    MIRA_DASHBOARD_DEV_HOT_RELOAD: "0",
                     MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: "http://localhost:5173",
                     PORT: "5173",
                 }),

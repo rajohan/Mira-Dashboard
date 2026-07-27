@@ -23,6 +23,8 @@ describe("PullRequestDevelopmentCard", () => {
         const { rerender } = render(<PullRequestDevelopmentCard preview={undefined} />);
 
         expect(screen.getByText("Available")).toBeInTheDocument();
+        expect(screen.getByText(/fixed PR commit/u)).toBeInTheDocument();
+        expect(screen.queryByText(/hot reload/iu)).not.toBeInTheDocument();
         expect(
             screen.getByText("Run an eligible trusted PR in dev from its card below.")
         ).toBeInTheDocument();

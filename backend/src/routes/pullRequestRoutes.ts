@@ -4,6 +4,7 @@ import {
     getPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
     prepareAndStopPullRequestPreview,
+    reconcileClosedPullRequestPreview,
 } from "../services/pullRequestPreviews.ts";
 import {
     getDashboardReleaseStatus,
@@ -43,7 +44,9 @@ export const pullRequestRoutes = {
     "/api/pull-requests": {
         GET: async () => {
             try {
-                return json({ pullRequests: await listDashboardPullRequests() });
+                const pullRequests = await listDashboardPullRequests();
+                await reconcileClosedPullRequestPreview(pullRequests);
+                return json({ pullRequests });
             } catch (error) {
                 return routeError(error);
             }

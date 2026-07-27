@@ -3032,6 +3032,10 @@ fi
             },
             isOk: true,
             message: "PR #5 closed",
+            previewCleanup: {
+                number: 5,
+                status: "skipped",
+            },
         });
 
         const reviewRoute = await pullRequestRoutes[
@@ -3197,6 +3201,10 @@ fi
                 },
                 isOk: true,
                 message: "PR #11 merged",
+                previewCleanup: {
+                    number: 11,
+                    status: "skipped",
+                },
             });
             await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
             await expect(Bun.file(gitLog).text()).resolves.toContain("worktree remove");
@@ -3289,6 +3297,10 @@ fi
                 deployError: undefined,
                 isOk: true,
                 message: "PR #11 merged. Production sync failed",
+                previewCleanup: {
+                    number: 11,
+                    status: "skipped",
+                },
                 syncError: expect.stringContaining("remote moved unexpectedly"),
             });
             await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
