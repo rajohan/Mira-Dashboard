@@ -8,7 +8,7 @@ const CURRENT_DATABASE_SCHEMA_VERSION = databaseMigrations.at(-1)?.version ?? 0;
  * previous release has left the rollback window.
  */
 export const DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY = Object.freeze({
-    maximum: 6,
+    maximum: 7,
     minimum: 6,
     target: CURRENT_DATABASE_SCHEMA_VERSION,
 });

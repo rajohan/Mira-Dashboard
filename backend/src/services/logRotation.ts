@@ -7,7 +7,7 @@ import {
     resolveDashboardProjectPathsForRuntime,
     resolveDashboardRuntimePath,
 } from "../lib/dashboardPaths.ts";
-import { runProcess } from "../lib/processes.ts";
+import { resolveBunExecutable, runProcess } from "../lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "../lib/safePath.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
@@ -147,10 +147,6 @@ function defaultConfigPath(): string {
         return SOURCE_CONFIG_PATH;
     }
     return BUNDLED_CONFIG_PATH;
-}
-
-function resolveBunExecutable(): string {
-    return process.execPath;
 }
 
 function fileHandleReadableStream(

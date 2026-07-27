@@ -2072,6 +2072,10 @@ describe("Mira Dashboard backend integration", () => {
                 expect.stringContaining("/text-to-speech/"),
                 "https://api.elevenlabs.io/v1/speech-to-text",
             ]);
+            const sttRequestBody = providerCalls.at(-1)?.body;
+            expect(sttRequestBody).toBeInstanceOf(FormData);
+            expect((sttRequestBody as FormData).get("model_id")).toBe("scribe_v2");
+            expect((sttRequestBody as FormData).get("language_code")).toBeNull();
         } finally {
             Object.defineProperty(globalThis, "fetch", {
                 configurable: true,

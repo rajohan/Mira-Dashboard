@@ -21,11 +21,15 @@ Environment token precedence is:
 
 ## Dashboard Storage And Paths
 
-| Variable                      | Required                    | Default                                | Purpose                                                                                                   |
+| Variable                      | Required                    | Fallback                               | Purpose                                                                                                   |
 | ----------------------------- | --------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `MIRA_DASHBOARD_PROJECT_ROOT` | Explicit in production unit | `/home/ubuntu/projects/mira-dashboard` | Single host-layout root. Every production, state, release, preview, and worktree path is derived from it. |
 | `OPENCLAW_HOME`               | Optional                    | `~/.openclaw`                          | Primary OpenClaw home for file/config/media/agent lookups when set.                                       |
 | `WORKSPACE_ROOT`              | Optional                    | OpenClaw workspace                     | Root exposed by `/api/files`. Must be absolute and normalized if set.                                     |
+
+Below, `<project-root>` means the validated
+`MIRA_DASHBOARD_PROJECT_ROOT`; the fallback is
+`/home/ubuntu/projects/mira-dashboard` only when that variable is unset.
 
 Production accepts no per-path Dashboard overrides. The service unit supplies
 only `MIRA_DASHBOARD_PROJECT_ROOT`; values with names such as
@@ -41,10 +45,9 @@ stored in Doppler or added to a production unit.
 isolated development child use its private state and let tests inject temporary
 fixtures; they are not operator configuration.
 
-Production mutable state lives in
-`/home/ubuntu/projects/mira-dashboard/production/state`, outside both the
-control checkout and immutable releases. SQLite backups live below the derived
-state root.
+Production mutable state lives in `<project-root>/production/state`, outside
+both the control checkout and immutable releases. SQLite backups live below
+that derived state root.
 Versioned `backend/config/` files are release artifacts, not external state.
 `OPENCLAW_HOME` remains the primary OpenClaw installation/configuration root;
 `MIRA_DASHBOARD_OPENCLAW_HOME` is the separate Dashboard client identity root
@@ -124,8 +127,10 @@ There is no executable-path environment override.
 | `OPENROUTER_API_KEY` | Cache/provider checks   | Used by quota/cache refresh services.         |
 | `SYNTHETIC_API_KEY`  | Synthetic cache checks  | Used by cache refresh services.               |
 
-The ElevenLabs STT model/language and TTS model/voice are product constants in
-code. Changing them is a reviewed code change, not a Doppler setting.
+The ElevenLabs STT model and TTS model/voice are product constants in code. STT
+uses `scribe_v2` without a `language_code`, allowing ElevenLabs to detect the
+spoken language automatically. Changing these settings is a reviewed code
+change, not a Doppler setting.
 
 ## Database Overview Integration
 
@@ -150,20 +155,20 @@ child environment forwards the two auth timing values unchanged, uses the
 production RP ID only to decide whether copied WebAuthn public credentials are
 compatible, and does not inherit other provider or host credentials.
 
-| Variable                                    | Default                                                        | Purpose                                                                                                            |
-| ------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `MIRA_DASHBOARD_DEV_FRONTEND_PORT`          | `5173`                                                         | Frontend hot-reload port.                                                                                          |
-| `MIRA_DASHBOARD_DEV_BACKEND_PORT`           | `3101`                                                         | Backend restart-on-change port.                                                                                    |
-| `MIRA_DASHBOARD_DEV_HOT_RELOAD`             | `1` when unset or empty                                        | Accepts only `0` or `1`; enables frontend HMR and backend/frontend source watchers, while managed PR dev sets `0`. |
-| `MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN`          | `http://localhost:5173`                                        | Cookie/WebAuthn origin; remote dev derives the Tailscale HTTPS origin.                                             |
-| `MIRA_DASHBOARD_DEV_STATE_ROOT`             | `~/projects/mira-dashboard/development/state/local`            | Owner-only isolated development state.                                                                             |
-| `MIRA_DASHBOARD_DEV_DB_SOURCE`              | `~/projects/mira-dashboard/production/state/mira-dashboard.db` | Production database used only to create a scrubbed WAL-consistent snapshot.                                        |
-| `MIRA_DASHBOARD_DEV_RELEASES_SOURCE`        | `~/projects/mira-dashboard/production/releases`                | Managed releases copied into isolated state.                                                                       |
-| `MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE`       | `~/.openclaw/workspace`                                        | Workspace copied with secret and symlink filtering.                                                                |
-| `MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE` | `~/.openclaw/openclaw.json`                                    | Source for sanitized agent-only development config.                                                                |
-| `MIRA_DASHBOARD_DEV_GATEWAY_URL`            | `ws://127.0.0.1:18789`                                         | Live production Gateway used by trusted dev.                                                                       |
-| `MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE`     | none                                                           | Optional owner-only token file; local commands normally use Doppler environment.                                   |
-| `HOST` / `PORT` / `DASHBOARD_API_TARGET`    | `127.0.0.1` / `5173` / `http://127.0.0.1:3101`                 | Child frontend bind and exact backend proxy target.                                                                |
+| Variable                                    | Default                                             | Purpose                                                                                                            |
+| ------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `MIRA_DASHBOARD_DEV_FRONTEND_PORT`          | `5173`                                              | Frontend hot-reload port.                                                                                          |
+| `MIRA_DASHBOARD_DEV_BACKEND_PORT`           | `3101`                                              | Backend restart-on-change port.                                                                                    |
+| `MIRA_DASHBOARD_DEV_HOT_RELOAD`             | `1` when unset or empty                             | Accepts only `0` or `1`; enables frontend HMR and backend/frontend source watchers, while managed PR dev sets `0`. |
+| `MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN`          | `http://localhost:5173`                             | Cookie/WebAuthn origin; remote dev derives the Tailscale HTTPS origin.                                             |
+| `MIRA_DASHBOARD_DEV_STATE_ROOT`             | `<project-root>/development/state/local`            | Owner-only isolated development state.                                                                             |
+| `MIRA_DASHBOARD_DEV_DB_SOURCE`              | `<project-root>/production/state/mira-dashboard.db` | Production database used only to create a scrubbed WAL-consistent snapshot.                                        |
+| `MIRA_DASHBOARD_DEV_RELEASES_SOURCE`        | `<project-root>/production/releases`                | Managed releases copied into isolated state.                                                                       |
+| `MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE`       | `~/.openclaw/workspace`                             | Workspace copied with secret and symlink filtering.                                                                |
+| `MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE` | `~/.openclaw/openclaw.json`                         | Source for sanitized agent-only development config.                                                                |
+| `MIRA_DASHBOARD_DEV_GATEWAY_URL`            | `ws://127.0.0.1:18789`                              | Live production Gateway used by trusted dev.                                                                       |
+| `MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE`     | none                                                | Optional owner-only token file; local commands normally use Doppler environment.                                   |
+| `HOST` / `PORT` / `DASHBOARD_API_TARGET`    | `127.0.0.1` / `5173` / `http://127.0.0.1:3101`      | Child frontend bind and exact backend proxy target.                                                                |
 
 Managed PR dev has one fixed slot. Its checkout/state paths derive from
 `MIRA_DASHBOARD_PROJECT_ROOT`; frontend `5173`, backend `3101`, proxy `18790`,

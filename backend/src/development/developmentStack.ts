@@ -574,6 +574,9 @@ function backfillCompletedDeploymentHistory(
         if (!hasTable(target, "deployment_jobs")) return;
         target.run("BEGIN IMMEDIATE");
         try {
+            if (hasTable(target, "deployment_lock")) {
+                target.run("DELETE FROM deployment_lock");
+            }
             target.run(
                 "DELETE FROM deployment_jobs WHERE status NOT IN ('isOk', 'failed')"
             );

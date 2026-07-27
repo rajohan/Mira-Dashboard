@@ -21,6 +21,11 @@ export type BunProcess = ReturnType<typeof Bun.spawn>;
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 const DEFAULT_FORCE_KILL_GRACE_MS = 3000;
 
+/** Returns the absolute Bun executable already running the Dashboard process. */
+export function resolveBunExecutable(): string {
+    return process.execPath;
+}
+
 async function readProcessText(
     stream: ReadableStream<Uint8Array> | undefined,
     maxBuffer: number

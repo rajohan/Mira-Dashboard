@@ -6,6 +6,7 @@ import { errorMessage } from "../lib/errors.ts";
 import {
     killProcessGroup,
     pipeProcessOutput,
+    resolveBunExecutable,
     runProcess,
     spawnProcess,
 } from "../lib/processes.ts";
@@ -102,10 +103,6 @@ const publicPullRequestCache: {
     failure?: { expiresAt: number; message: string };
     value?: { expiresAt: number; pullRequests: PullRequestSummary[] };
 } = {};
-
-function resolveBunExecutable(): string {
-    return process.execPath;
-}
 
 export function getResolvedRoots() {
     return {

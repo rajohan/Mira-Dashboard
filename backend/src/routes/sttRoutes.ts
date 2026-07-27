@@ -5,7 +5,6 @@ const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const ELEVENLABS_TIMEOUT_MS = 60_000;
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 const ELEVENLABS_STT_MODEL = "scribe_v2";
-const ELEVENLABS_STT_LANGUAGE = "nor";
 
 const sttRouteState: { activeTranscriptionToken?: string } = {};
 
@@ -65,7 +64,6 @@ async function transcribeWithElevenLabs(
     formData.append("model_id", ELEVENLABS_STT_MODEL);
     formData.append("tag_audio_events", "false");
     formData.append("diarize", "false");
-    formData.append("language_code", ELEVENLABS_STT_LANGUAGE);
 
     try {
         try {

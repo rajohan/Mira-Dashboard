@@ -82,7 +82,10 @@ function createSnapshotSource(databasePath: string): void {
         CREATE TABLE auth_sessions (id TEXT PRIMARY KEY);
         CREATE TABLE auth_pending_logins (id TEXT PRIMARY KEY);
         CREATE TABLE app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE deployment_lock (id INTEGER PRIMARY KEY);
+        CREATE TABLE deployment_lock (
+            id INTEGER PRIMARY KEY,
+            job_id TEXT NOT NULL
+        );
         CREATE TABLE deployment_jobs (
             id TEXT PRIMARY KEY,
             status TEXT NOT NULL,
@@ -166,7 +169,9 @@ function createSnapshotSource(databasePath: string): void {
                 NULL
             )
     `);
-    database.run("INSERT INTO deployment_lock (id) VALUES (1)");
+    database.run(
+        "INSERT INTO deployment_lock (id, job_id) VALUES (1, 'deployment-active')"
+    );
     database.run(`
         INSERT INTO scheduled_jobs (id, enabled, action_key, next_run_at)
         VALUES
@@ -498,6 +503,23 @@ describe("development stack", () => {
             );
             const legacySnapshot = new Database(config.databasePath);
             legacySnapshot.run("DELETE FROM deployment_jobs");
+            legacySnapshot.run(`
+                INSERT INTO deployment_jobs (
+                    id,
+                    status,
+                    started_at,
+                    updated_at
+                )
+                VALUES (
+                    'legacy-active-deployment',
+                    'verifying',
+                    '2026-01-03T00:00:00.000Z',
+                    '2026-01-03T00:01:00.000Z'
+                )
+            `);
+            legacySnapshot.run(
+                "INSERT INTO deployment_lock (id, job_id) VALUES (1, 'legacy-active-deployment')"
+            );
             legacySnapshot.close();
             expect(prepareDevelopmentState(config)).toEqual({
                 database: "reused",
@@ -512,6 +534,11 @@ describe("development stack", () => {
                     .query("SELECT id, status FROM deployment_jobs ORDER BY id")
                     .all()
             ).toEqual([{ id: "deployment", status: "isOk" }]);
+            expect(
+                backfilledSnapshot
+                    .query("SELECT id, job_id FROM deployment_lock ORDER BY id")
+                    .all()
+            ).toEqual([]);
             backfilledSnapshot.close();
 
             resetDevelopmentState(config);
