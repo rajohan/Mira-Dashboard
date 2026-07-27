@@ -28,12 +28,17 @@ import {
     secureSqliteFilePermissions,
     sqliteBackupDirectory,
 } from "../src/databaseStorage.ts";
+import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
 import { RELEASE_READINESS_FAILURE_NOTE_PREFIX } from "../src/services/deploymentRuntimeResults.ts";
 import { pruneDatabaseHistory } from "../src/services/sqliteMaintenance.ts";
 import {
     createVerifiedSqliteBackup,
+    createVerifiedSqliteCutoverSnapshot,
+    didDiscardSqliteCutoverSnapshot,
     getSqliteBackupInventory,
     pruneSqliteBackups,
+    restoreVerifiedSqliteCutoverSnapshot,
+    verifySqliteCutoverSnapshot,
 } from "../src/sqliteBackup.ts";
 
 const temporaryRoots: string[] = [];
@@ -639,6 +644,130 @@ describe("Dashboard SQLite lifecycle", () => {
             }
         } finally {
             database.close();
+        }
+    });
+
+    it("restores the exact guarded cutover snapshot before old code restarts", () => {
+        const root = temporaryRoot("mira-db-cutover-");
+        const databasePath = path.join(root, "dashboard.db");
+        const snapshotId = "019fa351-e832-7000-ae09-435160fd5ccc";
+        const database = openWalDatabase(databasePath);
+        database.run("CREATE TABLE cutover_values (value TEXT NOT NULL)");
+        database
+            .prepare("INSERT INTO cutover_values (value) VALUES (?)")
+            .run("before-cutover");
+        const snapshot = createVerifiedSqliteCutoverSnapshot(
+            database,
+            databasePath,
+            snapshotId
+        );
+        expect(() =>
+            createVerifiedSqliteCutoverSnapshot(database, databasePath, snapshotId)
+        ).toThrow("SQLite cutover snapshot already exists");
+        database
+            .prepare("INSERT INTO cutover_values (value) VALUES (?)")
+            .run("candidate-write");
+        database.close();
+
+        expect(verifySqliteCutoverSnapshot(databasePath, snapshotId)).toMatchObject({
+            kind: "cutover",
+            path: snapshot.path,
+            restoreVerified: true,
+        });
+        expect(() =>
+            verifySqliteCutoverSnapshot(databasePath, "../not-a-snapshot")
+        ).toThrow("SQLite cutover snapshot id must be a lowercase UUIDv7");
+        expect(
+            restoreVerifiedSqliteCutoverSnapshot(databasePath, snapshotId)
+        ).toMatchObject({
+            kind: "cutover",
+            path: snapshot.path,
+            restoreVerified: true,
+        });
+        const restored = new Database(databasePath, { readonly: true });
+        try {
+            expect(
+                restored.query("SELECT value FROM cutover_values ORDER BY value").all()
+            ).toEqual([{ value: "before-cutover" }]);
+        } finally {
+            restored.close();
+        }
+        expect(didDiscardSqliteCutoverSnapshot(databasePath, snapshotId)).toBe(true);
+        expect(didDiscardSqliteCutoverSnapshot(databasePath, snapshotId)).toBe(false);
+    });
+
+    it("exposes cutover snapshots through bounded release lifecycle commands", async () => {
+        const root = temporaryRoot("mira-db-cutover-lifecycle-");
+        const databasePath = path.join(root, "dashboard.db");
+        const snapshotId = "019fa351-e832-7000-ae09-435160fd5ccd";
+        const database = openWalDatabase(databasePath);
+        applyDatabaseMigrations(database, databasePath);
+        database.run("CREATE TABLE lifecycle_values (value TEXT NOT NULL)");
+        database
+            .prepare("INSERT INTO lifecycle_values (value) VALUES (?)")
+            .run("before-cutover");
+        database.close();
+
+        const originalDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH;
+        process.env.MIRA_DASHBOARD_DB_PATH = databasePath;
+        try {
+            await expect(
+                runReleaseLifecycleCommand(["snapshot-database", snapshotId])
+            ).resolves.toMatchObject({
+                snapshotId,
+            });
+            await expect(
+                runReleaseLifecycleCommand(["verify-database-snapshot", snapshotId])
+            ).resolves.toEqual({
+                bytes: expect.any(Number),
+                snapshotId,
+                verified: true,
+            });
+
+            const candidateDatabase = openWalDatabase(databasePath);
+            candidateDatabase
+                .prepare("INSERT INTO lifecycle_values (value) VALUES (?)")
+                .run("candidate-write");
+            candidateDatabase.close();
+
+            await expect(
+                runReleaseLifecycleCommand(["restore-database", snapshotId])
+            ).resolves.toEqual({
+                bytes: expect.any(Number),
+                restored: true,
+                snapshotId,
+            });
+            const restoredDatabase = new Database(databasePath, { readonly: true });
+            try {
+                expect(
+                    restoredDatabase
+                        .query("SELECT value FROM lifecycle_values ORDER BY value")
+                        .all()
+                ).toEqual([{ value: "before-cutover" }]);
+            } finally {
+                restoredDatabase.close();
+            }
+            await expect(
+                runReleaseLifecycleCommand(["discard-database-snapshot", snapshotId])
+            ).resolves.toEqual({
+                discarded: true,
+                snapshotId,
+            });
+            await expect(
+                runReleaseLifecycleCommand(["discard-database-snapshot", snapshotId])
+            ).resolves.toEqual({
+                discarded: false,
+                snapshotId,
+            });
+            await expect(
+                runReleaseLifecycleCommand(["snapshot-database"])
+            ).rejects.toThrow("requires exactly one snapshot id");
+        } finally {
+            if (originalDatabasePath === undefined) {
+                delete process.env.MIRA_DASHBOARD_DB_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_DB_PATH = originalDatabasePath;
+            }
         }
     });
 

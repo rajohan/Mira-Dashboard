@@ -91,14 +91,17 @@ const PUBLIC_PR_FAILURE_CACHE_MS = 30_000;
 const PUBLIC_GITHUB_API_TIMEOUT_MS = 15_000;
 const DEPLOYMENT_RESTART_STATUS_POLL_MS = 1000;
 const DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS = 2 * 60 * 1000;
+const DEPLOYMENT_CUTOVER_HANDOFF_TIMEOUT_MS = 30_000;
 const MAX_DEPLOYMENT_CUTOVER_CONTEXT_BYTES = 4096;
-const DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION = 1;
+const DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION = 2;
 const DEPLOYMENT_WORKER_STABILITY_SECONDS =
     Math.ceil(JOB_WORKER_HEARTBEAT_MAX_AGE_MS / 1000) + 1;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "verifying"]);
 const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
+const SQLITE_CUTOVER_SNAPSHOT_ID_PATTERN =
+    /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
 const publicPullRequestCache: {
     failure?: { expiresAt: number; message: string };
     value?: { expiresAt: number; pullRequests: PullRequestSummary[] };
@@ -379,6 +382,7 @@ interface DeploymentLockExecutionRow {
 
 interface DeploymentCutoverContext {
     candidateCommit: string;
+    databaseSnapshotId: string;
     formatVersion: typeof DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION;
     preActivationCommit: string;
     preActivationPreviousCommit?: string;
@@ -391,6 +395,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function createDeploymentCutoverContext(
     candidateCommit: string,
+    databaseSnapshotId: string,
     preActivationCommit: string,
     rollbackCommit: string,
     preActivationPreviousCommit: string | undefined
@@ -401,6 +406,9 @@ function createDeploymentCutoverContext(
         !FULL_COMMIT_SHA_PATTERN.test(rollbackCommit)
     ) {
         throw new TypeError("Release cutover context requires full commit SHAs");
+    }
+    if (!SQLITE_CUTOVER_SNAPSHOT_ID_PATTERN.test(databaseSnapshotId)) {
+        throw new TypeError("Release cutover context requires a lowercase UUIDv7");
     }
     if (rollbackCommit === candidateCommit) {
         throw new TypeError(
@@ -429,6 +437,7 @@ function createDeploymentCutoverContext(
     }
     return {
         candidateCommit,
+        databaseSnapshotId,
         formatVersion: DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION,
         preActivationCommit,
         ...(preActivationPreviousCommit && { preActivationPreviousCommit }),
@@ -460,6 +469,7 @@ function parseDeploymentCutoverContext(
     const value = output.releaseCutover;
     const allowedKeys = new Set([
         "candidateCommit",
+        "databaseSnapshotId",
         "formatVersion",
         "preActivationCommit",
         "preActivationPreviousCommit",
@@ -470,6 +480,7 @@ function parseDeploymentCutoverContext(
         value.formatVersion !== DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION ||
         typeof value.candidateCommit !== "string" ||
         value.candidateCommit !== expectedCandidateCommit ||
+        typeof value.databaseSnapshotId !== "string" ||
         typeof value.preActivationCommit !== "string" ||
         typeof value.rollbackCommit !== "string" ||
         (value.preActivationPreviousCommit !== undefined &&
@@ -480,6 +491,7 @@ function parseDeploymentCutoverContext(
     try {
         return createDeploymentCutoverContext(
             value.candidateCommit,
+            value.databaseSnapshotId,
             value.preActivationCommit,
             value.rollbackCommit,
             value.preActivationPreviousCommit
@@ -1907,6 +1919,74 @@ try {
     ].join(" ");
 }
 
+/**
+ * Waits until the worker has durably completed the scheduling action. The
+ * cutover snapshot must not capture a running execution that an older worker
+ * would later recover as failed.
+ */
+function deploymentCutoverHandoffCommand(
+    deploymentId: string,
+    databaseSnapshotId: string
+): string {
+    const script = `
+import { Database } from "bun:sqlite";
+const database = new Database(process.env.MIRA_DEPLOYMENT_DB, { readonly: true });
+database.run("PRAGMA busy_timeout = 5000");
+const deadline = Date.now() + ${DEPLOYMENT_CUTOVER_HANDOFF_TIMEOUT_MS};
+const readExecution = database.prepare(\`
+    SELECT
+        status,
+        json_extract(output_json, '$.releaseCutover.databaseSnapshotId') AS database_snapshot_id,
+        (SELECT status FROM deployment_jobs WHERE id = ?) AS deployment_status,
+        (SELECT job_id FROM deployment_lock WHERE id = 1) AS lock_job_id
+    FROM job_executions
+    WHERE action_key = 'dashboard.deploy'
+      AND json_valid(payload_json)
+      AND json_valid(output_json)
+      AND json_extract(payload_json, '$.deploymentId') = ?
+    ORDER BY queued_at DESC, id DESC
+    LIMIT 1
+\`);
+let isReady = false;
+try {
+    while (Date.now() < deadline) {
+        const execution = readExecution.get(
+            process.env.MIRA_DEPLOYMENT_ID,
+            process.env.MIRA_DEPLOYMENT_ID
+        );
+        if (
+            execution?.status === "success" &&
+            execution.database_snapshot_id === process.env.MIRA_DEPLOYMENT_SNAPSHOT_ID &&
+            execution.deployment_status === "verifying" &&
+            execution.lock_job_id === process.env.MIRA_DEPLOYMENT_ID
+        ) {
+            isReady = true;
+            break;
+        }
+        if (
+            execution &&
+            execution.status !== "queued" &&
+            execution.status !== "running"
+        ) {
+            break;
+        }
+        await Bun.sleep(100);
+    }
+} finally {
+    database.close();
+}
+if (!isReady) process.exitCode = 1;
+`;
+    return [
+        `MIRA_DEPLOYMENT_DB=${shellQuote(getMiraDatabasePath())}`,
+        `MIRA_DEPLOYMENT_ID=${shellQuote(deploymentId)}`,
+        `MIRA_DEPLOYMENT_SNAPSHOT_ID=${shellQuote(databaseSnapshotId)}`,
+        shellQuote(resolveBunExecutable()),
+        "-e",
+        shellQuote(script),
+    ].join(" ");
+}
+
 function releaseLifecycleInvocation(lifecycleCommand: string): string {
     return [
         `MIRA_DASHBOARD_PROJECT_ROOT=${shellQuote(
@@ -1973,6 +2053,9 @@ function releaseCutoverShellFunctions(): string[] {
         "restart_services() {",
         `  /usr/bin/systemctl --user restart ${DASHBOARD_SERVICES.join(" ")}`,
         "}",
+        "stop_services() {",
+        `  /usr/bin/systemctl --user stop ${DASHBOARD_SERVICES.join(" ")}`,
+        "}",
     ];
 }
 
@@ -2007,6 +2090,7 @@ async function scheduleReleaseCutover(
 ): Promise<CommandResult> {
     const {
         candidateCommit,
+        databaseSnapshotId,
         preActivationCommit,
         preActivationPreviousCommit,
         rollbackCommit,
@@ -2045,14 +2129,6 @@ async function scheduleReleaseCutover(
         );
     }
     const releasesRoot = resolveDashboardReleasesRoot();
-    const activationLifecycleCommand = path.join(
-        releasesRoot,
-        "releases",
-        preActivationCommit,
-        "backend",
-        "dist",
-        "releaseLifecycle.js"
-    );
     const guardedLifecycleCommand = path.join(
         releasesRoot,
         "releases",
@@ -2061,11 +2137,15 @@ async function scheduleReleaseCutover(
         "dist",
         "releaseLifecycle.js"
     );
-    const activationLifecycleEnvironment = releaseLifecycleInvocation(
-        activationLifecycleCommand
-    );
     const guardedLifecycleEnvironment = releaseLifecycleInvocation(
         guardedLifecycleCommand
+    );
+    const snapshotCommand = `${guardedLifecycleEnvironment} snapshot-database ${shellQuote(databaseSnapshotId)}`;
+    const restoreDatabaseCommand = `${guardedLifecycleEnvironment} restore-database ${shellQuote(databaseSnapshotId)}`;
+    const discardSnapshotCommand = `${guardedLifecycleEnvironment} discard-database-snapshot ${shellQuote(databaseSnapshotId)}`;
+    const waitForHandoffCommand = deploymentCutoverHandoffCommand(
+        job.id,
+        databaseSnapshotId
     );
     const restoreCommand = isNewActivation
         ? [
@@ -2108,28 +2188,69 @@ async function scheduleReleaseCutover(
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: "Release activation failed before restart; guardian left current unchanged",
+        note: "Release activation failed before restart; the exact pre-cutover database and original release were restored",
+    };
+    const snapshotFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Release activation stopped before restart because the guarded database snapshot failed; original services were restored",
+    };
+    const cutoverStartFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Release activation could not stop every Dashboard service safely; original services were restored",
+    };
+    const handoffFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Release activation stopped before service shutdown because the worker handoff did not become durable",
     };
 
     const script = [
-        "sleep 2",
         ...releaseCutoverShellFunctions(),
-        `if ${activationLifecycleEnvironment} activate ${shellQuote(candidateCommit)}; then`,
-        `  if restart_services && ready_for_commit ${shellQuote(candidateShort)}; then`,
-        `    if ${activationLifecycleEnvironment} prune 3; then`,
-        `      ${deploymentJobUpdateCommand(okJob)}`,
+        `${waitForHandoffCommand} || { ${deploymentJobUpdateCommand(handoffFailedJob)}; exit 1; }`,
+        "if stop_services; then",
+        `  if ${snapshotCommand}; then`,
+        `    if ${guardedLifecycleEnvironment} activate ${shellQuote(candidateCommit)} --coordinated-schema-cutover; then`,
+        `      if restart_services && ready_for_commit ${shellQuote(candidateShort)}; then`,
+        `        if ${guardedLifecycleEnvironment} prune 3; then`,
+        `          ${deploymentJobUpdateCommand(okJob)} || exit 1`,
+        "        else",
+        `          ${deploymentJobUpdateCommand(okWithRetentionWarningJob)} || exit 1`,
+        "        fi",
+        `        ${discardSnapshotCommand} >/dev/null 2>&1 || true`,
+        "      else",
+        `        if stop_services && ${restoreDatabaseCommand} && ${restoreCommand} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
+        `          ${deploymentJobUpdateCommand(rolledBackJob)} || exit 1`,
+        `          ${discardSnapshotCommand} >/dev/null 2>&1 || true`,
+        "        else",
+        `          ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
+        "        fi",
+        "      fi",
         "    else",
-        `      ${deploymentJobUpdateCommand(okWithRetentionWarningJob)}`,
+        `      if ${restoreDatabaseCommand} && restart_services && ready_for_commit ${shellQuote(preActivationCommit.slice(0, 8))}; then`,
+        `        ${deploymentJobUpdateCommand(activationFailedJob)} || exit 1`,
+        `        ${discardSnapshotCommand} >/dev/null 2>&1 || true`,
+        "      else",
+        `        ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
+        "      fi",
         "    fi",
         "  else",
-        `    if ${restoreCommand} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
-        `      ${deploymentJobUpdateCommand(rolledBackJob)}`,
+        `    if restart_services && ready_for_commit ${shellQuote(preActivationCommit.slice(0, 8))}; then`,
+        `      ${deploymentJobUpdateCommand(snapshotFailedJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
         "    fi",
         "  fi",
         "else",
-        `  ${deploymentJobUpdateCommand(activationFailedJob)}`,
+        `  if restart_services && ready_for_commit ${shellQuote(preActivationCommit.slice(0, 8))}; then`,
+        `    ${deploymentJobUpdateCommand(cutoverStartFailedJob)}`,
+        "  else",
+        `    ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
+        "  fi",
         "fi",
     ].join("\n");
 
@@ -2277,7 +2398,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         persistedCutover.candidateCommit !== persistedCutover.preActivationCommit;
     const recoveryMode = willRestoreExactPreActivationSlots
         ? "restore"
-        : isRollbackAction
+        : persistedCutover || isRollbackAction
           ? "rollback"
           : "legacy-rollback";
     const rolledBackJob: DeploymentJob = {
@@ -2306,6 +2427,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         `project_root=${shellQuote(resolveDashboardProjectPaths().projectRoot)}`,
         `releases_root=${shellQuote(releasesRoot)}`,
         `candidate_commit=${shellQuote(candidateCommit)}`,
+        `database_snapshot_id=${shellQuote(persistedCutover?.databaseSnapshotId ?? "")}`,
         `recovery_mode=${shellQuote(recoveryMode)}`,
         `expected_rollback_commit=${shellQuote(persistedCutover?.rollbackCommit ?? "")}`,
         `pre_activation_previous_commit=${shellQuote(
@@ -2366,7 +2488,48 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         "  esac",
         "}",
         "resolve_trusted_lifecycles || exit 1",
-        'if activation_output="$(run_activation_lifecycle activate "$candidate_commit")"; then',
+        'if [ -n "$database_snapshot_id" ]; then',
+        '  if ! run_candidate_lifecycle verify-database-snapshot "$database_snapshot_id" >/dev/null; then',
+        '    [ "$current_commit" != "$candidate_commit" ] || exit 1',
+        '    if restart_services && ready_for_commit "${current_commit:0:8}"; then',
+        `      ${deploymentJobUpdateCommand(activationNotAppliedJob)}`,
+        "      exit 0",
+        "    fi",
+        "    exit 1",
+        "  fi",
+        "  stop_services || exit 1",
+        '  if activation_output="$(run_candidate_lifecycle activate "$candidate_commit" --coordinated-schema-cutover)"; then',
+        '    activation_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
+        '    [ "$activation_commit" = "$candidate_commit" ] || exit 1',
+        '    if restart_services && ready_for_commit "${candidate_commit:0:8}"; then',
+        `      ${deploymentJobUpdateCommand(activeCandidateRecoveredJob)} || exit 1`,
+        '      run_candidate_lifecycle discard-database-snapshot "$database_snapshot_id" >/dev/null 2>&1 || true',
+        "      exit 0",
+        "    fi",
+        '    rollback_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.previous.commitSha // empty\')"',
+        '    [[ "$rollback_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
+        '    [ "$rollback_commit" != "$candidate_commit" ] || exit 1',
+        '    if stop_services && run_candidate_lifecycle restore-database "$database_snapshot_id" && restore_failed_candidate && restart_services && ready_for_commit "${rollback_commit:0:8}"; then',
+        `      ${deploymentJobUpdateCommand(rolledBackJob)} || exit 1`,
+        '      run_candidate_lifecycle discard-database-snapshot "$database_snapshot_id" >/dev/null 2>&1 || true',
+        "    else",
+        "      exit 1",
+        "    fi",
+        "  else",
+        '    if run_candidate_lifecycle restore-database "$database_snapshot_id"; then',
+        '      status_output="$(run_candidate_lifecycle status)" || exit 1',
+        '      current_commit="$(printf "%s" "$status_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
+        '      [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
+        '      [ "$current_commit" != "$candidate_commit" ] || exit 1',
+        '      if restart_services && ready_for_commit "${current_commit:0:8}"; then',
+        `        ${deploymentJobUpdateCommand(activationNotAppliedJob)} || exit 1`,
+        '        run_candidate_lifecycle discard-database-snapshot "$database_snapshot_id" >/dev/null 2>&1 || true',
+        "        exit 0",
+        "      fi",
+        "    fi",
+        "    exit 1",
+        "  fi",
+        'elif activation_output="$(run_activation_lifecycle activate "$candidate_commit")"; then',
         '  activation_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
         '  [ "$activation_commit" = "$candidate_commit" ] || exit 1',
         '  if restart_services && ready_for_commit "${candidate_commit:0:8}"; then',
@@ -2495,6 +2658,7 @@ async function runDeploymentJob(
         currentJob = refreshDeploymentHeartbeat(currentJob);
         const releaseCutover = createDeploymentCutoverContext(
             expectedCommit,
+            Bun.randomUUIDv7(),
             currentState.current.commitSha,
             rollbackRelease.commitSha,
             currentState.previous?.commitSha
@@ -2507,7 +2671,7 @@ async function runDeploymentJob(
             updatedAt: dateToISOString(new Date()),
             commit: candidate.manifest.commitSha,
             commitTitle: candidate.manifest.commitTitle,
-            note: `Release published. Activating it, restarting services, then verifying web, worker, deployed commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS} seconds of worker stability; automatic rollback is armed`,
+            note: `Release published. Pausing Dashboard writes, snapshotting SQLite, activating it, then verifying web, worker, deployed commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS} seconds of worker stability; code-and-data rollback is armed`,
         };
         writeDeploymentJob(cutoverJob);
         await scheduleReleaseCutover(cutoverJob, releaseCutover, signal);

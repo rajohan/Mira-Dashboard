@@ -1286,21 +1286,6 @@ export async function activateDashboardRelease(
                 options,
                 maximumInspectableSchemaVersion
             );
-            const requiresCoordinatedCutover =
-                requiresLiveSchemaCutover(candidate.manifest, liveSchemaState.version) ||
-                (state.current !== undefined &&
-                    requiresCurrentSchemaCutover(
-                        candidate.manifest,
-                        state.current.manifest
-                    ));
-            if (
-                !requiresCoordinatedCutover &&
-                options.schemaCutoverMode === "coordinated"
-            ) {
-                throw new Error(
-                    "Coordinated schema cutover mode requires an incompatible schema boundary"
-                );
-            }
             assertReleaseCanActivateLiveSchema(
                 candidate.manifest,
                 liveSchemaState.version,

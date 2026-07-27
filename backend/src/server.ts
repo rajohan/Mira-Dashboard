@@ -22,6 +22,7 @@ import {
 } from "./requestPolicy.ts";
 import { withRequestSecurity } from "./requestSecurity.ts";
 import { routes } from "./routes.ts";
+import { isProductionDeploymentCutoverActive } from "./services/deploymentCutoverState.ts";
 import { validateTotpStorageConfig } from "./services/multiFactorAuth.ts";
 import { validateWebAuthnConfig } from "./services/webAuthn.ts";
 
@@ -203,6 +204,19 @@ export function createServer(
                     return withRequestSecurity(
                         request,
                         new Response("Forbidden", { status: 403 }),
+                        server
+                    );
+                }
+                if (isProductionDeploymentCutoverActive()) {
+                    return withRequestSecurity(
+                        request,
+                        new Response(
+                            "Dashboard writes are paused while the release is verified",
+                            {
+                                headers: { "Retry-After": "5" },
+                                status: 503,
+                            }
+                        ),
                         server
                     );
                 }

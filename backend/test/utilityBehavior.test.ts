@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Server } from "bun";
 import { describe, expect, it, jest } from "bun:test";
 
+import { database } from "../src/database.ts";
 import * as databaseMigrationRunnerModule from "../src/databaseMigrationRunner.ts";
 import {
     isAllowedDashboardOrigin,
@@ -35,6 +36,7 @@ import {
     stringFallback,
 } from "../src/lib/values.ts";
 import {
+    isDeploymentCutoverMutationBlocked,
     isDevelopmentExternalNotificationSuppressed,
     isDevelopmentGatewayMethodBlocked,
     isDevelopmentGatewayProxyEventAllowed,
@@ -50,6 +52,7 @@ import { compactHeartbeatData } from "../src/routes/cacheRoutes.ts";
 import { isValidAgentId } from "../src/services/agents.ts";
 import { listAuditEvents } from "../src/services/auditEvents.ts";
 import { mapBackupJob } from "../src/services/backups.ts";
+import { isProductionDeploymentCutoverActive } from "../src/services/deploymentCutoverState.ts";
 import * as jobExecutionQueueModule from "../src/services/jobExecutionQueue.ts";
 import { dashboardJobProfile } from "../src/services/jobWorker.ts";
 import {
@@ -67,6 +70,8 @@ function serverWithAddress(address: string): Server<unknown> {
         requestIP: () => ({ address, family: "IPv4", port: 12_345 }),
     } as unknown as Server<unknown>;
 }
+
+const isCutoverActive = () => true;
 
 function canonicalPath(value: string): string {
     return path.join(realpathSync(path.dirname(value)), path.basename(value));
@@ -607,6 +612,88 @@ describe("backend service utilities", () => {
             })
         ).toBe("full");
         expect(dashboardJobProfile({ MIRA_DASHBOARD_DEV_SAFE_MODE: "0" })).toBe("full");
+    });
+
+    it("pauses production mutations while allowing cutover readiness reads", () => {
+        const environment = { NODE_ENV: "production" };
+        expect(
+            isDeploymentCutoverMutationBlocked(
+                new Request("https://dashboard.example/api/tasks", {
+                    method: "POST",
+                }),
+                { environment, isCutoverActive }
+            )
+        ).toBe(true);
+        expect(
+            isDeploymentCutoverMutationBlocked(
+                new Request("https://dashboard.example/api/health/ready"),
+                { environment, isCutoverActive }
+            )
+        ).toBe(false);
+        expect(
+            isDeploymentCutoverMutationBlocked(
+                new Request("https://dashboard.example/api/tasks", {
+                    headers: { "x-mira-user-activity": "1" },
+                }),
+                { environment, isCutoverActive }
+            )
+        ).toBe(true);
+        expect(
+            isDeploymentCutoverMutationBlocked(
+                new Request("https://dashboard.example/api/tasks", {
+                    method: "POST",
+                }),
+                { environment, isCutoverActive: () => false }
+            )
+        ).toBe(false);
+    });
+
+    it("detects and enforces a persisted production deployment cutover", async () => {
+        const deploymentId = `test-cutover-${Bun.randomUUIDv7()}`;
+        const timestamp = new Date().toISOString();
+        const originalNodeEnvironment = process.env.NODE_ENV;
+        expect(isProductionDeploymentCutoverActive({ NODE_ENV: "test" })).toBe(false);
+        try {
+            database
+                .prepare(
+                    `INSERT INTO deployment_jobs (
+                         id, status, started_at, updated_at, commit_sha,
+                         commit_title, note, stdout, stderr
+                     ) VALUES (?, 'verifying', ?, ?, NULL, NULL, NULL, NULL, NULL)`
+                )
+                .run(deploymentId, timestamp, timestamp);
+            expect(isProductionDeploymentCutoverActive({ NODE_ENV: "production" })).toBe(
+                true
+            );
+            process.env.NODE_ENV = "production";
+            const handler = jest.fn(() => new Response("must not run"));
+            const routes = withRequestPolicy({ "/api/tasks": handler });
+            const response = await callTestRoute(
+                routes,
+                "/api/tasks",
+                serverWithAddress("127.0.0.1"),
+                { method: "POST" }
+            );
+            expect(response.status).toBe(503);
+            expect(response.headers.get("retry-after")).toBe("5");
+            await expect(response.json()).resolves.toEqual({
+                code: "deployment_cutover_in_progress",
+                error: "Dashboard writes are paused while the release is verified",
+            });
+            expect(handler).not.toHaveBeenCalled();
+        } finally {
+            if (originalNodeEnvironment === undefined) {
+                delete process.env.NODE_ENV;
+            } else {
+                process.env.NODE_ENV = originalNodeEnvironment;
+            }
+            database
+                .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                .run(deploymentId);
+        }
+        expect(isProductionDeploymentCutoverActive({ NODE_ENV: "production" })).toBe(
+            false
+        );
     });
 
     it("maps operational errors without leaking unknown values", () => {

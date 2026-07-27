@@ -140,7 +140,11 @@ validates its recorded migration prefix, creates a `pre-deploy` snapshot with
 requires `PRAGMA quick_check = ok` plus valid migration history, then applies
 every pending migration to that disposable copy and validates it again. The
 retained `pre-deploy` snapshot and live database remain unchanged. Ordinary
-builds remain side-effect free.
+builds remain side-effect free. Managed activation later stops both Dashboard
+writers and creates a separate UUID-bound `cutover` snapshot. User mutations
+and worker claims stay paused until readiness succeeds. A failed activation
+atomically restores that snapshot before the exact old release slots restart; a
+successful activation discards it.
 
 The enabled `database.maintenance` worker job runs daily at `02:40`. It creates
 and restore-verifies a `scheduled` backup before pruning bounded history,
@@ -163,6 +167,7 @@ Snapshots live beside the active database below `backups/`. This is
 
 | Kind            | Maximum age | Maximum count |
 | --------------- | ----------- | ------------- |
+| `cutover`       | 2 days      | 5             |
 | `scheduled`     | 14 days     | 14            |
 | `pre-deploy`    | 90 days     | 20            |
 | `pre-migration` | 180 days    | 20            |

@@ -34,6 +34,7 @@ import {
     type AuditOutcome,
     writeAuditEvent,
 } from "./services/auditEvents.ts";
+import { isProductionDeploymentCutoverActive } from "./services/deploymentCutoverState.ts";
 
 type BunHandler = (
     request: Request,
@@ -137,6 +138,29 @@ function ensureBucketCleanupTimer(): void {
 
 function isApiRoute(pathname: string): boolean {
     return pathname === "/api" || pathname.startsWith("/api/");
+}
+
+/** Blocks user-visible writes until a guarded deployment reaches a terminal state. */
+export function isDeploymentCutoverMutationBlocked(
+    request: Request,
+    options: {
+        environment?: Record<string, string | undefined>;
+        isCutoverActive?: () => boolean;
+    } = {}
+): boolean {
+    const environment = options.environment ?? process.env;
+    if (environment.NODE_ENV !== "production") {
+        return false;
+    }
+    const isCutoverActive =
+        options.isCutoverActive ?? (() => isProductionDeploymentCutoverActive());
+    if (!isCutoverActive()) {
+        return false;
+    }
+    return (
+        !SAFE_REQUEST_METHODS.has(request.method.toUpperCase()) ||
+        request.headers.get("x-mira-user-activity")?.trim() === "1"
+    );
 }
 
 function isAuthRoute(pathname: string): boolean {
@@ -472,6 +496,15 @@ function secureHandler(
 
             if (isApi && !isAllowedMutationSource(request)) {
                 return json({ error: "Forbidden request origin" }, { status: 403 });
+            }
+            if (isApi && isDeploymentCutoverMutationBlocked(request)) {
+                return json(
+                    {
+                        code: "deployment_cutover_in_progress",
+                        error: "Dashboard writes are paused while the release is verified",
+                    },
+                    { headers: { "Retry-After": "5" }, status: 503 }
+                );
             }
 
             const requiresAuthentication = isApi && !isPublicApiRoute(request);

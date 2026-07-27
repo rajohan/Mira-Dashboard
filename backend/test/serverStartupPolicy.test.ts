@@ -838,6 +838,7 @@ describe("server start scheduler policy", () => {
         );
         let handleDashboardClientSpy: { mockRestore: () => void } | undefined;
         let getAuthSessionSpy: { mockRestore: () => void } | undefined;
+        let deploymentCutoverSpy: { mockRestore: () => void } | undefined;
         try {
             const now = new Date().toISOString();
             const authModule = await import("../src/auth.ts");
@@ -859,6 +860,11 @@ describe("server start scheduler policy", () => {
             handleDashboardClientSpy = jest
                 .spyOn(gatewayModule.default, "handleDashboardClient")
                 .mockImplementation(() => {});
+            const deploymentCutoverModule =
+                await import("../src/services/deploymentCutoverState.ts");
+            deploymentCutoverSpy = jest
+                .spyOn(deploymentCutoverModule, "isProductionDeploymentCutoverActive")
+                .mockReturnValue(false);
             const { createServer } = await import("../src/server.ts");
             const optionsSymbol = Symbol.for("mira.test.options");
             const server = createServer(0, "127.0.0.1") as Server<unknown> & {
@@ -949,6 +955,17 @@ describe("server start scheduler policy", () => {
             );
             expect(wsForbidden.status).toBe(403);
 
+            deploymentCutoverSpy.mockReturnValue(true);
+            const wsDuringCutover = await options.fetch(
+                new Request("https://test.local/ws", {
+                    headers: { Origin: "https://test.local" },
+                }),
+                server
+            );
+            expect(wsDuringCutover.status).toBe(503);
+            expect(wsDuringCutover.headers.get("retry-after")).toBe("5");
+            deploymentCutoverSpy.mockReturnValue(false);
+
             const closeHandler = jest.fn();
             const errorHandler = jest.fn();
             const messageHandler = jest.fn();
@@ -1033,6 +1050,7 @@ describe("server start scheduler policy", () => {
             expect(errorHandler).toHaveBeenCalledWith(expect.any(Error));
             expect(closeHandler).toHaveBeenCalled();
         } finally {
+            deploymentCutoverSpy?.mockRestore();
             getAuthSessionSpy?.mockRestore();
             handleDashboardClientSpy?.mockRestore();
             serveSpy.mockRestore();

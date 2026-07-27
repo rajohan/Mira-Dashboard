@@ -755,7 +755,7 @@ describe("Dashboard immutable release manager", () => {
         );
     });
 
-    it("requires an explicit coordinated mode for incompatible schema cutovers", async () => {
+    it("allows coordinated activation and requires it across incompatible schemas", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
@@ -776,9 +776,9 @@ describe("Dashboard immutable release manager", () => {
                 ...options,
                 schemaCutoverMode: "coordinated",
             })
-        ).rejects.toThrow(
-            "Coordinated schema cutover mode requires an incompatible schema boundary"
-        );
+        ).resolves.toMatchObject({
+            current: { commitSha: FIRST_COMMIT },
+        });
         await expect(
             activateDashboardRelease(SECOND_COMMIT, root, options)
         ).rejects.toThrow("cannot roll back after SQLite schema 8");

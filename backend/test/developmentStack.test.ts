@@ -540,6 +540,12 @@ describe("development stack", () => {
                     .all()
             ).toEqual([]);
             backfilledSnapshot.close();
+            rmSync(sourceDatabase);
+            expect(prepareDevelopmentState(config)).toEqual({
+                database: "reused",
+                releases: "reused",
+                workspace: "reused",
+            });
 
             resetDevelopmentState(config);
             expect(existsSync(stateRoot)).toBe(false);

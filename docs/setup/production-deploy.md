@@ -47,8 +47,9 @@ Mutable state is deliberately outside both Git and every release:
 | Dashboard Gateway device identity  | `/home/ubuntu/projects/mira-dashboard/production/state/openclaw-client/`  |
 | Log-rotation lock                  | `/home/ubuntu/projects/mira-dashboard/production/state/log-rotation.lock` |
 
-The backup directory is derived from the production state root, so pre-deploy
-and pre-migration snapshots automatically stay under the state root.
+The backup directory is derived from the production state root, so cutover,
+pre-deploy, and pre-migration snapshots automatically stay under the state
+root.
 Kopia mounts `/home/ubuntu/projects` as its projects source; the separate state
 directory remains in that backup scope.
 
@@ -86,15 +87,23 @@ The Dashboard worker owns the deployment:
    every checksummed artifact.
 6. Copy only declared artifacts to a hidden directory and atomically publish
    it as `releases/<full-sha>`.
-7. Start a detached cutover guardian, which atomically switches `current` and
-   retains the old release as `previous`.
-8. Restart web and worker from inside that guardian.
-9. Require `/api/health/ready` to report the exact expected frontend/backend
-   commit and a fresh worker heartbeat from that commit.
-10. On failure, switch back to `previous`, restart both units, verify the old
-    commit, and mark the deployment failed.
-11. On success, retain `current`, `previous`, and one additional newest
-    verified release.
+7. Persist a unique cutover-snapshot id and start a detached guardian.
+8. Require the scheduling execution, snapshot id, deployment row, and release
+   lock to be durably consistent. Then stop web and worker, create and
+   restore-verify the exact SQLite cutover snapshot, and atomically switch
+   `current` while retaining the old release as `previous`.
+9. Start web and worker. Unsafe HTTP requests, explicit user-activity touches,
+   Gateway WebSockets, and worker execution claims remain paused while the
+   deployment row is `verifying`.
+10. Require `/api/health/ready` to report the exact expected frontend/backend
+    commit and a fresh, stable worker heartbeat from that commit.
+11. On failure, stop both units, atomically restore the recorded database
+    snapshot, restore the exact pre-activation release slots, restart both
+    units, verify the old commit, and mark the deployment failed.
+12. On success, retain `current`, `previous`, and one additional newest
+    verified release, record the terminal result, then discard the one-cutover
+    snapshot. Terminalizing first prevents a crash from leaving `verifying`
+    without its rollback snapshot.
 
 The executor fails closed unless both units use the expected project root and
 run from managed `current/backend`. A deployment never modifies the running
@@ -120,11 +129,17 @@ must still return `401`.
 
 ## Rollback
 
-Normal activation automatically rolls back on restart or commit-bound readiness
-failure. The preferred manual path is **Delivery → Production releases →
+Normal activation automatically rolls code and data back on restart or
+commit-bound readiness failure before the cutover reaches a terminal state. The
+preferred manual path is **Delivery → Production releases →
 Roll back**, which uses the same exclusive release lock, persistent job,
 detached guardian, web/worker restart, commit-bound readiness, and automatic
 restoration of the original release if the rollback target fails.
+
+A later manual rollback is intentionally code-only and remains constrained by
+the live schema compatibility window. It never restores a pre-deploy snapshot
+after a successful release, because doing so would discard writes accepted
+after deployment.
 
 Use the host-local fallback below only when the Dashboard UI is unavailable.
 First confirm no deployment or rollback action is running:
@@ -235,29 +250,36 @@ separate restore-verified `pre-migration` backup before running migration SQL.
 Do not copy only the main `.db` file while Dashboard is running. WAL mode may
 hold committed writes in the `-wal` sidecar until a checkpoint.
 
-Code rollback and data rollback are separate decisions. A code rollback may use
-the migrated database only when the older code is schema-compatible. Otherwise
-stop both units and restore the matching snapshot using the
-[SQLite restore runbook](../operations/runbooks.md#restore-dashboard-sqlite).
+Build preflight snapshots prove that migrations are runnable, but managed
+activation creates a separate `cutover` snapshot only after both Dashboard
+writers are stopped. That exact snapshot id is persisted in the deployment
+context so detached recovery cannot guess which backup belongs to the release.
+During candidate verification, production mutations and worker execution claims
+are paused. Failed activation restores data first and old code second.
+
+After activation succeeds, code rollback and data rollback are separate
+operator decisions. A later code rollback may use the migrated database only
+when the older code is schema-compatible. Otherwise use the
+[SQLite restore runbook](../operations/runbooks.md#restore-dashboard-sqlite)
+with an explicitly selected backup and accept that it is a data-loss recovery.
 
 ### Schema Compatibility
 
-Classify every migration before release:
+The manifest range describes which live schema versions that release can open;
+it does not describe a reversible SQL path. Classify every migration before
+release:
 
 - **expand/backward-compatible:** `previous` can safely use the migrated schema;
 - **contract/incompatible:** older code cannot safely use the new schema or
   data semantics, so automatic code-only rollback is blocked.
 
-Prefer expand/migrate/contract across separate releases. If an incompatible
-change cannot be phased, use a coordinated code-and-data cutover:
-
-1. require an idle execution queue;
-2. stop both units;
-3. rerun candidate preflight and record its fresh verified snapshot;
-4. activate with `--coordinated-schema-cutover`;
-5. start both units and require commit/schema readiness;
-6. on failure, stop both units, restore the recorded snapshot, switch code back,
-   and only then restart.
+Every managed deployment now uses the coordinated code-and-data cutover above,
+including schema-compatible releases. An incompatible migration may therefore
+cross the previous release's runtime window safely during initial activation:
+failure restores the old schema snapshot before old code starts. Once the
+candidate passes readiness, its cutover snapshot is discarded and the old
+release is no longer a valid manual rollback target unless it can open the live
+schema.
 
 The migration runner has no destructive down-migration path. Unknown newer
 migrations make older code fail closed.

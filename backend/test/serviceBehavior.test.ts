@@ -49,13 +49,19 @@ function createTemporaryRoot(prefix: string): string {
 }
 
 async function executeSuccessfulGuardianPath(script: string): Promise<void> {
-    const firstLifecycleBranch = script.indexOf("\nif MIRA_DASHBOARD_PROJECT_ROOT=");
-    if (firstLifecycleBranch === -1) {
+    const lifecycleBranches = [
+        script.indexOf("\nif stop_services; then"),
+        script.indexOf("\nif MIRA_DASHBOARD_PROJECT_ROOT="),
+    ].filter((index) => index >= 0);
+    const firstLifecycleBranch =
+        lifecycleBranches.length > 0 ? Math.min(...lifecycleBranches) : undefined;
+    if (firstLifecycleBranch === undefined) {
         throw new Error("Guardian fixture is missing its lifecycle branch");
     }
     const executableScript = [
         "restart_services() { return 0; }",
         "ready_for_commit() { return 0; }",
+        "stop_services() { return 0; }",
         script.slice(firstLifecycleBranch + 1),
     ].join("\n");
     const child = Bun.spawn(["/bin/bash", "-lc", executableScript], {
@@ -73,6 +79,36 @@ async function executeSuccessfulGuardianPath(script: string): Promise<void> {
             `Guardian fixture failed with exit code ${exitCode}: ${
                 stderr.trim() || stdout.trim()
             }`
+        );
+    }
+}
+
+async function executeSuccessfulGuardianHandoff(script: string): Promise<void> {
+    const handoffStart = script.indexOf("\nMIRA_DEPLOYMENT_DB=");
+    const serviceStopBranch = script.indexOf("\nif stop_services; then", handoffStart);
+    if (handoffStart === -1 || serviceStopBranch === -1) {
+        throw new Error("Guardian fixture is missing its durable handoff");
+    }
+    const child = Bun.spawn(
+        [
+            "/usr/bin/timeout",
+            "5",
+            "/bin/bash",
+            "-lc",
+            script.slice(handoffStart + 1, serviceStopBranch),
+        ],
+        {
+            stderr: "pipe",
+            stdout: "pipe",
+        }
+    );
+    const [exitCode, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stderr).text(),
+    ]);
+    if (exitCode !== 0) {
+        throw new Error(
+            `Guardian handoff fixture failed with exit ${exitCode}: ${stderr.trim()}`
         );
     }
 }
@@ -2602,7 +2638,7 @@ printf 'scheduled\n'
             expect(row).toEqual({
                 commit_sha: candidateCommit,
                 commit_title: "Deployable dashboard commit",
-                note: "Release published. Activating it, restarting services, then verifying web, worker, deployed commit, and 31 seconds of worker stability; automatic rollback is armed",
+                note: "Release published. Pausing Dashboard writes, snapshotting SQLite, activating it, then verifying web, worker, deployed commit, and 31 seconds of worker stability; code-and-data rollback is armed",
                 status: "verifying",
             });
             const scheduledUpdatedAt = (
@@ -2655,16 +2691,36 @@ printf 'scheduled\n'
             expect(restartCommand).toContain("updatedAt: new Date().toISOString()");
             expect(restartCommand).toContain(".checks.release.backendCommit");
             expect(restartCommand).toContain("releaseLifecycle.js");
-            expect(restartCommand).toContain(
-                `${releasesRoot}/releases/${oldCommit}/backend/dist/releaseLifecycle.js`
-            );
+            expect(restartCommand).toContain("MIRA_DEPLOYMENT_SNAPSHOT_ID=");
+            expect(restartCommand).toContain('execution?.status === "success"');
             expect(restartCommand).toContain(
                 `${releasesRoot}/releases/${candidateCommit}/backend/dist/releaseLifecycle.js`
             );
-            expect(restartCommand).toContain(`activate '${candidateCommit}'`);
+            expect(restartCommand).toContain("if stop_services; then");
+            expect(restartCommand).toContain("snapshot-database");
+            expect(restartCommand).toContain("restore-database");
+            expect(restartCommand).toContain("discard-database-snapshot");
+            expect(restartCommand).toContain(
+                `activate '${candidateCommit}' --coordinated-schema-cutover`
+            );
             expect(restartCommand.indexOf(`activate '${candidateCommit}'`)).toBeLessThan(
                 restartCommand.indexOf("if restart_services")
             );
+            expect(restartCommand.indexOf("if stop_services; then")).toBeLessThan(
+                restartCommand.indexOf("snapshot-database")
+            );
+            expect(restartCommand.indexOf("MIRA_DEPLOYMENT_SNAPSHOT_ID=")).toBeLessThan(
+                restartCommand.indexOf("if stop_services; then")
+            );
+            await executeSuccessfulGuardianHandoff(restartCommand);
+            expect(restartCommand.indexOf("snapshot-database")).toBeLessThan(
+                restartCommand.indexOf(`activate '${candidateCommit}'`)
+            );
+            expect(
+                restartCommand.indexOf(
+                    "Atomic release activated. Web, worker, commit, and 31-second worker stability checks passed"
+                )
+            ).toBeLessThan(restartCommand.indexOf("discard-database-snapshot"));
             expect(restartCommand).toContain(
                 `restore '${candidateCommit}' '${oldCommit}' '${priorPreviousCommit}'`
             );
@@ -2675,11 +2731,22 @@ printf 'scheduled\n'
                         `restore '${candidateCommit}' '${oldCommit}' '${priorPreviousCommit}'`
                     )
                 );
+            if (!automaticRollbackLine) {
+                throw new Error(
+                    "Guardian fixture is missing its automatic rollback line"
+                );
+            }
             expect(automaticRollbackLine).toContain(
                 `${releasesRoot}/releases/${candidateCommit}/backend/dist/releaseLifecycle.js`
             );
             expect(automaticRollbackLine).not.toContain(
                 `${releasesRoot}/releases/${oldCommit}/backend/dist/releaseLifecycle.js`
+            );
+            expect(automaticRollbackLine).toContain("if stop_services &&");
+            expect(automaticRollbackLine.indexOf("restore-database")).toBeLessThan(
+                automaticRollbackLine.indexOf(
+                    `restore '${candidateCommit}' '${oldCommit}' '${priorPreviousCommit}'`
+                )
             );
             expect(restartCommand).toContain("prune 3");
             expect(restartCommand).not.toContain("/api/job-executions");
@@ -2708,7 +2775,8 @@ printf 'scheduled\n'
                     deploymentId: job.id,
                     releaseCutover: {
                         candidateCommit,
-                        formatVersion: 1,
+                        databaseSnapshotId: expect.stringMatching(/^[\da-f-]{36}$/u),
+                        formatVersion: 2,
                         preActivationCommit: oldCommit,
                         preActivationPreviousCommit: priorPreviousCommit,
                         rollbackCommit: oldCommit,
@@ -2739,7 +2807,7 @@ printf 'scheduled\n'
             );
             expect(recoveryCommand).toContain('activation_release="$candidate_release"');
             expect(recoveryCommand).toContain(
-                'activation_output="$(run_activation_lifecycle activate "$candidate_commit")"'
+                'activation_output="$(run_candidate_lifecycle activate "$candidate_commit" --coordinated-schema-cutover)"'
             );
             expect(recoveryCommand).toContain(
                 '[ "$activation_commit" = "$candidate_commit" ]'
@@ -2750,9 +2818,19 @@ printf 'scheduled\n'
             expect(recoveryCommand).toContain(
                 "Interrupted release cutover recovered; active candidate passed restart, commit-bound readiness, and 31-second worker stability"
             );
+            const recoveredSuccessStatusIndex = recoveryCommand.indexOf(
+                "Interrupted release cutover recovered; active candidate passed restart, commit-bound readiness, and 31-second worker stability"
+            );
+            expect(recoveredSuccessStatusIndex).toBeGreaterThanOrEqual(0);
+            expect(recoveredSuccessStatusIndex).toBeLessThan(
+                recoveryCommand.indexOf(
+                    "run_candidate_lifecycle discard-database-snapshot",
+                    recoveredSuccessStatusIndex
+                )
+            );
             expect(
                 recoveryCommand.indexOf(
-                    'activation_output="$(run_activation_lifecycle activate "$candidate_commit")"'
+                    'activation_output="$(run_candidate_lifecycle activate "$candidate_commit" --coordinated-schema-cutover)"'
                 )
             ).toBeLessThan(
                 recoveryCommand.indexOf(
@@ -2761,6 +2839,9 @@ printf 'scheduled\n'
             );
             expect(recoveryCommand).toContain(
                 'run_candidate_lifecycle restore "$candidate_commit" "$rollback_commit" "$pre_activation_previous_commit"'
+            );
+            expect(recoveryCommand).toContain(
+                'run_candidate_lifecycle restore-database "$database_snapshot_id"'
             );
             expect(recoveryCommand).toContain(`expected_rollback_commit='${oldCommit}'`);
             expect(recoveryCommand).toContain(
@@ -2840,7 +2921,8 @@ printf 'scheduled\n'
                     deploymentId: redeploy.id,
                     releaseCutover: {
                         candidateCommit: oldCommit,
-                        formatVersion: 1,
+                        databaseSnapshotId: expect.stringMatching(/^[\da-f-]{36}$/u),
+                        formatVersion: 2,
                         preActivationCommit: oldCommit,
                         preActivationPreviousCommit: priorPreviousCommit,
                         rollbackCommit: priorPreviousCommit,
@@ -2943,7 +3025,7 @@ printf 'scheduled\n'
                     .run(deploymentId);
             }
         }
-    });
+    }, 10_000);
 
     it("reports production checkout readiness through git command output", async () => {
         rememberEnvironment("PATH");

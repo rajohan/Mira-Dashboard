@@ -80,7 +80,7 @@ describe("Dashboard readiness contract", () => {
         });
     });
 
-    it("accepts only database schemas inside the explicit rollback window", () => {
+    it("accepts only database schemas inside the release runtime window", () => {
         expect(isDatabaseSchemaCompatible(7, { maximum: 7, minimum: 6 })).toBe(true);
         expect(isDatabaseSchemaCompatible(5, { maximum: 7, minimum: 6 })).toBe(false);
         expect(isDatabaseSchemaCompatible(8, { maximum: 7, minimum: 6 })).toBe(false);

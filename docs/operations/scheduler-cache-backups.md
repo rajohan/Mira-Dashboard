@@ -224,9 +224,11 @@ History retention keeps:
 | chat replay snapshots and events            | 30 days and at most 200 snapshots globally; orphan events removed                     |
 
 Active, queued, and running execution/deployment rows are preserved. SQLite
-snapshot retention is 14 scheduled/14 days, 20 pre-deploy/90 days, and 20
-pre-migration/180 days. Unread notifications are preserved. The job does not
-run automatic `VACUUM`.
+snapshot retention is 5 orphan-safety cutover snapshots/2 days, 14
+scheduled/14 days, 20 pre-deploy/90 days, and 20 pre-migration/180 days. Normal
+successful or recovered cutovers discard their UUID-bound snapshot immediately;
+the retention bound is a crash-recovery fallback. Unread notifications are
+preserved. The job does not run automatic `VACUUM`.
 
 ## Operational Checks
 

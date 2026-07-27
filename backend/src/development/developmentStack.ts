@@ -990,7 +990,11 @@ export function prepareDevelopmentState(
     } else {
         database = "created-empty";
     }
-    if (config.databaseSource && isRealRegularFile(config.databasePath)) {
+    if (
+        config.databaseSource &&
+        isRealRegularFile(config.databaseSource) &&
+        isRealRegularFile(config.databasePath)
+    ) {
         backfillCompletedDeploymentHistory(config.databaseSource, config.databasePath);
     }
 
