@@ -68,6 +68,7 @@ export type DashboardReleaseCommandRunner = (
 ) => Promise<DashboardReleaseCommandResult>;
 
 export interface StageDashboardReleaseOptions {
+    bunExecutable?: string;
     commandRunner?: DashboardReleaseCommandRunner;
     databasePath?: string;
     onProgress?: (message: string) => void;
@@ -293,6 +294,8 @@ export async function stageDashboardRelease(
     options: StageDashboardReleaseOptions = {}
 ): Promise<ManagedDashboardRelease> {
     const expectedCommit = assertFullCommitSha(commitSha);
+    // Default to the current Bun binary because managed workers do not inherit the user PATH.
+    const bunExecutable = options.bunExecutable ?? process.execPath;
     const releasesRoot = resolveAbsoluteNonRootPath(
         options.releasesRoot ?? resolveDashboardReleasesRoot(),
         "Dashboard releases root"
@@ -315,7 +318,7 @@ export async function stageDashboardRelease(
     }
     if (existingRelease) {
         options.onProgress?.("Preflighting existing immutable release");
-        await commandRunner("bun", ["dist/databasePreflight.js"], {
+        await commandRunner(bunExecutable, ["dist/databasePreflight.js"], {
             cwd: path.join(existingRelease.path, "backend"),
             environment: managedReleaseEnvironment(contract, existingRelease.path),
             signal: options.signal,
@@ -366,21 +369,21 @@ export async function stageDashboardRelease(
         }
 
         options.onProgress?.("Installing frontend release dependencies");
-        await commandRunner("bun", ["install", "--frozen-lockfile"], {
+        await commandRunner(bunExecutable, ["install", "--frozen-lockfile"], {
             cwd: worktreePath,
             environment,
             signal: options.signal,
             timeoutMs: 180_000,
         });
         options.onProgress?.("Installing backend release dependencies");
-        await commandRunner("bun", ["install", "--frozen-lockfile"], {
+        await commandRunner(bunExecutable, ["install", "--frozen-lockfile"], {
             cwd: path.join(worktreePath, "backend"),
             environment,
             signal: options.signal,
             timeoutMs: 120_000,
         });
         options.onProgress?.("Building and preflighting release");
-        await commandRunner("bun", ["run", "deploy:prepare"], {
+        await commandRunner(bunExecutable, ["run", "deploy:prepare"], {
             cwd: worktreePath,
             environment,
             signal: options.signal,

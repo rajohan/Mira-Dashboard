@@ -194,9 +194,9 @@ describe("immutable release deployment", () => {
         expect(calls.map(({ command, arguments_ }) => [command, ...arguments_])).toEqual([
             ["git", "worktree", "add", "--detach", expect.any(String), COMMIT_SHA],
             ["git", "rev-parse", "HEAD"],
-            ["bun", "install", "--frozen-lockfile"],
-            ["bun", "install", "--frozen-lockfile"],
-            ["bun", "run", "deploy:prepare"],
+            [process.execPath, "install", "--frozen-lockfile"],
+            [process.execPath, "install", "--frozen-lockfile"],
+            [process.execPath, "run", "deploy:prepare"],
             ["git", "worktree", "remove", "--force", expect.any(String)],
         ]);
         expect(progress).toEqual([
@@ -265,7 +265,7 @@ describe("immutable release deployment", () => {
         expect(calls).toEqual([
             {
                 arguments_: ["dist/databasePreflight.js"],
-                command: "bun",
+                command: process.execPath,
                 cwd: path.join(reused.path, "backend"),
                 databasePath: options.databasePath,
                 releaseRoot: reused.path,
@@ -302,7 +302,7 @@ describe("immutable release deployment", () => {
                 }
             }
             if (
-                command === "bun" &&
+                command === process.execPath &&
                 arguments_[0] === "run" &&
                 arguments_[1] === "deploy:prepare"
             ) {

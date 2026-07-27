@@ -98,7 +98,7 @@ function resolveExecutableFromPath(executable: string): string | undefined {
         return path.resolve(executable);
     }
 
-    return Bun.which(executable) ?? undefined;
+    return Bun.which(executable, { PATH: process.env.PATH }) ?? undefined;
 }
 
 function resolveBunExecutable(): string {
@@ -2212,6 +2212,7 @@ async function runDeploymentJob(
         });
         const expectedCommit = commitSha.trim();
         const candidate = await stageDashboardRelease(expectedCommit, {
+            bunExecutable: resolveBunExecutable(),
             commandRunner: async (command, arguments_, options) =>
                 runCommand(command, [...arguments_], {
                     cwd: options.cwd,
