@@ -680,12 +680,17 @@ async function runQueuedDockerAction(options: {
         resourceClass: options.resourceClass ?? "host-heavy",
         timeoutMs: options.timeoutMs,
     });
+    return successfulJobExecutionOutput(
+        await waitForDockerMutationExecution(
+            execution.id,
+            options.timeoutMs + 30 * 60 * 1000
+        )
+    );
+}
+
+async function waitForDockerMutationExecution(executionId: string, timeoutMs: number) {
     try {
-        return successfulJobExecutionOutput(
-            await waitForJobExecution(execution.id, {
-                timeoutMs: options.timeoutMs + 30 * 60 * 1000,
-            })
-        );
+        return await waitForJobExecution(executionId, { timeoutMs });
     } finally {
         invalidateDockerReadSnapshots();
     }
@@ -998,9 +1003,9 @@ export const dockerRoutes = {
         POST: async () => {
             try {
                 const scheduledRun = enqueueScheduledJob("docker.updater", "manual");
-                const execution = await waitForJobExecution(
+                const execution = await waitForDockerMutationExecution(
                     scheduledRun.executionId as string,
-                    { timeoutMs: 60 * 60 * 1000 }
+                    60 * 60 * 1000
                 );
                 const steps = dockerUpdaterSteps(execution);
                 return json({
@@ -1047,9 +1052,7 @@ export const dockerRoutes = {
                     timeoutMs: 30 * 60 * 1000,
                 });
                 steps = dockerUpdaterSteps(
-                    await waitForJobExecution(execution.id, {
-                        timeoutMs: 60 * 60 * 1000,
-                    })
+                    await waitForDockerMutationExecution(execution.id, 60 * 60 * 1000)
                 );
             } catch (error) {
                 return json(

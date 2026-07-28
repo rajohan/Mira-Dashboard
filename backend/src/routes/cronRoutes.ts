@@ -13,6 +13,7 @@ import {
 import {
     getOpenClawCronListSnapshot,
     invalidateOpenClawCronListSnapshot,
+    normalizeOpenClawCronJobs,
 } from "../services/openClawCronSnapshot.ts";
 import { withCronTaskLinks } from "../services/taskAutomation.ts";
 
@@ -27,19 +28,6 @@ interface CronJob {
     payload?: { kind?: string; [key: string]: unknown };
     schedule?: { kind?: string; [key: string]: unknown };
     [key: string]: unknown;
-}
-
-interface CronListResponse {
-    items?: CronJob[];
-    jobs?: CronJob[];
-}
-
-function normalizeJobs(payload: unknown): CronJob[] {
-    if (!payload || typeof payload !== "object") return [];
-    const value = payload as CronListResponse;
-    if (Array.isArray(value.jobs)) return value.jobs;
-    if (Array.isArray(value.items)) return value.items;
-    return [];
 }
 
 function cronError(error: unknown, fallback: string): Response {
@@ -84,7 +72,9 @@ export const cronRoutes = {
         GET: async () => {
             try {
                 const payload = await getOpenClawCronListSnapshot();
-                return json({ jobs: withCronTaskLinks(normalizeJobs(payload)) });
+                return json({
+                    jobs: withCronTaskLinks(normalizeOpenClawCronJobs<CronJob>(payload)),
+                });
             } catch (error) {
                 return cronError(error, "Failed to list cron jobs");
             }

@@ -56,7 +56,9 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const previousAuthIdentityReference = useRef<AuthSessionIdentity | undefined>(
         undefined
     );
-    const sessionListRefreshReference = useRef<Promise<void> | undefined>(undefined);
+    const sessionListRefreshReference = useRef<{ promise: Promise<void> } | undefined>(
+        undefined
+    );
 
     const [isConnected, setIsConnected] = useState(false);
     const [hasConfirmedSessionList, setHasConfirmedSessionList] = useState(false);
@@ -80,7 +82,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const refreshSessionList = async (client: SocketClient): Promise<void> => {
         const existing = sessionListRefreshReference.current;
         if (existing) {
-            await existing;
+            await existing.promise;
             return;
         }
 
@@ -88,10 +90,10 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
             const payload = await client.request("sessions.list");
             applySessionsListResponse(client, payload);
         };
-        const refresh = load();
+        const refresh = { promise: load() };
         sessionListRefreshReference.current = refresh;
         try {
-            await refresh;
+            await refresh.promise;
         } finally {
             if (sessionListRefreshReference.current === refresh) {
                 sessionListRefreshReference.current = undefined;

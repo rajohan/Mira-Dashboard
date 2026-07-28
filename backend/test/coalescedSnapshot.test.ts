@@ -108,4 +108,31 @@ describe("coalesced snapshots", () => {
         now = 2501;
         await expect(snapshot.read()).rejects.toThrow("producer unavailable");
     });
+
+    it("reuses a cold failure until its retry delay expires", async () => {
+        let now = 1000;
+        const failure = new Error("producer unavailable");
+        const producer = jest
+            .fn<() => Promise<string>>()
+            .mockRejectedValueOnce(failure)
+            .mockResolvedValueOnce("recovered");
+        const snapshot = new CoalescedSnapshot({
+            freshForMs: 500,
+            load: producer,
+            name: "test.cold-failure-backoff",
+            now: () => now,
+            retryAfterMs: 5000,
+            staleForMs: 1000,
+        });
+
+        await expect(snapshot.read()).rejects.toBe(failure);
+        await Promise.resolve();
+        now = 2000;
+        await expect(snapshot.read()).rejects.toBe(failure);
+        expect(producer).toHaveBeenCalledTimes(1);
+
+        now = 6001;
+        await expect(snapshot.read()).resolves.toBe("recovered");
+        expect(producer).toHaveBeenCalledTimes(2);
+    });
 });

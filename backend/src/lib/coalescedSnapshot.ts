@@ -22,6 +22,7 @@ interface CoalescedSnapshotOptions<T> {
 
 interface SnapshotEntry<T> {
     inFlight?: Promise<T>;
+    lastFailure?: { error: unknown };
     loadedAt?: number;
     nextRetryAt?: number;
     value?: T;
@@ -116,6 +117,7 @@ export class CoalescedSnapshot<T> {
             try {
                 const value = await this.#load();
                 if (this.#entry === entry) {
+                    entry.lastFailure = undefined;
                     entry.loadedAt = this.#now();
                     entry.nextRetryAt = undefined;
                     entry.value = value;
@@ -126,6 +128,7 @@ export class CoalescedSnapshot<T> {
                     this.#metrics.failures += 1;
                 }
                 if (this.#entry === entry) {
+                    entry.lastFailure = { error };
                     entry.nextRetryAt = this.#now() + this.#retryAfterMs;
                 }
                 throw error;
@@ -191,6 +194,10 @@ export class CoalescedSnapshot<T> {
         if (entry.inFlight) {
             this.#metrics.coalescedHits += 1;
             return await entry.inFlight;
+        }
+
+        if ((entry.nextRetryAt ?? 0) > now && entry.lastFailure) {
+            throw entry.lastFailure.error;
         }
 
         return await this.#startLoad(entry);

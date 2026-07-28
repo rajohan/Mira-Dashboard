@@ -9,7 +9,10 @@ import { HttpError, json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { objectFallback } from "../lib/values.ts";
 import { isDevelopmentExternalNotificationSuppressed } from "../requestPolicy.ts";
-import { getOpenClawCronListSnapshot } from "../services/openClawCronSnapshot.ts";
+import {
+    getOpenClawCronListSnapshot,
+    normalizeOpenClawCronJobs,
+} from "../services/openClawCronSnapshot.ts";
 
 type Status = "todo" | "in-progress" | "blocked" | "done";
 type Assignee = TaskAssigneeId;
@@ -202,13 +205,7 @@ function cronJobId(job: CronJob): string {
 async function fetchCronJobsById(): Promise<Map<string, CronJob>> {
     try {
         const payload = await getOpenClawCronListSnapshot();
-        if (!payload || typeof payload !== "object") return new Map();
-        const value = payload as { jobs?: CronJob[]; items?: CronJob[] };
-        const jobs = Array.isArray(value.jobs)
-            ? value.jobs
-            : Array.isArray(value.items)
-              ? value.items
-              : [];
+        const jobs = normalizeOpenClawCronJobs<CronJob>(payload);
         return new Map(
             jobs
                 .map((job) => [cronJobId(job), job] as const)

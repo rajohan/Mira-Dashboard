@@ -3,7 +3,10 @@ import { database } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
 import type { JobDisableIntent } from "./jobDisableIntent.ts";
 import { openClawCronDisableIntentsByJobId } from "./openClawCronMetadata.ts";
-import { getOpenClawCronListSnapshot } from "./openClawCronSnapshot.ts";
+import {
+    getOpenClawCronListSnapshot,
+    normalizeOpenClawCronJobs,
+} from "./openClawCronSnapshot.ts";
 
 export interface CronTaskLink {
     number: number;
@@ -26,11 +29,6 @@ interface CronJob {
     name?: string;
     state?: Record<string, unknown>;
     [key: string]: unknown;
-}
-
-interface CronListResponse {
-    items?: CronJob[];
-    jobs?: CronJob[];
 }
 
 interface HeartbeatTaskAutomation {
@@ -106,13 +104,6 @@ function cronJobId(job: CronJob): string {
     return String(job.jobId || job.id || "");
 }
 
-function normalizedCronJobs(payload: unknown): CronJob[] {
-    if (!payload || typeof payload !== "object") return [];
-    const value = payload as CronListResponse;
-    if (Array.isArray(value.jobs)) return value.jobs;
-    return Array.isArray(value.items) ? value.items : [];
-}
-
 function openTaskAutomationRows(): TaskAutomationRow[] {
     return database
         .prepare(
@@ -179,7 +170,9 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
     let cronError: string | undefined;
     let cronJobs: CronJob[] = [];
     try {
-        cronJobs = normalizedCronJobs(await getOpenClawCronListSnapshot());
+        cronJobs = normalizeOpenClawCronJobs<CronJob>(
+            await getOpenClawCronListSnapshot()
+        );
     } catch (error) {
         isCronDataAvailable = false;
         cronError = errorMessage(error, "OpenClaw cron list unavailable");
