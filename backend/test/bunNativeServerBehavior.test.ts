@@ -520,6 +520,9 @@ describe("Bun-native dashboard backend", () => {
         const appRoute = await fetch(`${state.baseUrl}/tasks`);
         expect(appRoute.status).toBe(200);
         expect(appRoute.headers.get("content-type")).toContain("text/html");
+        expect(appRoute.headers.get("cache-control")).toBe("no-cache");
+        expect(appRoute.headers.get("etag")).toBeTruthy();
+        expect(appRoute.headers.get("last-modified")).toBeTruthy();
         expect(appRoute.headers.get("content-security-policy")).toContain(
             `connect-src 'self' ${state.baseUrl.replace(/^http/u, "ws")}`
         );
@@ -530,10 +533,19 @@ describe("Bun-native dashboard backend", () => {
 
         const rootChunk = await fetch(`${state.baseUrl}/index-fixture.js`);
         expect(rootChunk.status).toBe(200);
-        expect(rootChunk.headers.get("cache-control")).toBe("no-store");
+        expect(rootChunk.headers.get("cache-control")).toBe("no-cache");
+        expect(rootChunk.headers.get("etag")).toBeTruthy();
+        expect(rootChunk.headers.get("last-modified")).toBeTruthy();
         expect(rootChunk.headers.get("x-request-id")).not.toBe(
             appRoute.headers.get("x-request-id")
         );
+
+        const cachedRootChunk = await fetch(`${state.baseUrl}/index-fixture.js`, {
+            headers: {
+                "If-None-Match": rootChunk.headers.get("etag") ?? "",
+            },
+        });
+        expect(cachedRootChunk.status).toBe(304);
 
         const missingChunk = await fetch(
             `${state.baseUrl}/assets/index-missing-after-deploy.js`

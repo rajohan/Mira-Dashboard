@@ -11,8 +11,10 @@ import {
 } from "lucide-react";
 import {
     type KeyboardEvent,
+    lazy,
     type PointerEvent,
     type RefObject,
+    Suspense,
     useEffect,
     useRef,
     useState,
@@ -20,7 +22,6 @@ import {
 
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
-import { ChatMarkdown } from "./ChatMarkdown";
 import { ChatMessageDetails } from "./ChatMessageDetails";
 import type {
     ChatAttachmentDisplay,
@@ -35,6 +36,11 @@ import {
     TOOL_ROLE_VARIANTS,
 } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
+
+const ChatMarkdown = lazy(async () => {
+    const module = await import("./ChatMarkdown");
+    return { default: module.ChatMarkdown };
+});
 
 const SCROLL_KEYS = new Set([
     " ",
@@ -685,7 +691,15 @@ export function ChatMessagesList({
                                             </div>
                                         ) : undefined}
                                         {shouldRenderPrimaryText ? (
-                                            <ChatMarkdown text={row.message.text} />
+                                            <Suspense
+                                                fallback={
+                                                    <div className="whitespace-pre-wrap">
+                                                        {row.message.text}
+                                                    </div>
+                                                }
+                                            >
+                                                <ChatMarkdown text={row.message.text} />
+                                            </Suspense>
                                         ) : undefined}
                                         <AttachmentList
                                             attachments={

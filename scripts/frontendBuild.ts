@@ -7,6 +7,11 @@ import {
     isReleaseBuildCommit,
     resolveBuildSourceIdentity,
 } from "../backend/scripts/buildSourceIdentity.ts";
+import {
+    assertFrontendBundleBudgets,
+    measureFrontendBundle,
+    writePrecompressedFrontendAssets,
+} from "./frontendBuildArtifacts";
 import reactCompilerPlugin from "./reactCompilerPlugin";
 
 type FrontendBuildMode = "development" | "production";
@@ -55,6 +60,7 @@ export async function buildFrontend({
         entrypoints: ["./index.html"],
         env: "PUBLIC_*",
         minify: isProduction,
+        metafile: true,
         naming: {
             asset: "assets/[name]-[hash].[ext]",
             chunk: "assets/[name]-[hash].[ext]",
@@ -74,6 +80,9 @@ export async function buildFrontend({
     if (!result.success) {
         throw new AggregateError(result.logs, "Frontend build failed");
     }
+    if (!result.metafile) {
+        throw new Error("Frontend build did not produce bundle metadata");
+    }
 
     await writeFile(
         path.join(resolvedOutdir, "build-identity.json"),
@@ -88,4 +97,22 @@ export async function buildFrontend({
             2
         )}\n`
     );
+
+    if (isProduction) {
+        const bundleMetrics = await measureFrontendBundle(
+            result.metafile,
+            resolvedOutdir
+        );
+        await writeFile(
+            path.join(resolvedOutdir, "frontend-bundle-metrics.json"),
+            `${JSON.stringify(bundleMetrics, undefined, 2)}\n`
+        );
+        assertFrontendBundleBudgets(bundleMetrics.measurements);
+        const compressedFileCount = await writePrecompressedFrontendAssets(
+            result.outputs.map(({ path: outputPath }) => outputPath)
+        );
+        console.log(
+            `Frontend bundle: ${bundleMetrics.measurements.initialJavaScriptGzipBytes} bytes initial JS gzip, ${bundleMetrics.measurements.totalJavaScriptGzipBytes} bytes total JS gzip, ${compressedFileCount} compressed sidecars`
+        );
+    }
 }

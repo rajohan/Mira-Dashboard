@@ -110,6 +110,7 @@ export function Layout({ children }: LayoutProperties) {
                         <Link
                             key={item.to}
                             to={item.to}
+                            preload="intent"
                             aria-current={isActive ? "page" : undefined}
                             className={cn(
                                 "mb-1 flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 transition-colors",

@@ -2,28 +2,30 @@ import {
     createRootRoute,
     createRoute,
     createRouter,
+    lazyRouteComponent,
     Outlet,
     redirect,
 } from "@tanstack/react-router";
 
 import { Layout } from "./components/layout/Layout";
-import { Agents } from "./pages/Agents";
-import { Chat } from "./pages/Chat";
-import { Dashboard } from "./pages/Dashboard";
-import { Database } from "./pages/Database";
-import { Delivery } from "./pages/Delivery";
-import { Docker } from "./pages/Docker";
-import { Files } from "./pages/Files";
-import { Jobs } from "./pages/Jobs";
-import { Login } from "./pages/Login";
-import { Logs } from "./pages/Logs";
-import { Moltbook } from "./pages/Moltbook";
-import { Reports } from "./pages/Reports";
-import { Sessions } from "./pages/Sessions";
-import { Settings } from "./pages/Settings";
-import { Tasks } from "./pages/Tasks";
-import { Terminal } from "./pages/Terminal";
 import { authActions, authStore } from "./stores/authStore";
+
+const Agents = lazyRouteComponent(() => import("./pages/Agents"), "Agents");
+const Chat = lazyRouteComponent(() => import("./pages/Chat"), "Chat");
+const Dashboard = lazyRouteComponent(() => import("./pages/Dashboard"), "Dashboard");
+const Database = lazyRouteComponent(() => import("./pages/Database"), "Database");
+const Delivery = lazyRouteComponent(() => import("./pages/Delivery"), "Delivery");
+const Docker = lazyRouteComponent(() => import("./pages/Docker"), "Docker");
+const Files = lazyRouteComponent(() => import("./pages/Files"), "Files");
+const Jobs = lazyRouteComponent(() => import("./pages/Jobs"), "Jobs");
+const Login = lazyRouteComponent(() => import("./pages/Login"), "Login");
+const Logs = lazyRouteComponent(() => import("./pages/Logs"), "Logs");
+const Moltbook = lazyRouteComponent(() => import("./pages/Moltbook"), "Moltbook");
+const Reports = lazyRouteComponent(() => import("./pages/Reports"), "Reports");
+const Sessions = lazyRouteComponent(() => import("./pages/Sessions"), "Sessions");
+const Settings = lazyRouteComponent(() => import("./pages/Settings"), "Settings");
+const Tasks = lazyRouteComponent(() => import("./pages/Tasks"), "Tasks");
+const Terminal = lazyRouteComponent(() => import("./pages/Terminal"), "Terminal");
 
 const rootRoute = createRootRoute({
     component: () => <Outlet />,

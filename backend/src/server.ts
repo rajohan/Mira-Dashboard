@@ -25,6 +25,7 @@ import { routes } from "./routes.ts";
 import { isProductionDeploymentCutoverActive } from "./services/deploymentCutoverState.ts";
 import { validateTotpStorageConfig } from "./services/multiFactorAuth.ts";
 import { validateWebAuthnConfig } from "./services/webAuthn.ts";
+import { staticFileResponse } from "./staticFileResponse.ts";
 
 interface DashboardSocketData {
     closeHandlers: Array<() => void>;
@@ -45,6 +46,9 @@ interface DashboardSocketRequest {
 const SERVER_IDLE_TIMEOUT_SECONDS = 240;
 const DEPLOYMENT_CUTOVER_SOCKET_CLOSE_CODE = 1012;
 const DEPLOYMENT_CUTOVER_SOCKET_CLOSE_REASON = "Dashboard release cutover in progress";
+const IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const REVALIDATED_ASSET_CACHE_CONTROL = "no-cache";
+const HASHED_ASSET_NAME = /-[\da-z]{8}\.[\da-z]+$/iu;
 
 function dashboardSocketRequest(data: string | Buffer): DashboardSocketRequest {
     try {
@@ -265,7 +269,7 @@ export function createServer(
             }
             return withRequestSecurity(
                 request,
-                await staticResponse(url.pathname),
+                await staticResponse(request, url.pathname),
                 server
             );
         },
@@ -273,13 +277,29 @@ export function createServer(
     });
 }
 
-async function fileResponse(filePath: string, contentType?: string): Promise<Response> {
-    const headers: Record<string, string> = { "Cache-Control": "no-store" };
-    if (contentType) headers["Content-Type"] = contentType;
-    return new Response(Bun.file(filePath), { headers });
+function cacheControlForStaticFile(frontendRoot: string, filePath: string): string {
+    const relativePath = path.relative(frontendRoot, filePath);
+    const isHashedAsset =
+        relativePath.startsWith(`assets${path.sep}`) &&
+        HASHED_ASSET_NAME.test(path.basename(relativePath));
+    return isHashedAsset
+        ? IMMUTABLE_ASSET_CACHE_CONTROL
+        : REVALIDATED_ASSET_CACHE_CONTROL;
 }
 
-async function staticResponse(pathname: string): Promise<Response> {
+async function fileResponse(
+    request: Request,
+    frontendRoot: string,
+    filePath: string,
+    contentType?: string
+): Promise<Response> {
+    return staticFileResponse(request, filePath, {
+        cacheControl: cacheControlForStaticFile(frontendRoot, filePath),
+        contentType,
+    });
+}
+
+async function staticResponse(request: Request, pathname: string): Promise<Response> {
     let decodedPath: string;
     try {
         decodedPath = decodeURIComponent(pathname.replace(/^\/+/u, "")).replace(
@@ -294,6 +314,9 @@ async function staticResponse(pathname: string): Promise<Response> {
         return Response.json({ error: "Not found" }, { status: 404 });
     }
     if (decodedPathname === "/health") {
+        return new Response("Not found", { status: 404 });
+    }
+    if (/\.(?:br|gz)$/iu.test(decodedPathname)) {
         return new Response("Not found", { status: 404 });
     }
 
@@ -335,7 +358,9 @@ async function staticResponse(pathname: string): Promise<Response> {
                 !hasHiddenStaticSegment(relativeRealPath)
             ) {
                 const stat = await fsp.stat(realDirectPath);
-                if (stat.isFile()) return fileResponse(realDirectPath);
+                if (stat.isFile()) {
+                    return fileResponse(request, realRoot, realDirectPath);
+                }
             }
         } catch {
             // Continue with hashed asset lookup or SPA routing below.
@@ -357,7 +382,9 @@ async function staticResponse(pathname: string): Promise<Response> {
                 return new Response("Not found", { status: 404 });
             }
             const stat = await fsp.stat(realAssetPath);
-            if (stat.isFile()) return fileResponse(realAssetPath);
+            if (stat.isFile()) {
+                return fileResponse(request, realRoot, realAssetPath);
+            }
         } catch {
             return new Response("Not found", { status: 404 });
         }
@@ -377,7 +404,9 @@ async function staticResponse(pathname: string): Promise<Response> {
             return new Response("Not found", { status: 404 });
         }
         const stat = await fsp.stat(realIndexPath);
-        if (stat.isFile()) return fileResponse(realIndexPath, "text/html");
+        if (stat.isFile()) {
+            return fileResponse(request, realRoot, realIndexPath, "text/html");
+        }
     } catch {
         // Fall through to a generic not-found response.
     }
