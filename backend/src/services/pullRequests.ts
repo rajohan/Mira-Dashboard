@@ -19,6 +19,7 @@ import {
 } from "../releaseDeployment.ts";
 import {
     assertDashboardReleaseHostRuntimeCompatible,
+    assertManagedDashboardReleaseRollbackSchemaCompatible,
     type ManagedDashboardRelease,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
@@ -767,7 +768,7 @@ interface DeploymentRuntimeResultRow {
  * readiness. Build failures and cancelled jobs do not disqualify an otherwise
  * verified immutable release.
  */
-function rollbackIneligibilityReason(
+function rollbackRuntimeIneligibilityReason(
     commitSha: string,
     excludedJobId?: string
 ): string | undefined {
@@ -801,6 +802,31 @@ function rollbackIneligibilityReason(
         : undefined;
 }
 
+async function rollbackIneligibilityReason(
+    activeRelease: ManagedDashboardRelease,
+    rollbackRelease: ManagedDashboardRelease,
+    excludedJobId?: string
+): Promise<string | undefined> {
+    const runtimeReason = rollbackRuntimeIneligibilityReason(
+        rollbackRelease.commitSha,
+        excludedJobId
+    );
+    if (runtimeReason) return runtimeReason;
+
+    try {
+        await assertManagedDashboardReleaseRollbackSchemaCompatible(
+            activeRelease,
+            rollbackRelease
+        );
+        return undefined;
+    } catch (error) {
+        return errorMessage(
+            error,
+            "Previous release schema compatibility could not be verified"
+        );
+    }
+}
+
 function dashboardReleaseSummary(
     release: ManagedDashboardRelease
 ): DashboardReleaseSummary {
@@ -826,19 +852,19 @@ export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatu
         current !== undefined &&
         previous !== undefined &&
         current.commitSha !== previous.commitSha;
-    const runtimeIneligibilityReason =
-        isRollbackAvailable && previous
-            ? rollbackIneligibilityReason(previous.commitSha)
+    const ineligibilityReason =
+        isRollbackAvailable && state.current && state.previous
+            ? await rollbackIneligibilityReason(state.current, state.previous)
             : undefined;
 
     return {
         current,
         previous,
         rollback: {
-            available: isRollbackAvailable && !runtimeIneligibilityReason,
-            ...((!isRollbackAvailable || runtimeIneligibilityReason) && {
+            available: isRollbackAvailable && !ineligibilityReason,
+            ...((!isRollbackAvailable || ineligibilityReason) && {
                 reason:
-                    runtimeIneligibilityReason ??
+                    ineligibilityReason ??
                     (current
                         ? "No distinct previous release is available"
                         : "No active managed release is available"),
@@ -2627,13 +2653,14 @@ async function runDeploymentJob(
             );
         }
         if (isRedeploy) {
-            const runtimeIneligibilityReason = rollbackIneligibilityReason(
-                rollbackRelease.commitSha,
+            const ineligibilityReason = await rollbackIneligibilityReason(
+                currentState.current,
+                rollbackRelease,
                 job.id
             );
-            if (runtimeIneligibilityReason) {
+            if (ineligibilityReason) {
                 throw new Error(
-                    `Automatic redeploy fallback is not eligible: ${runtimeIneligibilityReason}`
+                    `Automatic redeploy fallback is not eligible: ${ineligibilityReason}`
                 );
             }
         }
@@ -2718,13 +2745,14 @@ async function runRollbackJob(
         if (state.current.commitSha === state.previous.commitSha) {
             throw new Error("Managed release rollback requires two distinct releases");
         }
-        const runtimeIneligibilityReason = rollbackIneligibilityReason(
-            state.previous.commitSha,
+        const ineligibilityReason = await rollbackIneligibilityReason(
+            state.current,
+            state.previous,
             job.id
         );
-        if (runtimeIneligibilityReason) {
+        if (ineligibilityReason) {
             throw new Error(
-                `Previous release is not eligible for rollback: ${runtimeIneligibilityReason}`
+                `Previous release is not eligible for rollback: ${ineligibilityReason}`
             );
         }
         assertDashboardReleaseHostRuntimeCompatible(state.previous);
@@ -2894,13 +2922,14 @@ export async function prepareAndStartRollback(
                 { statusCode: 409 }
             );
         }
-        const runtimeIneligibilityReason = rollbackIneligibilityReason(
-            state.previous.commitSha
+        const ineligibilityReason = await rollbackIneligibilityReason(
+            state.current,
+            state.previous
         );
-        if (runtimeIneligibilityReason) {
+        if (ineligibilityReason) {
             throw Object.assign(
                 new Error(
-                    `Previous release is not eligible for rollback: ${runtimeIneligibilityReason}`
+                    `Previous release is not eligible for rollback: ${ineligibilityReason}`
                 ),
                 { statusCode: 409 }
             );

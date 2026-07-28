@@ -801,6 +801,36 @@ export function assertReleaseRollbackCompatible(
     }
 }
 
+/**
+ * Verifies that a managed rollback release can open the live schema and agrees
+ * with its applied migration history.
+ */
+export async function assertManagedDashboardReleaseRollbackSchemaCompatible(
+    activeRelease: ManagedDashboardRelease,
+    rollbackRelease: ManagedDashboardRelease,
+    options: DashboardReleaseManagerOptions = {}
+): Promise<void> {
+    const maximumInspectableSchemaVersion = Math.max(
+        DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+        activeRelease.manifest.schema.maximumCompatible,
+        rollbackRelease.manifest.schema.maximumCompatible
+    );
+    const liveSchemaState = await resolveLiveSchemaState(
+        options,
+        maximumInspectableSchemaVersion
+    );
+    assertReleaseRollbackCompatible(
+        activeRelease.manifest,
+        rollbackRelease.manifest,
+        liveSchemaState.version
+    );
+    assertReleaseMigrationHistoryCompatible(
+        rollbackRelease.manifest,
+        liveSchemaState,
+        "Rollback"
+    );
+}
+
 function assertReleaseCanActivateLiveSchema(
     release: DashboardReleaseManifest,
     liveSchemaVersion: number,
@@ -1366,24 +1396,10 @@ export async function rollbackDashboardRelease(
             const activeRelease = state.current;
             const rollbackRelease = state.previous;
             assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
-            const maximumInspectableSchemaVersion = Math.max(
-                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
-                activeRelease.manifest.schema.maximumCompatible,
-                rollbackRelease.manifest.schema.maximumCompatible
-            );
-            const liveSchemaState = await resolveLiveSchemaState(
-                options,
-                maximumInspectableSchemaVersion
-            );
-            assertReleaseRollbackCompatible(
-                activeRelease.manifest,
-                rollbackRelease.manifest,
-                liveSchemaState.version
-            );
-            assertReleaseMigrationHistoryCompatible(
-                rollbackRelease.manifest,
-                liveSchemaState,
-                "Rollback"
+            await assertManagedDashboardReleaseRollbackSchemaCompatible(
+                activeRelease,
+                rollbackRelease,
+                options
             );
 
             const before = releaseLinkStateFromDashboardState(state);

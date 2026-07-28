@@ -25,7 +25,10 @@ import {
     ensureDashboardReleaseLayout,
     managedReleasePath,
 } from "../src/releaseManager.ts";
-import { createReleaseFixture } from "./support/releaseFixture.ts";
+import {
+    createReleaseFixture,
+    rewriteReleaseFixtureSchemaVersion,
+} from "./support/releaseFixture.ts";
 
 const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
@@ -1887,6 +1890,79 @@ describe("backend service behavior", () => {
         }
     });
 
+    it("hides schema-incompatible rollback targets before queueing work", async () => {
+        rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
+        const releasesRoot = createTemporaryRoot("mira-release-schema-status-");
+        const currentCommit = "c".repeat(40);
+        const previousCommit = "d".repeat(40);
+        await ensureDashboardReleaseLayout(releasesRoot);
+        await createReleaseFixture(
+            managedReleasePath(releasesRoot, currentCommit),
+            currentCommit,
+            { commitTitle: "Schema 7 dashboard release" }
+        );
+        const previousReleasePath = managedReleasePath(releasesRoot, previousCommit);
+        await createReleaseFixture(previousReleasePath, previousCommit, {
+            commitTitle: "Schema 6 dashboard release",
+        });
+        await rewriteReleaseFixtureSchemaVersion(previousReleasePath, 6);
+        symlinkSync(
+            `releases/${currentCommit}`,
+            path.join(releasesRoot, "current"),
+            "dir"
+        );
+        symlinkSync(
+            `releases/${previousCommit}`,
+            path.join(releasesRoot, "previous"),
+            "dir"
+        );
+        process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
+
+        const { getDashboardReleaseStatus, prepareAndStartRollback } =
+            await import("../src/services/pullRequests.ts");
+        const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
+        const rollbackExecutionCount = () =>
+            (
+                database
+                    .prepare(
+                        `SELECT COUNT(*) AS count
+                         FROM job_executions
+                         WHERE action_key = 'dashboard.rollback'`
+                    )
+                    .get() as { count: number }
+            ).count;
+        const executionCountBefore = rollbackExecutionCount();
+
+        await expect(getDashboardReleaseStatus()).resolves.toMatchObject({
+            current: {
+                commitSha: currentCommit,
+                schema: { maximumCompatible: 7, target: 7 },
+            },
+            previous: {
+                commitSha: previousCommit,
+                schema: { maximumCompatible: 6, target: 6 },
+            },
+            rollback: {
+                available: false,
+                reason: "Rollback release cannot open SQLite schema 7",
+            },
+        });
+        await expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
+            "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 7"
+        );
+        const response = await pullRequestRoutes[
+            "/api/pull-requests/releases/rollback"
+        ].POST(rollbackRouteRequest(previousCommit));
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toMatchObject({
+            error: "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 7",
+        });
+        expect(rollbackExecutionCount()).toBe(executionCountBefore);
+        expect(
+            database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
+        ).toBeNull();
+    });
+
     it("rejects malformed and missing rollback worker executions", async () => {
         const { registerPullRequestExecutionActions } =
             await import("../src/services/pullRequests.ts");
@@ -2450,11 +2526,13 @@ printf 'scheduled\n'
         await createReleaseFixture(oldReleasePath, oldCommit, {
             commitTitle: "Previous dashboard commit",
         });
-        await createReleaseFixture(
-            managedReleasePath(releasesRoot, priorPreviousCommit),
-            priorPreviousCommit,
-            { commitTitle: "Older dashboard commit" }
+        const priorPreviousReleasePath = managedReleasePath(
+            releasesRoot,
+            priorPreviousCommit
         );
+        await createReleaseFixture(priorPreviousReleasePath, priorPreviousCommit, {
+            commitTitle: "Older dashboard commit",
+        });
         symlinkSync(`releases/${oldCommit}`, path.join(releasesRoot, "current"), "dir");
         symlinkSync(
             `releases/${priorPreviousCommit}`,
@@ -2979,6 +3057,32 @@ printf 'scheduled\n'
                     .get(blockedRedeploy.id)
             ).toEqual({
                 note: "Automatic redeploy fallback is not eligible: Previous release failed its latest runtime readiness check",
+                status: "failed",
+            });
+            database
+                .prepare("DELETE FROM deployment_jobs WHERE id = ?")
+                .run(failedRuntimeId);
+            await rewriteReleaseFixtureSchemaVersion(priorPreviousReleasePath, 6);
+            const schemaBlockedRedeploy = startDeployLatest();
+            createdDeploymentIds.push(schemaBlockedRedeploy.id);
+            const schemaBlockedExecution = database
+                .prepare(
+                    `SELECT id
+                     FROM job_executions
+                     WHERE action_key = 'dashboard.deploy'
+                       AND json_extract(payload_json, '$.deploymentId') = ?`
+                )
+                .get(schemaBlockedRedeploy.id) as { id: string };
+            await waitFor(
+                () => getJobExecution(schemaBlockedExecution.id)?.status === "failed",
+                5000
+            );
+            expect(
+                database
+                    .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
+                    .get(schemaBlockedRedeploy.id)
+            ).toEqual({
+                note: "Automatic redeploy fallback is not eligible: Rollback release cannot open SQLite schema 7",
                 status: "failed",
             });
             await executeSuccessfulGuardianPath(restartCommand);
