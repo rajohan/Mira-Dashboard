@@ -754,9 +754,11 @@ export async function loadRuntimeReleaseIdentity(
     if (environment !== "production" && backendBuildCommit === "development") {
         return developmentRuntimeReleaseIdentity(releaseRoot);
     }
+    let isLoadingManifest = true;
     try {
         const realReleaseRoot = await fsp.realpath(releaseRoot);
         const manifest = await loadReleaseManifest(realReleaseRoot);
+        isLoadingManifest = false;
         await verifyReleaseArtifacts(realReleaseRoot, manifest);
         try {
             await verifyReleaseBuildIdentities(realReleaseRoot, manifest);
@@ -799,8 +801,9 @@ export async function loadRuntimeReleaseIdentity(
             source: "manifest",
         };
     } catch (error) {
-        const isMissing = (error as NodeJS.ErrnoException).code === "ENOENT";
-        const isDevelopmentFallback = environment !== "production" && isMissing;
+        const isManifestMissing =
+            isLoadingManifest && (error as NodeJS.ErrnoException).code === "ENOENT";
+        const isDevelopmentFallback = environment !== "production" && isManifestMissing;
         if (isDevelopmentFallback) {
             return developmentRuntimeReleaseIdentity(releaseRoot);
         }
@@ -808,7 +811,7 @@ export async function loadRuntimeReleaseIdentity(
         return {
             backendCommit: commit,
             frontendCommit: commit,
-            issue: isMissing
+            issue: isManifestMissing
                 ? ("manifest-missing" as const)
                 : ("manifest-invalid" as const),
             ready: false,

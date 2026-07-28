@@ -536,6 +536,12 @@ describe("Dashboard release manifest", () => {
             issue: "manifest-invalid",
             ready: false,
         });
+        await expect(
+            loadRuntimeReleaseIdentity(root, "test", TEST_COMMIT)
+        ).resolves.toMatchObject({
+            issue: "manifest-invalid",
+            ready: false,
+        });
     });
 
     it("coalesces readiness verification and revalidates after invalidation", async () => {
