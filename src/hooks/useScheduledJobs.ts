@@ -1,99 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { ScheduledJobPatch, ScheduledJobRun } from "../../contracts/jobs";
+import {
+    parseScheduledJobMutationResponse,
+    parseScheduledJobRunResponse,
+    parseScheduledJobRunsResponse,
+    parseScheduledJobsResponse,
+} from "../../contracts/jobs";
 import { refreshPolicy } from "../lib/refreshPolicy";
-import type { JobDisableIntent } from "../types/job";
-import { apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
+import { apiFetchParsed, apiPatchParsed, apiPostParsed } from "./useApi";
 import {
     jobExecutionKeys,
-    type JobResourceClass,
     refreshJobExecutionQueueWhilePending,
 } from "./useJobExecutions";
-
-/** Represents a backend-native scheduled job. */
-export interface ScheduledJob {
-    id: string;
-    name: string;
-    description: string;
-    enabled: boolean;
-    scheduleType: "interval" | "daily" | "cron";
-    intervalSeconds: number;
-    timeOfDay?: string | undefined;
-    cronExpression?: string | undefined;
-    actionKey: string;
-    actionPayload: Record<string, unknown>;
-    disableIntent?: JobDisableIntent | undefined;
-    nextRunAt?: string | undefined;
-    createdAt: string;
-    updatedAt: string;
-    lastRun?: ScheduledJobRun | undefined;
-    resourceClass: JobResourceClass;
-    timeoutMs: number;
-    isQueued: boolean;
-    isRunning: boolean;
-}
-
-/** Represents a backend-native scheduled job run. */
-export interface ScheduledJobRun {
-    id: number;
-    jobId: string;
-    status: "queued" | "running" | "success" | "failed" | "cancelled";
-    triggerType: "manual" | "schedule" | "startup" | "system";
-    startedAt: string;
-    queuedAt: string;
-    finishedAt?: string | undefined;
-    message?: string | undefined;
-    output: Record<string, unknown>;
-    executionId?: string | undefined;
-    resourceClass: JobResourceClass;
-    cancelRequestedAt?: string | undefined;
-    cancellable: boolean;
-}
-
-export type ScheduledJobPatch = Partial<
-    Omit<Pick<ScheduledJob, "enabled" | "intervalSeconds" | "scheduleType">, never> & {
-        cronExpression?: string | null | undefined;
-        disableIntent?: JobDisableIntent | undefined;
-        timeOfDay?: string | null | undefined;
-    }
->;
-
-interface ScheduledJobRunsResponse {
-    runs: ScheduledJobRun[];
-}
-
-interface ScheduledJobsResponse {
-    jobs: ScheduledJob[];
-}
-
-const legacyScheduledJobTimeoutMs = 5 * 60 * 1000;
-
-function normalizeScheduledJobRun(
-    run: ScheduledJobRun,
-    resourceClass: JobResourceClass
-): ScheduledJobRun {
-    return {
-        ...run,
-        cancellable: run.cancellable ?? false,
-        queuedAt: run.queuedAt ?? run.startedAt,
-        resourceClass: run.resourceClass ?? resourceClass,
-    };
-}
-
-/** Keeps a new frontend usable during the brief old-backend deployment window. */
-function normalizeScheduledJob(job: ScheduledJob): ScheduledJob {
-    const resourceClass = job.resourceClass ?? "light";
-    const lastRun = job.lastRun
-        ? normalizeScheduledJobRun(job.lastRun, resourceClass)
-        : undefined;
-    return {
-        ...job,
-        isQueued: job.isQueued ?? lastRun?.status === "queued",
-        isRunning: job.isRunning ?? lastRun?.status === "running",
-        lastRun,
-        resourceClass,
-        timeoutMs: job.timeoutMs ?? legacyScheduledJobTimeoutMs,
-    };
-}
 
 /** Preserves a failed scheduled run so callers can surface its recorded output. */
 export class ScheduledJobRunError extends Error {
@@ -117,8 +36,8 @@ export const scheduledJobKeys = {
 export function useScheduledJobs() {
     return useQuery({
         queryKey: scheduledJobKeys.list(),
-        queryFn: () => apiFetchRequired<ScheduledJobsResponse>("/jobs"),
-        select: (data) => data.jobs.map((job) => normalizeScheduledJob(job)),
+        queryFn: () => apiFetchParsed("/jobs", parseScheduledJobsResponse),
+        select: (data) => data.jobs,
         refetchInterval: (query) =>
             query.state.data?.jobs.some((job) => job.isQueued || job.isRunning)
                 ? refreshPolicy.live
@@ -131,10 +50,11 @@ export function useScheduledJobRuns(id: string) {
     return useQuery({
         queryKey: scheduledJobKeys.runs(id),
         queryFn: () =>
-            apiFetchRequired<ScheduledJobRunsResponse>(
-                `/jobs/${encodeURIComponent(id)}/runs`
+            apiFetchParsed(
+                `/jobs/${encodeURIComponent(id)}/runs`,
+                parseScheduledJobRunsResponse
             ),
-        select: (data) => data.runs.map((run) => normalizeScheduledJobRun(run, "light")),
+        select: (data) => data.runs,
         enabled: id.length > 0,
         refetchInterval: (query) =>
             query.state.data?.runs.some(
@@ -151,8 +71,9 @@ export function useUpdateScheduledJob() {
 
     return useMutation({
         mutationFn: ({ id, patch }: { id: string; patch: ScheduledJobPatch }) =>
-            apiPatchRequired<{ isOk: boolean; job: ScheduledJob }>(
+            apiPatchParsed(
                 `/jobs/${encodeURIComponent(id)}`,
+                parseScheduledJobMutationResponse,
                 { patch }
             ),
         onSuccess: (_data, variables) => {
@@ -172,8 +93,9 @@ export function useRunScheduledJobNow() {
         mutationFn: async ({ id }: { id: string }) => {
             const result = await refreshJobExecutionQueueWhilePending(
                 queryClient,
-                apiPostRequired<{ isOk: boolean; run: ScheduledJobRun }>(
-                    `/jobs/${encodeURIComponent(id)}/run`
+                apiPostParsed(
+                    `/jobs/${encodeURIComponent(id)}/run`,
+                    parseScheduledJobRunResponse
                 )
             );
             if (

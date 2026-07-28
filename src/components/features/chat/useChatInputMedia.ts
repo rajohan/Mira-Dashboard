@@ -7,6 +7,7 @@ import {
     useState,
 } from "react";
 
+import { apiErrorFromResponse } from "../../../lib/apiError";
 import { formatSize } from "../../../utils/format";
 import { supportedAudioRecordingMimeType } from "./chatPageUtilities";
 import {
@@ -268,13 +269,7 @@ export function useChatInputMedia({
                 return;
             }
             if (!response.ok) {
-                let error: { error?: string };
-                try {
-                    error = (await response.json()) as { error?: string };
-                } catch {
-                    error = { error: "Failed to transcribe audio" };
-                }
-                throw new Error(error.error || `HTTP ${response.status}`);
+                throw await apiErrorFromResponse(response, "Failed to transcribe audio");
             }
 
             const result = (await response.json()) as { text?: string };

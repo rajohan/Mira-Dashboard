@@ -1,3 +1,7 @@
+import type {
+    AgentsStatusResponse,
+    AgentTaskHistoryResponse,
+} from "../../../contracts/agents.ts";
 import { HttpError, json, readJson } from "../http.ts";
 import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
@@ -24,10 +28,7 @@ function missingConfig(): Response {
     return json({ error: "Agent configuration not found" }, { status: 404 });
 }
 
-const agentStatusesSnapshot = new CoalescedSnapshot<{
-    agents: Awaited<ReturnType<typeof buildAgentStatuses>>;
-    timestamp: number;
-}>({
+const agentStatusesSnapshot = new CoalescedSnapshot<AgentsStatusResponse>({
     freshForMs: 1500,
     load: async () => {
         closeStaleActiveTasks();
@@ -36,7 +37,7 @@ const agentStatusesSnapshot = new CoalescedSnapshot<{
         return {
             agents: await buildAgentStatuses(config),
             timestamp: Date.now(),
-        };
+        } satisfies AgentsStatusResponse;
     },
     name: "openclaw.agent-statuses",
     staleForMs: 5000,
@@ -120,7 +121,7 @@ export const agentRoutes = {
                 return json({
                     tasks: getLatestCompletedTasks(limit),
                     timestamp: Date.now(),
-                });
+                } satisfies AgentTaskHistoryResponse);
             } catch (error) {
                 return agentError(error, "Agent task history failed");
             }

@@ -44,7 +44,7 @@ const configuredDashboardOrigins = new Set(
         .map((origin) => origin.trim())
         .filter(Boolean)
 );
-type HeaderInput = Record<string, string> | Array<[string, string]>;
+type HeaderInput = Headers | Record<string, string> | Array<[string, string]>;
 
 interface BunResponseInit {
     headers?: HeaderInput;

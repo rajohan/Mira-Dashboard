@@ -1,9 +1,6 @@
+import type { QuotasResponse, SyntheticQuota } from "../../../contracts/quotas.ts";
 import { database } from "../database.ts";
-import {
-    hasQuotaStatus,
-    type QuotasResponse,
-    type SyntheticQuota,
-} from "../lib/quotasCache.ts";
+import { hasQuotaStatus } from "../lib/quotasCache.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
 
 function dateToISOString(date: Date): string {

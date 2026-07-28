@@ -1341,7 +1341,13 @@ describe("Global security verification", () => {
                     ) {
                         verifyRequests += 1;
                         return Response.json(
-                            { error: "Session changed" },
+                            {
+                                error: {
+                                    code: "unauthorized",
+                                    message: "Session changed",
+                                    requestId: "security-session-changed",
+                                },
+                            },
                             { status: 401 }
                         );
                     }
@@ -1433,7 +1439,13 @@ describe("Global security verification", () => {
                         return (body as { code?: string }).code === "valid-recovery"
                             ? Response.json({ isOk: true })
                             : Response.json(
-                                  { error: "Invalid recovery code" },
+                                  {
+                                      error: {
+                                          code: "invalid_request",
+                                          message: "Invalid recovery code",
+                                          requestId: "security-invalid-recovery",
+                                      },
+                                  },
                                   { status: 400 }
                               );
                     }

@@ -15,6 +15,7 @@ import path from "node:path";
 
 import { describe, expect, it, jest } from "bun:test";
 
+import type { PullRequestSummary } from "../../contracts/delivery.ts";
 import * as developmentStack from "../src/development/developmentStack.ts";
 import * as processModule from "../src/lib/processes.ts";
 import type { JobExecution } from "../src/services/jobExecutionQueue.ts";
@@ -38,7 +39,6 @@ import {
     reconcileClosedPullRequestPreview,
     registerPullRequestPreviewExecutionActions,
 } from "../src/services/pullRequestPreviews.ts";
-import type { PullRequestSummary } from "../src/services/pullRequests.ts";
 import * as pullRequests from "../src/services/pullRequests.ts";
 import * as queuedJobExecution from "../src/services/queuedJobExecution.ts";
 import type {

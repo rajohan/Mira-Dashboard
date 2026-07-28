@@ -1,37 +1,10 @@
+import type {
+    CreateReportInput,
+    Report,
+    ReportStatus,
+    ReportType,
+} from "../../../contracts/reports.ts";
 import { database, sqlNullable } from "../database.ts";
-
-export type ReportType = "daily_brief" | "daily_summary" | "heartbeat" | "custom";
-export type ReportStatus = "ok" | "warning" | "error";
-
-export interface ReportRecord {
-    id: number;
-    type: ReportType;
-    status: ReportStatus;
-    title: string;
-    bodyMd: string;
-    summary: string;
-    source: string | undefined;
-    sourceJobId: string | undefined;
-    dedupeKey: string | undefined;
-    metadata: Record<string, unknown>;
-    createdAt: string;
-    updatedAt: string;
-    occurredAt: string;
-}
-
-export interface CreateReportInput {
-    type: ReportType;
-    status?: ReportStatus;
-    title: string;
-    bodyMd: string;
-    summary?: string;
-    source?: string;
-    sourceJobId?: string;
-    dedupeKey?: string;
-    metadata?: Record<string, unknown>;
-    occurredAt?: string;
-    notify?: boolean;
-}
 
 export interface ListReportsOptions {
     limit?: number;
@@ -70,7 +43,7 @@ function parseMetadata(value: string): Record<string, unknown> {
     }
 }
 
-function toReportRecord(row: ReportRow): ReportRecord {
+function toReport(row: ReportRow): Report {
     return {
         bodyMd: row.body_md,
         createdAt: row.created_at,
@@ -94,20 +67,20 @@ function notificationTypeForReport(status: ReportStatus): "error" | "info" | "wa
     return "info";
 }
 
-function shouldCreateNotification(report: ReportRecord, shouldNotify: boolean): boolean {
+function shouldCreateNotification(report: Report, shouldNotify: boolean): boolean {
     if (!shouldNotify) return false;
     if (report.type === "heartbeat") return report.status !== "ok";
     return true;
 }
 
-function notificationTitle(report: ReportRecord): string {
+function notificationTitle(report: Report): string {
     if (report.type === "daily_brief") return "Daily brief ready";
     if (report.type === "daily_summary") return "Daily summary ready";
     if (report.type === "heartbeat") return `Heartbeat ${report.status}`;
     return report.title;
 }
 
-function notificationDedupeKey(report: ReportRecord): string {
+function notificationDedupeKey(report: Report): string {
     if (report.type === "heartbeat") {
         return report.dedupeKey
             ? `report:heartbeat:${report.dedupeKey}`
@@ -118,13 +91,13 @@ function notificationDedupeKey(report: ReportRecord): string {
         : `report:${report.type}:${report.id}`;
 }
 
-function deleteReportNotification(report: ReportRecord): void {
+function deleteReportNotification(report: Report): void {
     database
         .prepare("DELETE FROM notifications WHERE dedupe_key = ?")
         .run(notificationDedupeKey(report));
 }
 
-function createReportNotification(report: ReportRecord): void {
+function createReportNotification(report: Report): void {
     const now = nowIso();
     database
         .prepare(
@@ -159,7 +132,7 @@ function createReportNotification(report: ReportRecord): void {
         );
 }
 
-export function createReport(input: CreateReportInput): ReportRecord {
+export function createReport(input: CreateReportInput): Report {
     const now = nowIso();
     const occurredAt = input.occurredAt ?? now;
     const status = input.status ?? "ok";
@@ -200,7 +173,7 @@ export function createReport(input: CreateReportInput): ReportRecord {
         throw new Error("Failed to create report");
     }
 
-    const report = toReportRecord(row);
+    const report = toReport(row);
     if (shouldCreateNotification(report, input.notify ?? true)) {
         createReportNotification(report);
     } else {
@@ -209,7 +182,7 @@ export function createReport(input: CreateReportInput): ReportRecord {
     return report;
 }
 
-export function listReports(options: ListReportsOptions = {}): ReportRecord[] {
+export function listReports(options: ListReportsOptions = {}): Report[] {
     const clauses: string[] = [];
     const bindings: Array<string | number> = [];
     if (options.type) {
@@ -232,10 +205,10 @@ export function listReports(options: ListReportsOptions = {}): ReportRecord[] {
              LIMIT ?`
         )
         .all(...bindings) as ReportRow[];
-    return rows.map((row) => toReportRecord(row));
+    return rows.map((row) => toReport(row));
 }
 
-export function getReport(id: number): ReportRecord | undefined {
+export function getReport(id: number): Report | undefined {
     const row = database
         .prepare(
             `SELECT id, type, status, title, body_md, summary, source, source_job_id, dedupe_key, metadata_json, created_at, updated_at, occurred_at
@@ -243,7 +216,7 @@ export function getReport(id: number): ReportRecord | undefined {
              WHERE id = ?`
         )
         .get(id) as ReportRow | undefined;
-    return row ? toReportRecord(row) : undefined;
+    return row ? toReport(row) : undefined;
 }
 
 export function deleteReport(id: number): number {

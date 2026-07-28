@@ -1,5 +1,14 @@
 import path from "node:path";
 
+import type {
+    DashboardReleaseStatus,
+    DashboardReleaseSummary,
+    DeploymentJob,
+    ProductionCheckoutStatus,
+    PullRequestPreviewCleanupResult,
+    PullRequestSummary,
+    WorktreeCleanupResult,
+} from "../../../contracts/delivery.ts";
 import { database, getMiraDatabasePath, sqlNullable } from "../database.ts";
 import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { errorMessage } from "../lib/errors.ts";
@@ -38,10 +47,7 @@ import {
     registerExpiredJobExecutionHandler,
     registerQueuedJobCancellationHandler,
 } from "./jobExecutionQueue.ts";
-import {
-    cleanupClosedPullRequestPreview,
-    type PullRequestPreviewCleanupResult,
-} from "./pullRequestPreviewHost.ts";
+import { cleanupClosedPullRequestPreview } from "./pullRequestPreviewHost.ts";
 import {
     isPullRequestPreviewAuthorAllowed,
     resolvePullRequestPreviewAllowedAuthors,
@@ -140,51 +146,6 @@ interface CommandResult {
     stderr: string;
 }
 
-/** Represents pull request author. */
-interface PullRequestAuthor {
-    login?: string;
-    name?: string;
-}
-
-/** Represents pull request summary. */
-export interface PullRequestSummary {
-    number: number;
-    title: string;
-    body?: string;
-    url: string;
-    headRefName: string;
-    baseRefName: string;
-    author: PullRequestAuthor;
-    createdAt: string;
-    updatedAt: string;
-    isDraft: boolean;
-    headRefOid?: string;
-    mergeable?: string;
-    mergeStateStatus?: string;
-    previewEligible?: boolean;
-    reviewDecision?: string;
-    reviewerApproved?: boolean;
-    canReviewerApprove?: boolean;
-    latestOpinionatedReviews?: PullRequestReviewConnection;
-    reviews?: PullRequestReview[];
-    statusCheckRollup?: unknown[];
-    additions?: number;
-    deletions?: number;
-    changedFiles?: number;
-}
-
-/** Represents a pull request review. */
-interface PullRequestReview {
-    state?: string;
-    submittedAt?: string;
-    author?: PullRequestAuthor;
-}
-
-/** Represents a pull request review connection. */
-interface PullRequestReviewConnection {
-    nodes?: PullRequestReview[];
-}
-
 interface PublicGitHubPullRequest {
     base?: { ref?: unknown };
     body?: unknown;
@@ -198,72 +159,11 @@ interface PublicGitHubPullRequest {
     user?: { login?: unknown };
 }
 
-/** Represents deployment job. */
-interface DeploymentJob {
-    id: string;
-    status: "building" | "verifying" | "isOk" | "failed";
-    startedAt: string;
-    updatedAt: string;
-    commit?: string;
-    commitTitle?: string;
-    commitUrl?: string;
-    note?: string;
-    stdout?: string;
-    stderr?: string;
-}
-
-/** Represents one immutable Dashboard release exposed to the operator UI. */
-export interface DashboardReleaseSummary {
-    builtAt: string;
-    commitSha: string;
-    commitTitle: string;
-    commitUrl: string;
-    schema: {
-        maximumCompatible: number;
-        minimumCompatible: number;
-        target: number;
-    };
-}
-
-/** Represents the active and immediately rollback-capable release slots. */
-export interface DashboardReleaseStatus {
-    current?: DashboardReleaseSummary;
-    previous?: DashboardReleaseSummary;
-    rollback: {
-        available: boolean;
-        reason?: string;
-    };
-}
-
-/** Represents production checkout status. */
-interface ProductionCheckoutStatus {
-    root: string;
-    expectedRoot: string;
-    worktreeRoot: string;
-    branch: string;
-    expectedBranch: string;
-    head: string;
-    headCommit: string;
-    upstream?: string;
-    isClean: boolean;
-    isProductionRoot: boolean;
-    isSafeForDeploy: boolean;
-    statusShort?: string;
-}
-
 /** Represents Git worktree. */
 interface GitWorktree {
     path: string;
     branch?: string;
     head?: string;
-}
-
-/** Represents worktree cleanup result. */
-interface WorktreeCleanupResult {
-    status: "removed" | "skipped" | "warning";
-    branch: string;
-    path?: string;
-    message: string;
 }
 
 /** Performs write deployment job. */

@@ -1,3 +1,10 @@
+import type {
+    DashboardDiagnosticsResponse,
+    DashboardLivenessResponse,
+    DashboardReadinessSnapshot,
+    DatabaseReadiness,
+    RuntimeReleaseIdentity,
+} from "../../contracts/health.ts";
 import { database } from "./database.ts";
 import { validateDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
 import {
@@ -6,22 +13,12 @@ import {
 } from "./databaseSchemaCompatibility.ts";
 import { isFrontendIndexReady } from "./frontendAssets.ts";
 import gateway from "./gateway.ts";
-import {
-    getRuntimeReleaseIdentity,
-    type RuntimeReleaseIdentity,
-} from "./releaseManifest.ts";
+import { getAppObservabilityMetrics } from "./observability.ts";
+import { getRuntimeReleaseIdentity } from "./releaseManifest.ts";
 import {
     getJobExecutionSummary,
     isJobWorkerReleaseReady,
 } from "./services/jobExecutionQueue.ts";
-
-interface DatabaseReadiness {
-    currentSchemaVersion?: number;
-    maximumCompatibleSchemaVersion: number;
-    minimumCompatibleSchemaVersion: number;
-    ready: boolean;
-    targetSchemaVersion: number;
-}
 
 export interface ReadinessSignals {
     database: DatabaseReadiness;
@@ -30,26 +27,6 @@ export interface ReadinessSignals {
     release: RuntimeReleaseIdentity;
     sessionCount: number;
     workerReady: boolean;
-}
-
-export interface DashboardReadinessSnapshot {
-    checks: {
-        database: DatabaseReadiness;
-        frontend: { ready: boolean };
-        release: {
-            backendCommit: string;
-            frontendCommit: string;
-            issue?: RuntimeReleaseIdentity["issue"];
-            manifestFormatVersion?: number;
-            ready: boolean;
-            source: RuntimeReleaseIdentity["source"];
-        };
-        worker: { ready: boolean };
-    };
-    dependencies: {
-        gatewayConnected: boolean;
-    };
-    status: "isReady" | "notReady";
 }
 
 function databaseReadiness(): DatabaseReadiness {
@@ -133,7 +110,7 @@ export function evaluateReadiness(signals: ReadinessSignals): DashboardReadiness
     };
 }
 
-export function livenessSnapshot() {
+export function livenessSnapshot(): DashboardLivenessResponse {
     return {
         status: "isOk" as const,
         uptimeSeconds: Math.floor(process.uptime()),
@@ -144,10 +121,14 @@ export async function readinessSnapshot(): Promise<DashboardReadinessSnapshot> {
     return evaluateReadiness(await collectReadinessSignals());
 }
 
-export async function diagnosticsSnapshot() {
-    const signals = await collectReadinessSignals();
+export async function diagnosticsSnapshot(): Promise<DashboardDiagnosticsResponse> {
+    const [signals, observability] = await Promise.all([
+        collectReadinessSignals(),
+        getAppObservabilityMetrics(),
+    ]);
     return {
         ...evaluateReadiness(signals),
+        observability,
         releaseDetails: signals.release,
         sessionCount: signals.sessionCount,
     };

@@ -1,159 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type {
+    DashboardReleaseStatus,
+    DashboardReleaseStatusResponse,
+    DeploymentActionResponse,
+    DeploymentJob,
+    DeploymentsResponse,
+    ProductionCheckoutResponse,
+    ProductionCheckoutStatus,
+    PullRequestActionResponse,
+    PullRequestPreviewMutationResponse,
+    PullRequestPreviewResponse,
+    PullRequestPreviewStatus,
+    PullRequestsResponse,
+    PullRequestSummary,
+} from "../../contracts/delivery";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
 import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiFetchRequired, apiPostRequired } from "./useApi";
-
-/** Represents pull request author. */
-export interface PullRequestAuthor {
-    login?: string;
-    name?: string;
-}
-
-/** Represents pull request summary. */
-export interface PullRequestSummary {
-    number: number;
-    title: string;
-    body?: string;
-    url: string;
-    headRefName: string;
-    baseRefName: string;
-    author: PullRequestAuthor;
-    createdAt: string;
-    updatedAt: string;
-    isDraft: boolean;
-    headRefOid?: string;
-    mergeable?: string;
-    mergeStateStatus?: string;
-    previewEligible?: boolean;
-    reviewDecision?: string;
-    reviewerApproved?: boolean;
-    canReviewerApprove?: boolean;
-    statusCheckRollup?: unknown[];
-    additions?: number;
-    deletions?: number;
-    changedFiles?: number;
-}
-
-/** Represents deployment job. */
-export interface DeploymentJob {
-    id: string;
-    status: "building" | "verifying" | "isOk" | "failed";
-    startedAt: string;
-    updatedAt: string;
-    commit?: string;
-    commitTitle?: string;
-    commitUrl?: string;
-    note?: string;
-    stdout?: string;
-    stderr?: string;
-}
-
-/** Represents an immutable managed Dashboard release. */
-export interface DashboardReleaseSummary {
-    builtAt: string;
-    commitSha: string;
-    commitTitle: string;
-    commitUrl: string;
-    schema: {
-        maximumCompatible: number;
-        minimumCompatible: number;
-        target: number;
-    };
-}
-
-/** Represents the active and immediately previous production releases. */
-export interface DashboardReleaseStatus {
-    current?: DashboardReleaseSummary;
-    previous?: DashboardReleaseSummary;
-    rollback: {
-        available: boolean;
-        reason?: string;
-    };
-}
-
-/** Represents production checkout status. */
-export interface ProductionCheckoutStatus {
-    root: string;
-    expectedRoot: string;
-    worktreeRoot: string;
-    branch: string;
-    expectedBranch: string;
-    head: string;
-    headCommit?: string;
-    upstream?: string;
-    isClean: boolean;
-    isProductionRoot: boolean;
-    isSafeForDeploy: boolean;
-    statusShort?: string;
-}
-
-export type PullRequestPreviewLifecycle =
-    "failed" | "running" | "starting" | "stopped" | "stopping";
-
-/** Represents the managed single-slot PR preview. */
-export interface PullRequestPreviewStatus {
-    backendPort?: number;
-    commitSha?: string;
-    controlsAvailable?: boolean;
-    frontendPort?: number;
-    message?: string;
-    number?: number;
-    startedAt?: string;
-    status: PullRequestPreviewLifecycle;
-    title?: string;
-    updatedAt?: string;
-    url?: string;
-}
-
-/** Represents worktree cleanup result. */
-export interface WorktreeCleanupResult {
-    status: "removed" | "skipped" | "warning";
-    branch: string;
-    path?: string;
-    message: string;
-}
-
-/** Represents the pull requests API response. */
-interface PullRequestsResponse {
-    pullRequests: PullRequestSummary[];
-}
-
-/** Represents the deployments API response. */
-interface DeploymentsResponse {
-    deployments: DeploymentJob[];
-}
-
-/** Represents the managed release status API response. */
-interface DashboardReleaseStatusResponse {
-    release: DashboardReleaseStatus;
-}
-
-/** Represents the production checkout API response. */
-interface ProductionCheckoutResponse {
-    checkout: ProductionCheckoutStatus;
-}
-
-/** Represents the managed pull request preview API response. */
-interface PullRequestPreviewResponse {
-    isOk?: boolean;
-    preview: PullRequestPreviewStatus;
-}
-
-/** Represents the pull request action API response. */
-interface PullRequestActionResponse {
-    isOk: boolean;
-    message: string;
-    deployment?: DeploymentJob;
-    deployError?: string;
-    cleanup?: WorktreeCleanupResult;
-    previewCleanup?: {
-        message: string;
-        number: number;
-        status: "removed" | "skipped" | "warning";
-    };
-    pullRequest?: PullRequestSummary;
-}
 
 /** Defines delivery page query keys. */
 export const deliveryKeys = {
@@ -250,27 +114,24 @@ async function updatePullRequestBranch(
 }
 
 /** Performs deploy dashboard. */
-async function deployDashboard(): Promise<{ isOk: boolean; deployment: DeploymentJob }> {
-    return apiPostRequired<{ isOk: boolean; deployment: DeploymentJob }>(
-        "/pull-requests/deploy"
-    );
+async function deployDashboard(): Promise<DeploymentActionResponse> {
+    return apiPostRequired<DeploymentActionResponse>("/pull-requests/deploy");
 }
 
 /** Queues an atomic rollback to the previous managed release. */
 async function rollbackDashboard(
     targetCommit: string
-): Promise<{ isOk: boolean; deployment: DeploymentJob }> {
-    return apiPostRequired<{ isOk: boolean; deployment: DeploymentJob }>(
-        "/pull-requests/releases/rollback",
-        { targetCommit }
-    );
+): Promise<DeploymentActionResponse> {
+    return apiPostRequired<DeploymentActionResponse>("/pull-requests/releases/rollback", {
+        targetCommit,
+    });
 }
 
 /** Starts or updates the managed preview slot. */
 async function startPullRequestPreview(
     number: number
 ): Promise<PullRequestPreviewStatus> {
-    const response = await apiPostRequired<PullRequestPreviewResponse>(
+    const response = await apiPostRequired<PullRequestPreviewMutationResponse>(
         `/pull-requests/${number}/preview/start`,
         {}
     );
@@ -279,7 +140,7 @@ async function startPullRequestPreview(
 
 /** Stops the managed preview slot owned by one PR. */
 async function stopPullRequestPreview(number: number): Promise<PullRequestPreviewStatus> {
-    const response = await apiPostRequired<PullRequestPreviewResponse>(
+    const response = await apiPostRequired<PullRequestPreviewMutationResponse>(
         `/pull-requests/${number}/preview/stop`,
         {}
     );

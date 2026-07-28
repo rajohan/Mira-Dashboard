@@ -1,3 +1,9 @@
+import type {
+    JobExecution as PublicJobExecution,
+    JobExecutionCancelResponse,
+    JobExecutionResponse,
+    JobExecutionsResponse,
+} from "../../../contracts/jobs.ts";
 import { json } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
@@ -13,7 +19,7 @@ type ParametersRequest<T extends string> = Request & { params: Record<T, string>
 function publicExecution(
     execution: JobExecution,
     options: { includeOutput?: boolean } = {}
-) {
+): PublicJobExecution {
     return {
         id: execution.id,
         scheduledJobId: execution.scheduledJobId,
@@ -57,7 +63,7 @@ export const jobExecutionRoutes = {
                         (execution) => publicExecution(execution)
                     ),
                     summary: getJobExecutionSummary(),
-                });
+                } satisfies JobExecutionsResponse);
             } catch (error) {
                 console.error("[jobExecutionRoutes] Queue lookup failed", error);
                 return json(
@@ -80,7 +86,7 @@ export const jobExecutionRoutes = {
                           execution: publicExecution(execution, {
                               includeOutput: true,
                           }),
-                      })
+                      } satisfies JobExecutionResponse)
                     : json({ error: "Job execution not found" }, { status: 404 });
             } catch (error) {
                 console.error("[jobExecutionRoutes] Queue detail lookup failed", error);
@@ -102,7 +108,7 @@ export const jobExecutionRoutes = {
                 return json({
                     execution: publicExecution(execution),
                     isOk: true,
-                });
+                } satisfies JobExecutionCancelResponse);
             } catch (error) {
                 const status = httpStatusCode(error);
                 if (status === 500) {

@@ -1,7 +1,9 @@
 import { Clock3 } from "lucide-react";
 
-import { type CronJob, useCronJobs } from "../../../hooks";
-import { type ScheduledJob, useScheduledJobs } from "../../../hooks/useScheduledJobs";
+import type { CronJob } from "../../../../contracts/cron";
+import type { ScheduledJob } from "../../../../contracts/jobs";
+import { useCronJobs } from "../../../hooks";
+import { useScheduledJobs } from "../../../hooks/useScheduledJobs";
 import {
     formatCronLastStatus,
     getCronJobName,

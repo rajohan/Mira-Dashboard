@@ -1,8 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type {
+    ExecJobResponse,
+    ExecRequest,
+    ExecResponse,
+    ExecStartResponse,
+    ExecStopResponse,
+} from "../../../contracts/exec.ts";
+import { ApiRouteError, mapApiError, type MappedApiError } from "../apiErrors.ts";
 import { database } from "../database.ts";
-import { errorMessage } from "../lib/errors.ts";
+import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     type BunProcess,
     killProcessGroup,
@@ -31,40 +39,11 @@ const OPS_SHELL_COMMANDS = new Set([
     "$HOME/.local/bin/openclaw update --yes",
 ]);
 
-export interface ExecRequest {
-    args?: string[];
-    command: string;
-    cwd?: string;
-    shell?: boolean;
-}
-
-export interface ExecResponse {
-    code: number | undefined;
-    stderr: string;
-    stdout: string;
-}
-
-export interface ExecStartResponse {
-    jobId: string;
-}
-
 type ExecRequestMode = "once" | "start";
 
-export interface ExecJobResponse {
-    code: number | undefined;
-    endedAt: number | undefined;
-    jobId: string;
-    startedAt: number;
-    status: "running" | "signaled" | "done";
-    stderr: string;
-    stdout: string;
-}
-
-class ExecValidationError extends Error {
-    readonly statusCode = 400;
-
+class ExecValidationError extends ApiRouteError {
     constructor(message: string) {
-        super(message);
+        super("exec_invalid_request", message, 400);
         this.name = "ExecValidationError";
     }
 }
@@ -203,24 +182,17 @@ function getApprovedShellCommand(command: string): string {
     return command;
 }
 
-export function execErrorResponse(error: unknown): { error: string; status: number } {
-    if (error instanceof ExecValidationError) {
-        return { error: error.message, status: 400 };
-    }
-    if (error !== undefined && error !== null) {
-        const statusCode = Number((error as { statusCode?: unknown }).statusCode);
-        if (Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600) {
-            return { error: errorMessage(error, "request failed"), status: statusCode };
-        }
-    }
-    const message =
-        error instanceof Error
-            ? error.message
-            : error === undefined || error === null
-              ? "Unknown error"
-              : String(error);
-    console.error("[Exec] Route error:", message);
-    return { error: "internal server error", status: 500 };
+export function execErrorResponse(error: unknown): MappedApiError {
+    const status = httpStatusCode(error);
+    return mapApiError(error, {
+        code:
+            status === 500
+                ? "exec_internal_error"
+                : status === 400 || status === 413
+                  ? "exec_invalid_request"
+                  : "exec_request_failed",
+        message: status === 500 ? "internal server error" : "request failed",
+    });
 }
 
 function runExecCommand(
@@ -470,7 +442,9 @@ function activeTrackedExecCount(): number {
 
 export function startExecJob(payload: unknown): ExecStartResponse {
     if (activeTrackedExecCount() >= MAX_JOBS) {
-        throw Object.assign(new Error("Too many exec jobs"), { statusCode: 429 });
+        throw new ApiRouteError("exec_capacity_exceeded", "Too many exec jobs", 429, {
+            retryAfterSeconds: 5,
+        });
     }
     const request = validateExecRequest(payload, "start");
     const execution = enqueueJobExecution({
@@ -486,15 +460,15 @@ export function startExecJob(payload: unknown): ExecStartResponse {
 function trackedExecExecution(jobId: string): JobExecution {
     const execution = getJobExecution(jobId);
     if (!execution || execution.actionKey !== "exec.tracked") {
-        throw Object.assign(new Error("Exec job not found"), { statusCode: 404 });
+        throw new ApiRouteError("exec_job_not_found", "Exec job not found", 404);
     }
     return execution;
 }
 
-export function stopExecJob(jobId: string): { isSuccess: boolean; message: string } {
+export function stopExecJob(jobId: string): ExecStopResponse {
     const execution = trackedExecExecution(jobId);
     if (execution.status !== "queued" && execution.status !== "running") {
-        throw Object.assign(new Error("Job is not running"), { statusCode: 400 });
+        throw new ApiRouteError("exec_job_not_running", "Job is not running", 400);
     }
     cancelJobExecution(jobId);
     return { isSuccess: true, message: "Stop signal sent" };

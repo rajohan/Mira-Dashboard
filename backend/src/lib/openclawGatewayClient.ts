@@ -104,6 +104,7 @@ export type OpenClawGatewayRequestOptions = {
 
 /** Defines open claw gateway client instance. */
 export type OpenClawGatewayClientInstance = {
+    pendingRequestCount?: () => number;
     start: () => void;
     stop: () => void;
     request: (
@@ -548,6 +549,11 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             );
             this.ws?.close(1008, error instanceof Error ? error.message : String(error));
         }
+    }
+
+    /** Returns only the count; request methods and payloads remain private. */
+    pendingRequestCount(): number {
+        return this.pending.size;
     }
 
     start(): void {

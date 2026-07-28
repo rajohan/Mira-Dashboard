@@ -1,33 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { CronJobsResponse, CronMutationResponse } from "../../contracts/cron";
+import type { JobDisableIntent } from "../../contracts/jobs";
 import { refreshPolicy } from "../lib/refreshPolicy";
-import type { JobDisableIntent } from "../types/job";
 import { apiFetchRequired, apiPostRequired } from "./useApi";
-
-/** Represents a task linked to an OpenClaw cron job. */
-export interface CronTaskLink {
-    number: number;
-    title: string;
-}
-
-/** Represents cron job. */
-export interface CronJob {
-    id?: string;
-    jobId?: string;
-    name?: string;
-    enabled?: boolean;
-    schedule?: { kind?: string; [key: string]: unknown };
-    payload?: { kind?: string; [key: string]: unknown };
-    delivery?: { mode?: string; [key: string]: unknown };
-    disableIntent?: JobDisableIntent;
-    taskLinks?: CronTaskLink[];
-    [key: string]: unknown;
-}
-
-/** Represents the cron jobs API response. */
-interface CronJobsResponse {
-    jobs: CronJob[];
-}
 
 /** Defines cron keys. */
 export const cronKeys = {
@@ -59,7 +35,7 @@ export function useToggleCronJob() {
             enabled: boolean;
             disableIntent?: JobDisableIntent;
         }) =>
-            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/toggle`, {
+            apiPostRequired<CronMutationResponse>(`/cron/jobs/${id}/toggle`, {
                 enabled,
                 disableIntent,
             }),
@@ -76,7 +52,9 @@ export function useUpdateCronJob() {
 
     return useMutation({
         mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
-            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/update`, { patch }),
+            apiPostRequired<CronMutationResponse>(`/cron/jobs/${id}/update`, {
+                patch,
+            }),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },
@@ -89,7 +67,7 @@ export function useDeleteCronJob() {
 
     return useMutation({
         mutationFn: ({ id }: { id: string }) =>
-            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/delete`),
+            apiPostRequired<CronMutationResponse>(`/cron/jobs/${id}/delete`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },
@@ -102,7 +80,7 @@ export function useRunCronJobNow() {
 
     return useMutation({
         mutationFn: ({ id }: { id: string }) =>
-            apiPostRequired<{ isOk: boolean }>(`/cron/jobs/${id}/run`),
+            apiPostRequired<CronMutationResponse>(`/cron/jobs/${id}/run`),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: cronKeys.jobs() });
         },

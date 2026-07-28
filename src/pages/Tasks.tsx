@@ -9,6 +9,13 @@ import { Plus } from "lucide-react";
 import { useState } from "react";
 
 import {
+    type ColumnId,
+    type Task,
+    TASK_ASSIGNEES,
+    type TaskAssigneeId,
+    type TaskAutomationInput,
+} from "../../contracts/tasks";
+import {
     COLUMN_CONFIG,
     getColumnId,
     NewTaskModal,
@@ -24,7 +31,6 @@ import { LoadingState } from "../components/ui/LoadingState";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
 import { SearchInput } from "../components/ui/SearchInput";
-import { TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors";
 import {
     useAssignTask,
     useCreateTask,
@@ -37,7 +43,6 @@ import {
     useUpdateTask,
     useUpdateTaskUpdate,
 } from "../hooks";
-import type { ColumnId, Task, TaskAutomationInput } from "../types/task";
 import {
     getPriority,
     getTaskUpdatedAtMs,

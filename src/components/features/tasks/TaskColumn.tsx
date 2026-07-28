@@ -1,7 +1,7 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 
-import type { ColumnId, Task } from "../../../types/task";
+import type { ColumnId, Task } from "../../../../contracts/tasks";
 import { COLUMN_CONFIG, type ColumnConfig } from "../../../utils/taskUtilities";
 import { TaskCard } from "./TaskCard";
 

@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import type { Report as ReportItem, ReportType } from "../../contracts/reports";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { EmptyState } from "../components/ui/EmptyState";
 import { LoadingState } from "../components/ui/LoadingState";
-import type { ReportItem, ReportType } from "../hooks/useReports";
 import { useDeleteReport, useReport, useReports } from "../hooks/useReports";
 import { cn } from "../utils/cn";
 import { formatDate } from "../utils/format";

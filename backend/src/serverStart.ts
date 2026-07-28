@@ -1,5 +1,6 @@
 import { getPersistedGatewayToken } from "./auth.ts";
 import gateway from "./gateway.ts";
+import { installStructuredConsole } from "./lib/structuredLogger.ts";
 import {
     getRuntimeReleaseIdentity,
     requireRunnableReleaseCommit,
@@ -83,6 +84,7 @@ export function handleServerListening(releaseCommit: string): void {
 
 /** Binds the HTTP server and starts runtime-only background services. */
 export function startBackendServer(port = resolveListenPort()): Promise<void> {
+    installStructuredConsole();
     if (serverStartState.activeServer) {
         return Promise.resolve();
     }

@@ -1,15 +1,4 @@
-export interface CoalescedSnapshotMetrics {
-    activeLoads: number;
-    averageLoadMs: number;
-    coalescedHits: number;
-    failures: number;
-    freshHits: number;
-    lastLoadMs: number;
-    loads: number;
-    name: string;
-    requests: number;
-    staleHits: number;
-}
+import type { CoalescedSnapshotMetrics } from "../../../contracts/metrics.ts";
 
 interface CoalescedSnapshotOptions<T> {
     freshForMs: number;

@@ -21,6 +21,7 @@ import {
     useState,
 } from "react";
 
+import { apiErrorFromResponse } from "../../../lib/apiError";
 import { loadLazyModule } from "../../../lib/lazyImportRecovery";
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
@@ -403,13 +404,7 @@ export function ChatMessagesList({
             });
 
             if (!response.ok) {
-                let error: { error?: string };
-                try {
-                    error = (await response.json()) as { error?: string };
-                } catch {
-                    error = { error: "Failed to generate speech" };
-                }
-                throw new Error(error.error || `HTTP ${response.status}`);
+                throw await apiErrorFromResponse(response, "Failed to generate speech");
             }
 
             const audioBlob = await response.blob();

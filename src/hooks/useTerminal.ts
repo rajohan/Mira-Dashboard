@@ -1,18 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { apiFetchRequired, apiPost, apiPostRequired } from "./useApi";
+import type { ExecJobResponse, ExecRequest } from "../../contracts/exec";
+import { parseExecJobResponse, parseExecStartResponse } from "../../contracts/exec";
+import type {
+    TerminalCdRequest,
+    TerminalCdResponse,
+    TerminalCompletionRequest,
+    TerminalCompletionResponse,
+} from "../../contracts/terminal";
+import {
+    parseTerminalCdResponse,
+    parseTerminalCompletionResponse,
+} from "../../contracts/terminal";
+import { apiFetchParsed, apiPost, apiPostParsed } from "./useApi";
 
-/** Represents the terminal job API response. */
-export interface TerminalJobResponse {
-    jobId: string;
-    status: "running" | "done";
-    code?: number;
-    stdout: string;
-    stderr: string;
-    startedAt: number;
-    endedAt?: number;
-}
+/** Represents the terminal view of a tracked exec job. */
+export type TerminalJobResponse = ExecJobResponse;
 
 /** Represents terminal command. */
 export interface TerminalCommand {
@@ -20,16 +24,7 @@ export interface TerminalCommand {
     cwd?: string;
 }
 
-interface TerminalExecRequest {
-    args: string[];
-    command: string;
-    cwd?: string;
-}
-
-function buildTerminalExecRequest({
-    command,
-    cwd,
-}: TerminalCommand): TerminalExecRequest {
+function buildTerminalExecRequest({ command, cwd }: TerminalCommand): ExecRequest {
     return {
         args: ["-lc", command],
         command: "bash",
@@ -49,8 +44,9 @@ export function useStartTerminalCommand() {
 
     return useMutation({
         mutationFn: async (payload: TerminalCommand) =>
-            apiPostRequired<{ jobId: string }>(
+            apiPostParsed(
                 "/exec/start",
+                parseExecStartResponse,
                 buildTerminalExecRequest(payload)
             ),
         onSuccess: () => {
@@ -65,8 +61,9 @@ export function useTerminalJob(jobId: string | undefined) {
         queryKey: terminalKeys.job(jobId),
         queryFn: async () => {
             try {
-                return await apiFetchRequired<TerminalJobResponse>(
-                    `/exec/${encodeURIComponent(jobId || "")}`
+                return await apiFetchParsed(
+                    `/exec/${encodeURIComponent(jobId || "")}`,
+                    parseExecJobResponse
                 );
             } catch (error) {
                 if (error instanceof Error && error.message === "Exec job not found") {
@@ -100,7 +97,7 @@ export interface CommandHistoryEntry {
     command: string;
     cwd: string;
     jobId: string | undefined;
-    status: "pending" | "running" | "done" | "error";
+    status: "done" | "error" | "pending" | "running" | "signaled";
     code?: number;
     stdout: string;
     stderr: string;
@@ -108,37 +105,22 @@ export interface CommandHistoryEntry {
     endedAt?: number;
 }
 
-/** Represents completion item. */
-interface CompletionItem {
-    completion: string;
-    type: "file" | "directory" | "executable";
-    display: string;
-}
-
-/** Represents the completion API response. */
-interface CompletionResponse {
-    completions: CompletionItem[];
-    commonPrefix: string;
-}
-
 /** Returns completions. */
 export async function getCompletions(
     partial: string,
     cwd: string
-): Promise<CompletionResponse> {
-    return apiPostRequired("/terminal/complete", { partial, cwd });
-}
-
-/** Represents the CD API response. */
-export interface CdResponse {
-    isSuccess: boolean;
-    newCwd: string;
-    error?: string;
+): Promise<TerminalCompletionResponse> {
+    const request: TerminalCompletionRequest = { cwd, partial };
+    return apiPostParsed("/terminal/complete", parseTerminalCompletionResponse, request);
 }
 
 /** Performs change directory. */
-export async function changeDirectory(path: string, cwd: string): Promise<CdResponse> {
-    return apiPostRequired("/terminal/cd", { path, cwd });
+export async function changeDirectory(
+    path: string,
+    cwd: string
+): Promise<TerminalCdResponse> {
+    const request: TerminalCdRequest = { cwd, path };
+    return apiPostParsed("/terminal/cd", parseTerminalCdResponse, request);
 }
 
 /** Performs stop terminal job. */

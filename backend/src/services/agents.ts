@@ -2,6 +2,11 @@ import FS from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
+import type {
+    Agent as AgentStatus,
+    AgentsConfig,
+    AgentTaskHistoryItem,
+} from "../../../contracts/agents.ts";
 import { database } from "../database.ts";
 import gateway from "../gateway.ts";
 import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
@@ -282,31 +287,6 @@ interface AgentMetadata {
     updatedAt?: string;
 }
 
-/** Represents one configured OpenClaw agent entry from agents.yml. */
-interface AgentConfig {
-    id: string;
-    default?: boolean;
-    model?: {
-        primary?: string;
-        fallbacks?: string[];
-    };
-    subagents?: {
-        allowAgents?: string[];
-    };
-}
-
-/** Represents the parsed agents.yml payload keyed by agent id. */
-interface AgentsConfig {
-    defaults: {
-        model?: {
-            primary?: string;
-            fallbacks?: string[];
-        };
-        models?: Record<string, { alias?: string }>;
-    };
-    list: AgentConfig[];
-}
-
 /** Captures lightweight session file metadata used to infer agent activity. */
 interface SessionInfo {
     key?: string;
@@ -330,29 +310,6 @@ function isSessionInfo(value: unknown): value is SessionInfo {
         (session.displayName === undefined || typeof session.displayName === "string") &&
         (session.label === undefined || typeof session.label === "string")
     );
-}
-
-/** Summarizes dashboard-facing status, activity, and metadata for one agent. */
-interface AgentStatus {
-    id: string;
-    status: "active" | "thinking" | "idle" | "offline";
-    model: string;
-    currentTask: string | undefined;
-    currentActivity: string | undefined;
-    lastActivity: string | undefined;
-    sessionKey: string | undefined;
-    channel: string | undefined;
-}
-
-/** Records an archived current-task value with timing metadata. */
-interface AgentTaskHistoryItem {
-    id: number;
-    agentId: string;
-    task: string;
-    status: string;
-    startedAt: string;
-    completedAt: string | undefined;
-    lastActivityAt: string;
 }
 
 /** Normalizes Gateway session data needed to map live sessions back to agents. */

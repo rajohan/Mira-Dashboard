@@ -1,4 +1,4 @@
-import type { CronJob } from "../hooks";
+import type { CronJob } from "../../contracts/cron";
 import { formatDate } from "./format";
 
 /** Returns cron job ID. */

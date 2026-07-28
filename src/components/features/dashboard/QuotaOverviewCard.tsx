@@ -1,10 +1,7 @@
 import { DollarSign, Gauge, Waves, Zap } from "lucide-react";
 
-import {
-    hasQuotaStatus,
-    type QuotasResponse,
-    type SyntheticQuota,
-} from "../../../hooks/useQuotas";
+import type { QuotasResponse, SyntheticQuota } from "../../../../contracts/quotas";
+import { hasQuotaStatus } from "../../../hooks/useQuotas";
 import { formatDate, formatOsloTime } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";

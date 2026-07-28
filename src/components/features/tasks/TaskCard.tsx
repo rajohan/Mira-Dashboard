@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 
-import type { Task } from "../../../types/task";
+import type { Task } from "../../../../contracts/tasks";
 import { formatCronLastStatus, getCronStatusVariant } from "../../../utils/cronUtilities";
 import { timestampFromDateString } from "../../../utils/date";
 import { formatDuration } from "../../../utils/format";

@@ -497,6 +497,27 @@ describe("chat input media", () => {
             expect(input.value).toBe("");
 
             defineFetch(
+                jest.fn(async () =>
+                    Response.json(
+                        {
+                            error: {
+                                code: "stt_provider_failed",
+                                message: "Speech provider is unavailable",
+                                requestId: "stt-request-1",
+                            },
+                        },
+                        { status: 502 }
+                    )
+                ) as unknown as typeof fetch
+            );
+            await act(async () => {
+                await result.current.handleVoiceFileSelected(
+                    fileList([new File(["voice"], "provider-failed.webm")])
+                );
+            });
+            expect(onError.mock.calls.at(-1)?.[0]).toBe("Speech provider is unavailable");
+
+            defineFetch(
                 jest.fn(
                     async () => new Response("not json", { status: 500 })
                 ) as unknown as typeof fetch

@@ -1,8 +1,5 @@
+import type { JobDisableIntent } from "../../../contracts/jobs.ts";
 import { HttpError } from "../http.ts";
-
-export type JobDisableIntent =
-    | { mode: "indefinite"; comment: string }
-    | { mode: "until"; comment: string; until: string };
 
 const disableIntentCommentMaxLength = 1000;
 

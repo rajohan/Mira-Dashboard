@@ -1,3 +1,8 @@
+import type {
+    PullRequestPreviewLifecycle,
+    PullRequestPreviewStatus,
+    PullRequestSummary,
+} from "../../../contracts/delivery.ts";
 import { errorMessage } from "../lib/errors.ts";
 import {
     enqueueJobExecution,
@@ -9,15 +14,12 @@ import {
     getPullRequestPreviewStatus as readPullRequestPreviewStatus,
     listManagedPullRequestPreviewStateNumbers,
     type PullRequestPreviewCandidate,
-    type PullRequestPreviewLifecycle,
-    type PullRequestPreviewStatus,
     startPullRequestPreview,
     stopPullRequestPreview,
 } from "./pullRequestPreviewHost.ts";
 import {
     isDashboardPullRequestOpen,
     listDashboardPullRequests,
-    type PullRequestSummary,
     validatePrNumber,
 } from "./pullRequests.ts";
 import {
@@ -25,11 +27,6 @@ import {
     waitForJobExecution,
 } from "./queuedJobExecution.ts";
 import { registerScheduledJobAction } from "./scheduledJobs.ts";
-
-export type {
-    PullRequestPreviewLifecycle,
-    PullRequestPreviewStatus,
-} from "./pullRequestPreviewHost.ts";
 
 const PREVIEW_START_TIMEOUT_MS = 30 * 60 * 1000;
 const PREVIEW_STOP_TIMEOUT_MS = 6 * 60 * 1000;

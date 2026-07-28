@@ -6891,11 +6891,13 @@ fi
         ).rejects.toThrow("cwd must be a directory");
         const notFoundError = Object.assign(new Error("missing"), { statusCode: 404 });
         expect(execErrorResponse(notFoundError)).toEqual({
-            error: "missing",
+            code: "exec_request_failed",
+            message: "missing",
             status: 404,
         });
         expect(execErrorResponse(new Error("boom"))).toEqual({
-            error: "internal server error",
+            code: "exec_internal_error",
+            message: "internal server error",
             status: 500,
         });
         expect(() => startExecJob({ command: "node" })).toThrow(
@@ -6914,7 +6916,11 @@ fi
         );
         expect(invalidPost.status).toBe(400);
         await expect(invalidPost.json()).resolves.toEqual({
-            error: "args are required unless shell mode is enabled",
+            error: {
+                code: "exec_invalid_request",
+                message: "args are required unless shell mode is enabled",
+                requestId: expect.any(String),
+            },
         });
 
         const malformedStart = await execRoutes["/api/exec/start"].POST(
@@ -6925,7 +6931,11 @@ fi
         );
         expect(malformedStart.status).toBe(400);
         await expect(malformedStart.json()).resolves.toEqual({
-            error: "Invalid JSON",
+            error: {
+                code: "invalid_json",
+                message: "Invalid JSON",
+                requestId: expect.any(String),
+            },
         });
 
         const missingJobRequest = Object.assign(
@@ -6935,14 +6945,22 @@ fi
         const missingJob = await execRoutes["/api/exec/:jobId"].GET(missingJobRequest);
         expect(missingJob.status).toBe(404);
         await expect(missingJob.json()).resolves.toEqual({
-            error: "Exec job not found",
+            error: {
+                code: "exec_job_not_found",
+                message: "Exec job not found",
+                requestId: expect.any(String),
+            },
         });
 
         const stopMissingJob =
             await execRoutes["/api/exec/:jobId/stop"].POST(missingJobRequest);
         expect(stopMissingJob.status).toBe(404);
         await expect(stopMissingJob.json()).resolves.toEqual({
-            error: "Exec job not found",
+            error: {
+                code: "exec_job_not_found",
+                message: "Exec job not found",
+                requestId: expect.any(String),
+            },
         });
     });
 

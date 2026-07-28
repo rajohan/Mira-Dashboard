@@ -1,8 +1,11 @@
 import { useForm } from "@tanstack/react-form";
 import { Loader2, Plus, X } from "lucide-react";
 
-import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../constants/taskActors";
-import type { TaskAutomation } from "../../../types/task";
+import {
+    TASK_ASSIGNEES,
+    type TaskAssigneeId,
+    type TaskAutomation,
+} from "../../../../contracts/tasks";
 import { PRIORITY_COLORS } from "../../../utils/taskUtilities";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";

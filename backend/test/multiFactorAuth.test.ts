@@ -541,7 +541,11 @@ describe("Dashboard multi-factor authentication", () => {
         );
         expect(enrollmentRequired.status).toBe(403);
         await expect(enrollmentRequired.json()).resolves.toMatchObject({
-            code: "mfa_enrollment_required",
+            error: {
+                code: "mfa_enrollment_required",
+                message: "Multi-factor authentication must be enabled",
+                requestId: expect.any(String),
+            },
         });
 
         const timestamp = new Date().toISOString();
@@ -559,7 +563,11 @@ describe("Dashboard multi-factor authentication", () => {
         const stale = await routes["/api/restart"].POST(request(staleSession), server);
         expect(stale.status).toBe(403);
         await expect(stale.json()).resolves.toMatchObject({
-            code: "step_up_required",
+            error: {
+                code: "step_up_required",
+                message: "Recent MFA verification is required",
+                requestId: expect.any(String),
+            },
         });
 
         const verifiedSession = createSession(user.id, {

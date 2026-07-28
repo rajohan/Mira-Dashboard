@@ -1,3 +1,4 @@
+import type { ChildProcessMetrics } from "../../../contracts/metrics.ts";
 import { scopedJobProcessCommand, scopedJobProcessEnvironment } from "./jobResources.ts";
 
 export interface RunProcessOptions {
@@ -16,22 +17,19 @@ export interface RunProcessResult {
     stdout: string;
 }
 
-export interface ChildProcessMetrics {
-    active: number;
-    failed: number;
-    started: number;
-    succeeded: number;
-}
-
 export type BunProcess = ReturnType<typeof Bun.spawn>;
 
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 const DEFAULT_FORCE_KILL_GRACE_MS = 3000;
 const childProcessMetrics: ChildProcessMetrics = {
     active: 0,
+    averageDurationMs: 0,
     failed: 0,
+    lastDurationMs: 0,
+    maxDurationMs: 0,
     started: 0,
     succeeded: 0,
+    totalDurationMs: 0,
 };
 
 /** Returns the absolute Bun executable already running the Dashboard process. */
@@ -77,6 +75,7 @@ export function spawnProcess(
         throw new DOMException("Process aborted before start", "AbortError");
     }
     const command = scopedJobProcessCommand(executable, arguments_);
+    const startedAt = performance.now();
     const process = Bun.spawn({
         cmd: [command.executable, ...command.arguments],
         cwd: options.cwd,
@@ -100,7 +99,22 @@ export function spawnProcess(
             childProcessMetrics.failed += 1;
         })
         .finally(() => {
+            const durationMs =
+                Math.round(Math.max(0, performance.now() - startedAt) * 100) / 100;
             childProcessMetrics.active = Math.max(0, childProcessMetrics.active - 1);
+            childProcessMetrics.lastDurationMs = durationMs;
+            childProcessMetrics.maxDurationMs = Math.max(
+                childProcessMetrics.maxDurationMs,
+                durationMs
+            );
+            childProcessMetrics.totalDurationMs += durationMs;
+            const completed = childProcessMetrics.succeeded + childProcessMetrics.failed;
+            childProcessMetrics.averageDurationMs =
+                completed === 0
+                    ? 0
+                    : Math.round(
+                          (childProcessMetrics.totalDurationMs / completed) * 100
+                      ) / 100;
         });
     return process;
 }

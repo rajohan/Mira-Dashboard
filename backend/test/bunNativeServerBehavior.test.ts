@@ -389,7 +389,11 @@ describe("Bun-native dashboard backend", () => {
         });
         expect(denied.status).toBe(403);
         await expect(denied.json()).resolves.toEqual({
-            error: "Automation credential scope denied",
+            error: {
+                code: "forbidden",
+                message: "Automation credential scope denied",
+                requestId: expect.any(String),
+            },
         });
 
         const invalid = await fetch(`${state.baseUrl}/api/tasks`, {
@@ -400,7 +404,11 @@ describe("Bun-native dashboard backend", () => {
         });
         expect(invalid.status).toBe(401);
         await expect(invalid.json()).resolves.toEqual({
-            error: "Invalid automation credential",
+            error: {
+                code: "unauthorized",
+                message: "Invalid automation credential",
+                requestId: expect.any(String),
+            },
         });
     });
 
@@ -416,7 +424,11 @@ describe("Bun-native dashboard backend", () => {
         expect(latest.headers.get("ratelimit-policy")).toBe("20;w=60");
         expect(latest.headers.get("retry-after")).toBeTruthy();
         expect(await latest.json()).toEqual({
-            error: "Too many authentication attempts, please try again later",
+            error: {
+                code: "rate_limited",
+                message: "Too many authentication attempts, please try again later",
+                requestId: expect.any(String),
+            },
         });
     });
 
@@ -659,7 +671,11 @@ describe("Bun-native dashboard backend", () => {
         });
         expect(rejected.status).toBe(403);
         await expect(rejected.json()).resolves.toEqual({
-            error: "Forbidden request origin",
+            error: {
+                code: "forbidden",
+                message: "Forbidden request origin",
+                requestId: expect.any(String),
+            },
         });
     });
 
@@ -748,11 +764,11 @@ describe("Bun-native dashboard backend", () => {
     });
 
     it("rejects Docker Compose service names that look like options", async () => {
-        const result = await api<{ error: string }>(
+        const result = await api<{ error: { message: string } }>(
             "/api/docker/stack/action",
             json("POST", { action: "restart", service: "--profile" })
         );
         expect(result.status).toBe(400);
-        expect(result.body.error).toBe("Invalid service name");
+        expect(result.body.error.message).toBe("Invalid service name");
     });
 });

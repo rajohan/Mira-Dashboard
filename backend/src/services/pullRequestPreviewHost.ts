@@ -19,6 +19,11 @@ import {
 import os from "node:os";
 import path from "node:path";
 
+import type {
+    PullRequestPreviewCleanupResult,
+    PullRequestPreviewLifecycle,
+    PullRequestPreviewStatus,
+} from "../../../contracts/delivery.ts";
 import { getPersistedGatewayToken } from "../auth.ts";
 import {
     prepareDevelopmentState,
@@ -64,35 +69,12 @@ const SAFE_INSTALL_ENVIRONMENT_KEYS = [
     "TZ",
 ] as const;
 
-export type PullRequestPreviewLifecycle =
-    "failed" | "running" | "starting" | "stopped" | "stopping";
-
-export interface PullRequestPreviewStatus {
-    backendPort?: number;
-    commitSha?: string;
-    controlsAvailable?: boolean;
-    frontendPort?: number;
-    message?: string;
-    number?: number;
-    startedAt?: string;
-    status: PullRequestPreviewLifecycle;
-    title?: string;
-    updatedAt?: string;
-    url?: string;
-}
-
 export interface PullRequestPreviewCandidate {
     authorLogin?: string;
     baseRefName: string;
     commitSha: string;
     number: number;
     title: string;
-}
-
-export interface PullRequestPreviewCleanupResult {
-    message: string;
-    number: number;
-    status: "removed" | "skipped" | "warning";
 }
 
 export interface PullRequestPreviewConfig {

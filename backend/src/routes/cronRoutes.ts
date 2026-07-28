@@ -1,9 +1,14 @@
+import type {
+    CronJob,
+    CronJobsResponse,
+    CronMutationResponse,
+} from "../../../contracts/cron.ts";
+import type { JobDisableIntent } from "../../../contracts/jobs.ts";
 import gateway from "../gateway.ts";
 import { json, readJson } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     assertJobDisableIntentIsCurrent,
-    type JobDisableIntent,
     normalizeJobDisableIntent,
 } from "../services/jobDisableIntent.ts";
 import {
@@ -18,17 +23,6 @@ import {
 import { withCronTaskLinks } from "../services/taskAutomation.ts";
 
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
-
-interface CronJob {
-    delivery?: { mode?: string; [key: string]: unknown };
-    enabled?: boolean;
-    id?: string;
-    jobId?: string;
-    name?: string;
-    payload?: { kind?: string; [key: string]: unknown };
-    schedule?: { kind?: string; [key: string]: unknown };
-    [key: string]: unknown;
-}
 
 function cronError(error: unknown, fallback: string): Response {
     return json(
@@ -74,7 +68,7 @@ export const cronRoutes = {
                 const payload = await getOpenClawCronListSnapshot();
                 return json({
                     jobs: withCronTaskLinks(normalizeOpenClawCronJobs<CronJob>(payload)),
-                });
+                } satisfies CronJobsResponse);
             } catch (error) {
                 return cronError(error, "Failed to list cron jobs");
             }
@@ -92,7 +86,7 @@ export const cronRoutes = {
                         jobId: request.params.id,
                     })
                 );
-                return json({ isOk: true, payload });
+                return json({ isOk: true, payload } satisfies CronMutationResponse);
             } catch (error) {
                 try {
                     setOpenClawCronDisableIntent(request.params.id, previousIntent);
@@ -115,7 +109,7 @@ export const cronRoutes = {
                         jobId: request.params.id,
                     })
                 );
-                return json({ isOk: true, payload });
+                return json({ isOk: true, payload } satisfies CronMutationResponse);
             } catch (error) {
                 return cronError(error, "Failed to run cron job");
             }
@@ -155,7 +149,7 @@ export const cronRoutes = {
                         disableIntent
                     )
                 );
-                return json({ isOk: true });
+                return json({ isOk: true } satisfies CronMutationResponse);
             } catch (error) {
                 return cronError(error, "Failed to toggle cron job");
             }
@@ -193,7 +187,7 @@ export const cronRoutes = {
                         })
                     );
                 }
-                return json({ isOk: true });
+                return json({ isOk: true } satisfies CronMutationResponse);
             } catch (error) {
                 return cronError(error, "Failed to update cron job");
             }

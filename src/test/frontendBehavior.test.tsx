@@ -20,6 +20,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
+import type { DashboardDiagnosticsResponse } from "../../contracts/health";
+import type { AppObservabilityMetrics, Metrics } from "../../contracts/metrics";
+import type { Task, TaskUpdate } from "../../contracts/tasks";
 import {
     agentsCollection,
     preloadAgentsCollection,
@@ -94,7 +97,7 @@ import {
     useAgentStatus,
     useAgentTaskHistory,
 } from "../hooks/useAgents";
-import { ApiError, apiFetch, UnauthorizedError } from "../hooks/useApi";
+import { apiFetch } from "../hooks/useApi";
 import {
     useClearKopiaBackupAttention,
     useClearWalgBackupAttention,
@@ -145,7 +148,7 @@ import {
 } from "../hooks/useDelivery";
 import { useDockerContainers } from "../hooks/useDocker";
 import { useFileContent, useFiles, useSaveFile } from "../hooks/useFiles";
-import { type HealthResponse, useHealth } from "../hooks/useHealth";
+import { useHealth } from "../hooks/useHealth";
 import {
     jobExecutionKeys,
     refreshJobExecutionQueueWhilePending,
@@ -189,6 +192,7 @@ import {
     useTerminalJob,
 } from "../hooks/useTerminal";
 import { useWeather } from "../hooks/useWeather";
+import { ApiError, UnauthorizedError } from "../lib/apiError";
 import {
     notifyAuthSessionRotated,
     UNAUTHORIZED_EVENT_NAME,
@@ -214,7 +218,6 @@ import { Reports } from "../pages/Reports";
 import { Tasks } from "../pages/Tasks";
 import { authActions, authStore } from "../stores/authStore";
 import { readSessionsResponsePayload } from "../types/socket";
-import type { Task, TaskUpdate } from "../types/task";
 import {
     formatCronLastStatus,
     formatCronTimestamp,
@@ -289,6 +292,175 @@ function task(overrides: Partial<Task> & Pick<Task, "number" | "title">): Task {
         updatedAt: overrides.updatedAt ?? "2026-06-19T08:00:00.000Z",
         url: overrides.url ?? `/tasks/${overrides.number}`,
         automation: overrides.automation,
+    };
+}
+
+function appObservabilityMetrics(): AppObservabilityMetrics {
+    return {
+        cacheRefresh: {
+            active: 0,
+            averageDurationMs: 4,
+            coalesced: 2,
+            failures: 1,
+            lastDurationMs: 5,
+            maxDurationMs: 8,
+            refreshes: 3,
+            requests: 5,
+            totalDurationMs: 12,
+        },
+        database: {
+            available: true,
+            averageDurationMs: 1,
+            fileBytes: 4096,
+            freelistBytes: 0,
+            freelistPages: 0,
+            freelistPercent: 0,
+            latencyMs: 0.5,
+            lockErrors: 0,
+            maxDurationMs: 2,
+            operations: 4,
+            shmBytes: 0,
+            walBytes: 0,
+        },
+        gateway: {
+            connectFailures: 0,
+            connected: true,
+            connections: 1,
+            disconnects: 0,
+            pendingRequests: 0,
+            reconnects: 0,
+        },
+        processes: {
+            active: 0,
+            averageDurationMs: 10,
+            failed: 0,
+            lastDurationMs: 10,
+            maxDurationMs: 10,
+            started: 1,
+            succeeded: 1,
+            totalDurationMs: 10,
+        },
+        runtime: {
+            eventLoopDelayMs: 0.25,
+            externalBytes: 1024,
+            heapTotalBytes: 4096,
+            heapUsedBytes: 2048,
+            rssBytes: 8192,
+            uptimeSeconds: 123,
+        },
+        scheduler: {
+            activeResourceClasses: [],
+            dueJobs: 0,
+            executorActive: true,
+            executorTickRunning: false,
+            lastTickDurationMs: 1,
+            queueFailures: 0,
+            queued: 0,
+            running: 0,
+            scheduleLagMs: 0,
+            schedulerActive: true,
+            schedulerTickRunning: false,
+            tickFailures: 0,
+            ticks: 2,
+            workerCapacity: 2,
+            workerCount: 1,
+            workerOnline: true,
+        },
+    };
+}
+
+function dashboardDiagnostics(
+    overrides: {
+        backendCommit?: string;
+        frontendCommit?: string;
+        sessionCount?: number;
+    } = {}
+): DashboardDiagnosticsResponse {
+    const backendCommit = overrides.backendCommit ?? "backend-sha";
+    const frontendCommit = overrides.frontendCommit ?? "frontend-sha";
+    return {
+        checks: {
+            database: {
+                currentSchemaVersion: 1,
+                maximumCompatibleSchemaVersion: 1,
+                minimumCompatibleSchemaVersion: 1,
+                ready: true,
+                targetSchemaVersion: 1,
+            },
+            frontend: { ready: true },
+            release: {
+                backendCommit,
+                frontendCommit,
+                ready: true,
+                source: "manifest",
+            },
+            worker: { ready: true },
+        },
+        dependencies: { gatewayConnected: true },
+        observability: appObservabilityMetrics(),
+        releaseDetails: {
+            backendCommit,
+            frontendCommit,
+            ready: true,
+            source: "manifest",
+        },
+        sessionCount: overrides.sessionCount ?? 1,
+        status: "isReady",
+    };
+}
+
+function dashboardMetrics(): Metrics {
+    return {
+        ...appObservabilityMetrics(),
+        cpu: {
+            count: 4,
+            loadAvg: [0.1, 0.2, 0.3],
+            loadPercent: 5,
+            model: "test cpu",
+        },
+        disk: {
+            percent: 25,
+            total: 1000,
+            totalGB: 1,
+            used: 250,
+            usedGB: 0.25,
+        },
+        http: {
+            averageDurationMs: 2,
+            errors: 0,
+            maxDurationMs: 3,
+            requests: 2,
+            routes: [],
+        },
+        memory: {
+            free: 60,
+            percent: 40,
+            total: 100,
+            totalGB: 0.1,
+            used: 40,
+            usedGB: 0.04,
+        },
+        network: { downloadMbps: 1, uploadMbps: 2 },
+        polling: { snapshots: [] },
+        system: {
+            hostname: "dashboard-test",
+            platform: "linux",
+            uptime: 123,
+        },
+        timestamp: 123_456,
+        tokens: {
+            byAgent: [
+                {
+                    label: "Mira",
+                    model: "codex",
+                    tokens: 42,
+                    type: "MAIN",
+                },
+            ],
+            byModel: { codex: 42 },
+            sessionsByModel: { codex: 1 },
+            total: 42,
+        },
     };
 }
 
@@ -761,23 +933,7 @@ describe("Mira Dashboard frontend behavior", () => {
             const url = String(input);
             apiCalls.push(`${init?.method ?? "GET"} ${url}`);
             if (url === "/api/health/diagnostics") {
-                return Response.json({
-                    checks: {
-                        release: {
-                            backendCommit: "backend-sha",
-                            frontendCommit: "frontend-sha",
-                            ready: true,
-                        },
-                        worker: { ready: true },
-                    },
-                    dependencies: { gatewayConnected: true },
-                    releaseDetails: {
-                        backendCommit: "backend-sha",
-                        frontendCommit: "frontend-sha",
-                    },
-                    sessionCount: 1,
-                    status: "isReady",
-                });
+                return Response.json(dashboardDiagnostics());
             }
             if (url === "/api/cache/system.host") {
                 return Response.json({
@@ -920,13 +1076,15 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(screen.getByText("Version mismatch")).toBeInTheDocument();
             expect(screen.queryByText(/Version mismatch \(FE/u)).not.toBeInTheDocument();
 
-            const readyHealth = queryClient.getQueryData<HealthResponse>(["health"]);
+            const readyHealth = queryClient.getQueryData<DashboardDiagnosticsResponse>([
+                "health",
+            ]);
             expect(readyHealth).toBeDefined();
             if (!readyHealth) {
                 throw new TypeError("Expected health data after layout initialization");
             }
             act(() => {
-                queryClient.setQueryData<HealthResponse>(["health"], {
+                queryClient.setQueryData<DashboardDiagnosticsResponse>(["health"], {
                     ...readyHealth,
                     checks: {
                         ...readyHealth.checks,
@@ -941,7 +1099,7 @@ describe("Mira Dashboard frontend behavior", () => {
 
             const healthQuery = queryClient
                 .getQueryCache()
-                .find<HealthResponse>({ queryKey: ["health"] });
+                .find<DashboardDiagnosticsResponse>({ queryKey: ["health"] });
             act(() => {
                 healthQuery?.setState({
                     data: undefined,
@@ -1032,7 +1190,13 @@ describe("Mira Dashboard frontend behavior", () => {
                     loginAttempts += 1;
                     if (body.password !== "correct-password") {
                         return Response.json(
-                            { error: "Invalid credentials" },
+                            {
+                                error: {
+                                    code: "unauthorized",
+                                    message: "Invalid credentials",
+                                    requestId: "login-invalid-credentials",
+                                },
+                            },
                             { status: 401 }
                         );
                     }
@@ -1238,7 +1402,16 @@ describe("Mira Dashboard frontend behavior", () => {
             configurable: true,
             value: jest.fn(async (input: RequestInfo | URL) => {
                 if (String(input) === "/api/tasks") {
-                    return Response.json({ error: "Unauthorized" }, { status: 401 });
+                    return Response.json(
+                        {
+                            error: {
+                                code: "unauthorized",
+                                message: "Unauthorized",
+                                requestId: "tasks-unauthorized",
+                            },
+                        },
+                        { status: 401 }
+                    );
                 }
                 if (String(input) === "/api/auth/session") {
                     return Response.json({
@@ -1299,7 +1472,16 @@ describe("Mira Dashboard frontend behavior", () => {
                 if (String(input) === "/api/tasks") {
                     taskRequests += 1;
                     return taskRequests === 1
-                        ? Response.json({ error: "Unauthorized" }, { status: 401 })
+                        ? Response.json(
+                              {
+                                  error: {
+                                      code: "unauthorized",
+                                      message: "Unauthorized",
+                                      requestId: "tasks-stale-session",
+                                  },
+                              },
+                              { status: 401 }
+                          )
                         : Response.json({ isOk: true });
                 }
                 throw new Error(`Unexpected stale-401 request: ${String(input)}`);
@@ -1359,7 +1541,16 @@ describe("Mira Dashboard frontend behavior", () => {
                     ) {
                         confirmationRequests += 1;
                         return confirmationRequests === 1
-                            ? Response.json({ error: "Unauthorized" }, { status: 401 })
+                            ? Response.json(
+                                  {
+                                      error: {
+                                          code: "unauthorized",
+                                          message: "Unauthorized",
+                                          requestId: "totp-stale-session",
+                                      },
+                                  },
+                                  { status: 401 }
+                              )
                             : Response.json({ isOk: true });
                     }
                     throw new Error(
@@ -1405,8 +1596,11 @@ describe("Mira Dashboard frontend behavior", () => {
             value: jest.fn(async () =>
                 Response.json(
                     {
-                        code: "recent_verification_required",
-                        error: "Recent password verification is required",
+                        error: {
+                            code: "recent_verification_required",
+                            message: "Recent password verification is required",
+                            requestId: "privileged-step-up",
+                        },
                     },
                     { status: 403 }
                 )
@@ -1450,8 +1644,11 @@ describe("Mira Dashboard frontend behavior", () => {
                 return requestCount === 1
                     ? Response.json(
                           {
-                              code: "step_up_required",
-                              error: "Recent MFA verification is required",
+                              error: {
+                                  code: "step_up_required",
+                                  message: "Recent MFA verification is required",
+                                  requestId: "privileged-retry-step-up",
+                              },
                           },
                           { status: 403 }
                       )
@@ -1490,8 +1687,11 @@ describe("Mira Dashboard frontend behavior", () => {
                 return requestCount === 1
                     ? Response.json(
                           {
-                              code: "step_up_required",
-                              error: "Recent MFA verification is required",
+                              error: {
+                                  code: "step_up_required",
+                                  message: "Recent MFA verification is required",
+                                  requestId: "privileged-stream-step-up",
+                              },
                           },
                           { status: 403 }
                       )
@@ -1600,7 +1800,16 @@ describe("Mira Dashboard frontend behavior", () => {
                 }
 
                 if (url === "/api/tasks" && method === "POST") {
-                    return Response.json({ error: "title is required" }, { status: 400 });
+                    return Response.json(
+                        {
+                            error: {
+                                code: "invalid_request",
+                                message: "title is required",
+                                requestId: "request-task-create",
+                            },
+                        },
+                        { status: 400 }
+                    );
                 }
 
                 if (url === "/api/broken" && method === "GET") {
@@ -1621,7 +1830,7 @@ describe("Mira Dashboard frontend behavior", () => {
         await expect(
             apiFetch("/tasks", { body: JSON.stringify({}), method: "POST" })
         ).rejects.toThrow("title is required");
-        await expect(apiFetch("/broken")).rejects.toThrow("Unknown error");
+        await expect(apiFetch("/broken")).rejects.toThrow("HTTP 500");
         const healthRequest = fetchMock.mock.calls.find(
             ([input]) => input === "/api/health/live"
         );
@@ -1630,6 +1839,51 @@ describe("Mira Dashboard frontend behavior", () => {
         );
         expect(new Headers(healthRequest?.[1]?.headers).get("Content-Type")).toBe(
             "application/json"
+        );
+    });
+
+    it("exposes strict API error metadata and retry guidance", async () => {
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: jest.fn(async () =>
+                Response.json(
+                    {
+                        error: {
+                            code: "rate_limited",
+                            details: { scope: "diagnostics" },
+                            message: "Try again later",
+                            requestId: "response-body-request",
+                        },
+                    },
+                    {
+                        headers: {
+                            "Retry-After": "17",
+                            "X-Request-ID": "response-header-request",
+                        },
+                        status: 429,
+                    }
+                )
+            ),
+            writable: true,
+        });
+
+        let error: unknown;
+        try {
+            await apiFetch("/diagnostics");
+        } catch (error_) {
+            error = error_;
+        }
+
+        expect(error).toBeInstanceOf(ApiError);
+        expect(error).toEqual(
+            expect.objectContaining({
+                code: "rate_limited",
+                details: { scope: "diagnostics" },
+                message: "Try again later",
+                requestId: "response-header-request",
+                retryAfter: 17,
+                status: 429,
+            })
         );
     });
 
@@ -3084,7 +3338,10 @@ describe("Mira Dashboard frontend behavior", () => {
                                 actionPayload: {},
                                 createdAt: "2026-06-23T08:00:00.000Z",
                                 updatedAt: "2026-06-23T08:00:00.000Z",
+                                isQueued: false,
                                 isRunning: false,
+                                resourceClass: "light",
+                                timeoutMs: 60_000,
                             },
                         ],
                     });
@@ -3096,6 +3353,9 @@ describe("Mira Dashboard frontend behavior", () => {
                             {
                                 id: 1,
                                 jobId: "job-1",
+                                cancellable: false,
+                                queuedAt: "2026-06-23T08:00:00.000Z",
+                                resourceClass: "light",
                                 status: "success",
                                 triggerType: "manual",
                                 startedAt: "2026-06-23T08:00:00.000Z",
@@ -3115,7 +3375,29 @@ describe("Mira Dashboard frontend behavior", () => {
                             },
                         },
                     });
-                    return Response.json({ isOk: true, job: { id: "job-1" } });
+                    return Response.json({
+                        isOk: true,
+                        job: {
+                            actionKey: "test",
+                            actionPayload: {},
+                            createdAt: "2026-06-23T08:00:00.000Z",
+                            description: "Runs things",
+                            disableIntent: {
+                                comment: "Paused for hook coverage",
+                                mode: "indefinite",
+                            },
+                            enabled: false,
+                            id: "job-1",
+                            intervalSeconds: 60,
+                            isQueued: false,
+                            isRunning: false,
+                            name: "Job One",
+                            resourceClass: "light",
+                            scheduleType: "interval",
+                            timeoutMs: 60_000,
+                            updatedAt: "2026-06-23T08:00:00.000Z",
+                        },
+                    });
                 }
 
                 if (url === "/api/jobs/job-1/run" && method === "POST") {
@@ -3124,6 +3406,9 @@ describe("Mira Dashboard frontend behavior", () => {
                         run: {
                             id: 2,
                             jobId: "job-1",
+                            cancellable: false,
+                            queuedAt: "2026-06-23T08:00:00.000Z",
+                            resourceClass: "light",
                             status: "success",
                             triggerType: "manual",
                             startedAt: "2026-06-23T08:00:00.000Z",
@@ -3410,69 +3695,17 @@ describe("Mira Dashboard frontend behavior", () => {
                 const method = init?.method ?? "GET";
 
                 if (url === "/api/health/diagnostics" && method === "GET") {
-                    return Response.json({
-                        checks: {
-                            release: {
-                                backendCommit: "abc123",
-                                frontendCommit: "abc123",
-                                ready: true,
-                            },
-                            worker: { ready: true },
-                        },
-                        dependencies: { gatewayConnected: true },
-                        releaseDetails: {
+                    return Response.json(
+                        dashboardDiagnostics({
                             backendCommit: "abc123",
                             frontendCommit: "abc123",
-                        },
-                        sessionCount: 2,
-                        status: "isReady",
-                    });
+                            sessionCount: 2,
+                        })
+                    );
                 }
 
                 if (url === "/api/metrics" && method === "GET") {
-                    return Response.json({
-                        cpu: {
-                            count: 4,
-                            model: "test cpu",
-                            loadAvg: [0.1, 0.2, 0.3],
-                            loadPercent: 5,
-                        },
-                        memory: {
-                            total: 100,
-                            used: 40,
-                            free: 60,
-                            percent: 40,
-                            totalGB: 0.1,
-                            usedGB: 0.04,
-                        },
-                        disk: {
-                            total: 1000,
-                            used: 250,
-                            percent: 25,
-                            totalGB: 1,
-                            usedGB: 0.25,
-                        },
-                        system: {
-                            uptime: 123,
-                            platform: "linux",
-                            hostname: "dashboard-test",
-                        },
-                        network: { downloadMbps: 1, uploadMbps: 2 },
-                        tokens: {
-                            total: 42,
-                            byModel: { codex: 42 },
-                            sessionsByModel: { codex: 1 },
-                            byAgent: [
-                                {
-                                    label: "Mira",
-                                    model: "codex",
-                                    tokens: 42,
-                                    type: "MAIN",
-                                },
-                            ],
-                        },
-                        timestamp: 123_456,
-                    });
+                    return Response.json(dashboardMetrics());
                 }
 
                 throw new Error(`Unexpected health API call: ${method} ${url}`);
@@ -3778,7 +4011,16 @@ describe("Mira Dashboard frontend behavior", () => {
                     throw new Error(`Unexpected cache API call: ${init?.method} ${url}`);
                 }
                 if (url === "/api/cache/cache.fail/refresh") {
-                    return Response.json({ error: "refresh failed" }, { status: 500 });
+                    return Response.json(
+                        {
+                            error: {
+                                code: "internal_error",
+                                message: "refresh failed",
+                                requestId: "cache-refresh-failed",
+                            },
+                        },
+                        { status: 500 }
+                    );
                 }
                 const key = url.replace("/api/cache/", "").replace("/refresh", "");
                 return Response.json({
@@ -3953,8 +4195,13 @@ describe("Mira Dashboard frontend behavior", () => {
                 Response.json({
                     isOk: true,
                     run: {
+                        cancellable: true,
                         id: 1,
                         jobId: "ops.log-rotation",
+                        output: {},
+                        queuedAt: "2026-06-23T08:00:00.000Z",
+                        resourceClass: "light",
+                        startedAt: "2026-06-23T08:00:00.000Z",
                         status: "queued",
                         triggerType: "manual",
                     },
@@ -4538,7 +4785,13 @@ describe("Mira Dashboard frontend behavior", () => {
 
                 if (url === "/api/exec/missing-job" && method === "GET") {
                     return Response.json(
-                        { error: "Exec job not found" },
+                        {
+                            error: {
+                                code: "not_found",
+                                message: "Exec job not found",
+                                requestId: "request-missing-exec-job",
+                            },
+                        },
                         { status: 404 }
                     );
                 }
@@ -4883,7 +5136,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 }
 
                 if (url === "/api/tasks/1" && method === "DELETE") {
-                    return new Response(undefined, { status: 204 });
+                    return Response.json({ isOk: true });
                 }
 
                 if (url === "/api/tasks/1/updates" && method === "POST") {
@@ -4915,7 +5168,7 @@ describe("Mira Dashboard frontend behavior", () => {
                 }
 
                 if (url === "/api/tasks/1/updates/7" && method === "DELETE") {
-                    return new Response(undefined, { status: 204 });
+                    return Response.json({ isOk: true });
                 }
 
                 throw new Error(`Unexpected task API call: ${method} ${url}`);
@@ -6839,7 +7092,16 @@ describe("Mira Dashboard frontend behavior", () => {
         const fetchMock = jest
             .fn()
             .mockResolvedValueOnce(
-                Response.json({ error: "Tasks unavailable" }, { status: 503 })
+                Response.json(
+                    {
+                        error: {
+                            code: "service_unavailable",
+                            message: "Tasks unavailable",
+                            requestId: "tasks-unavailable",
+                        },
+                    },
+                    { status: 503 }
+                )
             )
             .mockResolvedValueOnce(Response.json([]));
         Object.defineProperty(globalThis, "fetch", {
@@ -6872,7 +7134,16 @@ describe("Mira Dashboard frontend behavior", () => {
                 ])
             )
             .mockResolvedValueOnce(
-                Response.json({ error: "Tasks temporarily unavailable" }, { status: 503 })
+                Response.json(
+                    {
+                        error: {
+                            code: "service_unavailable",
+                            message: "Tasks temporarily unavailable",
+                            requestId: "tasks-refresh-unavailable",
+                        },
+                    },
+                    { status: 503 }
+                )
             );
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,

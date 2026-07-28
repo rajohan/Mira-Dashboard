@@ -394,8 +394,12 @@ export function Terminal() {
                                         {jobData.stderr}
                                     </pre>
                                 )}
-                                {jobData.status === "running" && (
-                                    <div className="mt-1 text-accent-400">Running...</div>
+                                {jobData.status !== "done" && (
+                                    <div className="mt-1 text-accent-400">
+                                        {jobData.status === "signaled"
+                                            ? "Stopping..."
+                                            : "Running..."}
+                                    </div>
                                 )}
                             </div>
                         )}
@@ -432,11 +436,12 @@ export function Terminal() {
                             />
                         </div>
                         <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
-                            {currentJobId && jobData?.status === "running" ? (
+                            {currentJobId && jobData && jobData.status !== "done" ? (
                                 <Button
                                     type="button"
                                     variant="danger"
                                     className="w-full sm:w-auto"
+                                    disabled={jobData.status === "signaled"}
                                     onClick={async () => {
                                         try {
                                             await stopTerminalJob(currentJobId);
@@ -446,7 +451,7 @@ export function Terminal() {
                                     }}
                                 >
                                     <Square className="size-4" />
-                                    Stop
+                                    {jobData.status === "signaled" ? "Stopping" : "Stop"}
                                 </Button>
                             ) : (
                                 <Button
@@ -485,15 +490,23 @@ function TerminalOutput({ entry }: { entry: CommandHistoryEntry }) {
     const isSuccess = entry.status === "done" && entry.code === 0;
 
     return (
-        <div className={cn("mb-4", entry.status === "running" && "opacity-80")}>
+        <div
+            className={cn(
+                "mb-4",
+                (entry.status === "running" || entry.status === "signaled") &&
+                    "opacity-80"
+            )}
+        >
             {/* Command line */}
             <div className="flex flex-wrap items-start gap-x-2 gap-y-1 text-primary-400">
                 <span className="shrink-0 text-accent-400">{entry.cwd}$</span>
                 <span className="min-w-0 break-all text-primary-100">
                     {entry.command}
                 </span>
-                {entry.status === "running" && (
-                    <span className="animate-pulse text-accent-400">●</span>
+                {(entry.status === "running" || entry.status === "signaled") && (
+                    <span className="animate-pulse text-accent-400">
+                        {entry.status === "signaled" ? "Stopping…" : "●"}
+                    </span>
                 )}
             </div>
 

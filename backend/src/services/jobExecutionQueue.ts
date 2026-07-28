@@ -1,9 +1,11 @@
+import type {
+    JobExecutionStatus,
+    JobExecutionSummary,
+    JobExecutionTriggerType,
+    JobResourceClass,
+} from "../../../contracts/jobs.ts";
 import { database, sqlNullable } from "../database.ts";
-import {
-    isJobResourceClass,
-    type JobResourceClass,
-    jobResourcePriority,
-} from "../lib/jobResources.ts";
+import { isJobResourceClass, jobResourcePriority } from "../lib/jobResources.ts";
 import { currentRequestAuditContext } from "../requestAuditContext.ts";
 import {
     type AuditActor,
@@ -16,10 +18,6 @@ const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_EXECUTION_LIST_LIMIT = 200;
 export const JOB_WORKER_HEARTBEAT_MAX_AGE_MS = 30_000;
 const RELEASE_COMMIT_PATTERN = /^[\da-f]{8,40}$/u;
-
-export type JobExecutionStatus =
-    "queued" | "running" | "success" | "failed" | "cancelled";
-export type JobExecutionTriggerType = "manual" | "schedule" | "startup" | "system";
 
 export interface JobExecution {
     id: string;
@@ -45,18 +43,6 @@ export interface JobExecution {
     timeoutMs: number;
     message: string | undefined;
     output: Record<string, unknown>;
-}
-
-export interface JobExecutionSummary {
-    activeResourceClasses: JobResourceClass[];
-    oldestQueuedAgeMs: number | undefined;
-    oldestQueuedAt: string | undefined;
-    queued: number;
-    running: number;
-    workerCapacity: number;
-    workerCount: number;
-    workerLastHeartbeatAt: string | undefined;
-    workerOnline: boolean;
 }
 
 export interface InsertJobExecutionInput {

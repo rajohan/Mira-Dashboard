@@ -1,4 +1,4 @@
-import type { CronJob } from "../../../hooks";
+import type { CronJob } from "../../../../contracts/cron";
 import {
     formatCronTimestamp,
     getCronJobId,

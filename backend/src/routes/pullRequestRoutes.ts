@@ -1,3 +1,13 @@
+import type {
+    DashboardReleaseStatusResponse,
+    DeploymentActionResponse,
+    DeploymentsResponse,
+    ProductionCheckoutResponse,
+    PullRequestActionResponse,
+    PullRequestPreviewMutationResponse,
+    PullRequestPreviewResponse,
+    PullRequestsResponse,
+} from "../../../contracts/delivery.ts";
 import { json, jsonWithEtag, readJson } from "../http.ts";
 import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
@@ -73,7 +83,10 @@ const productionCheckoutSnapshot = new CoalescedSnapshot<
     staleForMs: 30_000,
 });
 
-function pullRequestSnapshotJson(request: Request | undefined, data: unknown): Response {
+function pullRequestSnapshotJson(
+    request: Request | undefined,
+    data: PullRequestsResponse
+): Response {
     return request ? jsonWithEtag(request, data) : json(data);
 }
 
@@ -106,11 +119,10 @@ export const pullRequestRoutes = {
                 const body = request.body
                     ? await readJson<{ deploy?: unknown } | undefined>(request)
                     : undefined;
-                return json(
-                    await runPullRequestMutation(() =>
-                        runPullRequestApproval(number, body?.deploy === true)
-                    )
+                const response = await runPullRequestMutation(() =>
+                    runPullRequestApproval(number, body?.deploy === true)
                 );
+                return json(response satisfies PullRequestActionResponse);
             } catch (error) {
                 return routeError(error);
             }
@@ -128,11 +140,10 @@ export const pullRequestRoutes = {
                     typeof body?.comment === "string" && body.comment.trim()
                         ? body.comment.trim()
                         : "Closed from Mira Dashboard after Rajohan rejected it.";
-                return json(
-                    await runPullRequestMutation(() =>
-                        runPullRequestRejection(number, comment)
-                    )
+                const response = await runPullRequestMutation(() =>
+                    runPullRequestRejection(number, comment)
                 );
+                return json(response satisfies PullRequestActionResponse);
             } catch (error) {
                 return routeError(error);
             }
@@ -143,11 +154,10 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                return json(
-                    await runPullRequestMutation(() =>
-                        runPullRequestReviewApproval(number)
-                    )
+                const response = await runPullRequestMutation(() =>
+                    runPullRequestReviewApproval(number)
                 );
+                return json(response satisfies PullRequestActionResponse);
             } catch (error) {
                 return routeError(error);
             }
@@ -158,9 +168,10 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                return json(
-                    await runPullRequestMutation(() => runPullRequestBranchUpdate(number))
+                const response = await runPullRequestMutation(() =>
+                    runPullRequestBranchUpdate(number)
                 );
+                return json(response satisfies PullRequestActionResponse);
             } catch (error) {
                 return routeError(error);
             }
@@ -176,7 +187,7 @@ export const pullRequestRoutes = {
                         {
                             isOk: true,
                             preview: await prepareAndStartPullRequestPreview(number),
-                        },
+                        } satisfies PullRequestPreviewMutationResponse,
                         { status: 202 }
                     );
                 } finally {
@@ -196,7 +207,7 @@ export const pullRequestRoutes = {
                     return json({
                         isOk: true,
                         preview: await prepareAndStopPullRequestPreview(number),
-                    });
+                    } satisfies PullRequestPreviewMutationResponse);
                 } finally {
                     pullRequestPreviewSnapshot.invalidate();
                 }
@@ -208,12 +219,11 @@ export const pullRequestRoutes = {
     "/api/pull-requests/deploy": {
         POST: async () => {
             try {
-                return json(
-                    await runPullRequestMutation(async () => ({
-                        deployment: await prepareAndStartDeployLatest(),
-                        isOk: true,
-                    }))
-                );
+                const response = await runPullRequestMutation(async () => ({
+                    deployment: await prepareAndStartDeployLatest(),
+                    isOk: true as const,
+                }));
+                return json(response satisfies DeploymentActionResponse);
             } catch (error) {
                 return routeError(error);
             }
@@ -222,7 +232,9 @@ export const pullRequestRoutes = {
     "/api/pull-requests/deployments": {
         GET: () => {
             try {
-                return json({ deployments: readDeploymentJobs() });
+                return json({
+                    deployments: readDeploymentJobs(),
+                } satisfies DeploymentsResponse);
             } catch (error) {
                 return routeError(error);
             }
@@ -231,7 +243,9 @@ export const pullRequestRoutes = {
     "/api/pull-requests/releases": {
         GET: async () => {
             try {
-                return json({ release: await getDashboardReleaseStatus() });
+                return json({
+                    release: await getDashboardReleaseStatus(),
+                } satisfies DashboardReleaseStatusResponse);
             } catch (error) {
                 return routeError(error);
             }
@@ -248,12 +262,11 @@ export const pullRequestRoutes = {
                     );
                 }
                 const targetCommit = body.targetCommit;
-                return json(
-                    await runPullRequestMutation(async () => ({
-                        deployment: await prepareAndStartRollback(targetCommit),
-                        isOk: true,
-                    }))
-                );
+                const response = await runPullRequestMutation(async () => ({
+                    deployment: await prepareAndStartRollback(targetCommit),
+                    isOk: true as const,
+                }));
+                return json(response satisfies DeploymentActionResponse);
             } catch (error) {
                 return routeError(error);
             }
@@ -262,7 +275,9 @@ export const pullRequestRoutes = {
     "/api/pull-requests/production-checkout": {
         GET: async () => {
             try {
-                return json({ checkout: await productionCheckoutSnapshot.read() });
+                return json({
+                    checkout: await productionCheckoutSnapshot.read(),
+                } satisfies ProductionCheckoutResponse);
             } catch (error) {
                 return routeError(error);
             }
@@ -271,7 +286,9 @@ export const pullRequestRoutes = {
     "/api/pull-requests/preview": {
         GET: async () => {
             try {
-                return json({ preview: await pullRequestPreviewSnapshot.read() });
+                return json({
+                    preview: await pullRequestPreviewSnapshot.read(),
+                } satisfies PullRequestPreviewResponse);
             } catch (error) {
                 return routeError(error, "PR preview status failed");
             }

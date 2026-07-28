@@ -3,6 +3,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import type { RuntimeReleaseIdentity } from "../../contracts/health.ts";
 import { getBackendBuildCommit } from "./buildIdentity.ts";
 import {
     databaseMigrationIdentities,
@@ -73,22 +74,6 @@ export interface DashboardReleaseManifest {
         minimumCompatible: number;
         target: number;
     };
-}
-
-export interface RuntimeReleaseIdentity {
-    artifactCount?: number;
-    backendCommit: string;
-    commitSha?: string;
-    frontendCommit: string;
-    issue?:
-        | "build-identity-invalid"
-        | "manifest-code-mismatch"
-        | "manifest-invalid"
-        | "manifest-missing";
-    manifestFormatVersion?: number;
-    ready: boolean;
-    schema?: DashboardReleaseManifest["schema"];
-    source: "git" | "manifest" | "unknown";
 }
 
 export function requireRunnableReleaseCommit(

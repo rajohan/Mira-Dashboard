@@ -1,23 +1,34 @@
+import type { CronJob } from "../../../contracts/cron.ts";
 import {
-    TASK_ASSIGNEE_IDS,
+    type ColumnId,
+    parseAssignTaskRequest,
+    parseCreateTaskRequest,
+    parseCreateTaskUpdateRequest,
+    parseMoveTaskRequest,
+    parseUpdateTaskRequest,
+    parseUpdateTaskUpdateRequest,
+    type Task,
     TASK_ASSIGNEES,
     type TaskAssigneeId,
-} from "../constants/taskActors.ts";
+    type TaskAutomation,
+    type TaskAutomationInput,
+    type TaskMutationResponse,
+    type TaskUpdate,
+} from "../../../contracts/tasks.ts";
 import { database, sqlNullable } from "../database.ts";
 import gateway from "../gateway.ts";
-import { HttpError, json, readJson } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { json } from "../http.ts";
 import { objectFallback } from "../lib/values.ts";
 import { isDevelopmentExternalNotificationSuppressed } from "../requestPolicy.ts";
+import { readApiJson, routeErrorResponse } from "../routeSupport.ts";
 import {
     getOpenClawCronListSnapshot,
     normalizeOpenClawCronJobs,
 } from "../services/openClawCronSnapshot.ts";
 
-type Status = "todo" | "in-progress" | "blocked" | "done";
+type Status = ColumnId;
 type Assignee = TaskAssigneeId;
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
-const INVALID_ASSIGNEE_MESSAGE = "Assignee not found in allowed list";
 
 interface DatabaseTaskUpdate {
     id: number;
@@ -44,28 +55,6 @@ type DatabaseTaskRow = Omit<DatabaseTask, "assignee"> & {
     assignee: Assignee | null | undefined;
 };
 
-interface CronJob {
-    id?: string;
-    jobId?: string;
-    name?: string;
-    enabled?: boolean;
-    schedule?: Record<string, unknown>;
-    payload?: Record<string, unknown>;
-    state?: Record<string, unknown>;
-    sessionTarget?: string;
-}
-
-interface TaskAutomationInput {
-    type?: string;
-    recurring?: boolean;
-    cronJobId?: string;
-    scheduleSummary?: string;
-    sessionTarget?: string;
-    model?: string;
-    thinking?: string;
-    [key: string]: unknown;
-}
-
 function normalizeDatabaseTask(
     task: DatabaseTaskRow | undefined
 ): DatabaseTask | undefined {
@@ -80,10 +69,6 @@ function nowIso(): string {
     return new Date().toISOString();
 }
 
-function isValidAssignee(value: unknown): value is Assignee {
-    return typeof value === "string" && TASK_ASSIGNEE_IDS.includes(value as Assignee);
-}
-
 function normalizeStatus(columnLabel?: string): Status | undefined {
     if (columnLabel === "done") return "done";
     if (columnLabel === "blocked") return "blocked";
@@ -96,22 +81,6 @@ function derivePriority(labels: string[]): "low" | "medium" | "high" {
     if (labels.includes("priority-high") || labels.includes("high")) return "high";
     if (labels.includes("priority-low") || labels.includes("low")) return "low";
     return "medium";
-}
-
-function optionalString(value: unknown, field: string): string | undefined {
-    if (value === undefined) return undefined;
-    if (typeof value !== "string") {
-        throw new HttpError(`${field} must be a string`, 400);
-    }
-    return value;
-}
-
-function optionalLabels(value: unknown): string[] | undefined {
-    if (value === undefined) return undefined;
-    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-        throw new HttpError("Labels must be an array of strings", 400);
-    }
-    return value;
 }
 
 function labelsFromTask(task: DatabaseTask): string[] {
@@ -143,24 +112,23 @@ function parseRecordJson(value: string): Record<string, unknown> {
     }
 }
 
-function normalizeAutomationInput(value: unknown): string {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+function normalizeAutomationInput(value: TaskAutomationInput | null | undefined): string {
+    if (!value) {
         return "{}";
     }
-    const input = value as TaskAutomationInput;
-    const cronJobId = typeof input.cronJobId === "string" ? input.cronJobId.trim() : "";
+    const cronJobId = value.cronJobId.trim();
     if (!cronJobId) return "{}";
     const automation: TaskAutomationInput = {
         type: "cron",
-        recurring: input.recurring ?? true,
+        recurring: value.recurring ?? true,
         cronJobId,
     };
-    for (const key of ["scheduleSummary", "sessionTarget", "model", "thinking"]) {
-        const keyValue = input[key];
-        if (typeof keyValue === "string" && keyValue.trim()) {
-            automation[key] = keyValue.trim();
-        }
-    }
+    if (value.scheduleSummary?.trim())
+        automation.scheduleSummary = value.scheduleSummary.trim();
+    if (value.sessionTarget?.trim())
+        automation.sessionTarget = value.sessionTarget.trim();
+    if (value.model?.trim()) automation.model = value.model.trim();
+    if (value.thinking?.trim()) automation.thinking = value.thinking.trim();
     return JSON.stringify(automation);
 }
 
@@ -216,7 +184,10 @@ async function fetchCronJobsById(): Promise<Map<string, CronJob>> {
     }
 }
 
-function toFrontendAutomation(task: DatabaseTask, cronJobsById?: Map<string, CronJob>) {
+function toFrontendAutomation(
+    task: DatabaseTask,
+    cronJobsById?: Map<string, CronJob>
+): TaskAutomation | undefined {
     const stored = parseRecordJson(task.automation_json);
     const id = stringFromRecord(stored, "cronJobId");
     if (!id) return;
@@ -250,7 +221,7 @@ function toFrontendAutomation(task: DatabaseTask, cronJobsById?: Map<string, Cro
     };
 }
 
-function toFrontendTask(task: DatabaseTask, cronJobsById?: Map<string, CronJob>) {
+function toFrontendTask(task: DatabaseTask, cronJobsById?: Map<string, CronJob>): Task {
     const labels = labelsFromTask(task);
     return {
         number: task.id,
@@ -266,7 +237,7 @@ function toFrontendTask(task: DatabaseTask, cronJobsById?: Map<string, CronJob>)
     };
 }
 
-function toFrontendTaskUpdate(update: DatabaseTaskUpdate) {
+function toFrontendTaskUpdate(update: DatabaseTaskUpdate): TaskUpdate {
     return {
         id: update.id,
         taskId: update.task_id,
@@ -347,31 +318,9 @@ function safeId(value: string | undefined): number | undefined {
     return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
-async function readTaskJson<T>(request: Request): Promise<T | Response> {
-    try {
-        const body = await readJson<T>(request);
-        if (!body || typeof body !== "object" || Array.isArray(body)) {
-            return json({ error: "Request body must be an object" }, { status: 400 });
-        }
-        return body;
-    } catch (error) {
-        return json(
-            { error: errorMessage(error, "Invalid JSON") },
-            { status: httpStatusCode(error) }
-        );
-    }
-}
-
-function taskRouteError(error: unknown, fallback = "Invalid task payload"): Response {
-    return json(
-        { error: errorMessage(error, fallback) },
-        { status: httpStatusCode(error) }
-    );
-}
-
 export const taskRoutes = {
     "/api/tasks": {
-        GET: async () => {
+        GET: async (request: Request) => {
             try {
                 const rows = database
                     .prepare(
@@ -387,34 +336,22 @@ export const taskRoutes = {
                     )
                 );
             } catch (error) {
-                console.error("[Tasks] Failed to list tasks:", error);
-                return json({ error: "Failed to list tasks" }, { status: 500 });
+                return routeErrorResponse(request, error, {
+                    code: "tasks_list_failed",
+                    context: "tasks.list",
+                    message: "Failed to list tasks",
+                });
             }
         },
 
         POST: async (request: Request) => {
-            const body = await readTaskJson<{
-                assignee?: Assignee | undefined;
-                automation?: TaskAutomationInput;
-                body?: string;
-                labels?: string[];
-                title?: string;
-            }>(request);
-            if (body instanceof Response) return body;
             try {
-                const title = optionalString(body.title, "Title")?.trim();
-                if (!title) return json({ error: "Title is required" }, { status: 400 });
-                if (
-                    body.assignee !== undefined &&
-                    body.assignee !== null &&
-                    !isValidAssignee(body.assignee)
-                ) {
-                    return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
-                }
+                const body = await readApiJson(request, parseCreateTaskRequest);
+                const title = body.title;
                 const assignee = body.assignee ?? undefined;
                 const now = nowIso();
-                const labels = optionalLabels(body.labels) ?? [];
-                const taskBody = optionalString(body.body, "Body") ?? "";
+                const labels = body.labels ?? [];
+                const taskBody = body.body ?? "";
                 const status =
                     normalizeStatus(
                         labels.includes("done")
@@ -459,7 +396,11 @@ export const taskRoutes = {
                     status: 201,
                 });
             } catch (error) {
-                return taskRouteError(error);
+                return routeErrorResponse(request, error, {
+                    code: "task_create_failed",
+                    context: "tasks.create",
+                    message: "Failed to create task",
+                });
             }
         },
     },
@@ -474,7 +415,11 @@ export const taskRoutes = {
                 if (!row) return json({ error: "Task not found" }, { status: 404 });
                 return json(toFrontendTask(row, await fetchCronJobsById()));
             } catch (error) {
-                return taskRouteError(error);
+                return routeErrorResponse(request, error, {
+                    code: "task_lookup_failed",
+                    context: "tasks.get",
+                    message: "Failed to load task",
+                });
             }
         },
 
@@ -483,15 +428,9 @@ export const taskRoutes = {
             if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
             const existing = taskById(id);
             if (!existing) return json({ error: "Task not found" }, { status: 404 });
-            const body = await readTaskJson<{
-                automation?: TaskAutomationInput | undefined;
-                body?: string;
-                labels?: string[];
-                title?: string;
-            }>(request);
-            if (body instanceof Response) return body;
             try {
-                const labels = optionalLabels(body.labels) ?? labelsFromTask(existing);
+                const body = await readApiJson(request, parseUpdateTaskRequest);
+                const labels = body.labels ?? labelsFromTask(existing);
                 const status =
                     normalizeStatus(
                         labels.includes("done")
@@ -503,9 +442,8 @@ export const taskRoutes = {
                                 : "todo"
                     ) ?? "todo";
                 const priority = derivePriority(labels);
-                const title =
-                    optionalString(body.title, "Title")?.trim() || existing.title;
-                const taskBody = optionalString(body.body, "Body") ?? existing.body;
+                const title = body.title ?? existing.title;
+                const taskBody = body.body ?? existing.body;
                 const automationJson =
                     body.automation === undefined
                         ? existing.automation_json
@@ -539,7 +477,11 @@ export const taskRoutes = {
                 }
                 return json(toFrontendTask(taskById(id) as DatabaseTask));
             } catch (error) {
-                return taskRouteError(error);
+                return routeErrorResponse(request, error, {
+                    code: "task_update_failed",
+                    context: "tasks.update",
+                    message: "Failed to update task",
+                });
             }
         },
 
@@ -565,32 +507,26 @@ export const taskRoutes = {
                     void notifyMira("deleted", existing);
                 }
             } catch (error) {
-                console.error("[Tasks] Failed to delete task:", error);
-                return json({ error: "Failed to delete task" }, { status: 500 });
+                return routeErrorResponse(request, error, {
+                    code: "task_delete_failed",
+                    context: "tasks.delete",
+                    message: "Failed to delete task",
+                });
             }
-            return json({ isOk: true });
+            return json({ isOk: true } satisfies TaskMutationResponse);
         },
     },
 
     "/api/tasks/:id/assign": {
         POST: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            const body = await readTaskJson<{ assignee?: string | null | undefined }>(
-                request
-            );
-            if (body instanceof Response) return body;
-            if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
-            if (
-                body.assignee !== undefined &&
-                body.assignee !== null &&
-                !isValidAssignee(body.assignee)
-            ) {
-                return json({ error: INVALID_ASSIGNEE_MESSAGE }, { status: 400 });
-            }
-            const assignee = body.assignee ?? undefined;
-            const existing = taskById(id);
-            if (!existing) return json({ error: "Task not found" }, { status: 404 });
             try {
+                const body = await readApiJson(request, parseAssignTaskRequest);
+                if (id === undefined)
+                    return json({ error: "Invalid id" }, { status: 400 });
+                const assignee = body.assignee ?? undefined;
+                const existing = taskById(id);
+                if (!existing) return json({ error: "Task not found" }, { status: 404 });
                 database.transaction(() => {
                     database
                         .prepare(
@@ -604,8 +540,11 @@ export const taskRoutes = {
                 }
                 return json(toFrontendTask(taskById(id) as DatabaseTask));
             } catch (error) {
-                console.error("[Tasks] Failed to assign task:", error);
-                return json({ error: "Failed to assign task" }, { status: 500 });
+                return routeErrorResponse(request, error, {
+                    code: "task_assign_failed",
+                    context: "tasks.assign",
+                    message: "Failed to assign task",
+                });
             }
         },
     },
@@ -613,19 +552,14 @@ export const taskRoutes = {
     "/api/tasks/:id/move": {
         POST: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            const body = await readTaskJson<{ columnLabel?: string }>(request);
-            if (body instanceof Response) return body;
             try {
-                const columnLabel = optionalString(body.columnLabel, "Column label");
-                if (id === undefined || !columnLabel) {
+                const body = await readApiJson(request, parseMoveTaskRequest);
+                if (id === undefined) {
                     return json({ error: "Invalid request" }, { status: 400 });
                 }
                 const existing = taskById(id);
                 if (!existing) return json({ error: "Task not found" }, { status: 404 });
-                const status = normalizeStatus(columnLabel);
-                if (!status) {
-                    return json({ error: "Invalid task status" }, { status: 400 });
-                }
+                const status = body.columnLabel;
                 const labels = [
                     ...labelsFromTask(existing).filter(
                         (label) =>
@@ -643,7 +577,11 @@ export const taskRoutes = {
                 })();
                 return json(toFrontendTask(taskById(id) as DatabaseTask));
             } catch (error) {
-                return taskRouteError(error);
+                return routeErrorResponse(request, error, {
+                    code: "task_move_failed",
+                    context: "tasks.move",
+                    message: "Failed to move task",
+                });
             }
         },
     },
@@ -663,24 +601,25 @@ export const taskRoutes = {
                     .all(id) as DatabaseTaskUpdate[];
                 return json(rows.map((row) => toFrontendTaskUpdate(row)));
             } catch (error) {
-                return taskRouteError(error);
+                return routeErrorResponse(request, error, {
+                    code: "task_updates_list_failed",
+                    context: "tasks.updates.list",
+                    message: "Failed to list task updates",
+                });
             }
         },
 
         POST: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            const body = await readTaskJson<{ author?: Assignee; messageMd?: string }>(
-                request
-            );
-            if (body instanceof Response) return body;
             try {
-                const messageMd = optionalString(body.messageMd, "Message")?.trim();
-                if (id === undefined || !messageMd || !isValidAssignee(body.author)) {
+                const body = await readApiJson(request, parseCreateTaskUpdateRequest);
+                if (id === undefined) {
                     return json({ error: "Invalid update payload" }, { status: 400 });
                 }
                 if (!database.prepare("SELECT id FROM tasks WHERE id = ?").get(id)) {
                     return json({ error: "Task not found" }, { status: 404 });
                 }
+                const messageMd = body.messageMd.trim();
                 const author = body.author;
                 const createdAt = nowIso();
                 const result = database.transaction(() => {
@@ -708,7 +647,11 @@ export const taskRoutes = {
                 }
                 return json(toFrontendTaskUpdate(row), { status: 201 });
             } catch (error) {
-                return taskRouteError(error);
+                return routeErrorResponse(request, error, {
+                    code: "task_update_create_failed",
+                    context: "tasks.updates.create",
+                    message: "Failed to create task update",
+                });
             }
         },
     },
@@ -717,11 +660,9 @@ export const taskRoutes = {
         PATCH: async (request: ParametersRequest<"id" | "updateId">) => {
             const id = safeId(request.params.id);
             const updateId = safeId(request.params.updateId);
-            const body = await readTaskJson<{ messageMd?: string }>(request);
-            if (body instanceof Response) return body;
             try {
-                const messageMd = optionalString(body.messageMd, "Message")?.trim();
-                if (id === undefined || updateId === undefined || !messageMd) {
+                const body = await readApiJson(request, parseUpdateTaskUpdateRequest);
+                if (id === undefined || updateId === undefined) {
                     return json({ error: "Invalid update payload" }, { status: 400 });
                 }
                 const existing = database
@@ -729,6 +670,7 @@ export const taskRoutes = {
                     .get(updateId, id);
                 if (!existing)
                     return json({ error: "Update not found" }, { status: 404 });
+                const messageMd = body.messageMd.trim();
                 database.transaction(() => {
                     database
                         .prepare(
@@ -746,7 +688,11 @@ export const taskRoutes = {
                     .get(updateId) as DatabaseTaskUpdate;
                 return json(toFrontendTaskUpdate(row));
             } catch (error) {
-                return taskRouteError(error);
+                return routeErrorResponse(request, error, {
+                    code: "task_update_edit_failed",
+                    context: "tasks.updates.edit",
+                    message: "Failed to edit task update",
+                });
             }
         },
 
@@ -769,9 +715,13 @@ export const taskRoutes = {
                         .prepare("UPDATE tasks SET updated_at = ? WHERE id = ?")
                         .run(nowIso(), id);
                 })();
-                return json({ isOk: true });
+                return json({ isOk: true } satisfies TaskMutationResponse);
             } catch (error) {
-                return taskRouteError(error);
+                return routeErrorResponse(request, error, {
+                    code: "task_update_delete_failed",
+                    context: "tasks.updates.delete",
+                    message: "Failed to delete task update",
+                });
             }
         },
     },

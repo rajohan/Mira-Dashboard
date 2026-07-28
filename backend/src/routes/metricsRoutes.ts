@@ -2,83 +2,29 @@ import { readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import type { Metrics } from "../../../contracts/metrics.ts";
 import gateway from "../gateway.ts";
 import { json } from "../http.ts";
 import {
     CoalescedSnapshot,
-    type CoalescedSnapshotMetrics,
     getCoalescedSnapshotMetrics,
 } from "../lib/coalescedSnapshot.ts";
-import {
-    type ChildProcessMetrics,
-    getChildProcessMetrics,
-    runProcess,
-} from "../lib/processes.ts";
+import { getHttpRequestMetrics } from "../lib/httpRequestMetrics.ts";
+import { runProcess } from "../lib/processes.ts";
 import { stringFallback } from "../lib/values.ts";
-
-interface CpuMetrics {
-    count: number;
-    loadAvg: number[];
-    loadPercent: number;
-    model: string;
-}
-
-interface MemoryMetrics {
-    free: number;
-    percent: number;
-    total: number;
-    totalGB: number;
-    used: number;
-    usedGB: number;
-}
-
-interface DiskMetrics {
-    percent: number;
-    total: number;
-    totalGB: number;
-    used: number;
-    usedGB: number;
-}
-
-interface SystemMetrics {
-    hostname: string;
-    platform: string;
-    uptime: number;
-}
+import { getAppObservabilityMetrics } from "../observability.ts";
+import { routeErrorResponse } from "../routeSupport.ts";
 
 interface NetworkMetrics {
     downloadMbps: number;
     uploadMbps: number;
 }
 
-interface SystemMetricsResponse {
-    cpu: CpuMetrics;
-    disk: DiskMetrics;
-    memory: MemoryMetrics;
-    network: NetworkMetrics;
-    system: SystemMetrics;
-    timestamp: number;
-}
-
-interface TokenMetrics {
-    byAgent: Array<{
-        label: string;
-        model: string;
-        tokens: number;
-        type: string;
-    }>;
-    byModel: Record<string, number>;
-    sessionsByModel: Record<string, number>;
-    total: number;
-}
-
-interface MetricsResponse extends SystemMetricsResponse {
-    polling: {
-        snapshots: CoalescedSnapshotMetrics[];
-    };
-    processes: ChildProcessMetrics;
-    tokens: TokenMetrics;
-}
+type SystemMetricsResponse = Pick<
+    Metrics,
+    "cpu" | "disk" | "memory" | "network" | "system" | "timestamp"
+>;
+type TokenMetrics = Metrics["tokens"];
 
 const PREFERRED_LINUX_NETWORK_INTERFACE = "enp0s6";
 const METRICS_FRESH_MS = 2000;
@@ -343,28 +289,38 @@ function getTokenMetrics(): TokenMetrics {
     };
 }
 
-const metricsSnapshot = new CoalescedSnapshot<MetricsResponse>({
+const metricsSnapshot = new CoalescedSnapshot<Metrics>({
     freshForMs: METRICS_FRESH_MS,
-    load: async () => ({
-        ...(await getSystemMetrics()),
-        polling: {
-            snapshots: getCoalescedSnapshotMetrics(),
-        },
-        processes: getChildProcessMetrics(),
-        tokens: getTokenMetrics(),
-    }),
+    load: async () => {
+        const [system, observability] = await Promise.all([
+            getSystemMetrics(),
+            getAppObservabilityMetrics(),
+        ]);
+        return {
+            ...system,
+            ...observability,
+            http: getHttpRequestMetrics(),
+            polling: {
+                snapshots: getCoalescedSnapshotMetrics(),
+            },
+            tokens: getTokenMetrics(),
+        };
+    },
     name: "system.metrics",
     staleForMs: METRICS_STALE_MS,
 });
 
 export const metricsRoutes = {
     "/api/metrics": {
-        GET: async () => {
+        GET: async (request = new Request("http://localhost/api/metrics")) => {
             try {
                 return json(await metricsSnapshot.read());
             } catch (error) {
-                console.error("[Metrics] Failed to fetch metrics:", error);
-                return json({ error: "Failed to fetch metrics" }, { status: 500 });
+                return routeErrorResponse(request, error, {
+                    code: "metrics_snapshot_failed",
+                    context: "metrics.snapshot",
+                    message: "Failed to fetch metrics",
+                });
             }
         },
     },

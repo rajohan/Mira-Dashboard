@@ -1,50 +1,23 @@
 import os from "node:os";
 import path from "node:path";
 
-import { json, readJson } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import type {
+    TerminalCdRequest,
+    TerminalCdResponse as CdResponse,
+    TerminalCompletionItem as CompletionItem,
+    TerminalCompletionRequest,
+    TerminalCompletionResponse as CompletionResponse,
+} from "../../../contracts/terminal.ts";
+import {
+    parseTerminalCdRequest,
+    parseTerminalCompletionRequest,
+} from "../../../contracts/terminal.ts";
+import { json } from "../http.ts";
 import { guardedPath, readdirGuardedAsync, statGuardedAsync } from "../lib/guardedOps.ts";
-
-interface CompletionRequest {
-    cwd?: string;
-    partial: string;
-}
-
-interface CdRequest {
-    cwd: string;
-    path: string;
-}
-
-interface CdResponse {
-    error?: string;
-    isSuccess: boolean;
-    newCwd: string;
-}
-
-interface CompletionItem {
-    completion: string;
-    display: string;
-    type: "file" | "directory" | "executable";
-}
-
-interface CompletionResponse {
-    commonPrefix: string;
-    completions: CompletionItem[];
-}
+import { readApiJson, routeErrorResponse } from "../routeSupport.ts";
 
 const HOME_DIR = os.homedir();
 const SHELL_ESCAPE_RE = /([\s\\'"$`!&|;<>()*?[\]{}])/gu;
-
-async function readTerminalJson<T>(request: Request): Promise<T | Response> {
-    try {
-        return await readJson<T>(request);
-    } catch (error) {
-        return json(
-            { error: errorMessage(error, "Invalid request body") },
-            { status: httpStatusCode(error) }
-        );
-    }
-}
 
 function expandPath(inputPath: string, cwd: string): string {
     if (inputPath.includes("\0")) return cwd;
@@ -216,23 +189,25 @@ async function getCompletions(
 export const terminalRoutes = {
     "/api/terminal/complete": {
         POST: async (request: Request) => {
-            const body = await readTerminalJson<CompletionRequest | undefined>(request);
-            if (body instanceof Response) return body;
-            if (!body || typeof body !== "object") {
-                return json({ error: "Missing or invalid body" }, { status: 400 });
+            let body: TerminalCompletionRequest;
+            try {
+                body = await readApiJson(request, parseTerminalCompletionRequest);
+            } catch (error) {
+                return routeErrorResponse(request, error, {
+                    code: "terminal_completion_failed",
+                    context: "terminal.complete",
+                    message: "Terminal completion failed",
+                });
             }
 
             const { cwd, partial } = body;
-            if (typeof partial !== "string" || partial.includes("\0")) {
+            if (partial.includes("\0")) {
                 return json({ error: "Missing or invalid partial" }, { status: 400 });
             }
-            const trimmedCwd = typeof cwd === "string" ? cwd.trim() : undefined;
+            const trimmedCwd = cwd?.trim();
             if (
                 cwd !== undefined &&
-                (typeof cwd !== "string" ||
-                    !trimmedCwd ||
-                    trimmedCwd.includes("\0") ||
-                    !path.isAbsolute(trimmedCwd))
+                (!trimmedCwd || trimmedCwd.includes("\0") || !path.isAbsolute(trimmedCwd))
             ) {
                 return json({ error: "Missing or invalid cwd" }, { status: 400 });
             }
@@ -242,27 +217,24 @@ export const terminalRoutes = {
 
     "/api/terminal/cd": {
         POST: async (request: Request) => {
-            const body = await readTerminalJson<CdRequest | undefined>(request);
-            if (body instanceof Response) return body;
-            if (!body || typeof body !== "object") {
-                return json(
-                    {
-                        error: "Missing or invalid body",
-                        isSuccess: false,
-                        newCwd: HOME_DIR,
-                    } satisfies CdResponse,
-                    { status: 400 }
-                );
+            let body: TerminalCdRequest;
+            try {
+                body = await readApiJson(request, parseTerminalCdRequest);
+            } catch (error) {
+                return routeErrorResponse(request, error, {
+                    code: "terminal_cd_failed",
+                    context: "terminal.cd",
+                    message: "Terminal directory change failed",
+                });
             }
-            const resolvedCwd = typeof body.cwd === "string" ? body.cwd : HOME_DIR;
+            const resolvedCwd = body.cwd;
             const targetPath = body.path;
 
             if (
                 !targetPath ||
-                typeof targetPath !== "string" ||
                 resolvedCwd.includes("\0") ||
-                (typeof body.cwd === "string" &&
-                    (!body.cwd.trim() || !body.cwd.startsWith("/"))) ||
+                !body.cwd.trim() ||
+                !body.cwd.startsWith("/") ||
                 targetPath.includes("\0")
             ) {
                 return json(

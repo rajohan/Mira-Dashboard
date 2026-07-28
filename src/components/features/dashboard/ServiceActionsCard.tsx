@@ -1,7 +1,8 @@
 import { AlertTriangle, Loader2, Play, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import type { ExecResponse, OpsActionDefinition } from "../../../hooks";
+import type { ExecResponse } from "../../../../contracts/exec";
+import type { OpsActionDefinition } from "../../../hooks";
 import {
     OPS_ACTIONS,
     useCacheEntry,
@@ -126,7 +127,7 @@ export function ServiceActionsCard({ className }: ServiceActionsCardProperties =
               action: runningActionLabel || "Running action",
               ranAt: execJob.data.startedAt,
               ...(execJob.data.status === "done" && { code: execJob.data.code }),
-              running: execJob.data.status === "running",
+              running: execJob.data.status !== "done",
           }
         : result
           ? {
