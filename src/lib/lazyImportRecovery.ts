@@ -1,5 +1,11 @@
 const LAZY_IMPORT_RELOAD_COOLDOWN_MS = 60_000;
 const LAZY_IMPORT_RELOAD_KEY_PREFIX = "mira-dashboard:lazy-import-reload:";
+const LAZY_IMPORT_FAILURE_MESSAGES = [
+    "error loading dynamically imported module",
+    "failed to fetch dynamically imported module",
+    "failed to load module script",
+    "importing a module script failed",
+] as const;
 
 interface RecoveryStorage {
     getItem(key: string): string | null | undefined;
@@ -14,6 +20,12 @@ interface LazyImportRecoveryOptions {
 }
 
 const reloadAttempts = new Map<string, number>();
+
+function isLazyImportLoadFailure(error: unknown): boolean {
+    if (!(error instanceof Error) || error.name !== "TypeError") return false;
+    const message = error.message.toLowerCase();
+    return LAZY_IMPORT_FAILURE_MESSAGES.some((candidate) => message.includes(candidate));
+}
 
 function browserSessionStorage(): RecoveryStorage | undefined {
     try {
@@ -80,6 +92,8 @@ export async function loadLazyModule<T>(
         clearReloadAttempt(storage ?? undefined, storageKey);
         return loaded;
     } catch (error) {
+        if (!isLazyImportLoadFailure(error)) throw error;
+
         const now = (options.now ?? Date.now)();
         const lastReloadAt =
             storedReloadAt(storage ?? undefined, storageKey) ??

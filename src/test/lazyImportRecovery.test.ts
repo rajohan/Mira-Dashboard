@@ -39,6 +39,26 @@ describe("lazy import recovery", () => {
         );
     });
 
+    it("surfaces module evaluation errors without reloading the page", async () => {
+        const evaluationError = new TypeError(
+            "Cannot read properties of undefined (reading 'route')"
+        );
+        const storage = recoveryStorage();
+        const reload = jest.fn();
+
+        await expect(
+            loadLazyModule(
+                "route-evaluation-failure",
+                async () => {
+                    throw evaluationError;
+                },
+                { reload, storage }
+            )
+        ).rejects.toBe(evaluationError);
+        expect(reload).not.toHaveBeenCalled();
+        expect(storage.setItem).not.toHaveBeenCalled();
+    });
+
     it("reloads once for a missing chunk and rejects a repeated failure", async () => {
         const importError = new TypeError("Failed to fetch dynamically imported module");
         const storage = recoveryStorage();

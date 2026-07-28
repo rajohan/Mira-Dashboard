@@ -56,16 +56,24 @@ function normalizedOutputKey(outputKey: string): string {
     return outputKey.replaceAll("\\", "/").replace(/^\.\//u, "");
 }
 
-function outputFilePath(outdir: string, outputKey: string): string {
+function isPathWithin(directory: string, candidate: string): boolean {
+    return candidate === directory || candidate.startsWith(`${directory}${path.sep}`);
+}
+
+function resolvedOutput(outdir: string, outputKey: string) {
     const resolvedOutdir = path.resolve(outdir);
-    const resolvedPath = path.resolve(resolvedOutdir, normalizedOutputKey(outputKey));
-    if (
-        resolvedPath !== resolvedOutdir &&
-        !resolvedPath.startsWith(`${resolvedOutdir}${path.sep}`)
-    ) {
+    const normalizedKey = normalizedOutputKey(outputKey);
+    const cwdRelativePath = path.resolve(normalizedKey);
+    const resolvedPath = isPathWithin(resolvedOutdir, cwdRelativePath)
+        ? cwdRelativePath
+        : path.resolve(resolvedOutdir, normalizedKey);
+    if (resolvedPath === resolvedOutdir || !isPathWithin(resolvedOutdir, resolvedPath)) {
         throw new Error(`Frontend build output escaped its directory: ${outputKey}`);
     }
-    return resolvedPath;
+    return {
+        filePath: resolvedPath,
+        relativePath: path.relative(resolvedOutdir, resolvedPath).replaceAll("\\", "/"),
+    };
 }
 
 function isIndexEntryPoint(entryPoint?: string): boolean {
@@ -136,10 +144,11 @@ export async function measureFrontendBundle(
     for (const outputKey of Object.keys(metafile.outputs)) {
         const extension = path.extname(outputKey);
         if (extension !== ".css" && extension !== ".js") continue;
-        const contents = await readFile(outputFilePath(outdir, outputKey));
+        const output = resolvedOutput(outdir, outputKey);
+        const contents = await readFile(output.filePath);
         measuredOutputs.set(outputKey, {
             gzipBytes: gzipSync(contents, { level: 9 }).byteLength,
-            outputPath: normalizedOutputKey(outputKey),
+            outputPath: output.relativePath,
             rawBytes: contents.byteLength,
         });
     }

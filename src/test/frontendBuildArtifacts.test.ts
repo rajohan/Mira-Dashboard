@@ -135,6 +135,34 @@ describe("frontend build artifacts", () => {
         );
     });
 
+    it("does not prepend outdir when metafile keys already include it", async () => {
+        const outdir = await temporaryOutputRoot();
+        const entryContents = "export const entry = true;\n";
+        await fs.writeFile(path.join(outdir, "assets", "entry.js"), entryContents);
+        const outdirKey = path.relative(process.cwd(), outdir).replaceAll("\\", "/");
+        const outputKey = `${outdirKey}/assets/entry.js`;
+        const metafile = {
+            inputs: {},
+            outputs: {
+                [outputKey]: {
+                    bytes: entryContents.length,
+                    entryPoint: "index.html",
+                    exports: [],
+                    imports: [],
+                    inputs: {},
+                },
+            },
+        } satisfies Bun.BuildMetafile;
+
+        const metrics = await measureFrontendBundle(metafile, outdir);
+        expect(metrics.initialFiles).toEqual([
+            expect.objectContaining({
+                outputPath: "assets/entry.js",
+                rawBytes: Buffer.byteLength(entryContents),
+            }),
+        ]);
+    });
+
     it("fails closed when build metadata has no initial JavaScript graph", async () => {
         const outdir = await temporaryOutputRoot();
         const metafile = {
