@@ -34,6 +34,26 @@ export interface Metrics {
         downloadMbps: number;
         uploadMbps: number;
     };
+    polling?: {
+        snapshots: Array<{
+            activeLoads: number;
+            averageLoadMs: number;
+            coalescedHits: number;
+            failures: number;
+            freshHits: number;
+            lastLoadMs: number;
+            loads: number;
+            name: string;
+            requests: number;
+            staleHits: number;
+        }>;
+    };
+    processes?: {
+        active: number;
+        failed: number;
+        started: number;
+        succeeded: number;
+    };
     tokens: {
         total: number;
         byModel: Record<string, number>;

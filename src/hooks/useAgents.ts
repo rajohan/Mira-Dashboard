@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { refreshPolicy } from "../lib/refreshPolicy";
 import type { Agent, AgentTaskHistoryItem } from "../types/session";
 import { apiFetchRequired } from "./useApi";
 
@@ -41,7 +42,7 @@ export function useAgentsStatus() {
     return useQuery<AgentsStatusResponse>({
         queryKey: ["agents", "status"],
         queryFn: () => apiFetchRequired<AgentsStatusResponse>("/agents/status"),
-        refetchInterval: 2000,
+        refetchInterval: refreshPolicy.live,
         staleTime: 1000,
     });
 }
@@ -63,7 +64,7 @@ export function useAgentTaskHistory(limit = 8) {
             apiFetchRequired<AgentTaskHistoryResponse>(
                 `/agents/tasks/history?limit=${limit}`
             ),
-        refetchInterval: 5000,
+        refetchInterval: refreshPolicy.active,
         staleTime: 4000,
     });
 }
@@ -74,7 +75,7 @@ export function useAgentStatus(agentId: string) {
         queryKey: ["agents", "status", agentId],
         queryFn: () =>
             apiFetchRequired<Agent>(`/agents/${encodeURIComponent(agentId)}/status`),
-        refetchInterval: 2000,
+        refetchInterval: refreshPolicy.live,
         staleTime: 1000,
     });
 }

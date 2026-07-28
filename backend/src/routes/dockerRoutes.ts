@@ -1,5 +1,6 @@
 import { database } from "../database.ts";
-import { json, readJson } from "../http.ts";
+import { json, jsonWithEtag, readJson } from "../http.ts";
+import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
 import {
@@ -306,12 +307,12 @@ async function getContainerInspectMap(containerIds: string[]) {
     return map;
 }
 
-export async function getContainers() {
+export async function getContainers(statsRows?: DockerStatsRow[]) {
     const psRows = parseJsonLines<DockerPsRow>(
         await runDocker(["ps", "-a", "--format", "{{json .}}"])
     );
-    const statsRows = await getContainerStatsRows();
-    const statsById = new Map(statsRows.map((row) => [row.ID, row]));
+    const resolvedStatsRows = statsRows ?? (await getContainerStatsRows());
+    const statsById = new Map(resolvedStatsRows.map((row) => [row.ID, row]));
     const inspectMap = await getContainerInspectMap(psRows.map((row) => row.ID));
 
     return psRows.map((row) => {
@@ -370,6 +371,25 @@ export async function getContainerStatsRows() {
     return parseJsonLines<DockerStatsRow>(
         await runDocker(["stats", "--no-stream", "--format", "{{json .}}"])
     );
+}
+
+async function getContainerLogs(containerId: string, tail: number): Promise<string> {
+    const { code, stderr, stdout } = await runProcess(
+        dockerBin,
+        ["logs", "--tail", String(tail), containerId],
+        {
+            cwd: getDockerRoot(),
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+            timeoutMs: DOCKER_REQUEST_TIMEOUT_MS,
+        }
+    );
+    if (code !== 0) {
+        throw new Error(
+            `docker logs failed with exit code ${code}: ${stderr.trim() || stdout.trim()}`
+        );
+    }
+    return [String(stdout), String(stderr)].filter(Boolean).join("\n").trim();
 }
 
 async function getContainerDetails(containerId: string) {
@@ -661,10 +681,19 @@ async function runQueuedDockerAction(options: {
         timeoutMs: options.timeoutMs,
     });
     return successfulJobExecutionOutput(
-        await waitForJobExecution(execution.id, {
-            timeoutMs: options.timeoutMs + 30 * 60 * 1000,
-        })
+        await waitForDockerMutationExecution(
+            execution.id,
+            options.timeoutMs + 30 * 60 * 1000
+        )
     );
+}
+
+async function waitForDockerMutationExecution(executionId: string, timeoutMs: number) {
+    try {
+        return await waitForJobExecution(executionId, { timeoutMs });
+    } finally {
+        invalidateDockerReadSnapshots();
+    }
 }
 
 function outputString(output: Record<string, unknown>, key: string): string {
@@ -709,15 +738,50 @@ async function runStackAction(request: Request): Promise<Response> {
     });
 }
 
+const dockerStatsSnapshot = new CoalescedSnapshot<
+    Awaited<ReturnType<typeof getContainerStatsRows>>
+>({
+    freshForMs: 2000,
+    load: getContainerStatsRows,
+    name: "docker.stats",
+    staleForMs: 15_000,
+});
+
+const dockerStateSnapshot = new CoalescedSnapshot<
+    Awaited<ReturnType<typeof getContainers>>
+>({
+    freshForMs: 2000,
+    load: async () => getContainers(await dockerStatsSnapshot.read()),
+    name: "docker.state",
+    staleForMs: 15_000,
+});
+
+/** Returns the shared read-only container sampler for polling routes. */
+export async function getDockerContainersSnapshot() {
+    return await dockerStateSnapshot.read();
+}
+
+function invalidateDockerReadSnapshots(): void {
+    dockerStateSnapshot.invalidate();
+    dockerStatsSnapshot.invalidate();
+}
+
+function dockerSnapshotJson(request: Request | undefined, data: unknown): Response {
+    return request ? jsonWithEtag(request, data) : json(data);
+}
+
 export const dockerRoutes = {
     "/api/docker/containers": {
-        GET: async () => json({ containers: await getContainers() }),
+        GET: async (request?: Request) =>
+            dockerSnapshotJson(request, {
+                containers: await getDockerContainersSnapshot(),
+            }),
     },
     "/api/docker/containers/stats": {
-        GET: async () => {
-            const rows = await getContainerStatsRows();
-            return json({
-                stats: rows.map((row) => ({
+        GET: async (request?: Request) => {
+            const statsRows = await dockerStatsSnapshot.read();
+            return dockerSnapshotJson(request, {
+                stats: statsRows.map((row) => ({
                     blockIO: row.BlockIO,
                     cpu: row.CPUPerc,
                     id: row.ID,
@@ -771,29 +835,7 @@ export const dockerRoutes = {
             if (!containerId) return invalidDockerIdentifier("containerId");
             const requestedTail = Math.trunc(queryNumber(request, "tail", 200)) || 200;
             const tail = Math.min(MAX_LOG_TAIL, Math.max(MIN_LOG_TAIL, requestedTail));
-            const { code, stderr, stdout } = await runProcess(
-                dockerBin,
-                ["logs", "--tail", String(tail), containerId],
-                {
-                    cwd: getDockerRoot(),
-                    env: process.env,
-                    maxBuffer: 10 * 1024 * 1024,
-                    timeoutMs: DOCKER_REQUEST_TIMEOUT_MS,
-                }
-            );
-            if (code !== 0) {
-                throw new Error(
-                    `docker logs failed with exit code ${code}: ${
-                        stderr.trim() || stdout.trim()
-                    }`
-                );
-            }
-            return json({
-                content: [String(stdout), String(stderr)]
-                    .filter(Boolean)
-                    .join("\n")
-                    .trim(),
-            });
+            return json({ content: await getContainerLogs(containerId, tail) });
         },
     },
     "/api/docker/exec/:jobId": {
@@ -962,9 +1004,9 @@ export const dockerRoutes = {
         POST: async () => {
             try {
                 const scheduledRun = enqueueScheduledJob("docker.updater", "manual");
-                const execution = await waitForJobExecution(
+                const execution = await waitForDockerMutationExecution(
                     scheduledRun.executionId as string,
-                    { timeoutMs: 60 * 60 * 1000 }
+                    60 * 60 * 1000
                 );
                 const steps = dockerUpdaterSteps(execution);
                 return json({
@@ -1011,9 +1053,7 @@ export const dockerRoutes = {
                     timeoutMs: 30 * 60 * 1000,
                 });
                 steps = dockerUpdaterSteps(
-                    await waitForJobExecution(execution.id, {
-                        timeoutMs: 60 * 60 * 1000,
-                    })
+                    await waitForDockerMutationExecution(execution.id, 60 * 60 * 1000)
                 );
             } catch (error) {
                 return json(

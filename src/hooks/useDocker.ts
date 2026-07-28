@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
 import { cacheKeys, useCacheEntry } from "./useCache";
 
@@ -206,8 +207,8 @@ export const dockerKeys = {
     summaryRefresh: ["docker", "summary-refresh"] as const,
 };
 
-const DOCKER_CONTAINER_REFRESH_MS = 5000;
-const DOCKER_SUMMARY_REFRESH_MS = 30_000;
+const DOCKER_CONTAINER_REFRESH_MS = refreshPolicy.active;
+const DOCKER_SUMMARY_REFRESH_MS = refreshPolicy.background;
 
 function invalidateDockerSummary(queryClient: ReturnType<typeof useQueryClient>) {
     return queryClient.invalidateQueries({ queryKey: cacheKeys.entry("docker.summary") });
@@ -281,7 +282,7 @@ export function useDockerContainer(containerId: string | undefined) {
         queryKey: dockerKeys.container(containerId || ""),
         queryFn: () => fetchContainer(containerId!),
         enabled: Boolean(containerId),
-        refetchInterval: 60_000,
+        refetchInterval: refreshPolicy.static,
         refetchOnWindowFocus: false,
         staleTime: 60_000,
     });
@@ -297,7 +298,7 @@ export function useDockerContainerLogs(
         queryKey: dockerKeys.containerLogs(containerId || "", tail),
         queryFn: () => fetchContainerLogs(containerId!, tail),
         enabled: isEnabled && Boolean(containerId),
-        refetchInterval: 5000,
+        refetchInterval: refreshPolicy.active,
     });
 }
 

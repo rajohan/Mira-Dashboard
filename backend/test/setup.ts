@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { afterAll, afterEach, jest } from "bun:test";
 
+import { resetCoalescedSnapshotsForTests } from "../src/lib/coalescedSnapshot.ts";
+
 const preloadDatabaseRoot = mkdtempSync(
     path.join(tmpdir(), "mira-dashboard-test-preload-")
 );
@@ -44,4 +46,5 @@ afterAll(() => {
 
 afterEach(() => {
     jest.restoreAllMocks();
+    resetCoalescedSnapshotsForTests();
 });

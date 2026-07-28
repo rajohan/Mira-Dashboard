@@ -4,6 +4,7 @@ import Path from "node:path";
 
 import { database } from "../database.ts";
 import gateway from "../gateway.ts";
+import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import {
     guardedPath,
     mkdirGuarded,
@@ -405,7 +406,7 @@ function resolveConfiguredModelName(
 }
 
 /** Returns Gateway sessions for agent keys, preferring live Gateway data and falling back to cached files on failure. */
-async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
+async function loadGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     const cached: GatewaySessionSummary[] = (() => {
         try {
             return gateway
@@ -477,6 +478,17 @@ async function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
         // Fall back to cached sessions below
     }
     return cached;
+}
+
+const gatewayAgentSessionsSnapshot = new CoalescedSnapshot<GatewaySessionSummary[]>({
+    freshForMs: 1500,
+    load: loadGatewaySessionsForAgents,
+    name: "openclaw.agent-sessions",
+    staleForMs: 10_000,
+});
+
+function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
+    return gatewayAgentSessionsSnapshot.read();
 }
 
 /** Returns a millisecond timestamp for Gateway values that may already be numeric or ISO strings. */

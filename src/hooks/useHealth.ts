@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiFetchRequired } from "./useApi";
 
 /** Represents the health API response. */
@@ -35,7 +36,7 @@ export function useHealth() {
     return useQuery({
         queryKey: ["health"],
         queryFn: fetchHealth,
-        refetchInterval: 10_000,
+        refetchInterval: refreshPolicy.active * 2,
         staleTime: 5000,
     });
 }

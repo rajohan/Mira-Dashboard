@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
+import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiFetchRequired, apiPostRequired } from "./useApi";
 
 /** Represents pull request author. */
@@ -164,7 +165,7 @@ export const deliveryKeys = {
     releaseStatus: () => [...deliveryKeys.all, "releases"] as const,
 };
 
-export const DELIVERY_NAV_REFRESH_MS = 60_000;
+export const DELIVERY_NAV_REFRESH_MS = refreshPolicy.static;
 export const DELIVERY_PAGE_REFRESH_MS = AUTO_REFRESH_MS;
 
 /** Fetches pull requests. */
@@ -286,7 +287,9 @@ async function stopPullRequestPreview(number: number): Promise<PullRequestPrevie
 }
 
 /** Provides pull requests. */
-export function usePullRequests(refreshInterval = DELIVERY_PAGE_REFRESH_MS) {
+export function usePullRequests(
+    refreshInterval: number | false = DELIVERY_PAGE_REFRESH_MS
+) {
     return useQuery({
         queryKey: deliveryKeys.list(),
         queryFn: fetchPullRequests,
@@ -331,7 +334,7 @@ export function usePullRequestPreview() {
         queryKey: deliveryKeys.preview(),
         queryFn: fetchPullRequestPreview,
         staleTime: 2000,
-        refetchInterval: 5000,
+        refetchInterval: refreshPolicy.active,
     });
 }
 

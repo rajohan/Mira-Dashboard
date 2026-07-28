@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { Server } from "bun";
 
 import { type AuthSession, type AuthUser, getAuthSessionFromSessionId } from "./auth.ts";
@@ -54,6 +56,38 @@ export function json(data: unknown, init: BunResponseInit = {}): Response {
     const headers = new Headers(init.headers);
     headers.set("Content-Type", "application/json");
     return Response.json(data, { ...init, headers });
+}
+
+function hasMatchingEtag(request: Request, etag: string): boolean {
+    const candidates = request.headers.get("if-none-match");
+    if (!candidates) return false;
+    const normalizedEtag = etag.replace(/^W\//u, "");
+    return candidates.split(",").some((candidate) => {
+        const normalizedCandidate = candidate.trim().replace(/^W\//u, "");
+        return normalizedCandidate === "*" || normalizedCandidate === normalizedEtag;
+    });
+}
+
+/**
+ * Serves private JSON with a strong validator so repeated polling can reuse the
+ * browser's response body even when it still revalidates with the backend.
+ */
+export function jsonWithEtag(
+    request: Request,
+    data: unknown,
+    init: BunResponseInit = {}
+): Response {
+    const body = JSON.stringify(data);
+    const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
+    const headers = new Headers(init.headers);
+    headers.set("Cache-Control", "private, no-cache");
+    headers.set("Content-Type", "application/json");
+    headers.set("ETag", etag);
+    headers.set("Vary", "Cookie, Authorization");
+    if (hasMatchingEtag(request, etag)) {
+        return new Response(undefined, { ...init, headers, status: 304 });
+    }
+    return new Response(body, { ...init, headers });
 }
 
 export function text(

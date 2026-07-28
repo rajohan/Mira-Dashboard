@@ -16,10 +16,23 @@ export interface RunProcessResult {
     stdout: string;
 }
 
+export interface ChildProcessMetrics {
+    active: number;
+    failed: number;
+    started: number;
+    succeeded: number;
+}
+
 export type BunProcess = ReturnType<typeof Bun.spawn>;
 
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 const DEFAULT_FORCE_KILL_GRACE_MS = 3000;
+const childProcessMetrics: ChildProcessMetrics = {
+    active: 0,
+    failed: 0,
+    started: 0,
+    succeeded: 0,
+};
 
 /** Returns the absolute Bun executable already running the Dashboard process. */
 export function resolveBunExecutable(): string {
@@ -64,7 +77,7 @@ export function spawnProcess(
         throw new DOMException("Process aborted before start", "AbortError");
     }
     const command = scopedJobProcessCommand(executable, arguments_);
-    return Bun.spawn({
+    const process = Bun.spawn({
         cmd: [command.executable, ...command.arguments],
         cwd: options.cwd,
         detached: options.detached ?? true,
@@ -73,6 +86,28 @@ export function spawnProcess(
         stdin: "ignore",
         stdout: "pipe",
     });
+    childProcessMetrics.active += 1;
+    childProcessMetrics.started += 1;
+    void process.exited
+        .then((code) => {
+            if (code === 0) {
+                childProcessMetrics.succeeded += 1;
+            } else {
+                childProcessMetrics.failed += 1;
+            }
+        })
+        .catch(() => {
+            childProcessMetrics.failed += 1;
+        })
+        .finally(() => {
+            childProcessMetrics.active = Math.max(0, childProcessMetrics.active - 1);
+        });
+    return process;
+}
+
+/** Returns aggregate process telemetry without command arguments or environment data. */
+export function getChildProcessMetrics(): ChildProcessMetrics {
+    return { ...childProcessMetrics };
 }
 
 export function killProcessGroup(process_: BunProcess, signal: NodeJS.Signals): void {

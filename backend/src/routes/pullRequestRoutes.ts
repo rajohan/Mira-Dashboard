@@ -1,4 +1,5 @@
-import { json, readJson } from "../http.ts";
+import { json, jsonWithEtag, readJson } from "../http.ts";
+import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     getPullRequestPreviewStatus,
@@ -40,13 +41,58 @@ function parsePullRequestNumber(value: unknown): number | Response {
     }
 }
 
+const pullRequestPreviewSnapshot = new CoalescedSnapshot<
+    Awaited<ReturnType<typeof getPullRequestPreviewStatus>>
+>({
+    freshForMs: 2000,
+    load: getPullRequestPreviewStatus,
+    name: "git.pull-request-preview",
+    staleForMs: 10_000,
+});
+
+const pullRequestListSnapshot = new CoalescedSnapshot<
+    Awaited<ReturnType<typeof listDashboardPullRequests>>
+>({
+    freshForMs: 15_000,
+    load: async () => {
+        const pullRequests = await listDashboardPullRequests();
+        await reconcileClosedPullRequestPreview(pullRequests);
+        pullRequestPreviewSnapshot.invalidate();
+        return pullRequests;
+    },
+    name: "github.pull-requests",
+    staleForMs: 120_000,
+});
+
+const productionCheckoutSnapshot = new CoalescedSnapshot<
+    Awaited<ReturnType<typeof getProductionCheckoutStatus>>
+>({
+    freshForMs: 3000,
+    load: () => getProductionCheckoutStatus(),
+    name: "git.production-checkout",
+    staleForMs: 30_000,
+});
+
+function pullRequestSnapshotJson(request: Request | undefined, data: unknown): Response {
+    return request ? jsonWithEtag(request, data) : json(data);
+}
+
+async function runPullRequestMutation<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+        return await operation();
+    } finally {
+        pullRequestListSnapshot.invalidate();
+        productionCheckoutSnapshot.invalidate();
+    }
+}
+
 export const pullRequestRoutes = {
     "/api/pull-requests": {
-        GET: async () => {
+        GET: async (request?: Request) => {
             try {
-                const pullRequests = await listDashboardPullRequests();
-                await reconcileClosedPullRequestPreview(pullRequests);
-                return json({ pullRequests });
+                return pullRequestSnapshotJson(request, {
+                    pullRequests: await pullRequestListSnapshot.read(),
+                });
             } catch (error) {
                 return routeError(error);
             }
@@ -60,7 +106,11 @@ export const pullRequestRoutes = {
                 const body = request.body
                     ? await readJson<{ deploy?: unknown } | undefined>(request)
                     : undefined;
-                return json(await runPullRequestApproval(number, body?.deploy === true));
+                return json(
+                    await runPullRequestMutation(() =>
+                        runPullRequestApproval(number, body?.deploy === true)
+                    )
+                );
             } catch (error) {
                 return routeError(error);
             }
@@ -78,7 +128,11 @@ export const pullRequestRoutes = {
                     typeof body?.comment === "string" && body.comment.trim()
                         ? body.comment.trim()
                         : "Closed from Mira Dashboard after Rajohan rejected it.";
-                return json(await runPullRequestRejection(number, comment));
+                return json(
+                    await runPullRequestMutation(() =>
+                        runPullRequestRejection(number, comment)
+                    )
+                );
             } catch (error) {
                 return routeError(error);
             }
@@ -89,7 +143,11 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                return json(await runPullRequestReviewApproval(number));
+                return json(
+                    await runPullRequestMutation(() =>
+                        runPullRequestReviewApproval(number)
+                    )
+                );
             } catch (error) {
                 return routeError(error);
             }
@@ -100,7 +158,9 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                return json(await runPullRequestBranchUpdate(number));
+                return json(
+                    await runPullRequestMutation(() => runPullRequestBranchUpdate(number))
+                );
             } catch (error) {
                 return routeError(error);
             }
@@ -111,13 +171,17 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                return json(
-                    {
-                        isOk: true,
-                        preview: await prepareAndStartPullRequestPreview(number),
-                    },
-                    { status: 202 }
-                );
+                try {
+                    return json(
+                        {
+                            isOk: true,
+                            preview: await prepareAndStartPullRequestPreview(number),
+                        },
+                        { status: 202 }
+                    );
+                } finally {
+                    pullRequestPreviewSnapshot.invalidate();
+                }
             } catch (error) {
                 return routeError(error, "PR preview startup failed");
             }
@@ -128,10 +192,14 @@ export const pullRequestRoutes = {
             const number = parsePullRequestNumber(request.params.number);
             if (number instanceof Response) return number;
             try {
-                return json({
-                    isOk: true,
-                    preview: await prepareAndStopPullRequestPreview(number),
-                });
+                try {
+                    return json({
+                        isOk: true,
+                        preview: await prepareAndStopPullRequestPreview(number),
+                    });
+                } finally {
+                    pullRequestPreviewSnapshot.invalidate();
+                }
             } catch (error) {
                 return routeError(error, "PR preview stop failed");
             }
@@ -140,10 +208,12 @@ export const pullRequestRoutes = {
     "/api/pull-requests/deploy": {
         POST: async () => {
             try {
-                return json({
-                    deployment: await prepareAndStartDeployLatest(),
-                    isOk: true,
-                });
+                return json(
+                    await runPullRequestMutation(async () => ({
+                        deployment: await prepareAndStartDeployLatest(),
+                        isOk: true,
+                    }))
+                );
             } catch (error) {
                 return routeError(error);
             }
@@ -177,10 +247,13 @@ export const pullRequestRoutes = {
                         { status: 400 }
                     );
                 }
-                return json({
-                    deployment: await prepareAndStartRollback(body.targetCommit),
-                    isOk: true,
-                });
+                const targetCommit = body.targetCommit;
+                return json(
+                    await runPullRequestMutation(async () => ({
+                        deployment: await prepareAndStartRollback(targetCommit),
+                        isOk: true,
+                    }))
+                );
             } catch (error) {
                 return routeError(error);
             }
@@ -189,7 +262,7 @@ export const pullRequestRoutes = {
     "/api/pull-requests/production-checkout": {
         GET: async () => {
             try {
-                return json({ checkout: await getProductionCheckoutStatus() });
+                return json({ checkout: await productionCheckoutSnapshot.read() });
             } catch (error) {
                 return routeError(error);
             }
@@ -198,7 +271,7 @@ export const pullRequestRoutes = {
     "/api/pull-requests/preview": {
         GET: async () => {
             try {
-                return json({ preview: await getPullRequestPreviewStatus() });
+                return json({ preview: await pullRequestPreviewSnapshot.read() });
             } catch (error) {
                 return routeError(error, "PR preview status failed");
             }

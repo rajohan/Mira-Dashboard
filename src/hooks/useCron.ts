@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { refreshPolicy } from "../lib/refreshPolicy";
 import type { JobDisableIntent } from "../types/job";
 import { apiFetchRequired, apiPostRequired } from "./useApi";
 
@@ -40,7 +41,7 @@ export function useCronJobs() {
         queryKey: cronKeys.jobs(),
         queryFn: () => apiFetchRequired<CronJobsResponse>("/cron/jobs"),
         select: (data) => data.jobs,
-        refetchInterval: 10_000,
+        refetchInterval: refreshPolicy.active * 2,
     });
 }
 

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { refreshPolicy } from "../lib/refreshPolicy";
 import type { JobDisableIntent } from "../types/job";
 import { apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
 import {
@@ -120,8 +121,8 @@ export function useScheduledJobs() {
         select: (data) => data.jobs.map((job) => normalizeScheduledJob(job)),
         refetchInterval: (query) =>
             query.state.data?.jobs.some((job) => job.isQueued || job.isRunning)
-                ? 2000
-                : 30_000,
+                ? refreshPolicy.live
+                : refreshPolicy.background,
     });
 }
 
@@ -139,8 +140,8 @@ export function useScheduledJobRuns(id: string) {
             query.state.data?.runs.some(
                 (run) => run.status === "queued" || run.status === "running"
             )
-                ? 2000
-                : 30_000,
+                ? refreshPolicy.live
+                : refreshPolicy.background,
     });
 }
 

@@ -4,7 +4,16 @@ import path from "node:path";
 
 import gateway from "../gateway.ts";
 import { json } from "../http.ts";
-import { runProcess } from "../lib/processes.ts";
+import {
+    CoalescedSnapshot,
+    type CoalescedSnapshotMetrics,
+    getCoalescedSnapshotMetrics,
+} from "../lib/coalescedSnapshot.ts";
+import {
+    type ChildProcessMetrics,
+    getChildProcessMetrics,
+    runProcess,
+} from "../lib/processes.ts";
 import { stringFallback } from "../lib/values.ts";
 
 interface CpuMetrics {
@@ -64,10 +73,16 @@ interface TokenMetrics {
 }
 
 interface MetricsResponse extends SystemMetricsResponse {
+    polling: {
+        snapshots: CoalescedSnapshotMetrics[];
+    };
+    processes: ChildProcessMetrics;
     tokens: TokenMetrics;
 }
 
 const PREFERRED_LINUX_NETWORK_INTERFACE = "enp0s6";
+const METRICS_FRESH_MS = 2000;
+const METRICS_STALE_MS = 10_000;
 
 const metricsRouteState: {
     networkSampleLock: Promise<void>;
@@ -328,14 +343,25 @@ function getTokenMetrics(): TokenMetrics {
     };
 }
 
+const metricsSnapshot = new CoalescedSnapshot<MetricsResponse>({
+    freshForMs: METRICS_FRESH_MS,
+    load: async () => ({
+        ...(await getSystemMetrics()),
+        polling: {
+            snapshots: getCoalescedSnapshotMetrics(),
+        },
+        processes: getChildProcessMetrics(),
+        tokens: getTokenMetrics(),
+    }),
+    name: "system.metrics",
+    staleForMs: METRICS_STALE_MS,
+});
+
 export const metricsRoutes = {
     "/api/metrics": {
         GET: async () => {
             try {
-                return json({
-                    ...(await getSystemMetrics()),
-                    tokens: getTokenMetrics(),
-                } satisfies MetricsResponse);
+                return json(await metricsSnapshot.read());
             } catch (error) {
                 console.error("[Metrics] Failed to fetch metrics:", error);
                 return json({ error: "Failed to fetch metrics" }, { status: 500 });

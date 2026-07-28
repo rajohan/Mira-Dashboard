@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
 
 export type ReportType = "daily_brief" | "daily_summary" | "heartbeat" | "custom";
@@ -48,7 +49,7 @@ interface ReportsFilters {
     type?: ReportType;
 }
 
-const REPORTS_REFRESH_INTERVAL_MS = 30_000;
+const REPORTS_REFRESH_INTERVAL_MS = refreshPolicy.background;
 
 export const reportKeys = {
     all: ["reports"] as const,
