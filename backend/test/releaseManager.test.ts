@@ -422,7 +422,10 @@ describe("Dashboard immutable release manager", () => {
                 },
                 root
             )
-        ).rejects.toThrow("slots changed");
+        ).resolves.toMatchObject({
+            current: { commitSha: SECOND_COMMIT },
+            previous: { commitSha: FIRST_COMMIT },
+        });
         await expect(readDashboardReleaseState(root)).resolves.toMatchObject({
             current: { commitSha: SECOND_COMMIT },
             previous: { commitSha: FIRST_COMMIT },
@@ -679,6 +682,21 @@ describe("Dashboard immutable release manager", () => {
         await expect(
             activateDashboardRelease(SECOND_COMMIT, registryRoot, SCHEMA_6_OPTIONS)
         ).rejects.toThrow("migration registry changed");
+        const restoredRegistryState = await restoreDashboardReleaseAfterFailedActivation(
+            {
+                ...SCHEMA_6_OPTIONS,
+                expected: {
+                    candidateCommitSha: SECOND_COMMIT,
+                    previousCommitSha: undefined,
+                    rollbackCommitSha: FIRST_COMMIT,
+                },
+            },
+            registryRoot
+        );
+        expect(restoredRegistryState).toMatchObject({
+            current: { commitSha: FIRST_COMMIT },
+        });
+        expect(restoredRegistryState.previous).toBeUndefined();
 
         const runtimeRoot = temporaryReleasesRoot();
         await createManagedRelease(runtimeRoot, FIRST_COMMIT, FIRST_COMMIT, "0.0.0");
@@ -833,7 +851,7 @@ describe("Dashboard immutable release manager", () => {
         expect(migratedCode.current?.commitSha).toBe(SECOND_COMMIT);
     });
 
-    it("recovers the prior slots from an interrupted activation journal", async () => {
+    it("restores the prior slots from an interrupted activation journal", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);
         await createManagedRelease(root, SECOND_COMMIT);
@@ -865,10 +883,16 @@ describe("Dashboard immutable release manager", () => {
         );
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(true);
 
-        const recovered = await activateDashboardRelease(
-            SECOND_COMMIT,
-            root,
-            SCHEMA_6_OPTIONS
+        const recovered = await restoreDashboardReleaseAfterFailedActivation(
+            {
+                ...SCHEMA_6_OPTIONS,
+                expected: {
+                    candidateCommitSha: THIRD_COMMIT,
+                    previousCommitSha: FIRST_COMMIT,
+                    rollbackCommitSha: SECOND_COMMIT,
+                },
+            },
+            root
         );
         expect(recovered.current?.commitSha).toBe(SECOND_COMMIT);
         expect(recovered.previous?.commitSha).toBe(FIRST_COMMIT);

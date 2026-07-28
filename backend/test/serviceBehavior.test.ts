@@ -2827,6 +2827,32 @@ printf 'scheduled\n'
                     `restore '${candidateCommit}' '${oldCommit}' '${priorPreviousCommit}'`
                 )
             );
+            const exactRestoreLines = restartCommand
+                .split("\n")
+                .filter((line) =>
+                    line.includes(
+                        `restore '${candidateCommit}' '${oldCommit}' '${priorPreviousCommit}'`
+                    )
+                );
+            expect(exactRestoreLines).toHaveLength(2);
+            const activationFailureRestoreLine = exactRestoreLines.find(
+                (line) => !line.includes("stop_services")
+            );
+            if (!activationFailureRestoreLine) {
+                throw new Error(
+                    "Guardian fixture is missing activation-failure link recovery"
+                );
+            }
+            expect(activationFailureRestoreLine.indexOf("restore-database")).toBeLessThan(
+                activationFailureRestoreLine.indexOf(
+                    `restore '${candidateCommit}' '${oldCommit}' '${priorPreviousCommit}'`
+                )
+            );
+            expect(
+                activationFailureRestoreLine.indexOf(
+                    `restore '${candidateCommit}' '${oldCommit}' '${priorPreviousCommit}'`
+                )
+            ).toBeLessThan(activationFailureRestoreLine.indexOf("restart_services"));
             expect(restartCommand).toContain("prune 3");
             expect(restartCommand).not.toContain("/api/job-executions");
             expect(readlinkSync(path.join(releasesRoot, "current"))).toBe(

@@ -1463,6 +1463,18 @@ export async function restoreDashboardReleaseAfterFailedActivation(
             await recoverInterruptedReleaseTransition(layout);
             const state = await readDashboardReleaseStateFromLayout(layout);
             if (
+                state.current?.commitSha === rollbackCommitSha &&
+                state.previous?.commitSha === previousCommitSha
+            ) {
+                assertDashboardReleaseHostRuntimeCompatible(state.current);
+                await assertManagedDashboardReleaseRollbackSchemaCompatible(
+                    state.current,
+                    state.current,
+                    options
+                );
+                return state;
+            }
+            if (
                 state.current?.commitSha !== candidateCommitSha ||
                 state.previous?.commitSha !== rollbackCommitSha
             ) {
@@ -1477,24 +1489,10 @@ export async function restoreDashboardReleaseAfterFailedActivation(
             const restoredPreviousRelease = previousCommitSha
                 ? await loadManagedReleaseFromLayout(layout, previousCommitSha)
                 : undefined;
-            const maximumInspectableSchemaVersion = Math.max(
-                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
-                candidateRelease.manifest.schema.maximumCompatible,
-                rollbackRelease.manifest.schema.maximumCompatible
-            );
-            const liveSchemaState = await resolveLiveSchemaState(
-                options,
-                maximumInspectableSchemaVersion
-            );
-            assertReleaseRollbackCompatible(
-                candidateRelease.manifest,
-                rollbackRelease.manifest,
-                liveSchemaState.version
-            );
-            assertReleaseMigrationHistoryCompatible(
-                rollbackRelease.manifest,
-                liveSchemaState,
-                "Rollback"
+            await assertManagedDashboardReleaseRollbackSchemaCompatible(
+                candidateRelease,
+                rollbackRelease,
+                options
             );
 
             const before = releaseLinkStateFromDashboardState(state);

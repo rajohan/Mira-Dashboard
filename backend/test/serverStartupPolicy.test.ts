@@ -837,7 +837,8 @@ describe("server start scheduler policy", () => {
                 }) as unknown as Server<unknown>) as typeof Bun.serve
         );
         let handleDashboardClientSpy: { mockRestore: () => void } | undefined;
-        let getAuthSessionSpy: { mockRestore: () => void } | undefined;
+        let getAuthSessionSpy:
+            { mockClear: () => void; mockRestore: () => void } | undefined;
         let deploymentCutoverSpy: { mockRestore: () => void } | undefined;
         let isDeploymentCutoverActive = false;
         try {
@@ -1004,6 +1005,40 @@ describe("server start scheduler policy", () => {
             expect(closeSpy).toHaveBeenCalledWith(1000, "done");
             expect(sendSpy).toHaveBeenCalledWith("state");
 
+            closeSpy.mockClear();
+            messageHandler.mockClear();
+            isDeploymentCutoverActive = true;
+            options.websocket.open(ws);
+            expect(closeSpy).toHaveBeenCalledWith(
+                1012,
+                "Dashboard release cutover in progress"
+            );
+            expect(handleDashboardClientSpy).toHaveBeenCalledTimes(1);
+
+            closeSpy.mockClear();
+            getAuthSessionSpy.mockClear();
+            ws.data.sessionToken = "dev-session";
+            ws.data.userId = 7;
+            options.websocket.message(
+                ws,
+                JSON.stringify({
+                    id: "cutover-request",
+                    method: "chat.send",
+                    type: "request",
+                    userActivity: true,
+                })
+            );
+            expect(closeSpy).toHaveBeenCalledWith(
+                1012,
+                "Dashboard release cutover in progress"
+            );
+            expect(getAuthSessionSpy).not.toHaveBeenCalled();
+            expect(messageHandler).not.toHaveBeenCalled();
+            isDeploymentCutoverActive = false;
+            delete ws.data.sessionToken;
+            delete ws.data.userId;
+
+            closeSpy.mockClear();
             options.websocket.message(ws, new TextEncoder().encode("hello"));
             expect(closeSpy).toHaveBeenCalledWith(
                 4401,

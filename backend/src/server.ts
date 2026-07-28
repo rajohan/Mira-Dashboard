@@ -43,6 +43,8 @@ interface DashboardSocketRequest {
 }
 
 const SERVER_IDLE_TIMEOUT_SECONDS = 240;
+const DEPLOYMENT_CUTOVER_SOCKET_CLOSE_CODE = 1012;
+const DEPLOYMENT_CUTOVER_SOCKET_CLOSE_REASON = "Dashboard release cutover in progress";
 
 function dashboardSocketRequest(data: string | Buffer): DashboardSocketRequest {
     try {
@@ -56,6 +58,17 @@ function dashboardSocketRequest(data: string | Buffer): DashboardSocketRequest {
     } catch {
         return {};
     }
+}
+
+function didCloseSocketForDeploymentCutover(
+    ws: ServerWebSocket<DashboardSocketData>
+): boolean {
+    if (!isProductionDeploymentCutoverActive()) return false;
+    ws.close(
+        DEPLOYMENT_CUTOVER_SOCKET_CLOSE_CODE,
+        DEPLOYMENT_CUTOVER_SOCKET_CLOSE_REASON
+    );
+    return true;
 }
 
 function sendSocketAuthenticationError(
@@ -144,6 +157,7 @@ export function createServer(
             }
         },
         message(ws: ServerWebSocket<DashboardSocketData>, message: string | Buffer) {
+            if (didCloseSocketForDeploymentCutover(ws)) return;
             if (
                 typeof ws.data.sessionToken !== "string" ||
                 !Number.isSafeInteger(ws.data.userId)
@@ -186,6 +200,7 @@ export function createServer(
             }
         },
         open(ws: ServerWebSocket<DashboardSocketData>) {
+            if (didCloseSocketForDeploymentCutover(ws)) return;
             const socket = dashboardSocketFromBun(ws);
             ws.data.socket = socket;
             gateway.handleDashboardClient(socket);

@@ -2185,6 +2185,9 @@ async function scheduleReleaseCutover(
                   : []),
           ].join(" ")
         : `${guardedLifecycleEnvironment} rollback ${shellQuote(candidateCommit)} ${shellQuote(rollbackCommit)}`;
+    const activationFailureRestoreCommand = isNewActivation
+        ? `${restoreDatabaseCommand} && ${restoreCommand}`
+        : restoreDatabaseCommand;
     const candidateShort = candidateCommit.slice(0, 8);
     const rollbackShort = rollbackCommit.slice(0, 8);
     const okJob: DeploymentJob = {
@@ -2258,7 +2261,7 @@ async function scheduleReleaseCutover(
         "        fi",
         "      fi",
         "    else",
-        `      if ${restoreDatabaseCommand} && restart_services && ready_for_commit ${shellQuote(preActivationCommit.slice(0, 8))}; then`,
+        `      if ${activationFailureRestoreCommand} && restart_services && ready_for_commit ${shellQuote(preActivationCommit.slice(0, 8))}; then`,
         `        ${deploymentJobUpdateCommand(activationFailedJob)} || exit 1`,
         `        ${discardSnapshotCommand} >/dev/null 2>&1 || true`,
         "      else",
