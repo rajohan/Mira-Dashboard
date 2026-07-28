@@ -8,8 +8,10 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
     assertFrontendBundleBudgets,
     FRONTEND_BUNDLE_BUDGETS,
+    frontendAppOutputKey,
     initialFrontendOutputKeys,
     measureFrontendBundle,
+    writeFrontendHtmlAppEntrypoint,
     writePrecompressedFrontendAssets,
 } from "../../scripts/frontendBuildArtifacts";
 
@@ -50,7 +52,7 @@ describe("frontend build artifacts", () => {
                 "./assets/entry.js": {
                     bytes: entryContents.length,
                     cssBundle: "./assets/styles.css",
-                    entryPoint: "index.html",
+                    entryPoint: "src/main.tsx",
                     exports: [],
                     imports: [
                         {
@@ -62,7 +64,11 @@ describe("frontend build artifacts", () => {
                             path: "./assets/lazy.js",
                         },
                     ],
-                    inputs: {},
+                    inputs: {
+                        "src/main.tsx": {
+                            bytesInOutput: entryContents.length,
+                        },
+                    },
                 },
                 "./assets/lazy.js": {
                     bytes: lazyContents.length,
@@ -93,12 +99,7 @@ describe("frontend build artifacts", () => {
         } satisfies Bun.BuildMetafile;
 
         expect(initialFrontendOutputKeys(metafile)).toEqual(
-            new Set([
-                "./assets/entry.js",
-                "./assets/shared.js",
-                "./assets/styles.css",
-                "./index.html",
-            ])
+            new Set(["./assets/entry.js", "./assets/shared.js", "./assets/styles.css"])
         );
 
         const metrics = await measureFrontendBundle(metafile, outdir);
@@ -146,10 +147,14 @@ describe("frontend build artifacts", () => {
             outputs: {
                 [outputKey]: {
                     bytes: entryContents.length,
-                    entryPoint: "index.html",
+                    entryPoint: "src/main.tsx",
                     exports: [],
                     imports: [],
-                    inputs: {},
+                    inputs: {
+                        "src/main.tsx": {
+                            bytesInOutput: entryContents.length,
+                        },
+                    },
                 },
             },
         } satisfies Bun.BuildMetafile;
@@ -163,7 +168,59 @@ describe("frontend build artifacts", () => {
         ]);
     });
 
-    it("fails closed when build metadata has no initial JavaScript graph", async () => {
+    it("repairs a generated HTML entrypoint that targets an unrelated chunk", async () => {
+        const outdir = await temporaryOutputRoot();
+        await Promise.all([
+            fs.writeFile(
+                path.join(outdir, "index.html"),
+                '<div id="root"></div><script type="module" crossorigin src="/assets/unrelated.js"></script>'
+            ),
+            fs.writeFile(
+                path.join(outdir, "assets", "application.js"),
+                "document.querySelector('#root');\n"
+            ),
+            fs.writeFile(
+                path.join(outdir, "assets", "unrelated.js"),
+                "export const unrelated = true;\n"
+            ),
+        ]);
+        const metafile = {
+            inputs: {},
+            outputs: {
+                "./assets/application.js": {
+                    bytes: 33,
+                    entryPoint: "src/main.tsx",
+                    exports: [],
+                    imports: [],
+                    inputs: {
+                        "src/main.tsx": {
+                            bytesInOutput: 33,
+                        },
+                    },
+                },
+                "./assets/unrelated.js": {
+                    bytes: 31,
+                    exports: [],
+                    imports: [],
+                    inputs: {
+                        "src/components/ui/Switch.tsx": {
+                            bytesInOutput: 31,
+                        },
+                    },
+                },
+            },
+        } satisfies Bun.BuildMetafile;
+
+        expect(frontendAppOutputKey(metafile)).toBe("./assets/application.js");
+        await expect(writeFrontendHtmlAppEntrypoint(metafile, outdir)).resolves.toBe(
+            "/assets/application.js"
+        );
+        expect(await fs.readFile(path.join(outdir, "index.html"), "utf8")).toContain(
+            'src="/assets/application.js"'
+        );
+    });
+
+    it("fails closed when build metadata has no application entrypoint", async () => {
         const outdir = await temporaryOutputRoot();
         const metafile = {
             inputs: {},
@@ -179,7 +236,7 @@ describe("frontend build artifacts", () => {
         } satisfies Bun.BuildMetafile;
 
         await expect(measureFrontendBundle(metafile, outdir)).rejects.toThrow(
-            "initial JavaScript graph"
+            "exactly one src/main.tsx output"
         );
     });
 

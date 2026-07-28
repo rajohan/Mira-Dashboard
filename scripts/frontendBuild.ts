@@ -10,6 +10,7 @@ import {
 import {
     assertFrontendBundleBudgets,
     measureFrontendBundle,
+    writeFrontendHtmlAppEntrypoint,
     writePrecompressedFrontendAssets,
 } from "./frontendBuildArtifacts";
 import reactCompilerPlugin from "./reactCompilerPlugin";
@@ -83,6 +84,7 @@ export async function buildFrontend({
     if (!result.metafile) {
         throw new Error("Frontend build did not produce bundle metadata");
     }
+    await writeFrontendHtmlAppEntrypoint(result.metafile, resolvedOutdir);
 
     await writeFile(
         path.join(resolvedOutdir, "build-identity.json"),

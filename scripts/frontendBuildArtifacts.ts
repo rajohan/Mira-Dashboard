@@ -13,6 +13,10 @@ const COMPRESSIBLE_EXTENSIONS = new Set([
     ".xml",
 ]);
 const MINIMUM_COMPRESSION_BYTES = 512;
+const FRONTEND_APP_INPUT = "src/main.tsx";
+const SCRIPT_TAG_PATTERN = /<script\b[^>]*><\/script>/giu;
+const SCRIPT_SOURCE_ATTRIBUTE_PATTERN = /\bsrc=(["'])([^"']+)\1/iu;
+const MODULE_SCRIPT_TYPE_PATTERN = /\btype=(["'])module\1/iu;
 
 export interface FrontendBundleMeasurements {
     initialJavaScriptGzipBytes: number;
@@ -76,10 +80,75 @@ function resolvedOutput(outdir: string, outputKey: string) {
     };
 }
 
-function isIndexEntryPoint(entryPoint?: string): boolean {
-    if (!entryPoint) return false;
-    const normalized = entryPoint.replaceAll("\\", "/").replace(/^\.\//u, "");
-    return normalized === "index.html" || normalized.endsWith("/index.html");
+function isFrontendAppInput(inputKey: string): boolean {
+    const normalized = normalizedOutputKey(inputKey);
+    return (
+        normalized === FRONTEND_APP_INPUT || normalized.endsWith(`/${FRONTEND_APP_INPUT}`)
+    );
+}
+
+/** Resolves the single JavaScript output that owns the application bootstrap. */
+export function frontendAppOutputKey(metafile: Bun.BuildMetafile): string {
+    const candidates = Object.entries(metafile.outputs)
+        .filter(
+            ([outputKey, output]) =>
+                path.extname(outputKey) === ".js" &&
+                Object.keys(output.inputs).some((inputKey) =>
+                    isFrontendAppInput(inputKey)
+                )
+        )
+        .map(([outputKey]) => outputKey);
+    if (candidates.length !== 1) {
+        throw new Error(
+            `Frontend build metadata must contain exactly one ${FRONTEND_APP_INPUT} output; found ${candidates.length}`
+        );
+    }
+    return candidates[0]!;
+}
+
+/**
+ * Works around Bun selecting an unrelated split chunk for the generated HTML
+ * module script when metafile output is enabled.
+ */
+export async function writeFrontendHtmlAppEntrypoint(
+    metafile: Bun.BuildMetafile,
+    outdir: string
+): Promise<string> {
+    const appOutput = resolvedOutput(outdir, frontendAppOutputKey(metafile));
+    const publicPath = `/${appOutput.relativePath}`;
+    const indexPath = path.join(path.resolve(outdir), "index.html");
+    const html = await readFile(indexPath, "utf8");
+    const moduleScripts = html
+        .matchAll(SCRIPT_TAG_PATTERN)
+        .filter(
+            ([script]) =>
+                MODULE_SCRIPT_TYPE_PATTERN.test(script) &&
+                SCRIPT_SOURCE_ATTRIBUTE_PATTERN.test(script)
+        )
+        .toArray();
+    if (moduleScripts.length !== 1) {
+        throw new Error(
+            `Frontend index must contain exactly one module script with a source; found ${moduleScripts.length}`
+        );
+    }
+    const [script] = moduleScripts[0]!;
+    const source = script.match(SCRIPT_SOURCE_ATTRIBUTE_PATTERN)?.[2];
+    if (!source) {
+        throw new Error("Frontend index module script has no source");
+    }
+    if (source !== publicPath) {
+        const correctedScript = script.replace(
+            SCRIPT_SOURCE_ATTRIBUTE_PATTERN,
+            () => `src="${publicPath}"`
+        );
+        const scriptIndex = moduleScripts[0]!.index;
+        const correctedHtml =
+            html.slice(0, scriptIndex) +
+            correctedScript +
+            html.slice(scriptIndex + script.length);
+        await writeFile(indexPath, correctedHtml);
+    }
+    return publicPath;
 }
 
 /**
@@ -98,9 +167,7 @@ export function initialFrontendOutputKeys(metafile: Bun.BuildMetafile): Set<stri
         Object.hasOwn(outputs, candidate)
             ? candidate
             : keyByNormalizedPath.get(normalizedOutputKey(candidate));
-    const pending = Object.entries(outputs)
-        .filter(([, output]) => isIndexEntryPoint(output.entryPoint))
-        .map(([outputKey]) => outputKey);
+    const pending = [frontendAppOutputKey(metafile)];
     const initialOutputKeys = new Set<string>();
 
     while (pending.length > 0) {
