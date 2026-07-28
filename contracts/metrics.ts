@@ -1,7 +1,6 @@
-import type { JobExecutionSummary } from "./jobs";
+import { type JobExecutionSummary, parseJobExecutionSummary } from "./jobs";
 import {
     contractArray,
-    contractEnum,
     contractFiniteNumber,
     contractRecord,
     contractString,
@@ -178,26 +177,8 @@ export interface Metrics {
     };
 }
 
-const JOB_RESOURCE_CLASSES = [
-    "interactive",
-    "light",
-    "network",
-    "host-heavy",
-    "exclusive",
-] as const;
-
 function numberField(input: Record<string, unknown>, key: string, path: string): number {
     return contractFiniteNumber(input[key], `${path}.${key}`);
-}
-
-function optionalNumberField(
-    input: Record<string, unknown>,
-    key: string,
-    path: string
-): number | undefined {
-    return input[key] === undefined
-        ? undefined
-        : contractFiniteNumber(input[key], `${path}.${key}`);
 }
 
 function stringField(input: Record<string, unknown>, key: string, path: string): string {
@@ -307,28 +288,11 @@ function parseRuntimeMetrics(value: unknown, path: string): RuntimeMetrics {
 
 function parseSchedulerMetrics(value: unknown, path: string): SchedulerMetrics {
     const input = contractRecord(value, path);
-    if (!Array.isArray(input.activeResourceClasses)) {
-        return invalidContract(`${path}.activeResourceClasses`, "must be an array");
-    }
+    const queue = parseJobExecutionSummary(input, path);
     const lastTickAt = optionalContractString(input.lastTickAt, `${path}.lastTickAt`);
     const oldestDueAt = optionalContractString(input.oldestDueAt, `${path}.oldestDueAt`);
-    const oldestQueuedAt = optionalContractString(
-        input.oldestQueuedAt,
-        `${path}.oldestQueuedAt`
-    );
-    const workerLastHeartbeatAt = optionalContractString(
-        input.workerLastHeartbeatAt,
-        `${path}.workerLastHeartbeatAt`
-    );
-    const oldestQueuedAgeMs = optionalNumberField(input, "oldestQueuedAgeMs", path);
     return {
-        activeResourceClasses: input.activeResourceClasses.map((entry, index) =>
-            contractEnum(
-                entry,
-                JOB_RESOURCE_CLASSES,
-                `${path}.activeResourceClasses[${index}]`
-            )
-        ),
+        ...queue,
         dueJobs: numberField(input, "dueJobs", path),
         executorActive: requiresContractBoolean(
             input.executorActive,
@@ -353,14 +317,8 @@ function parseSchedulerMetrics(value: unknown, path: string): SchedulerMetrics {
         ),
         tickFailures: numberField(input, "tickFailures", path),
         ticks: numberField(input, "ticks", path),
-        workerCapacity: numberField(input, "workerCapacity", path),
-        workerCount: numberField(input, "workerCount", path),
-        workerOnline: requiresContractBoolean(input.workerOnline, `${path}.workerOnline`),
         ...(lastTickAt !== undefined && { lastTickAt }),
         ...(oldestDueAt !== undefined && { oldestDueAt }),
-        ...(oldestQueuedAgeMs !== undefined && { oldestQueuedAgeMs }),
-        ...(oldestQueuedAt !== undefined && { oldestQueuedAt }),
-        ...(workerLastHeartbeatAt !== undefined && { workerLastHeartbeatAt }),
     };
 }
 

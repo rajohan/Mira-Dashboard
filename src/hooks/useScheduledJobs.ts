@@ -1,15 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type {
-    ScheduledJobMutationResponse,
-    ScheduledJobPatch,
-    ScheduledJobRun,
-    ScheduledJobRunResponse,
-    ScheduledJobRunsResponse,
-    ScheduledJobsResponse,
+import type { ScheduledJobPatch, ScheduledJobRun } from "../../contracts/jobs";
+import {
+    parseScheduledJobMutationResponse,
+    parseScheduledJobRunResponse,
+    parseScheduledJobRunsResponse,
+    parseScheduledJobsResponse,
 } from "../../contracts/jobs";
 import { refreshPolicy } from "../lib/refreshPolicy";
-import { apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
+import { apiFetchParsed, apiPatchParsed, apiPostParsed } from "./useApi";
 import {
     jobExecutionKeys,
     refreshJobExecutionQueueWhilePending,
@@ -37,7 +36,7 @@ export const scheduledJobKeys = {
 export function useScheduledJobs() {
     return useQuery({
         queryKey: scheduledJobKeys.list(),
-        queryFn: () => apiFetchRequired<ScheduledJobsResponse>("/jobs"),
+        queryFn: () => apiFetchParsed("/jobs", parseScheduledJobsResponse),
         select: (data) => data.jobs,
         refetchInterval: (query) =>
             query.state.data?.jobs.some((job) => job.isQueued || job.isRunning)
@@ -51,8 +50,9 @@ export function useScheduledJobRuns(id: string) {
     return useQuery({
         queryKey: scheduledJobKeys.runs(id),
         queryFn: () =>
-            apiFetchRequired<ScheduledJobRunsResponse>(
-                `/jobs/${encodeURIComponent(id)}/runs`
+            apiFetchParsed(
+                `/jobs/${encodeURIComponent(id)}/runs`,
+                parseScheduledJobRunsResponse
             ),
         select: (data) => data.runs,
         enabled: id.length > 0,
@@ -71,8 +71,9 @@ export function useUpdateScheduledJob() {
 
     return useMutation({
         mutationFn: ({ id, patch }: { id: string; patch: ScheduledJobPatch }) =>
-            apiPatchRequired<ScheduledJobMutationResponse>(
+            apiPatchParsed(
                 `/jobs/${encodeURIComponent(id)}`,
+                parseScheduledJobMutationResponse,
                 { patch }
             ),
         onSuccess: (_data, variables) => {
@@ -92,8 +93,9 @@ export function useRunScheduledJobNow() {
         mutationFn: async ({ id }: { id: string }) => {
             const result = await refreshJobExecutionQueueWhilePending(
                 queryClient,
-                apiPostRequired<ScheduledJobRunResponse>(
-                    `/jobs/${encodeURIComponent(id)}/run`
+                apiPostParsed(
+                    `/jobs/${encodeURIComponent(id)}/run`,
+                    parseScheduledJobRunResponse
                 )
             );
             if (

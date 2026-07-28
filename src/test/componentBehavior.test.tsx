@@ -3630,10 +3630,14 @@ describe("shared component helpers", () => {
                                 enabled: true,
                                 id: "ops.log-rotation",
                                 intervalSeconds: 86_400,
+                                isQueued: false,
                                 isRunning: false,
                                 lastRun: {
+                                    cancellable: false,
                                     id: 1,
                                     jobId: "ops.log-rotation",
+                                    queuedAt: "2026-06-24T09:59:00.000Z",
+                                    resourceClass: "light",
                                     status: "success",
                                     triggerType: "schedule",
                                     startedAt: "2026-06-24T09:59:00.000Z",
@@ -3642,8 +3646,10 @@ describe("shared component helpers", () => {
                                 },
                                 name: "Log rotation",
                                 nextRunAt: "2026-06-24T22:30:00.000Z",
+                                resourceClass: "light",
                                 scheduleType: "cron",
                                 cronExpression: "30 22 * * *",
+                                timeoutMs: 300_000,
                                 updatedAt: "2026-06-24T08:00:00.000Z",
                             },
                         ],
@@ -3732,10 +3738,13 @@ describe("shared component helpers", () => {
                         );
                     }
                     return Response.json({
-                        isOk: false,
+                        isOk: true,
                         run: {
+                            cancellable: false,
                             id: 2,
                             jobId: "ops.log-rotation",
+                            queuedAt: "2026-06-24T10:00:00.000Z",
+                            resourceClass: "light",
                             status: "failed",
                             triggerType: "manual",
                             startedAt: "2026-06-24T10:00:00.000Z",

@@ -198,9 +198,7 @@ export interface ScheduledJobDefinition {
     timeoutMs?: number;
 }
 
-interface ScheduledJobPatch extends PublicScheduledJobPatch {
-    clearDisableIntent?: boolean;
-}
+type ScheduledJobPatch = PublicScheduledJobPatch;
 
 interface ScheduledJobRow {
     id: string;
@@ -821,7 +819,7 @@ export function updateScheduledJob(
     }
     const next = {
         disableIntent:
-            patch.enabled === true || patch.clearDisableIntent
+            patch.enabled === true || patch.disableIntent === null
                 ? undefined
                 : (patch.disableIntent ?? existing.disableIntent),
         enabled: patch.enabled ?? existing.enabled,

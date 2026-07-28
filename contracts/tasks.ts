@@ -146,6 +146,22 @@ export function parseTaskAutomationInput(
 ): TaskAutomationInput {
     const input = contractRecord(value, path);
     assertContractKeys(input, TASK_AUTOMATION_KEYS, path);
+    const model = optionalContractString(input.model, `${path}.model`, {
+        allowEmpty: true,
+    });
+    const scheduleSummary = optionalContractString(
+        input.scheduleSummary,
+        `${path}.scheduleSummary`,
+        { allowEmpty: true }
+    );
+    const sessionTarget = optionalContractString(
+        input.sessionTarget,
+        `${path}.sessionTarget`,
+        { allowEmpty: true }
+    );
+    const thinking = optionalContractString(input.thinking, `${path}.thinking`, {
+        allowEmpty: true,
+    });
     const type =
         input.type === undefined
             ? undefined
@@ -157,23 +173,10 @@ export function parseTaskAutomationInput(
             undefined && {
             recurring: requiresContractBoolean(input.recurring, `${path}.recurring`),
         }),
-        ...(optionalContractString(input.scheduleSummary, `${path}.scheduleSummary`) !==
-            undefined && {
-            scheduleSummary: contractString(
-                input.scheduleSummary,
-                `${path}.scheduleSummary`
-            ),
-        }),
-        ...(optionalContractString(input.sessionTarget, `${path}.sessionTarget`) !==
-            undefined && {
-            sessionTarget: contractString(input.sessionTarget, `${path}.sessionTarget`),
-        }),
-        ...(optionalContractString(input.model, `${path}.model`) !== undefined && {
-            model: contractString(input.model, `${path}.model`),
-        }),
-        ...(optionalContractString(input.thinking, `${path}.thinking`) !== undefined && {
-            thinking: contractString(input.thinking, `${path}.thinking`),
-        }),
+        ...(scheduleSummary && { scheduleSummary }),
+        ...(sessionTarget && { sessionTarget }),
+        ...(model && { model }),
+        ...(thinking && { thinking }),
     };
 }
 

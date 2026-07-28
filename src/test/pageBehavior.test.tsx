@@ -90,8 +90,11 @@ const jobsApiState = {
     heartbeatIntervalSeconds: 1800,
     heartbeatRuns: [
         {
+            cancellable: false,
             id: 1,
             jobId: "heartbeat",
+            queuedAt: "2026-06-24T08:00:00.000Z",
+            resourceClass: "light",
             status: "success",
             triggerType: "manual",
             startedAt: "2026-06-24T08:00:00.000Z",
@@ -1389,6 +1392,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         return Response.json({
             jobs: [
                 {
+                    description: "Dashboard heartbeat",
                     id: "heartbeat",
                     name: "Heartbeat",
                     enabled: jobsApiState.heartbeatEnabled,
@@ -1475,6 +1479,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
             return Response.json({
                 isOk: true,
                 job: {
+                    description: "Dashboard heartbeat",
                     id: "heartbeat",
                     name: "Heartbeat",
                     enabled: jobsApiState.heartbeatEnabled,
@@ -1505,6 +1510,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
         return Response.json({
             isOk: true,
             job: {
+                description: "Dashboard heartbeat",
                 id: "heartbeat",
                 name: "Heartbeat",
                 enabled: jobsApiState.heartbeatEnabled,
@@ -1526,8 +1532,11 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     if (method === "POST" && url === "/api/jobs/heartbeat/run") {
         jobsApiState.heartbeatRuns = [
             {
+                cancellable: false,
                 id: 2,
                 jobId: "heartbeat",
+                queuedAt: "2026-06-24T08:05:00.000Z",
+                resourceClass: "light",
                 status: "success",
                 triggerType: "manual",
                 startedAt: "2026-06-24T08:05:00.000Z",
@@ -2128,8 +2137,11 @@ describe("Mira Dashboard pages", () => {
         jobsApiState.heartbeatIntervalSeconds = 1800;
         jobsApiState.heartbeatRuns = [
             {
+                cancellable: false,
                 id: 1,
                 jobId: "heartbeat",
+                queuedAt: "2026-06-24T08:00:00.000Z",
+                resourceClass: "light",
                 status: "success",
                 triggerType: "manual",
                 startedAt: "2026-06-24T08:00:00.000Z",

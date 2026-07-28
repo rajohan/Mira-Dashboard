@@ -2,7 +2,11 @@ import { describe, expect, it } from "bun:test";
 
 import { parseApiErrorResponse } from "../../contracts/apiErrors";
 import { parseExecRequest } from "../../contracts/exec";
-import { parseScheduledJobUpdateRequest } from "../../contracts/jobs";
+import {
+    parseJobExecutionsResponse,
+    parseScheduledJobsResponse,
+    parseScheduledJobUpdateRequest,
+} from "../../contracts/jobs";
 import { parseCreateReportInput } from "../../contracts/reports";
 import { ContractValidationError } from "../../contracts/runtime";
 import { parseCreateTaskRequest, parseUpdateTaskRequest } from "../../contracts/tasks";
@@ -24,7 +28,11 @@ describe("shared runtime contracts", () => {
                 assignee: "mira-2026",
                 automation: {
                     cronJobId: "cron-1",
+                    model: " ",
                     recurring: true,
+                    scheduleSummary: "",
+                    sessionTarget: "  ",
+                    thinking: "",
                     type: "cron",
                 },
                 body: "  keep markdown spacing  ",
@@ -57,6 +65,7 @@ describe("shared runtime contracts", () => {
     });
 
     it("validates exec and scheduled-job transport shapes before service logic", () => {
+        const clearedDisableIntent = JSON.parse("null") as null;
         expect(
             parseExecRequest({
                 args: ["-lc", "pwd"],
@@ -94,6 +103,115 @@ describe("shared runtime contracts", () => {
                 enabled: false,
             },
         });
+        expect(
+            parseScheduledJobUpdateRequest({
+                patch: {
+                    disableIntent: clearedDisableIntent,
+                    enabled: false,
+                },
+            })
+        ).toEqual({
+            patch: {
+                disableIntent: clearedDisableIntent,
+                enabled: false,
+            },
+        });
+    });
+
+    it("validates scheduled-job and queue responses before frontend state accepts them", () => {
+        expect(
+            parseScheduledJobsResponse({
+                jobs: [
+                    {
+                        actionKey: "cache.refresh",
+                        actionPayload: { key: "git" },
+                        createdAt: "2026-07-28T10:00:00.000Z",
+                        description: "Refresh cache",
+                        enabled: true,
+                        id: "cache-refresh",
+                        intervalSeconds: 3600,
+                        isQueued: false,
+                        isRunning: false,
+                        name: "Cache refresh",
+                        resourceClass: "network",
+                        scheduleType: "interval",
+                        timeoutMs: 60_000,
+                        updatedAt: "2026-07-28T10:00:00.000Z",
+                    },
+                ],
+            }).jobs[0]
+        ).toMatchObject({
+            actionKey: "cache.refresh",
+            actionPayload: { key: "git" },
+            id: "cache-refresh",
+            resourceClass: "network",
+            scheduleType: "interval",
+        });
+
+        expect(
+            parseJobExecutionsResponse({
+                executions: [
+                    {
+                        actionKey: "cache.refresh",
+                        attempt: 1,
+                        availableAt: "2026-07-28T10:00:00.000Z",
+                        cancellable: true,
+                        displayName: "Cache refresh",
+                        id: "019fa8b1-0000-7000-8000-000000000001",
+                        queuedAt: "2026-07-28T10:00:00.000Z",
+                        resourceClass: "network",
+                        status: "queued",
+                        triggerType: "manual",
+                    },
+                ],
+                summary: {
+                    activeResourceClasses: ["network"],
+                    queued: 1,
+                    running: 0,
+                    workerCapacity: 2,
+                    workerCount: 1,
+                    workerOnline: true,
+                },
+            }).summary
+        ).toEqual({
+            activeResourceClasses: ["network"],
+            queued: 1,
+            running: 0,
+            workerCapacity: 2,
+            workerCount: 1,
+            workerOnline: true,
+        });
+
+        expect(
+            captureContractError(() =>
+                parseScheduledJobsResponse({
+                    jobs: [
+                        {
+                            actionKey: "cache.refresh",
+                            actionPayload: {},
+                            createdAt: "2026-07-28T10:00:00.000Z",
+                            description: "Refresh cache",
+                            enabled: true,
+                            id: "cache-refresh",
+                            intervalSeconds: 3600,
+                            isQueued: false,
+                            isRunning: false,
+                            name: "Cache refresh",
+                            resourceClass: "unbounded",
+                            scheduleType: "interval",
+                            timeoutMs: 60_000,
+                            updatedAt: "2026-07-28T10:00:00.000Z",
+                        },
+                    ],
+                })
+            ).issues
+        ).toEqual([
+            {
+                message:
+                    "must be one of: interactive, light, network, host-heavy, exclusive",
+                path: "response.jobs[0].resourceClass",
+            },
+        ]);
     });
 
     it("normalizes report timestamps and rejects malformed metadata", () => {

@@ -1641,6 +1641,32 @@ describe("backend route and service behavior", () => {
             },
         });
 
+        const clearedDisableIntent = JSON.parse("null") as null;
+        const clearIntentResponse = await jobRoutes["/api/jobs/:id"].PATCH(
+            requestWithParameters(
+                `/api/jobs/${jobId}`,
+                { id: jobId },
+                {
+                    body: JSON.stringify({
+                        patch: {
+                            disableIntent: clearedDisableIntent,
+                            enabled: false,
+                        },
+                    }),
+                    method: "PATCH",
+                }
+            )
+        );
+        const clearedIntentJobResponse = await responseJson(clearIntentResponse);
+        expect(clearedIntentJobResponse).toMatchObject({
+            job: { enabled: false },
+        });
+        expect(clearedIntentJobResponse.job).not.toHaveProperty("disableIntent");
+        const clearedStoredIntent = database
+            .prepare("SELECT disable_intent_json FROM scheduled_jobs WHERE id = ?")
+            .get(jobId) as { disable_intent_json: string | null };
+        expect(clearedStoredIntent.disable_intent_json).toBeNull();
+
         const enableResponse = await jobRoutes["/api/jobs/:id"].PATCH(
             requestWithParameters(
                 `/api/jobs/${jobId}`,

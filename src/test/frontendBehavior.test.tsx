@@ -3338,7 +3338,10 @@ describe("Mira Dashboard frontend behavior", () => {
                                 actionPayload: {},
                                 createdAt: "2026-06-23T08:00:00.000Z",
                                 updatedAt: "2026-06-23T08:00:00.000Z",
+                                isQueued: false,
                                 isRunning: false,
+                                resourceClass: "light",
+                                timeoutMs: 60_000,
                             },
                         ],
                     });
@@ -3350,6 +3353,9 @@ describe("Mira Dashboard frontend behavior", () => {
                             {
                                 id: 1,
                                 jobId: "job-1",
+                                cancellable: false,
+                                queuedAt: "2026-06-23T08:00:00.000Z",
+                                resourceClass: "light",
                                 status: "success",
                                 triggerType: "manual",
                                 startedAt: "2026-06-23T08:00:00.000Z",
@@ -3369,7 +3375,29 @@ describe("Mira Dashboard frontend behavior", () => {
                             },
                         },
                     });
-                    return Response.json({ isOk: true, job: { id: "job-1" } });
+                    return Response.json({
+                        isOk: true,
+                        job: {
+                            actionKey: "test",
+                            actionPayload: {},
+                            createdAt: "2026-06-23T08:00:00.000Z",
+                            description: "Runs things",
+                            disableIntent: {
+                                comment: "Paused for hook coverage",
+                                mode: "indefinite",
+                            },
+                            enabled: false,
+                            id: "job-1",
+                            intervalSeconds: 60,
+                            isQueued: false,
+                            isRunning: false,
+                            name: "Job One",
+                            resourceClass: "light",
+                            scheduleType: "interval",
+                            timeoutMs: 60_000,
+                            updatedAt: "2026-06-23T08:00:00.000Z",
+                        },
+                    });
                 }
 
                 if (url === "/api/jobs/job-1/run" && method === "POST") {
@@ -3378,6 +3406,9 @@ describe("Mira Dashboard frontend behavior", () => {
                         run: {
                             id: 2,
                             jobId: "job-1",
+                            cancellable: false,
+                            queuedAt: "2026-06-23T08:00:00.000Z",
+                            resourceClass: "light",
                             status: "success",
                             triggerType: "manual",
                             startedAt: "2026-06-23T08:00:00.000Z",
@@ -4164,8 +4195,13 @@ describe("Mira Dashboard frontend behavior", () => {
                 Response.json({
                     isOk: true,
                     run: {
+                        cancellable: true,
                         id: 1,
                         jobId: "ops.log-rotation",
+                        output: {},
+                        queuedAt: "2026-06-23T08:00:00.000Z",
+                        resourceClass: "light",
+                        startedAt: "2026-06-23T08:00:00.000Z",
                         status: "queued",
                         triggerType: "manual",
                     },

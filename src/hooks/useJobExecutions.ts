@@ -5,12 +5,12 @@ import {
     useQueryClient,
 } from "@tanstack/react-query";
 
-import type {
-    JobExecutionCancelResponse,
-    JobExecutionsResponse,
+import {
+    parseJobExecutionCancelResponse,
+    parseJobExecutionsResponse,
 } from "../../contracts/jobs";
 import { refreshPolicy } from "../lib/refreshPolicy";
-import { apiFetchRequired, apiPostRequired } from "./useApi";
+import { apiFetchParsed, apiPostParsed } from "./useApi";
 
 export const jobExecutionKeys = {
     all: ["job-executions"] as const,
@@ -42,7 +42,7 @@ export async function refreshJobExecutionQueueWhilePending<T>(
 export function useJobExecutions() {
     return useQuery({
         queryKey: jobExecutionKeys.list(),
-        queryFn: () => apiFetchRequired<JobExecutionsResponse>("/job-executions"),
+        queryFn: () => apiFetchParsed("/job-executions", parseJobExecutionsResponse),
         refetchInterval: refreshPolicy.active,
         refetchIntervalInBackground: false,
         staleTime: 500,
@@ -53,8 +53,9 @@ export function useCancelJobExecution() {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: (id: string) =>
-            apiPostRequired<JobExecutionCancelResponse>(
-                `/job-executions/${encodeURIComponent(id)}/cancel`
+            apiPostParsed(
+                `/job-executions/${encodeURIComponent(id)}/cancel`,
+                parseJobExecutionCancelResponse
             ),
         onSuccess: (result) => {
             void queryClient.invalidateQueries({ queryKey: jobExecutionKeys.all });
