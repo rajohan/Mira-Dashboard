@@ -2693,6 +2693,7 @@ printf 'scheduled\n'
             expect(restartCommand).toContain("releaseLifecycle.js");
             expect(restartCommand).toContain("MIRA_DEPLOYMENT_SNAPSHOT_ID=");
             expect(restartCommand).toContain('execution?.status === "success"');
+            expect(restartCommand).toContain("const deadline = Date.now() + 75000");
             expect(restartCommand).toContain(
                 `${releasesRoot}/releases/${candidateCommit}/backend/dist/releaseLifecycle.js`
             );

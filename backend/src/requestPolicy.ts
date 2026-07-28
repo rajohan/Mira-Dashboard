@@ -158,6 +158,7 @@ export function isDeploymentCutoverMutationBlocked(
         return false;
     }
     return (
+        // Safe methods still write session activity when this touch header is set.
         !SAFE_REQUEST_METHODS.has(request.method.toUpperCase()) ||
         request.headers.get("x-mira-user-activity")?.trim() === "1"
     );

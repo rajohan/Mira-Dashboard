@@ -7,6 +7,9 @@ export function isProductionDeploymentCutoverActive(
     if (environment.NODE_ENV !== "production") {
         return false;
     }
+    // The retained deployment history is capped at 500 rows. This bounded,
+    // fail-closed read deliberately avoids a process-local cache that a detached
+    // guardian could leave stale while it changes the deployment state.
     return Boolean(
         database
             .query(

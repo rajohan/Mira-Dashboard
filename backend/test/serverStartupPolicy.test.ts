@@ -839,6 +839,7 @@ describe("server start scheduler policy", () => {
         let handleDashboardClientSpy: { mockRestore: () => void } | undefined;
         let getAuthSessionSpy: { mockRestore: () => void } | undefined;
         let deploymentCutoverSpy: { mockRestore: () => void } | undefined;
+        let isDeploymentCutoverActive = false;
         try {
             const now = new Date().toISOString();
             const authModule = await import("../src/auth.ts");
@@ -864,7 +865,7 @@ describe("server start scheduler policy", () => {
                 await import("../src/services/deploymentCutoverState.ts");
             deploymentCutoverSpy = jest
                 .spyOn(deploymentCutoverModule, "isProductionDeploymentCutoverActive")
-                .mockReturnValue(false);
+                .mockImplementation(() => isDeploymentCutoverActive);
             const { createServer } = await import("../src/server.ts");
             const optionsSymbol = Symbol.for("mira.test.options");
             const server = createServer(0, "127.0.0.1") as Server<unknown> & {
@@ -955,7 +956,7 @@ describe("server start scheduler policy", () => {
             );
             expect(wsForbidden.status).toBe(403);
 
-            deploymentCutoverSpy.mockReturnValue(true);
+            isDeploymentCutoverActive = true;
             const wsDuringCutover = await options.fetch(
                 new Request("https://test.local/ws", {
                     headers: { Origin: "https://test.local" },
@@ -964,7 +965,7 @@ describe("server start scheduler policy", () => {
             );
             expect(wsDuringCutover.status).toBe(503);
             expect(wsDuringCutover.headers.get("retry-after")).toBe("5");
-            deploymentCutoverSpy.mockReturnValue(false);
+            isDeploymentCutoverActive = false;
 
             const closeHandler = jest.fn();
             const errorHandler = jest.fn();
