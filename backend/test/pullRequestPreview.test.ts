@@ -32,6 +32,7 @@ import {
     stopPullRequestPreview,
 } from "../src/services/pullRequestPreviewHost.ts";
 import {
+    getPullRequestPreviewStatus as getDeliveryPullRequestPreviewStatus,
     prepareAndStartPullRequestPreview,
     prepareAndStopPullRequestPreview,
     reconcileClosedPullRequestPreview,
@@ -68,7 +69,7 @@ function previewConfig(root: string): PullRequestPreviewConfig {
     return {
         allowedAuthors: new Set(["mira-2026", "rajohan"]),
         backendPort: 3101,
-        bunExecutable: "/home/ubuntu/.bun/bin/bun",
+        bunExecutable: process.execPath,
         dashboardRoot: path.join(root, "dashboard"),
         frontendPort: 5173,
         gatewayProxyEntrypoint: path.resolve(
@@ -88,6 +89,7 @@ function previewConfig(root: string): PullRequestPreviewConfig {
         gitCommonDirectory: path.join(root, "dashboard", ".git"),
         managedWorktreePath: path.join(root, "managed-preview"),
         previewRoot: path.join(root, "preview"),
+        projectRoot: root,
         stateFile: path.join(root, "preview", "active-preview.json"),
         unitName: "mira-dashboard-pr-preview.service",
     };
@@ -150,125 +152,117 @@ function previewScheduledJob(number: unknown, commitSha: unknown = COMMIT): Sche
 }
 
 describe("managed pull request preview", () => {
+    it("keeps host preview controls out of isolated Dashboard dev", async () => {
+        const previousSafeMode = process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+        const statusSpy = jest.spyOn(previewHost, "getPullRequestPreviewStatus");
+        const enqueueSpy = jest.spyOn(jobExecutionQueue, "enqueueJobExecution");
+        const executionsSpy = jest.spyOn(jobExecutionQueue, "listJobExecutions");
+        const pullRequestsSpy = jest.spyOn(pullRequests, "listDashboardPullRequests");
+        const stateNumbersSpy = jest.spyOn(
+            previewHost,
+            "listManagedPullRequestPreviewStateNumbers"
+        );
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+
+        try {
+            await expect(getDeliveryPullRequestPreviewStatus()).resolves.toEqual({
+                controlsAvailable: false,
+                message:
+                    "PR dev controls are available only from the production Dashboard.",
+                status: "stopped",
+            });
+            await expect(prepareAndStartPullRequestPreview(342)).resolves.toEqual({
+                controlsAvailable: false,
+                message:
+                    "PR dev controls are available only from the production Dashboard.",
+                status: "stopped",
+            });
+            await expect(prepareAndStopPullRequestPreview(342)).resolves.toEqual({
+                controlsAvailable: false,
+                message:
+                    "PR dev controls are available only from the production Dashboard.",
+                status: "stopped",
+            });
+            await reconcileClosedPullRequestPreview([]);
+            expect(statusSpy).not.toHaveBeenCalled();
+            expect(enqueueSpy).not.toHaveBeenCalled();
+            expect(executionsSpy).not.toHaveBeenCalled();
+            expect(pullRequestsSpy).not.toHaveBeenCalled();
+            expect(stateNumbersSpy).not.toHaveBeenCalled();
+        } finally {
+            if (previousSafeMode === undefined) {
+                delete process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+            } else {
+                process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = previousSafeMode;
+            }
+            statusSpy.mockRestore();
+            enqueueSpy.mockRestore();
+            executionsSpy.mockRestore();
+            pullRequestsSpy.mockRestore();
+            stateNumbersSpy.mockRestore();
+        }
+    });
+
     it("uses the running Bun executable when the service PATH does not expose Bun", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-bun-path-"));
         try {
             const config = resolvePullRequestPreviewConfig({
-                MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
-                MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(root, "managed-preview"),
-                MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                HOME: root,
+                MIRA_DASHBOARD_PROJECT_ROOT: root,
                 PATH: path.join(root, "empty-bin"),
             });
 
             expect(config.bunExecutable).toBe(process.execPath);
             expect(path.isAbsolute(config.bunExecutable)).toBe(true);
-            expect(() =>
-                resolvePullRequestPreviewConfig({
-                    BUN_BINARY: "bun",
-                    MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
-                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
-                        root,
-                        "managed-preview"
-                    ),
-                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                    PATH: path.join(root, "empty-bin"),
-                })
-            ).toThrow("bun executable must resolve to an absolute path");
         } finally {
             rmSync(root, { force: true, recursive: true });
         }
     });
 
-    it("resolves a single-slot host contract without accepting ambiguous config", () => {
+    it("derives the fixed single-slot host contract from the project root", () => {
         const root = mkdtempSync(path.join(tmpdir(), "mira-preview-config-"));
         try {
             const config = resolvePullRequestPreviewConfig({
-                BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
-                MIRA_DASHBOARD_PREVIEW_BACKEND_PORT: "4101",
-                MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT: "4173",
-                MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
-                MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(root, "managed-preview"),
-                MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                HOME: root,
+                MIRA_DASHBOARD_PROJECT_ROOT: root,
+                OPENCLAW_GATEWAY_URL: "wss://gateway.example/ws",
             });
             expect(config).toMatchObject({
-                backendPort: 4101,
-                frontendPort: 4173,
+                backendPort: 3101,
+                dashboardRoot: path.join(root, "production", "checkout"),
+                databaseTemplate: path.join(
+                    root,
+                    "production",
+                    "state",
+                    "mira-dashboard.db"
+                ),
+                frontendPort: 5173,
                 gatewayProxyPort: 18_790,
                 gatewayProxyUnitName: "mira-dashboard-pr-preview-gateway.service",
-                gatewayTokenFile: path.join(root, "state", "gateway.token"),
-                gatewayUpstreamTokenFile: path.join(
+                gatewayTokenFile: path.join(
                     root,
+                    "development",
                     "state",
-                    "gateway-upstream.token"
+                    "preview",
+                    "gateway.token"
                 ),
-                gatewayUrl: "ws://127.0.0.1:18789",
-                managedWorktreePath: path.join(root, "managed-preview"),
-                previewRoot: path.join(root, "state"),
+                gatewayUrl: "wss://gateway.example/ws",
+                managedWorktreePath: path.join(root, "development", "preview"),
+                previewRoot: path.join(root, "development", "state", "preview"),
+                projectRoot: root,
+                releaseSource: path.join(root, "production", "releases"),
                 unitName: "mira-dashboard-pr-preview.service",
             });
             expect(config.allowedAuthors).toEqual(new Set(["mira-2026", "rajohan"]));
             expect(() =>
                 resolvePullRequestPreviewConfig({
-                    BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
-                    MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS: " , ",
-                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
-                        root,
-                        "managed-preview"
-                    ),
-                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
+                    HOME: root,
+                    MIRA_DASHBOARD_PROJECT_ROOT: root,
+                    OPENCLAW_GATEWAY_URL: "https://gateway.example/ws",
                 })
             ).toThrow(
-                "MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS must contain at least one author"
+                "OPENCLAW_GATEWAY_URL must be ws:// or wss:// without credentials or a fragment"
             );
-
-            for (const environment of [
-                {
-                    BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
-                    MIRA_DASHBOARD_PREVIEW_BACKEND_PORT: "5173",
-                    MIRA_DASHBOARD_PREVIEW_FRONTEND_PORT: "5173",
-                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
-                        root,
-                        "managed-preview"
-                    ),
-                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                },
-                {
-                    BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
-                    MIRA_DASHBOARD_PREVIEW_GATEWAY_URL: "https://gateway.example/ws",
-                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
-                        root,
-                        "managed-preview"
-                    ),
-                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                },
-                {
-                    BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
-                    MIRA_DASHBOARD_PREVIEW_UNIT: "../preview.service",
-                    MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: path.join(
-                        root,
-                        "managed-preview"
-                    ),
-                    MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                },
-            ]) {
-                expect(() => resolvePullRequestPreviewConfig(environment)).toThrow();
-            }
-            for (const managedWorktreePath of [
-                path.join(root, "dashboard"),
-                path.join(root, "dashboard", "preview"),
-                path.join(root, "state", "preview"),
-            ]) {
-                expect(() =>
-                    resolvePullRequestPreviewConfig({
-                        BUN_BINARY: "/home/ubuntu/.bun/bin/bun",
-                        MIRA_DASHBOARD_PREVIEW_ROOT: path.join(root, "state"),
-                        MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH: managedWorktreePath,
-                        MIRA_DASHBOARD_ROOT: path.join(root, "dashboard"),
-                    })
-                ).toThrow(
-                    "MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH must not overlap Dashboard source or preview state"
-                );
-            }
         } finally {
             rmSync(root, { force: true, recursive: true });
         }
@@ -287,7 +281,6 @@ describe("managed pull request preview", () => {
             const stateRoot = path.join(config.previewRoot, "states", "pr-335");
             const command = buildPullRequestPreviewSandboxCommand({
                 config,
-                number: 335,
                 publicOrigin: "https://dashboard.example:5173",
                 stateRoot,
                 worktreePath,
@@ -303,15 +296,15 @@ describe("managed pull request preview", () => {
                 "--ro-bind",
                 "--bind",
                 "/etc/resolv.conf",
-                "MIRA_DASHBOARD_DEV_STATE_OWNER",
-                "managed-pr-335",
+                "MIRA_DASHBOARD_PROJECT_ROOT",
+                config.projectRoot,
                 "MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE",
                 "/run/mira-dashboard-preview/gateway.token",
                 "MIRA_DASHBOARD_DEV_GATEWAY_URL",
                 "ws://127.0.0.1:18790/gateway",
                 "MIRA_DASHBOARD_DEV_HOT_RELOAD",
                 "0",
-                "MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID",
+                "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
                 "dashboard.example",
             ]) {
                 expect(command).toContain(value);

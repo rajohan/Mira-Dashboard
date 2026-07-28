@@ -223,8 +223,6 @@ async function main(): Promise<number> {
     const route = await enableDevelopmentServe(port);
     const config = resolveDevelopmentStackConfig({
         ...process.env,
-        MIRA_DASHBOARD_DEV_BACKEND_HOST: "127.0.0.1",
-        MIRA_DASHBOARD_DEV_FRONTEND_HOST: "127.0.0.1",
         MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: route.status.origin,
     });
     try {

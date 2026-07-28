@@ -588,9 +588,7 @@ describe("backend route and service behavior", () => {
     it("restores Gateway state when first-user bootstrap closes during token validation", async () => {
         isolateOpenClawEnvironment("mira-first-user-race-close-coverage-");
         rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
-        rememberEnvironment("OPENCLAW_TOKEN");
         delete process.env.OPENCLAW_GATEWAY_TOKEN;
-        delete process.env.OPENCLAW_TOKEN;
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
         const originalInit = gateway.init;
@@ -645,9 +643,7 @@ describe("backend route and service behavior", () => {
     it("shuts down rejected first-user bootstrap Gateway when no previous token exists", async () => {
         isolateOpenClawEnvironment("mira-first-user-race-shutdown-coverage-");
         rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
-        rememberEnvironment("OPENCLAW_TOKEN");
         delete process.env.OPENCLAW_GATEWAY_TOKEN;
-        delete process.env.OPENCLAW_TOKEN;
         const gatewayModule = await import("../src/gateway.ts");
         const gateway = gatewayModule.default;
         const originalShutdown = gateway.shutdown;
@@ -3298,10 +3294,8 @@ describe("backend route and service behavior", () => {
     it("proxies managed Gateway media without exposing its bearer token", async () => {
         rememberEnvironment("OPENCLAW_GATEWAY_URL");
         rememberEnvironment("OPENCLAW_GATEWAY_TOKEN");
-        rememberEnvironment("OPENCLAW_TOKEN");
         process.env.OPENCLAW_GATEWAY_URL = "wss://gateway.example.test/base";
         process.env.OPENCLAW_GATEWAY_TOKEN = "environment-secret";
-        delete process.env.OPENCLAW_TOKEN;
         const previousToken = database
             .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
             .get() as { value: string } | undefined;

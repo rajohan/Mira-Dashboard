@@ -1,10 +1,12 @@
 import path from "node:path";
 
 import { database, getMiraDatabasePath, sqlNullable } from "../database.ts";
+import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { errorMessage } from "../lib/errors.ts";
 import {
     killProcessGroup,
     pipeProcessOutput,
+    resolveBunExecutable,
     runProcess,
     spawnProcess,
 } from "../lib/processes.ts";
@@ -17,6 +19,7 @@ import {
 } from "../releaseDeployment.ts";
 import {
     assertDashboardReleaseHostRuntimeCompatible,
+    assertManagedDashboardReleaseRollbackSchemaCompatible,
     type ManagedDashboardRelease,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
@@ -89,38 +92,22 @@ const PUBLIC_PR_FAILURE_CACHE_MS = 30_000;
 const PUBLIC_GITHUB_API_TIMEOUT_MS = 15_000;
 const DEPLOYMENT_RESTART_STATUS_POLL_MS = 1000;
 const DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS = 2 * 60 * 1000;
+// Must exceed scheduled-job interrupted-handler cleanup before final status is durable.
+const DEPLOYMENT_CUTOVER_HANDOFF_TIMEOUT_MS = 75_000;
 const MAX_DEPLOYMENT_CUTOVER_CONTEXT_BYTES = 4096;
-const DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION = 1;
+const DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION = 2;
 const DEPLOYMENT_WORKER_STABILITY_SECONDS =
     Math.ceil(JOB_WORKER_HEARTBEAT_MAX_AGE_MS / 1000) + 1;
 const PASSING_CHECK_VALUES = new Set(["success", "successful", "neutral", "skipped"]);
 const OPINIONATED_REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
-const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "restart-scheduled"]);
+const ACTIVE_DEPLOYMENT_STATUSES = new Set(["building", "verifying"]);
 const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
-const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
+const SQLITE_CUTOVER_SNAPSHOT_ID_PATTERN =
+    /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
 const publicPullRequestCache: {
     failure?: { expiresAt: number; message: string };
     value?: { expiresAt: number; pullRequests: PullRequestSummary[] };
 } = {};
-
-function resolveExecutableFromPath(executable: string): string | undefined {
-    if (path.isAbsolute(executable)) {
-        return executable;
-    }
-    if (executable.includes(path.sep)) {
-        return path.resolve(executable);
-    }
-
-    return Bun.which(executable, { PATH: process.env.PATH }) ?? undefined;
-}
-
-function resolveBunExecutable(): string {
-    const resolved = resolveExecutableFromPath(BUN_EXECUTABLE);
-    if (resolved) {
-        return resolved;
-    }
-    return BUN_EXECUTABLE === "bun" ? process.execPath : BUN_EXECUTABLE;
-}
 
 export function getResolvedRoots() {
     return {
@@ -130,17 +117,21 @@ export function getResolvedRoots() {
 }
 
 function getDashboardRoot(): string {
-    return resolveConfiguredRoot(
-        "MIRA_DASHBOARD_ROOT",
-        "/home/ubuntu/projects/mira-dashboard"
-    );
+    return process.env.NODE_ENV === "production"
+        ? resolveDashboardProjectPaths().productionCheckoutRoot
+        : resolveConfiguredRoot(
+              "MIRA_DASHBOARD_ROOT",
+              resolveDashboardProjectPaths().productionCheckoutRoot
+          );
 }
 
 function getDashboardWorktreeRoot(): string {
-    return resolveConfiguredRoot(
-        "MIRA_DASHBOARD_WORKTREE_ROOT",
-        "/home/ubuntu/projects/mira-dashboard-worktrees"
-    );
+    return process.env.NODE_ENV === "production"
+        ? resolveDashboardProjectPaths().developmentWorktreeRoot
+        : resolveConfiguredRoot(
+              "MIRA_DASHBOARD_WORKTREE_ROOT",
+              resolveDashboardProjectPaths().developmentWorktreeRoot
+          );
 }
 
 /** Represents command result. */
@@ -210,7 +201,7 @@ interface PublicGitHubPullRequest {
 /** Represents deployment job. */
 interface DeploymentJob {
     id: string;
-    status: "building" | "restart-scheduled" | "isOk" | "failed";
+    status: "building" | "verifying" | "isOk" | "failed";
     startedAt: string;
     updatedAt: string;
     commit?: string;
@@ -393,6 +384,7 @@ interface DeploymentLockExecutionRow {
 
 interface DeploymentCutoverContext {
     candidateCommit: string;
+    databaseSnapshotId: string;
     formatVersion: typeof DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION;
     preActivationCommit: string;
     preActivationPreviousCommit?: string;
@@ -405,6 +397,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function createDeploymentCutoverContext(
     candidateCommit: string,
+    databaseSnapshotId: string,
     preActivationCommit: string,
     rollbackCommit: string,
     preActivationPreviousCommit: string | undefined
@@ -415,6 +408,9 @@ function createDeploymentCutoverContext(
         !FULL_COMMIT_SHA_PATTERN.test(rollbackCommit)
     ) {
         throw new TypeError("Release cutover context requires full commit SHAs");
+    }
+    if (!SQLITE_CUTOVER_SNAPSHOT_ID_PATTERN.test(databaseSnapshotId)) {
+        throw new TypeError("Release cutover context requires a lowercase UUIDv7");
     }
     if (rollbackCommit === candidateCommit) {
         throw new TypeError(
@@ -443,6 +439,7 @@ function createDeploymentCutoverContext(
     }
     return {
         candidateCommit,
+        databaseSnapshotId,
         formatVersion: DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION,
         preActivationCommit,
         ...(preActivationPreviousCommit && { preActivationPreviousCommit }),
@@ -474,6 +471,7 @@ function parseDeploymentCutoverContext(
     const value = output.releaseCutover;
     const allowedKeys = new Set([
         "candidateCommit",
+        "databaseSnapshotId",
         "formatVersion",
         "preActivationCommit",
         "preActivationPreviousCommit",
@@ -484,6 +482,7 @@ function parseDeploymentCutoverContext(
         value.formatVersion !== DEPLOYMENT_CUTOVER_CONTEXT_FORMAT_VERSION ||
         typeof value.candidateCommit !== "string" ||
         value.candidateCommit !== expectedCandidateCommit ||
+        typeof value.databaseSnapshotId !== "string" ||
         typeof value.preActivationCommit !== "string" ||
         typeof value.rollbackCommit !== "string" ||
         (value.preActivationPreviousCommit !== undefined &&
@@ -494,6 +493,7 @@ function parseDeploymentCutoverContext(
     try {
         return createDeploymentCutoverContext(
             value.candidateCommit,
+            value.databaseSnapshotId,
             value.preActivationCommit,
             value.rollbackCommit,
             value.preActivationPreviousCommit
@@ -768,7 +768,7 @@ interface DeploymentRuntimeResultRow {
  * readiness. Build failures and cancelled jobs do not disqualify an otherwise
  * verified immutable release.
  */
-function rollbackIneligibilityReason(
+function rollbackRuntimeIneligibilityReason(
     commitSha: string,
     excludedJobId?: string
 ): string | undefined {
@@ -802,6 +802,31 @@ function rollbackIneligibilityReason(
         : undefined;
 }
 
+async function rollbackIneligibilityReason(
+    activeRelease: ManagedDashboardRelease,
+    rollbackRelease: ManagedDashboardRelease,
+    excludedJobId?: string
+): Promise<string | undefined> {
+    const runtimeReason = rollbackRuntimeIneligibilityReason(
+        rollbackRelease.commitSha,
+        excludedJobId
+    );
+    if (runtimeReason) return runtimeReason;
+
+    try {
+        await assertManagedDashboardReleaseRollbackSchemaCompatible(
+            activeRelease,
+            rollbackRelease
+        );
+        return undefined;
+    } catch (error) {
+        return errorMessage(
+            error,
+            "Previous release schema compatibility could not be verified"
+        );
+    }
+}
+
 function dashboardReleaseSummary(
     release: ManagedDashboardRelease
 ): DashboardReleaseSummary {
@@ -827,19 +852,19 @@ export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatu
         current !== undefined &&
         previous !== undefined &&
         current.commitSha !== previous.commitSha;
-    const runtimeIneligibilityReason =
-        isRollbackAvailable && previous
-            ? rollbackIneligibilityReason(previous.commitSha)
+    const ineligibilityReason =
+        isRollbackAvailable && state.current && state.previous
+            ? await rollbackIneligibilityReason(state.current, state.previous)
             : undefined;
 
     return {
         current,
         previous,
         rollback: {
-            available: isRollbackAvailable && !runtimeIneligibilityReason,
-            ...((!isRollbackAvailable || runtimeIneligibilityReason) && {
+            available: isRollbackAvailable && !ineligibilityReason,
+            ...((!isRollbackAvailable || ineligibilityReason) && {
                 reason:
-                    runtimeIneligibilityReason ??
+                    ineligibilityReason ??
                     (current
                         ? "No distinct previous release is available"
                         : "No active managed release is available"),
@@ -918,14 +943,9 @@ function buildReviewCommandEnvironment(): NodeJS.ProcessEnv {
     return buildGithubCommandEnvironment(githubToken);
 }
 
-/** Returns the configured reviewer author. */
-function reviewerAuthor(): string {
-    return process.env.RAJOHAN_GITHUB_USERNAME?.trim() || DEFAULT_REVIEWER_AUTHOR;
-}
-
 /** Returns whether the configured reviewer has approved the pull request. */
 function hasReviewerApproval(pr: PullRequestSummary): boolean {
-    const author = reviewerAuthor();
+    const author = DEFAULT_REVIEWER_AUTHOR;
     const reviews = (
         pr.latestOpinionatedReviews?.nodes?.length
             ? pr.latestOpinionatedReviews.nodes
@@ -953,7 +973,7 @@ function isPullRequestReviewApproved(pr: PullRequestSummary): boolean {
 /** Returns whether the configured reviewer can approve the pull request. */
 function canReviewerApprove(pr: PullRequestSummary): boolean {
     return (
-        pr.author?.login !== reviewerAuthor() &&
+        pr.author?.login !== DEFAULT_REVIEWER_AUTHOR &&
         !pr.isDraft &&
         !isPullRequestReviewApproved(pr)
     );
@@ -964,9 +984,7 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
     const rest = { ...pr };
     delete rest.latestOpinionatedReviews;
     delete rest.reviews;
-    const previewAllowedAuthors = resolvePullRequestPreviewAllowedAuthors(
-        process.env.MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS
-    );
+    const previewAllowedAuthors = resolvePullRequestPreviewAllowedAuthors();
 
     return {
         ...rest,
@@ -1341,6 +1359,7 @@ async function runGhJsonLines<T>(
 /** Lists open pull requests targeting the dashboard production branch. */
 export async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
     if (
+        process.env.NODE_ENV !== "production" &&
         process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
         !configuredGithubReadToken()
     ) {
@@ -1671,7 +1690,7 @@ function validateDashboardPrForApproval(pr: PullRequestSummary): void {
 /** Validates a pull request can receive Rajohan's review approval. */
 function validateDashboardPrForReviewApproval(pr: PullRequestSummary): void {
     validateDashboardPr(pr);
-    if (pr.author?.login === reviewerAuthor()) {
+    if (pr.author?.login === DEFAULT_REVIEWER_AUTHOR) {
         throw new Error("Rajohan cannot approve his own pull request");
     }
     if (isPullRequestReviewApproved(pr)) {
@@ -1861,7 +1880,10 @@ function shellQuote(value: string): string {
 function deploymentJobUpdateCommand(job: DeploymentJob): string {
     const script = `
 import { Database } from "bun:sqlite";
-const job = JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}");
+const job = {
+    ...JSON.parse(process.env.MIRA_DEPLOYMENT_JOB || "{}"),
+    updatedAt: new Date().toISOString(),
+};
 const database = new Database(process.env.MIRA_DEPLOYMENT_DB);
 const sqlNull = JSON.parse("null");
 function sqlNullable(value) {
@@ -1924,13 +1946,79 @@ try {
     ].join(" ");
 }
 
-function releaseLifecycleInvocation(
-    releasesRoot: string,
-    lifecycleCommand: string
+/**
+ * Waits until the worker has durably completed the scheduling action. The
+ * cutover snapshot must not capture a running execution that an older worker
+ * would later recover as failed.
+ */
+function deploymentCutoverHandoffCommand(
+    deploymentId: string,
+    databaseSnapshotId: string
 ): string {
+    const script = `
+import { Database } from "bun:sqlite";
+const database = new Database(process.env.MIRA_DEPLOYMENT_DB, { readonly: true });
+database.run("PRAGMA busy_timeout = 5000");
+const deadline = Date.now() + ${DEPLOYMENT_CUTOVER_HANDOFF_TIMEOUT_MS};
+const readExecution = database.prepare(\`
+    SELECT
+        status,
+        json_extract(output_json, '$.releaseCutover.databaseSnapshotId') AS database_snapshot_id,
+        (SELECT status FROM deployment_jobs WHERE id = ?) AS deployment_status,
+        (SELECT job_id FROM deployment_lock WHERE id = 1) AS lock_job_id
+    FROM job_executions
+    WHERE action_key = 'dashboard.deploy'
+      AND json_valid(payload_json)
+      AND json_valid(output_json)
+      AND json_extract(payload_json, '$.deploymentId') = ?
+    ORDER BY queued_at DESC, id DESC
+    LIMIT 1
+\`);
+let isReady = false;
+try {
+    while (Date.now() < deadline) {
+        const execution = readExecution.get(
+            process.env.MIRA_DEPLOYMENT_ID,
+            process.env.MIRA_DEPLOYMENT_ID
+        );
+        if (
+            execution?.status === "success" &&
+            execution.database_snapshot_id === process.env.MIRA_DEPLOYMENT_SNAPSHOT_ID &&
+            execution.deployment_status === "verifying" &&
+            execution.lock_job_id === process.env.MIRA_DEPLOYMENT_ID
+        ) {
+            isReady = true;
+            break;
+        }
+        if (
+            execution &&
+            execution.status !== "queued" &&
+            execution.status !== "running"
+        ) {
+            break;
+        }
+        await Bun.sleep(100);
+    }
+} finally {
+    database.close();
+}
+if (!isReady) process.exitCode = 1;
+`;
     return [
-        `MIRA_DASHBOARD_RELEASES_ROOT=${shellQuote(releasesRoot)}`,
-        `MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())}`,
+        `MIRA_DEPLOYMENT_DB=${shellQuote(getMiraDatabasePath())}`,
+        `MIRA_DEPLOYMENT_ID=${shellQuote(deploymentId)}`,
+        `MIRA_DEPLOYMENT_SNAPSHOT_ID=${shellQuote(databaseSnapshotId)}`,
+        shellQuote(resolveBunExecutable()),
+        "-e",
+        shellQuote(script),
+    ].join(" ");
+}
+
+function releaseLifecycleInvocation(lifecycleCommand: string): string {
+    return [
+        `MIRA_DASHBOARD_PROJECT_ROOT=${shellQuote(
+            resolveDashboardProjectPaths().projectRoot
+        )}`,
         "NODE_ENV=production",
         shellQuote(resolveBunExecutable()),
         shellQuote(lifecycleCommand),
@@ -1992,6 +2080,9 @@ function releaseCutoverShellFunctions(): string[] {
         "restart_services() {",
         `  /usr/bin/systemctl --user restart ${DASHBOARD_SERVICES.join(" ")}`,
         "}",
+        "stop_services() {",
+        `  /usr/bin/systemctl --user stop ${DASHBOARD_SERVICES.join(" ")}`,
+        "}",
     ];
 }
 
@@ -2026,6 +2117,7 @@ async function scheduleReleaseCutover(
 ): Promise<CommandResult> {
     const {
         candidateCommit,
+        databaseSnapshotId,
         preActivationCommit,
         preActivationPreviousCommit,
         rollbackCommit,
@@ -2064,14 +2156,6 @@ async function scheduleReleaseCutover(
         );
     }
     const releasesRoot = resolveDashboardReleasesRoot();
-    const activationLifecycleCommand = path.join(
-        releasesRoot,
-        "releases",
-        preActivationCommit,
-        "backend",
-        "dist",
-        "releaseLifecycle.js"
-    );
     const guardedLifecycleCommand = path.join(
         releasesRoot,
         "releases",
@@ -2080,13 +2164,15 @@ async function scheduleReleaseCutover(
         "dist",
         "releaseLifecycle.js"
     );
-    const activationLifecycleEnvironment = releaseLifecycleInvocation(
-        releasesRoot,
-        activationLifecycleCommand
-    );
     const guardedLifecycleEnvironment = releaseLifecycleInvocation(
-        releasesRoot,
         guardedLifecycleCommand
+    );
+    const snapshotCommand = `${guardedLifecycleEnvironment} snapshot-database ${shellQuote(databaseSnapshotId)}`;
+    const restoreDatabaseCommand = `${guardedLifecycleEnvironment} restore-database ${shellQuote(databaseSnapshotId)}`;
+    const discardSnapshotCommand = `${guardedLifecycleEnvironment} discard-database-snapshot ${shellQuote(databaseSnapshotId)}`;
+    const waitForHandoffCommand = deploymentCutoverHandoffCommand(
+        job.id,
+        databaseSnapshotId
     );
     const restoreCommand = isNewActivation
         ? [
@@ -2099,17 +2185,20 @@ async function scheduleReleaseCutover(
                   : []),
           ].join(" ")
         : `${guardedLifecycleEnvironment} rollback ${shellQuote(candidateCommit)} ${shellQuote(rollbackCommit)}`;
+    const activationFailureRestoreCommand = isNewActivation
+        ? `${restoreDatabaseCommand} && ${restoreCommand}`
+        : restoreDatabaseCommand;
     const candidateShort = candidateCommit.slice(0, 8);
     const rollbackShort = rollbackCommit.slice(0, 8);
     const okJob: DeploymentJob = {
         ...job,
         status: "isOk",
         updatedAt: dateToISOString(new Date()),
-        note: "Atomic release activated. Web, worker, and commit readiness passed",
+        note: `Atomic release activated. Web, worker, commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS}-second worker stability checks passed`,
     };
     const okWithRetentionWarningJob: DeploymentJob = {
         ...okJob,
-        note: "Atomic release activated and ready; release retention cleanup failed",
+        note: `Atomic release activated and verified, including ${DEPLOYMENT_WORKER_STABILITY_SECONDS}-second worker stability; release retention cleanup failed`,
     };
     const rolledBackJob: DeploymentJob = {
         ...job,
@@ -2129,28 +2218,69 @@ async function scheduleReleaseCutover(
         ...job,
         status: "failed",
         updatedAt: dateToISOString(new Date()),
-        note: "Release activation failed before restart; guardian left current unchanged",
+        note: "Release activation failed before restart; the exact pre-cutover database and original release were restored",
+    };
+    const snapshotFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Release activation stopped before restart because the guarded database snapshot failed; original services were restored",
+    };
+    const cutoverStartFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Release activation could not stop every Dashboard service safely; original services were restored",
+    };
+    const handoffFailedJob: DeploymentJob = {
+        ...job,
+        status: "failed",
+        updatedAt: dateToISOString(new Date()),
+        note: "Release activation stopped before service shutdown because the worker handoff did not become durable",
     };
 
     const script = [
-        "sleep 2",
         ...releaseCutoverShellFunctions(),
-        `if ${activationLifecycleEnvironment} activate ${shellQuote(candidateCommit)}; then`,
-        `  if restart_services && ready_for_commit ${shellQuote(candidateShort)}; then`,
-        `    if ${activationLifecycleEnvironment} prune 3; then`,
-        `      ${deploymentJobUpdateCommand(okJob)}`,
+        `${waitForHandoffCommand} || { ${deploymentJobUpdateCommand(handoffFailedJob)}; exit 1; }`,
+        "if stop_services; then",
+        `  if ${snapshotCommand}; then`,
+        `    if ${guardedLifecycleEnvironment} activate ${shellQuote(candidateCommit)} --coordinated-schema-cutover; then`,
+        `      if restart_services && ready_for_commit ${shellQuote(candidateShort)}; then`,
+        `        if ${guardedLifecycleEnvironment} prune 3; then`,
+        `          ${deploymentJobUpdateCommand(okJob)} || exit 1`,
+        "        else",
+        `          ${deploymentJobUpdateCommand(okWithRetentionWarningJob)} || exit 1`,
+        "        fi",
+        `        ${discardSnapshotCommand} >/dev/null 2>&1 || true`,
+        "      else",
+        `        if stop_services && ${restoreDatabaseCommand} && ${restoreCommand} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
+        `          ${deploymentJobUpdateCommand(rolledBackJob)} || exit 1`,
+        `          ${discardSnapshotCommand} >/dev/null 2>&1 || true`,
+        "        else",
+        `          ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
+        "        fi",
+        "      fi",
         "    else",
-        `      ${deploymentJobUpdateCommand(okWithRetentionWarningJob)}`,
+        `      if ${activationFailureRestoreCommand} && restart_services && ready_for_commit ${shellQuote(preActivationCommit.slice(0, 8))}; then`,
+        `        ${deploymentJobUpdateCommand(activationFailedJob)} || exit 1`,
+        `        ${discardSnapshotCommand} >/dev/null 2>&1 || true`,
+        "      else",
+        `        ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
+        "      fi",
         "    fi",
         "  else",
-        `    if ${restoreCommand} && restart_services && ready_for_commit ${shellQuote(rollbackShort)}; then`,
-        `      ${deploymentJobUpdateCommand(rolledBackJob)}`,
+        `    if restart_services && ready_for_commit ${shellQuote(preActivationCommit.slice(0, 8))}; then`,
+        `      ${deploymentJobUpdateCommand(snapshotFailedJob)}`,
         "    else",
         `      ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
         "    fi",
         "  fi",
         "else",
-        `  ${deploymentJobUpdateCommand(activationFailedJob)}`,
+        `  if restart_services && ready_for_commit ${shellQuote(preActivationCommit.slice(0, 8))}; then`,
+        `    ${deploymentJobUpdateCommand(cutoverStartFailedJob)}`,
+        "  else",
+        `    ${deploymentJobUpdateCommand(rollbackFailedJob)}`,
+        "  fi",
         "fi",
     ].join("\n");
 
@@ -2202,17 +2332,14 @@ async function scheduleReleaseRollback(
         "dist",
         "releaseLifecycle.js"
     );
-    const lifecycleEnvironment = releaseLifecycleInvocation(
-        releasesRoot,
-        lifecycleCommand
-    );
+    const lifecycleEnvironment = releaseLifecycleInvocation(lifecycleCommand);
     const targetShort = targetCommit.slice(0, 8);
     const originalShort = originalCommit.slice(0, 8);
     const okJob: DeploymentJob = {
         ...job,
         status: "isOk",
         updatedAt: dateToISOString(new Date()),
-        note: `Atomic rollback activated ${targetShort}. Web, worker, and commit readiness passed`,
+        note: `Atomic rollback activated ${targetShort}. Web, worker, commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS}-second worker stability checks passed`,
     };
     const restoredJob: DeploymentJob = {
         ...job,
@@ -2271,7 +2398,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
     cutover: OrphanedDeploymentCutover
 ): boolean {
     const job = readDeploymentJob(cutover.id);
-    if (!job || job.status !== "restart-scheduled") {
+    if (!job || job.status !== "verifying") {
         return false;
     }
     const candidateCommit = cutover.candidateCommit ?? job.commit;
@@ -2301,7 +2428,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         persistedCutover.candidateCommit !== persistedCutover.preActivationCommit;
     const recoveryMode = willRestoreExactPreActivationSlots
         ? "restore"
-        : isRollbackAction
+        : persistedCutover || isRollbackAction
           ? "rollback"
           : "legacy-rollback";
     const rolledBackJob: DeploymentJob = {
@@ -2322,13 +2449,15 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         ...job,
         status: "isOk",
         updatedAt: dateToISOString(new Date()),
-        note: "Interrupted release cutover recovered; active candidate passed restart and commit-bound readiness",
+        note: `Interrupted release cutover recovered; active candidate passed restart, commit-bound readiness, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS}-second worker stability`,
     };
     const script = [
         "sleep 1",
         ...releaseCutoverShellFunctions(),
+        `project_root=${shellQuote(resolveDashboardProjectPaths().projectRoot)}`,
         `releases_root=${shellQuote(releasesRoot)}`,
         `candidate_commit=${shellQuote(candidateCommit)}`,
+        `database_snapshot_id=${shellQuote(persistedCutover?.databaseSnapshotId ?? "")}`,
         `recovery_mode=${shellQuote(recoveryMode)}`,
         `expected_rollback_commit=${shellQuote(persistedCutover?.rollbackCommit ?? "")}`,
         `pre_activation_previous_commit=${shellQuote(
@@ -2360,14 +2489,12 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         '  [ -f "$activation_lifecycle" ] && [ ! -L "$activation_lifecycle" ]',
         "}",
         "run_activation_lifecycle() {",
-        '  MIRA_DASHBOARD_RELEASES_ROOT="$releases_root" \\',
-        `  MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())} \\`,
+        '  MIRA_DASHBOARD_PROJECT_ROOT="$project_root" \\',
         "  NODE_ENV=production \\",
         '  "$bun_executable" "$activation_lifecycle" "$@"',
         "}",
         "run_candidate_lifecycle() {",
-        '  MIRA_DASHBOARD_RELEASES_ROOT="$releases_root" \\',
-        `  MIRA_DASHBOARD_DB_PATH=${shellQuote(getMiraDatabasePath())} \\`,
+        '  MIRA_DASHBOARD_PROJECT_ROOT="$project_root" \\',
         "  NODE_ENV=production \\",
         '  "$bun_executable" "$candidate_lifecycle" "$@"',
         "}",
@@ -2391,7 +2518,48 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         "  esac",
         "}",
         "resolve_trusted_lifecycles || exit 1",
-        'if activation_output="$(run_activation_lifecycle activate "$candidate_commit")"; then',
+        'if [ -n "$database_snapshot_id" ]; then',
+        '  if ! run_candidate_lifecycle verify-database-snapshot "$database_snapshot_id" >/dev/null; then',
+        '    [ "$current_commit" != "$candidate_commit" ] || exit 1',
+        '    if restart_services && ready_for_commit "${current_commit:0:8}"; then',
+        `      ${deploymentJobUpdateCommand(activationNotAppliedJob)}`,
+        "      exit 0",
+        "    fi",
+        "    exit 1",
+        "  fi",
+        "  stop_services || exit 1",
+        '  if activation_output="$(run_candidate_lifecycle activate "$candidate_commit" --coordinated-schema-cutover)"; then',
+        '    activation_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
+        '    [ "$activation_commit" = "$candidate_commit" ] || exit 1',
+        '    if restart_services && ready_for_commit "${candidate_commit:0:8}"; then',
+        `      ${deploymentJobUpdateCommand(activeCandidateRecoveredJob)} || exit 1`,
+        '      run_candidate_lifecycle discard-database-snapshot "$database_snapshot_id" >/dev/null 2>&1 || true',
+        "      exit 0",
+        "    fi",
+        '    rollback_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.previous.commitSha // empty\')"',
+        '    [[ "$rollback_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
+        '    [ "$rollback_commit" != "$candidate_commit" ] || exit 1',
+        '    if stop_services && run_candidate_lifecycle restore-database "$database_snapshot_id" && restore_failed_candidate && restart_services && ready_for_commit "${rollback_commit:0:8}"; then',
+        `      ${deploymentJobUpdateCommand(rolledBackJob)} || exit 1`,
+        '      run_candidate_lifecycle discard-database-snapshot "$database_snapshot_id" >/dev/null 2>&1 || true',
+        "    else",
+        "      exit 1",
+        "    fi",
+        "  else",
+        '    if run_candidate_lifecycle restore-database "$database_snapshot_id"; then',
+        '      status_output="$(run_candidate_lifecycle status)" || exit 1',
+        '      current_commit="$(printf "%s" "$status_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
+        '      [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || exit 1',
+        '      [ "$current_commit" != "$candidate_commit" ] || exit 1',
+        '      if restart_services && ready_for_commit "${current_commit:0:8}"; then',
+        `        ${deploymentJobUpdateCommand(activationNotAppliedJob)} || exit 1`,
+        '        run_candidate_lifecycle discard-database-snapshot "$database_snapshot_id" >/dev/null 2>&1 || true',
+        "        exit 0",
+        "      fi",
+        "    fi",
+        "    exit 1",
+        "  fi",
+        'elif activation_output="$(run_activation_lifecycle activate "$candidate_commit")"; then',
         '  activation_commit="$(printf "%s" "$activation_output" | /usr/bin/jq --raw-output \'.current.commitSha // empty\')"',
         '  [ "$activation_commit" = "$candidate_commit" ] || exit 1',
         '  if restart_services && ready_for_commit "${candidate_commit:0:8}"; then',
@@ -2488,13 +2656,14 @@ async function runDeploymentJob(
             );
         }
         if (isRedeploy) {
-            const runtimeIneligibilityReason = rollbackIneligibilityReason(
-                rollbackRelease.commitSha,
+            const ineligibilityReason = await rollbackIneligibilityReason(
+                currentState.current,
+                rollbackRelease,
                 job.id
             );
-            if (runtimeIneligibilityReason) {
+            if (ineligibilityReason) {
                 throw new Error(
-                    `Automatic redeploy fallback is not eligible: ${runtimeIneligibilityReason}`
+                    `Automatic redeploy fallback is not eligible: ${ineligibilityReason}`
                 );
             }
         }
@@ -2509,7 +2678,6 @@ async function runDeploymentJob(
                     signal: options.signal,
                     timeoutMs: options.timeoutMs,
                 }),
-            databasePath: getMiraDatabasePath(),
             onProgress: () => {
                 currentJob = refreshDeploymentHeartbeat(currentJob);
             },
@@ -2521,22 +2689,23 @@ async function runDeploymentJob(
         currentJob = refreshDeploymentHeartbeat(currentJob);
         const releaseCutover = createDeploymentCutoverContext(
             expectedCommit,
+            Bun.randomUUIDv7(),
             currentState.current.commitSha,
             rollbackRelease.commitSha,
             currentState.previous?.commitSha
         );
         persistCutover(releaseCutover);
 
-        const restartScheduled: DeploymentJob = {
+        const cutoverJob: DeploymentJob = {
             ...currentJob,
-            status: "restart-scheduled",
+            status: "verifying",
             updatedAt: dateToISOString(new Date()),
             commit: candidate.manifest.commitSha,
             commitTitle: candidate.manifest.commitTitle,
-            note: "Immutable release published. Detached activation and rollback check scheduled",
+            note: `Release published. Pausing Dashboard writes, snapshotting SQLite, activating it, then verifying web, worker, deployed commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS} seconds of worker stability; code-and-data rollback is armed`,
         };
-        writeDeploymentJob(restartScheduled);
-        await scheduleReleaseCutover(restartScheduled, releaseCutover, signal);
+        writeDeploymentJob(cutoverJob);
+        await scheduleReleaseCutover(cutoverJob, releaseCutover, signal);
         return releaseCutover;
     } catch (error) {
         const failed: DeploymentJob = {
@@ -2579,28 +2748,29 @@ async function runRollbackJob(
         if (state.current.commitSha === state.previous.commitSha) {
             throw new Error("Managed release rollback requires two distinct releases");
         }
-        const runtimeIneligibilityReason = rollbackIneligibilityReason(
-            state.previous.commitSha,
+        const ineligibilityReason = await rollbackIneligibilityReason(
+            state.current,
+            state.previous,
             job.id
         );
-        if (runtimeIneligibilityReason) {
+        if (ineligibilityReason) {
             throw new Error(
-                `Previous release is not eligible for rollback: ${runtimeIneligibilityReason}`
+                `Previous release is not eligible for rollback: ${ineligibilityReason}`
             );
         }
         assertDashboardReleaseHostRuntimeCompatible(state.previous);
 
-        const restartScheduled: DeploymentJob = {
+        const cutoverJob: DeploymentJob = {
             ...currentJob,
-            status: "restart-scheduled",
+            status: "verifying",
             updatedAt: dateToISOString(new Date()),
             commit: state.previous.commitSha,
             commitTitle: state.previous.manifest.commitTitle,
-            note: "Verified rollback target. Detached atomic rollback and readiness check scheduled",
+            note: `Rollback target verified. Activating it, restarting services, then verifying web, worker, deployed commit, and ${DEPLOYMENT_WORKER_STABILITY_SECONDS} seconds of worker stability; automatic restoration is armed`,
         };
-        writeDeploymentJob(restartScheduled);
+        writeDeploymentJob(cutoverJob);
         await scheduleReleaseRollback(
-            restartScheduled,
+            cutoverJob,
             state.previous.commitSha,
             state.current.commitSha,
             signal
@@ -2755,13 +2925,14 @@ export async function prepareAndStartRollback(
                 { statusCode: 409 }
             );
         }
-        const runtimeIneligibilityReason = rollbackIneligibilityReason(
-            state.previous.commitSha
+        const ineligibilityReason = await rollbackIneligibilityReason(
+            state.current,
+            state.previous
         );
-        if (runtimeIneligibilityReason) {
+        if (ineligibilityReason) {
             throw Object.assign(
                 new Error(
-                    `Previous release is not eligible for rollback: ${runtimeIneligibilityReason}`
+                    `Previous release is not eligible for rollback: ${ineligibilityReason}`
                 ),
                 { statusCode: 409 }
             );

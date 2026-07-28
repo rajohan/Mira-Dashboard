@@ -16,6 +16,7 @@ import {
     invalidateCacheEntry,
     parseJsonField,
 } from "../lib/cacheStore.ts";
+import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import type { JobResourceClass } from "../lib/jobResources.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
@@ -59,6 +60,7 @@ const KOPIA_EXPECTED_SOURCE_PATHS = [
 ] as const;
 const BACKUP_STATUS_STALE_HOURS = 30;
 const BACKUP_STATUS_MAX_TTL_HOURS = 25;
+const dashboardProjectPaths = resolveDashboardProjectPaths();
 
 type JsonRecord = Record<string, unknown>;
 type CacheTtlUnit = "hours" | "minutes";
@@ -82,7 +84,7 @@ const SPYDEBERG = {
 const CODEX_TRUSTED_DIRS = [
     "/home/ubuntu/.openclaw",
     "/home/ubuntu/projects",
-    "/home/ubuntu/projects/mira-dashboard",
+    dashboardProjectPaths.projectRoot,
 ];
 const MOLTBOOK_CACHE_KEY_LIST = [
     "moltbook.home",
@@ -108,7 +110,7 @@ const gitRepos = [
     {
         key: "mira-dashboard",
         name: "mira-dashboard",
-        path: "/home/ubuntu/projects/mira-dashboard",
+        path: dashboardProjectPaths.productionCheckoutRoot,
         category: "project",
     },
     {
@@ -1862,7 +1864,9 @@ async function refreshDockerSummaryCache() {
 }
 
 async function refreshDatabaseSummaryCache() {
-    const isIsolated = process.env.MIRA_DASHBOARD_JOB_PROFILE === "isolated";
+    const isIsolated =
+        process.env.NODE_ENV !== "production" &&
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE === "1";
     const previousEntry = isIsolated
         ? await getCacheEntry(DATABASE_SUMMARY_KEY)
         : undefined;

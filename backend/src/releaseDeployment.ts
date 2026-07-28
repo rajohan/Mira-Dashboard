@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
 import { runProcess } from "./lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
@@ -14,12 +15,6 @@ import {
 } from "./releaseManager.ts";
 
 const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
-const DEFAULT_DASHBOARD_SOURCE_ROOT = "/home/ubuntu/projects/mira-dashboard";
-const DEFAULT_DASHBOARD_WORKTREE_ROOT = "/home/ubuntu/projects/mira-dashboard-worktrees";
-const DEFAULT_DASHBOARD_STATE_ROOT = "/home/ubuntu/projects/mira-dashboard-state";
-const DEFAULT_DASHBOARD_DATABASE_PATH = `${DEFAULT_DASHBOARD_STATE_ROOT}/mira-dashboard.db`;
-const DEFAULT_DASHBOARD_OPENCLAW_HOME = `${DEFAULT_DASHBOARD_STATE_ROOT}/openclaw-client`;
-const DEFAULT_DASHBOARD_LOG_ROTATION_LOCK_FILE = `${DEFAULT_DASHBOARD_STATE_ROOT}/log-rotation.lock`;
 const MAX_PROCESS_OUTPUT_BYTES = 20 * 1024 * 1024;
 export const MANAGED_DASHBOARD_UNITS = {
     "mira-dashboard-worker.service": "dist/workerStart.js",
@@ -27,28 +22,11 @@ export const MANAGED_DASHBOARD_UNITS = {
 } as const;
 export const MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT = [
     "NODE_ENV",
-    "MIRA_DASHBOARD_EXECUTION_ROLE",
-    "MIRA_DASHBOARD_ENABLE_JOB_SCOPES",
-    "MIRA_DASHBOARD_JOB_SCOPE_OWNER",
-    "MIRA_DASHBOARD_DB_PATH",
-    "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE",
-    "MIRA_DASHBOARD_OPENCLAW_HOME",
-    "MIRA_DASHBOARD_RELEASE_ROOT",
-    "MIRA_DASHBOARD_RELEASES_ROOT",
+    "MIRA_DASHBOARD_PROJECT_ROOT",
 ] as const;
 const MANAGED_DASHBOARD_UNIT_POLICY_ENVIRONMENT = {
-    "mira-dashboard-worker.service": [
-        "NODE_ENV=production",
-        "MIRA_DASHBOARD_EXECUTION_ROLE=worker",
-        "MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1",
-        "MIRA_DASHBOARD_JOB_SCOPE_OWNER=mira-dashboard-worker.service",
-    ],
-    "mira-dashboard.service": [
-        "NODE_ENV=production",
-        "MIRA_DASHBOARD_EXECUTION_ROLE=web",
-        "MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1",
-        "MIRA_DASHBOARD_JOB_SCOPE_OWNER=mira-dashboard.service",
-    ],
+    "mira-dashboard-worker.service": ["NODE_ENV=production"],
+    "mira-dashboard.service": ["NODE_ENV=production"],
 } as const satisfies Record<keyof typeof MANAGED_DASHBOARD_UNITS, readonly string[]>;
 
 export interface DashboardReleaseCommandResult {
@@ -70,9 +48,7 @@ export type DashboardReleaseCommandRunner = (
 export interface StageDashboardReleaseOptions {
     bunExecutable?: string;
     commandRunner?: DashboardReleaseCommandRunner;
-    databasePath?: string;
     onProgress?: (message: string) => void;
-    openClawHome?: string;
     releasesRoot?: string;
     signal?: AbortSignal;
     sourceRoot?: string;
@@ -83,23 +59,40 @@ export interface ManagedDashboardUnitContract {
     databasePath: string;
     logRotationLockFile: string;
     openClawHome: string;
+    previewRoot: string;
+    previewWorktreePath: string;
+    projectRoot: string;
     releaseRoot: string;
     releasesRoot: string;
+    sourceRoot: string;
+    worktreeRoot: string;
 }
 
 type ManagedDashboardUnitName = keyof typeof MANAGED_DASHBOARD_UNITS;
 
+const MANAGED_RELEASE_BUILD_ENVIRONMENT = [
+    "HOME",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "LANG",
+    "LC_ALL",
+    "NO_PROXY",
+    "PATH",
+    "TZ",
+] as const;
+
 function managedReleaseEnvironment(
-    contract: ManagedDashboardUnitContract,
-    releaseRoot: string
+    contract: ManagedDashboardUnitContract
 ): NodeJS.ProcessEnv {
+    const environment: NodeJS.ProcessEnv = {};
+    for (const key of MANAGED_RELEASE_BUILD_ENVIRONMENT) {
+        if (process.env[key] !== undefined) {
+            environment[key] = process.env[key];
+        }
+    }
     return {
-        ...process.env,
-        MIRA_DASHBOARD_DB_PATH: contract.databasePath,
-        MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE: contract.logRotationLockFile,
-        MIRA_DASHBOARD_OPENCLAW_HOME: contract.openClawHome,
-        MIRA_DASHBOARD_RELEASE_ROOT: releaseRoot,
-        MIRA_DASHBOARD_RELEASES_ROOT: contract.releasesRoot,
+        ...environment,
+        MIRA_DASHBOARD_PROJECT_ROOT: contract.projectRoot,
         NODE_ENV: "production",
     };
 }
@@ -215,22 +208,42 @@ async function defaultCommandRunner(
 }
 
 export function managedDashboardUnitContract(
-    releasesRoot = resolveDashboardReleasesRoot(),
-    databasePath = process.env.MIRA_DASHBOARD_DB_PATH ?? DEFAULT_DASHBOARD_DATABASE_PATH,
-    openClawHome = process.env.MIRA_DASHBOARD_OPENCLAW_HOME ??
-        DEFAULT_DASHBOARD_OPENCLAW_HOME
+    releasesRoot = resolveDashboardReleasesRoot()
 ): ManagedDashboardUnitContract {
+    const projectPaths = resolveDashboardProjectPaths();
     const root = resolveAbsoluteNonRootPath(releasesRoot, "Dashboard releases root");
     return {
-        databasePath: resolveAbsoluteNonRootPath(databasePath, "Dashboard database path"),
+        databasePath: resolveAbsoluteNonRootPath(
+            projectPaths.productionDatabasePath,
+            "Dashboard database path"
+        ),
         logRotationLockFile: resolveAbsoluteNonRootPath(
-            process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE ??
-                DEFAULT_DASHBOARD_LOG_ROTATION_LOCK_FILE,
+            projectPaths.productionLogRotationLockFile,
             "Dashboard log rotation lock file"
         ),
-        openClawHome: resolveAbsoluteNonRootPath(openClawHome, "Dashboard OpenClaw home"),
+        openClawHome: resolveAbsoluteNonRootPath(
+            projectPaths.productionOpenClawHome,
+            "Dashboard OpenClaw home"
+        ),
+        previewRoot: resolveAbsoluteNonRootPath(
+            projectPaths.developmentPreviewStateRoot,
+            "Dashboard preview state root"
+        ),
+        previewWorktreePath: resolveAbsoluteNonRootPath(
+            projectPaths.developmentPreviewRoot,
+            "Dashboard preview worktree path"
+        ),
+        projectRoot: projectPaths.projectRoot,
         releaseRoot: path.join(root, "current"),
         releasesRoot: root,
+        sourceRoot: resolveAbsoluteNonRootPath(
+            projectPaths.productionCheckoutRoot,
+            "Dashboard source root"
+        ),
+        worktreeRoot: resolveAbsoluteNonRootPath(
+            projectPaths.developmentWorktreeRoot,
+            "Dashboard worktree root"
+        ),
     };
 }
 
@@ -241,11 +254,7 @@ export function assertManagedDashboardUnitProperties(
 ): void {
     const expectedEnvironment = [
         ...MANAGED_DASHBOARD_UNIT_POLICY_ENVIRONMENT[unit],
-        `MIRA_DASHBOARD_DB_PATH=${contract.databasePath}`,
-        `MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${contract.logRotationLockFile}`,
-        `MIRA_DASHBOARD_OPENCLAW_HOME=${contract.openClawHome}`,
-        `MIRA_DASHBOARD_RELEASE_ROOT=${contract.releaseRoot}`,
-        `MIRA_DASHBOARD_RELEASES_ROOT=${contract.releasesRoot}`,
+        `MIRA_DASHBOARD_PROJECT_ROOT=${contract.projectRoot}`,
     ];
     const expectedWorkingDirectory = `${contract.releaseRoot}/backend`;
     const actual = new Map(
@@ -301,13 +310,8 @@ export async function stageDashboardRelease(
         "Dashboard releases root"
     );
     const commandRunner = options.commandRunner ?? defaultCommandRunner;
-    const contract = managedDashboardUnitContract(
-        releasesRoot,
-        options.databasePath ??
-            process.env.MIRA_DASHBOARD_DB_PATH ??
-            DEFAULT_DASHBOARD_DATABASE_PATH,
-        options.openClawHome
-    );
+    const projectPaths = resolveDashboardProjectPaths();
+    const contract = managedDashboardUnitContract(releasesRoot);
     let existingRelease: ManagedDashboardRelease | undefined;
     try {
         existingRelease = await loadManagedRelease(releasesRoot, expectedCommit);
@@ -320,7 +324,7 @@ export async function stageDashboardRelease(
         options.onProgress?.("Preflighting existing immutable release");
         await commandRunner(bunExecutable, ["dist/databasePreflight.js"], {
             cwd: path.join(existingRelease.path, "backend"),
-            environment: managedReleaseEnvironment(contract, existingRelease.path),
+            environment: managedReleaseEnvironment(contract),
             signal: options.signal,
             timeoutMs: 120_000,
         });
@@ -328,11 +332,11 @@ export async function stageDashboardRelease(
     }
 
     const sourceRoot = resolveAbsoluteNonRootPath(
-        options.sourceRoot ?? DEFAULT_DASHBOARD_SOURCE_ROOT,
+        options.sourceRoot ?? projectPaths.productionCheckoutRoot,
         "Dashboard source root"
     );
     const worktreeRoot = resolveAbsoluteNonRootPath(
-        options.worktreeRoot ?? DEFAULT_DASHBOARD_WORKTREE_ROOT,
+        options.worktreeRoot ?? projectPaths.developmentWorktreeRoot,
         "Dashboard worktree root"
     );
     await assertRealDirectory(sourceRoot, "Dashboard source root");
@@ -341,7 +345,7 @@ export async function stageDashboardRelease(
         worktreeRoot,
         `release-${expectedCommit.slice(0, 12)}-${randomUUID()}`
     );
-    const environment = managedReleaseEnvironment(contract, worktreePath);
+    const environment = managedReleaseEnvironment(contract);
     let isWorktreeCreated = false;
     let stagedRelease: ManagedDashboardRelease | undefined;
     let stagingError: unknown;

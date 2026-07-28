@@ -3,12 +3,13 @@ import { databaseMigrations } from "./databaseMigrations/index.ts";
 const CURRENT_DATABASE_SCHEMA_VERSION = databaseMigrations.at(-1)?.version ?? 0;
 
 /**
- * Keep this range explicit. An expand migration may widen the maximum before
- * the migration ships; a contract migration must narrow it only after the
- * previous release has left the rollback window.
+ * Runtime schema versions this release can safely open. This is not a promise
+ * that migrations are reversible: failed coordinated cutovers restore their
+ * pre-cutover snapshot before older code starts, while later manual rollbacks
+ * remain bounded by the live schema.
  */
 export const DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY = Object.freeze({
-    maximum: 6,
+    maximum: 7,
     minimum: 6,
     target: CURRENT_DATABASE_SCHEMA_VERSION,
 });

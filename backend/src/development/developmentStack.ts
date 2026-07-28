@@ -25,6 +25,7 @@ import path from "node:path";
 
 import { Database } from "bun:sqlite";
 
+import { dashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { formatOpenClawLogDate } from "../lib/logRoots.ts";
 import {
     type DevelopmentWorkspaceState,
@@ -34,9 +35,9 @@ import {
 const DEVELOPMENT_STATE_MARKER = ".mira-dashboard-development-state.json";
 const DEVELOPMENT_SECRET_FILE = ".secret-encryption-key";
 const RELEASE_SHA_PATTERN = /^[\da-f]{40}$/u;
-const HOST_PATTERN = /^(?:localhost|[\da-f:.]+|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$/iu;
 const RP_ID_PATTERN =
     /^(?:localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*)$/u;
+const MANAGED_STATE_BASENAME_PATTERN = /^pr-\d+$/u;
 const DEFAULT_FRONTEND_PORT = 5173;
 const DEFAULT_BACKEND_PORT = 3101;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
@@ -248,28 +249,6 @@ function configuredPort(
     return port;
 }
 
-function configuredHost(
-    name: string,
-    value: string | undefined,
-    fallback: string
-): string {
-    const host = value?.trim() || fallback;
-    if (host.length > 253 || !HOST_PATTERN.test(host) || /[\s/\\\0]/u.test(host)) {
-        throw new TypeError(`${name} must be a valid listen hostname or IP address`);
-    }
-    return host;
-}
-
-function configuredStateOwner(value: string | undefined, fallback: string): string {
-    const owner = value?.trim() || fallback;
-    if (!owner || owner.length > 512 || /[\r\n\0]/u.test(owner)) {
-        throw new TypeError(
-            "MIRA_DASHBOARD_DEV_STATE_OWNER must be a non-empty stable identifier"
-        );
-    }
-    return owner;
-}
-
 function isEnvironmentFlagEnabled(
     name: string,
     value: string | undefined,
@@ -386,21 +365,30 @@ export function resolveDevelopmentStackConfig(
         throw new TypeError("Frontend and backend development ports must be distinct");
     }
     const hostHome = absoluteNonRootPath(
-        "MIRA_DASHBOARD_DEV_HOST_HOME",
-        environment.MIRA_DASHBOARD_DEV_HOST_HOME,
+        "HOME",
+        environment.HOME,
         environment.HOME?.trim() || os.homedir()
     );
     if (!hostHome) {
         throw new Error("Could not resolve the host home for development snapshots");
     }
+    const hostDashboardPaths = dashboardProjectPaths(
+        environment.MIRA_DASHBOARD_PROJECT_ROOT?.trim() ||
+            path.join(hostHome, "projects", "mira-dashboard")
+    );
     const stateRoot = absoluteNonRootPath(
         "MIRA_DASHBOARD_DEV_STATE_ROOT",
         environment.MIRA_DASHBOARD_DEV_STATE_ROOT,
-        path.join(hostHome, "projects", "mira-dashboard-dev-state", "local")
+        hostDashboardPaths.developmentLocalStateRoot
     );
     if (!stateRoot) {
         throw new Error("Development state root could not be resolved");
     }
+    const stateBasename = path.basename(stateRoot);
+    const isManagedPreviewState =
+        path.dirname(stateRoot) ===
+            path.join(hostDashboardPaths.developmentPreviewStateRoot, "states") &&
+        MANAGED_STATE_BASENAME_PATTERN.test(stateBasename);
     const publicOrigin = normalizedPublicOrigin(
         environment.MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN,
         frontendPort
@@ -411,30 +399,22 @@ export function resolveDevelopmentStackConfig(
     );
     const gatewayUrl = normalizedGatewayUrl(environment.MIRA_DASHBOARD_DEV_GATEWAY_URL);
     const openClawSourceRoot = absoluteNonRootPath(
-        "MIRA_DASHBOARD_DEV_OPENCLAW_SOURCE_ROOT",
-        environment.MIRA_DASHBOARD_DEV_OPENCLAW_SOURCE_ROOT,
+        "OPENCLAW_HOME",
+        environment.OPENCLAW_HOME,
         path.join(hostHome, ".openclaw")
     );
 
     return {
         apiTarget: `http://127.0.0.1:${backendPort}`,
-        backendHost: configuredHost(
-            "MIRA_DASHBOARD_DEV_BACKEND_HOST",
-            environment.MIRA_DASHBOARD_DEV_BACKEND_HOST,
-            "127.0.0.1"
-        ),
+        backendHost: "127.0.0.1",
         backendPort,
         databasePath: path.join(stateRoot, "mira-dashboard.db"),
         databaseSource: absoluteNonRootPath(
             "MIRA_DASHBOARD_DEV_DB_SOURCE",
             environment.MIRA_DASHBOARD_DEV_DB_SOURCE,
-            path.join(hostHome, "projects", "mira-dashboard-state", "mira-dashboard.db")
+            hostDashboardPaths.productionDatabasePath
         ),
-        frontendHost: configuredHost(
-            "MIRA_DASHBOARD_DEV_FRONTEND_HOST",
-            environment.MIRA_DASHBOARD_DEV_FRONTEND_HOST,
-            "127.0.0.1"
-        ),
+        frontendHost: "127.0.0.1",
         frontendPort,
         gatewayTokenFile,
         gatewayUrl: gatewayUrl || DEFAULT_GATEWAY_URL,
@@ -457,20 +437,18 @@ export function resolveDevelopmentStackConfig(
         releaseSource: absoluteNonRootPath(
             "MIRA_DASHBOARD_DEV_RELEASES_SOURCE",
             environment.MIRA_DASHBOARD_DEV_RELEASES_SOURCE,
-            path.join(hostHome, "projects", "mira-dashboard-releases")
+            hostDashboardPaths.productionReleasesRoot
         ),
         repositoryRoot: resolvedRepoRoot,
         rpId: publicOrigin.hostname.toLowerCase(),
         secretEncryptionKeyPath: path.join(stateRoot, DEVELOPMENT_SECRET_FILE),
         sourceWebAuthnRpId: normalizedOptionalRpId(
-            "MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID",
-            environment.MIRA_DASHBOARD_DEV_SOURCE_WEBAUTHN_RP_ID ||
-                environment.MIRA_DASHBOARD_WEBAUTHN_RP_ID
+            "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
+            environment.MIRA_DASHBOARD_WEBAUTHN_RP_ID
         ),
-        stateOwner: configuredStateOwner(
-            environment.MIRA_DASHBOARD_DEV_STATE_OWNER,
-            "local-dashboard-dev"
-        ),
+        stateOwner: isManagedPreviewState
+            ? `managed-${stateBasename}`
+            : "local-dashboard-dev",
         stateRoot,
         workspaceSource: absoluteNonRootPath(
             "MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE",
@@ -562,6 +540,115 @@ function runIfTableExists(
     }
 }
 
+interface CompletedDeploymentHistoryRow {
+    commit_sha: null | string;
+    commit_title: null | string;
+    id: string;
+    note: null | string;
+    started_at: string;
+    status: "failed" | "isOk";
+    stderr: null | string;
+    stdout: null | string;
+    updated_at: string;
+}
+
+/**
+ * Restores terminal release history into snapshots created by older Dashboard
+ * versions without refreshing any mutable development data.
+ */
+function backfillCompletedDeploymentHistory(
+    sourcePath: string,
+    targetPath: string
+): void {
+    if (!isRealRegularFile(sourcePath)) {
+        throw new Error(
+            `MIRA_DASHBOARD_DEV_DB_SOURCE must be a real regular file: ${sourcePath}`
+        );
+    }
+    if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+        throw new Error("Development database source and target must be distinct");
+    }
+
+    const target = new Database(targetPath);
+    try {
+        if (!hasTable(target, "deployment_jobs")) return;
+        target.run("BEGIN IMMEDIATE");
+        try {
+            if (hasTable(target, "deployment_lock")) {
+                target.run("DELETE FROM deployment_lock");
+            }
+            target.run(
+                "DELETE FROM deployment_jobs WHERE status NOT IN ('isOk', 'failed')"
+            );
+            const existing = target
+                .query(
+                    "SELECT 1 FROM deployment_jobs WHERE status IN ('isOk', 'failed') LIMIT 1"
+                )
+                .get();
+            if (!existing) {
+                const source = new Database(sourcePath, { readonly: true });
+                let rows: CompletedDeploymentHistoryRow[];
+                try {
+                    rows = hasTable(source, "deployment_jobs")
+                        ? (source
+                              .query(
+                                  `SELECT
+                                       id,
+                                       status,
+                                       started_at,
+                                       updated_at,
+                                       commit_sha,
+                                       commit_title,
+                                       note,
+                                       stdout,
+                                       stderr
+                                   FROM deployment_jobs
+                                   WHERE status IN ('isOk', 'failed')
+                                   ORDER BY started_at, id`
+                              )
+                              .all() as CompletedDeploymentHistoryRow[])
+                        : [];
+                } finally {
+                    source.close();
+                }
+                const insert = target.prepare(
+                    `INSERT INTO deployment_jobs (
+                         id,
+                         status,
+                         started_at,
+                         updated_at,
+                         commit_sha,
+                         commit_title,
+                         note,
+                         stdout,
+                         stderr
+                     )
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                );
+                for (const row of rows) {
+                    insert.run(
+                        row.id,
+                        row.status,
+                        row.started_at,
+                        row.updated_at,
+                        row.commit_sha,
+                        row.commit_title,
+                        row.note,
+                        row.stdout,
+                        row.stderr
+                    );
+                }
+            }
+            target.run("COMMIT");
+        } catch (error) {
+            if (target.inTransaction) target.run("ROLLBACK");
+            throw error;
+        }
+    } finally {
+        target.close();
+    }
+}
+
 function scrubDevelopmentDatabase(
     databasePath: string,
     shouldPreserveWebAuthnCredentials: boolean
@@ -613,7 +700,11 @@ function scrubDevelopmentDatabase(
             database.run("DELETE FROM app_config WHERE key = 'gateway_token'");
         }
         runIfTableExists(database, "deployment_lock", "DELETE FROM deployment_lock");
-        runIfTableExists(database, "deployment_jobs", "DELETE FROM deployment_jobs");
+        runIfTableExists(
+            database,
+            "deployment_jobs",
+            "DELETE FROM deployment_jobs WHERE status NOT IN ('isOk', 'failed')"
+        );
         runIfTableExists(database, "job_executions", "DELETE FROM job_executions");
         runIfTableExists(
             database,
@@ -899,6 +990,13 @@ export function prepareDevelopmentState(
     } else {
         database = "created-empty";
     }
+    if (
+        config.databaseSource &&
+        isRealRegularFile(config.databaseSource) &&
+        isRealRegularFile(config.databasePath)
+    ) {
+        backfillCompletedDeploymentHistory(config.databaseSource, config.databasePath);
+    }
 
     let releases: DevelopmentStateResult["releases"];
     const currentRelease = releaseCommitForSlot(config.releaseRoot, "current");
@@ -953,9 +1051,7 @@ function developmentGatewayToken(
         }
         token = readFileSync(config.gatewayTokenFile, "utf8").trim();
     } else {
-        token =
-            environment.OPENCLAW_GATEWAY_TOKEN?.trim() ||
-            environment.OPENCLAW_TOKEN?.trim();
+        token = environment.OPENCLAW_GATEWAY_TOKEN?.trim();
     }
     if (!token || token.length > 16_384 || /[\r\n\0]/u.test(token)) {
         throw new Error(
@@ -972,25 +1068,19 @@ export function developmentBackendEnvironment(
     const gatewayToken = developmentGatewayToken(config);
     return {
         ...inheritedChildEnvironment(),
-        BUN_BINARY: process.execPath,
         HOME: config.openClawHome,
         MIRA_DASHBOARD_ALLOWED_ORIGINS: config.publicOrigin,
-        MIRA_DASHBOARD_COOKIE_NAMESPACE: `mira_dashboard_dev_${config.frontendPort}`,
         MIRA_DASHBOARD_DB_PATH: config.databasePath,
+        MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: `mira_dashboard_dev_${config.frontendPort}`,
         MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
-        MIRA_DASHBOARD_DISABLE_SCHEDULER: "0",
-        MIRA_DASHBOARD_EXECUTION_ROLE: "combined",
         MIRA_DASHBOARD_FRONTEND_PATH: config.repositoryRoot,
         MIRA_DASHBOARD_HOST: config.backendHost,
-        MIRA_DASHBOARD_JOB_PROFILE: "isolated",
         MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE: path.join(
             config.stateRoot,
             "log-rotation.lock"
         ),
         MIRA_DASHBOARD_LOGS_ROOT: developmentLogsRoot(config),
-        MIRA_DASHBOARD_METRICS_DISK_PATH: config.repositoryRoot,
         MIRA_DASHBOARD_OPENCLAW_HOME: config.openClawClientHome,
-        MIRA_DASHBOARD_RELEASE_ROOT: config.repositoryRoot,
         MIRA_DASHBOARD_RELEASES_ROOT: config.releaseRoot,
         MIRA_DASHBOARD_ROOT: config.repositoryRoot,
         MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY: developmentSecretEncryptionKey(config),

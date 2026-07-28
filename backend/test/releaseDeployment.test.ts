@@ -12,6 +12,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "bun:test";
 
 import {
+    resolveDashboardProjectPaths,
+    resolveDashboardProjectPathsForRuntime,
+    resolveDashboardRuntimePath,
+} from "../src/lib/dashboardPaths.ts";
+import {
     assertManagedDashboardUnitProperties,
     type DashboardReleaseCommandRunner,
     MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT,
@@ -25,6 +30,7 @@ import { createReleaseFixture } from "./support/releaseFixture.ts";
 
 const COMMIT_SHA = "a".repeat(40);
 const OTHER_COMMIT_SHA = "b".repeat(40);
+const PRODUCTION_PATHS = resolveDashboardProjectPaths({});
 const temporaryRoots: string[] = [];
 
 function managedUnitProperties(unitContents: string): string {
@@ -33,7 +39,9 @@ function managedUnitProperties(unitContents: string): string {
         .filter((line) => line.startsWith("Environment="))
         .map((line) => line.slice("Environment=".length));
     const execStart = lines.find((line) => line.startsWith("ExecStart="));
-    const workingDirectory = lines.find((line) => line.startsWith("WorkingDirectory="));
+    const workingDirectory = lines
+        .find((line) => line.startsWith("WorkingDirectory="))
+        ?.replaceAll("%h", "/home/ubuntu");
     if (!execStart || !workingDirectory) {
         throw new Error("Managed unit fixture is missing required service properties");
     }
@@ -58,14 +66,9 @@ function stagingOptions() {
     const sourceRoot = path.join(base, "source");
     const worktreeRoot = path.join(base, "worktrees");
     const releasesRoot = path.join(base, "managed");
-    const databasePath = path.join(base, "state", "mira-dashboard.db");
-    const openClawHome = path.join(base, "state", "openclaw-client");
     mkdirSync(sourceRoot);
     mkdirSync(worktreeRoot);
-    mkdirSync(path.dirname(databasePath));
     return {
-        databasePath,
-        openClawHome,
         releasesRoot,
         sourceRoot,
         worktreeRoot,
@@ -80,15 +83,66 @@ afterEach(() => {
 });
 
 describe("immutable release deployment", () => {
+    it("derives the complete host layout from one project-root environment value", () => {
+        const paths = resolveDashboardProjectPaths({
+            MIRA_DASHBOARD_PROJECT_ROOT: "/srv/dashboard",
+        });
+        expect(paths).toMatchObject({
+            developmentLocalStateRoot: "/srv/dashboard/development/state/local",
+            developmentPreviewRoot: "/srv/dashboard/development/preview",
+            developmentPreviewStateRoot: "/srv/dashboard/development/state/preview",
+            developmentWorktreeRoot: "/srv/dashboard/development/worktrees",
+            productionCheckoutRoot: "/srv/dashboard/production/checkout",
+            productionDatabasePath: "/srv/dashboard/production/state/mira-dashboard.db",
+            productionReleasesRoot: "/srv/dashboard/production/releases",
+            projectRoot: "/srv/dashboard",
+        });
+        expect(() =>
+            resolveDashboardProjectPaths({
+                MIRA_DASHBOARD_PROJECT_ROOT: "/",
+            })
+        ).toThrow("Dashboard project root must be an absolute non-root path");
+        expect(
+            resolveDashboardProjectPathsForRuntime({
+                MIRA_DASHBOARD_PROJECT_ROOT: "/srv/runtime-dashboard",
+                NODE_ENV: "development",
+            })?.projectRoot
+        ).toBe("/srv/runtime-dashboard");
+        expect(
+            resolveDashboardProjectPathsForRuntime({
+                NODE_ENV: "development",
+            })
+        ).toBeUndefined();
+        expect(
+            resolveDashboardProjectPathsForRuntime({
+                NODE_ENV: "production",
+            })?.projectRoot
+        ).toBe(PRODUCTION_PATHS.projectRoot);
+        expect(
+            resolveDashboardRuntimePath("/derived", "/internal", {
+                NODE_ENV: "production",
+            })
+        ).toBe("/derived");
+        expect(
+            resolveDashboardRuntimePath("/derived", "/internal", {
+                NODE_ENV: "development",
+            })
+        ).toBe("/internal");
+    });
+
     it("keeps shipped managed units aligned with the production contract", () => {
-        const releasesRoot = "/home/ubuntu/projects/mira-dashboard-releases";
+        const releasesRoot = PRODUCTION_PATHS.productionReleasesRoot;
         const contract = {
-            databasePath: "/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db",
-            logRotationLockFile:
-                "/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock",
-            openClawHome: "/home/ubuntu/projects/mira-dashboard-state/openclaw-client",
+            databasePath: PRODUCTION_PATHS.productionDatabasePath,
+            logRotationLockFile: PRODUCTION_PATHS.productionLogRotationLockFile,
+            openClawHome: PRODUCTION_PATHS.productionOpenClawHome,
+            previewRoot: PRODUCTION_PATHS.developmentPreviewStateRoot,
+            previewWorktreePath: PRODUCTION_PATHS.developmentPreviewRoot,
+            projectRoot: PRODUCTION_PATHS.projectRoot,
             releaseRoot: `${releasesRoot}/current`,
             releasesRoot,
+            sourceRoot: PRODUCTION_PATHS.productionCheckoutRoot,
+            worktreeRoot: PRODUCTION_PATHS.developmentWorktreeRoot,
         };
         for (const unitName of Object.keys(MANAGED_DASHBOARD_UNITS) as Array<
             keyof typeof MANAGED_DASHBOARD_UNITS
@@ -105,20 +159,29 @@ describe("immutable release deployment", () => {
                 )
             ).not.toThrow();
             expect(unit).toContain(
-                "WorkingDirectory=/home/ubuntu/projects/mira-dashboard-releases/current/backend"
+                "WorkingDirectory=%h/projects/mira-dashboard/production/releases/current/backend"
             );
             expect(unit).toContain(
-                "MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db"
+                `Environment=MIRA_DASHBOARD_PROJECT_ROOT=${PRODUCTION_PATHS.projectRoot}`
             );
-            expect(unit).toContain(
-                "MIRA_DASHBOARD_OPENCLAW_HOME=/home/ubuntu/projects/mira-dashboard-state/openclaw-client"
-            );
-            expect(unit).toContain(
-                "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock"
-            );
-            expect(unit).not.toContain(
-                "/home/ubuntu/projects/mira-dashboard/backend/data"
-            );
+            for (const obsoleteEnvironment of [
+                "MIRA_DASHBOARD_DB_PATH",
+                "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE",
+                "MIRA_DASHBOARD_OPENCLAW_HOME",
+                "MIRA_DASHBOARD_PREVIEW_ROOT",
+                "MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH",
+                "MIRA_DASHBOARD_RELEASE_ROOT",
+                "MIRA_DASHBOARD_RELEASES_ROOT",
+                "MIRA_DASHBOARD_ROOT",
+                "MIRA_DASHBOARD_WORKTREE_ROOT",
+            ]) {
+                expect(unit).not.toMatch(
+                    new RegExp(
+                        String.raw`(?:^Environment=|\s)${obsoleteEnvironment}=`,
+                        "m"
+                    )
+                );
+            }
         }
     });
 
@@ -128,11 +191,12 @@ describe("immutable release deployment", () => {
         ) as { scripts?: Record<string, string> };
         const resetCommand = backendPackage.scripts?.["auth:reset-password"];
         expect(resetCommand).toContain(
-            "MIRA_DASHBOARD_DB_PATH=${MIRA_DASHBOARD_DB_PATH:-/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db}"
+            "NODE_ENV=production doppler run --config prd --project rajohan"
         );
         expect(resetCommand).toContain(
-            "--preserve-env=MIRA_DASHBOARD_DB_PATH -- bun dist/resetDashboardPassword.js"
+            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- bun dist/resetDashboardPassword.js"
         );
+        expect(resetCommand).not.toContain("/home/ubuntu/projects");
     });
 
     it("builds in an isolated worktree and atomically publishes only artifacts", async () => {
@@ -141,7 +205,7 @@ describe("immutable release deployment", () => {
             arguments_: readonly string[];
             command: string;
             cwd: string;
-            releaseRoot: string | undefined;
+            dashboardEnvironment: Record<string, string | undefined>;
         }> = [];
         const progress: string[] = [];
         const runner: DashboardReleaseCommandRunner = async (
@@ -153,7 +217,11 @@ describe("immutable release deployment", () => {
                 arguments_,
                 command,
                 cwd: commandOptions.cwd,
-                releaseRoot: commandOptions.environment.MIRA_DASHBOARD_RELEASE_ROOT,
+                dashboardEnvironment: Object.fromEntries(
+                    Object.entries(commandOptions.environment).filter(([key]) =>
+                        key.startsWith("MIRA_DASHBOARD_")
+                    )
+                ),
             });
             if (command === "git" && arguments_[0] === "worktree") {
                 if (arguments_[1] === "add") {
@@ -206,9 +274,11 @@ describe("immutable release deployment", () => {
             "Building and preflighting release",
             "Publishing verified immutable release",
         ]);
-        const buildReleaseRoots = new Set(calls.map(({ releaseRoot }) => releaseRoot));
-        expect(buildReleaseRoots.size).toBe(1);
-        expect([...buildReleaseRoots][0]).toStartWith(`${options.worktreeRoot}/release-`);
+        for (const call of calls) {
+            expect(call.dashboardEnvironment).toEqual({
+                MIRA_DASHBOARD_PROJECT_ROOT: resolveDashboardProjectPaths().projectRoot,
+            });
+        }
     });
 
     it("reruns database preflight when reusing a verified immutable release", async () => {
@@ -244,8 +314,7 @@ describe("immutable release deployment", () => {
             arguments_: readonly string[];
             command: string;
             cwd: string;
-            databasePath: string | undefined;
-            releaseRoot: string | undefined;
+            dashboardEnvironment: Record<string, string | undefined>;
         }> = [];
         const reused = await stageDashboardRelease(COMMIT_SHA, {
             ...options,
@@ -254,8 +323,11 @@ describe("immutable release deployment", () => {
                     arguments_,
                     command,
                     cwd: commandOptions.cwd,
-                    databasePath: commandOptions.environment.MIRA_DASHBOARD_DB_PATH,
-                    releaseRoot: commandOptions.environment.MIRA_DASHBOARD_RELEASE_ROOT,
+                    dashboardEnvironment: Object.fromEntries(
+                        Object.entries(commandOptions.environment).filter(([key]) =>
+                            key.startsWith("MIRA_DASHBOARD_")
+                        )
+                    ),
                 });
                 return { stderr: "", stdout: "" };
             },
@@ -267,8 +339,10 @@ describe("immutable release deployment", () => {
                 arguments_: ["dist/databasePreflight.js"],
                 command: process.execPath,
                 cwd: path.join(reused.path, "backend"),
-                databasePath: options.databasePath,
-                releaseRoot: reused.path,
+                dashboardEnvironment: {
+                    MIRA_DASHBOARD_PROJECT_ROOT:
+                        resolveDashboardProjectPaths().projectRoot,
+                },
             },
         ]);
         await expect(
@@ -470,31 +544,14 @@ describe("immutable release deployment", () => {
 
     it("validates paths, commits, and CLI commands", async () => {
         const options = stagingOptions();
-        expect(() =>
-            managedDashboardUnitContract(
-                options.releasesRoot,
-                options.databasePath,
-                options.openClawHome
-            )
-        ).not.toThrow();
-        expect(() =>
-            managedDashboardUnitContract(
-                options.releasesRoot,
-                "relative.db",
-                options.openClawHome
-            )
-        ).toThrow("database path must be an absolute non-root path");
-        expect(() =>
-            managedDashboardUnitContract("/", options.databasePath, options.openClawHome)
-        ).toThrow("releases root must be an absolute non-root path");
-        const contract = managedDashboardUnitContract(
-            options.releasesRoot,
-            options.databasePath,
-            options.openClawHome
+        expect(() => managedDashboardUnitContract(options.releasesRoot)).not.toThrow();
+        expect(() => managedDashboardUnitContract("/")).toThrow(
+            "releases root must be an absolute non-root path"
         );
+        const contract = managedDashboardUnitContract(options.releasesRoot);
         const properties = [
             `WorkingDirectory=${contract.releaseRoot}/backend`,
-            `Environment=NODE_ENV=production MIRA_DASHBOARD_EXECUTION_ROLE=web MIRA_DASHBOARD_ENABLE_JOB_SCOPES=1 MIRA_DASHBOARD_JOB_SCOPE_OWNER=mira-dashboard.service MIRA_DASHBOARD_DB_PATH=${contract.databasePath} MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=${contract.logRotationLockFile} MIRA_DASHBOARD_OPENCLAW_HOME=${contract.openClawHome} MIRA_DASHBOARD_RELEASE_ROOT=${contract.releaseRoot} MIRA_DASHBOARD_RELEASES_ROOT=${contract.releasesRoot}`,
+            `Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${contract.projectRoot}`,
             `ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=${MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT.join(",")} -- bun dist/serverStart.js ; }`,
         ].join("\n");
         expect(() =>
@@ -524,10 +581,7 @@ describe("immutable release deployment", () => {
         expect(() =>
             assertManagedDashboardUnitProperties(
                 "mira-dashboard.service",
-                properties.replace(
-                    "MIRA_DASHBOARD_EXECUTION_ROLE=web",
-                    "MIRA_DASHBOARD_EXECUTION_ROLE=worker"
-                ),
+                properties.replace("NODE_ENV=production", "NODE_ENV=development"),
                 contract
             )
         ).toThrow("missing stable managed release environment");
@@ -555,22 +609,22 @@ describe("immutable release deployment", () => {
             assertManagedDashboardUnitProperties(
                 "mira-dashboard.service",
                 properties.replace(
-                    ` MIRA_DASHBOARD_OPENCLAW_HOME=${contract.openClawHome}`,
+                    ` MIRA_DASHBOARD_PROJECT_ROOT=${contract.projectRoot}`,
                     ""
                 ),
                 contract
             )
-        ).toThrow("MIRA_DASHBOARD_OPENCLAW_HOME");
+        ).toThrow("MIRA_DASHBOARD_PROJECT_ROOT");
         expect(() =>
             assertManagedDashboardUnitProperties(
                 "mira-dashboard.service",
                 properties.replace(
-                    ` MIRA_DASHBOARD_OPENCLAW_HOME=${contract.openClawHome}`,
-                    () => ` NOT_MIRA_DASHBOARD_OPENCLAW_HOME=${contract.openClawHome}`
+                    ` MIRA_DASHBOARD_PROJECT_ROOT=${contract.projectRoot}`,
+                    () => ` NOT_MIRA_DASHBOARD_PROJECT_ROOT=${contract.projectRoot}`
                 ),
                 contract
             )
-        ).toThrow("MIRA_DASHBOARD_OPENCLAW_HOME");
+        ).toThrow("MIRA_DASHBOARD_PROJECT_ROOT");
         await expect(
             stageDashboardRelease("short", {
                 ...options,

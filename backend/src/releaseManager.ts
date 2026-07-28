@@ -12,6 +12,11 @@ import {
 } from "./database.ts";
 import { readAppliedDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
 import type { DatabaseMigrationIdentity } from "./databaseMigrations/index.ts";
+import {
+    configuredDashboardProjectPaths,
+    resolveDashboardProjectPaths,
+    resolveDashboardRuntimePath,
+} from "./lib/dashboardPaths.ts";
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
@@ -23,8 +28,6 @@ import {
     verifyReleaseBuildIdentities,
 } from "./releaseManifest.ts";
 
-export const DEFAULT_DASHBOARD_RELEASES_ROOT =
-    "/home/ubuntu/projects/mira-dashboard-releases";
 export const MANAGED_RELEASES_DIRECTORY_NAME = "releases";
 
 const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
@@ -367,8 +370,11 @@ async function writeReleaseTransitionJournal(
 }
 
 export function resolveDashboardReleasesRoot(
-    configuredRoot = process.env.MIRA_DASHBOARD_RELEASES_ROOT ??
-        DEFAULT_DASHBOARD_RELEASES_ROOT
+    configuredRoot = resolveDashboardRuntimePath(
+        configuredDashboardProjectPaths()?.productionReleasesRoot ??
+            resolveDashboardProjectPaths({}).productionReleasesRoot,
+        process.env.MIRA_DASHBOARD_RELEASES_ROOT
+    ) ?? resolveDashboardProjectPaths({}).productionReleasesRoot
 ): string {
     return resolveAbsoluteNonRootPath(configuredRoot, "Dashboard releases root");
 }
@@ -793,6 +799,36 @@ export function assertReleaseRollbackCompatible(
             "Rollback release has a different migration registry for the live SQLite schema"
         );
     }
+}
+
+/**
+ * Verifies that a managed rollback release can open the live schema and agrees
+ * with its applied migration history.
+ */
+export async function assertManagedDashboardReleaseRollbackSchemaCompatible(
+    activeRelease: ManagedDashboardRelease,
+    rollbackRelease: ManagedDashboardRelease,
+    options: DashboardReleaseManagerOptions = {}
+): Promise<void> {
+    const maximumInspectableSchemaVersion = Math.max(
+        DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
+        activeRelease.manifest.schema.maximumCompatible,
+        rollbackRelease.manifest.schema.maximumCompatible
+    );
+    const liveSchemaState = await resolveLiveSchemaState(
+        options,
+        maximumInspectableSchemaVersion
+    );
+    assertReleaseRollbackCompatible(
+        activeRelease.manifest,
+        rollbackRelease.manifest,
+        liveSchemaState.version
+    );
+    assertReleaseMigrationHistoryCompatible(
+        rollbackRelease.manifest,
+        liveSchemaState,
+        "Rollback"
+    );
 }
 
 function assertReleaseCanActivateLiveSchema(
@@ -1280,21 +1316,6 @@ export async function activateDashboardRelease(
                 options,
                 maximumInspectableSchemaVersion
             );
-            const requiresCoordinatedCutover =
-                requiresLiveSchemaCutover(candidate.manifest, liveSchemaState.version) ||
-                (state.current !== undefined &&
-                    requiresCurrentSchemaCutover(
-                        candidate.manifest,
-                        state.current.manifest
-                    ));
-            if (
-                !requiresCoordinatedCutover &&
-                options.schemaCutoverMode === "coordinated"
-            ) {
-                throw new Error(
-                    "Coordinated schema cutover mode requires an incompatible schema boundary"
-                );
-            }
             assertReleaseCanActivateLiveSchema(
                 candidate.manifest,
                 liveSchemaState.version,
@@ -1375,24 +1396,10 @@ export async function rollbackDashboardRelease(
             const activeRelease = state.current;
             const rollbackRelease = state.previous;
             assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
-            const maximumInspectableSchemaVersion = Math.max(
-                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
-                activeRelease.manifest.schema.maximumCompatible,
-                rollbackRelease.manifest.schema.maximumCompatible
-            );
-            const liveSchemaState = await resolveLiveSchemaState(
-                options,
-                maximumInspectableSchemaVersion
-            );
-            assertReleaseRollbackCompatible(
-                activeRelease.manifest,
-                rollbackRelease.manifest,
-                liveSchemaState.version
-            );
-            assertReleaseMigrationHistoryCompatible(
-                rollbackRelease.manifest,
-                liveSchemaState,
-                "Rollback"
+            await assertManagedDashboardReleaseRollbackSchemaCompatible(
+                activeRelease,
+                rollbackRelease,
+                options
             );
 
             const before = releaseLinkStateFromDashboardState(state);
@@ -1456,6 +1463,18 @@ export async function restoreDashboardReleaseAfterFailedActivation(
             await recoverInterruptedReleaseTransition(layout);
             const state = await readDashboardReleaseStateFromLayout(layout);
             if (
+                state.current?.commitSha === rollbackCommitSha &&
+                state.previous?.commitSha === previousCommitSha
+            ) {
+                assertDashboardReleaseHostRuntimeCompatible(state.current);
+                await assertManagedDashboardReleaseRollbackSchemaCompatible(
+                    state.current,
+                    state.current,
+                    options
+                );
+                return state;
+            }
+            if (
                 state.current?.commitSha !== candidateCommitSha ||
                 state.previous?.commitSha !== rollbackCommitSha
             ) {
@@ -1470,24 +1489,10 @@ export async function restoreDashboardReleaseAfterFailedActivation(
             const restoredPreviousRelease = previousCommitSha
                 ? await loadManagedReleaseFromLayout(layout, previousCommitSha)
                 : undefined;
-            const maximumInspectableSchemaVersion = Math.max(
-                DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY.maximum,
-                candidateRelease.manifest.schema.maximumCompatible,
-                rollbackRelease.manifest.schema.maximumCompatible
-            );
-            const liveSchemaState = await resolveLiveSchemaState(
-                options,
-                maximumInspectableSchemaVersion
-            );
-            assertReleaseRollbackCompatible(
-                candidateRelease.manifest,
-                rollbackRelease.manifest,
-                liveSchemaState.version
-            );
-            assertReleaseMigrationHistoryCompatible(
-                rollbackRelease.manifest,
-                liveSchemaState,
-                "Rollback"
+            await assertManagedDashboardReleaseRollbackSchemaCompatible(
+                candidateRelease,
+                rollbackRelease,
+                options
             );
 
             const before = releaseLinkStateFromDashboardState(state);

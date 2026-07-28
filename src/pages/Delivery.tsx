@@ -294,7 +294,7 @@ function normalizedCheckValue(value: unknown): string {
 function deploymentVariant(status: DeploymentJob["status"]) {
     if (status === "isOk") return "success" as const;
     if (status === "failed") return "error" as const;
-    if (status === "restart-scheduled") return "warning" as const;
+    if (status === "verifying") return "warning" as const;
     return "info" as const;
 }
 
@@ -831,10 +831,12 @@ export function Delivery() {
         const isRebuildDevelopment =
             isPreviewSlotActive && hasPullRequestPreviewSlot && !isPreviewCommitCurrent;
         const canStartDevelopment = !hasCurrentDevelopment;
+        const arePreviewControlsAvailable = previewStatus?.controlsAvailable !== false;
         const isPreviewActionDisabled =
             isActionPending ||
             isPreviewStatusLoading ||
             Boolean(previewStatusError) ||
+            !arePreviewControlsAvailable ||
             isPreviewSlotBusy ||
             isPreviewTransitionInProgress;
         let blockedMessage: string | undefined;
@@ -842,6 +844,10 @@ export function Delivery() {
             blockedMessage = "Loading PR dev status.";
         } else if (previewStatusError) {
             blockedMessage = `PR dev status is unavailable: ${previewStatusError.message}`;
+        } else if (!arePreviewControlsAvailable) {
+            blockedMessage =
+                previewStatus?.message ??
+                "PR dev controls are available only from the production Dashboard.";
         } else if (isPreviewSlotBusy) {
             blockedMessage = `PR #${previewStatus?.number} currently owns the dev slot. Stop it before starting another PR.`;
         } else if (isPreviewTransitionInProgress) {
@@ -899,7 +905,11 @@ export function Delivery() {
                                 type: "preview-stop",
                             })
                         }
-                        disabled={isActionPending || isPreviewTransitionInProgress}
+                        disabled={
+                            isActionPending ||
+                            !arePreviewControlsAvailable ||
+                            isPreviewTransitionInProgress
+                        }
                     >
                         <Square className="size-4" />
                         Stop dev

@@ -1,21 +1,8 @@
-const DEFAULT_ALLOWED_AUTHORS = "mira-2026,rajohan";
+const PULL_REQUEST_PREVIEW_ALLOWED_AUTHORS = ["mira-2026", "rajohan"] as const;
 
 /** Resolves the single backend-owned allowlist used by preview auth and UI metadata. */
-export function resolvePullRequestPreviewAllowedAuthors(
-    configuredValue: string | undefined
-): ReadonlySet<string> {
-    const allowedAuthors = new Set(
-        (configuredValue === undefined ? DEFAULT_ALLOWED_AUTHORS : configuredValue)
-            .split(",")
-            .map((author) => author.trim().toLowerCase())
-            .filter(Boolean)
-    );
-    if (allowedAuthors.size === 0) {
-        throw new TypeError(
-            "MIRA_DASHBOARD_PREVIEW_ALLOWED_AUTHORS must contain at least one author"
-        );
-    }
-    return allowedAuthors;
+export function resolvePullRequestPreviewAllowedAuthors(): ReadonlySet<string> {
+    return new Set(PULL_REQUEST_PREVIEW_ALLOWED_AUTHORS);
 }
 
 /** Checks one GitHub login against the normalized backend preview allowlist. */

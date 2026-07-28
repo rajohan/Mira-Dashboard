@@ -1,7 +1,14 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { writeReleaseManifest } from "../../src/releaseManifest.ts";
+import { databaseMigrations } from "../../src/databaseMigrations/index.ts";
+import {
+    databaseMigrationInventorySha256,
+    loadReleaseManifest,
+    parseReleaseManifest,
+    RELEASE_MANIFEST_FILE_NAME,
+    writeReleaseManifest,
+} from "../../src/releaseManifest.ts";
 
 interface ReleaseFixtureOptions {
     builtAt?: Date;
@@ -68,4 +75,47 @@ export async function createReleaseFixture(
         commitTitle: options.commitTitle ?? `Release ${commitSha.slice(0, 8)}`,
         releaseRoot,
     });
+}
+
+/** Rewrites a release fixture to model an older exact schema compatibility window. */
+export async function rewriteReleaseFixtureSchemaVersion(
+    releaseRoot: string,
+    schemaVersion: number
+): Promise<void> {
+    const manifest = await loadReleaseManifest(releaseRoot);
+    if (
+        !Number.isSafeInteger(schemaVersion) ||
+        schemaVersion < 0 ||
+        schemaVersion > manifest.schema.target ||
+        schemaVersion > databaseMigrations.length
+    ) {
+        throw new TypeError("Release fixture schema version is invalid");
+    }
+    const migrations = manifest.schema.migrations.slice(0, schemaVersion);
+    const migrationRegistrySha256 = new Bun.CryptoHasher("sha256")
+        .update(
+            databaseMigrations
+                .slice(0, schemaVersion)
+                .map(
+                    (migration) =>
+                        `${migration.version}\0${migration.name}\0${migration.sql}`
+                )
+                .join("\0")
+        )
+        .digest("hex");
+    const rewritten = parseReleaseManifest({
+        ...manifest,
+        schema: {
+            maximumCompatible: schemaVersion,
+            migrations,
+            migrationInventorySha256: databaseMigrationInventorySha256(migrations),
+            migrationRegistrySha256,
+            minimumCompatible: schemaVersion,
+            target: schemaVersion,
+        },
+    });
+    writeFileSync(
+        path.join(releaseRoot, RELEASE_MANIFEST_FILE_NAME),
+        `${JSON.stringify(rewritten, undefined, 2)}\n`
+    );
 }

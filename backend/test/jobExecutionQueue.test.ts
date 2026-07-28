@@ -81,7 +81,7 @@ function createScheduledTestJob(
     return id;
 }
 
-function createRestartScheduledDeployment(
+function createVerifyingDeployment(
     updatedAt: string,
     candidateCommit = "c".repeat(40)
 ): string {
@@ -91,7 +91,7 @@ function createRestartScheduledDeployment(
         .prepare(
             `INSERT INTO deployment_jobs (
                 id, status, started_at, updated_at, commit_sha, note, stdout, stderr
-             ) VALUES (?, 'restart-scheduled', ?, ?, ?, ?, '', '')`
+             ) VALUES (?, 'verifying', ?, ?, ?, ?, '', '')`
         )
         .run(deploymentId, updatedAt, updatedAt, candidateCommit, "Waiting for guardian");
     database
@@ -104,7 +104,7 @@ describe("persistent job execution queue", () => {
     it("schedules rollback recovery for an inactive detached cutover", () => {
         const startedAt = "2026-07-26T03:00:00.000Z";
         const recoveredAt = "2026-07-26T03:01:00.000Z";
-        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const deploymentId = createVerifyingDeployment(startedAt);
         const recovery = jest.fn(() => true);
 
         expect(
@@ -129,7 +129,7 @@ describe("persistent job execution queue", () => {
                 .get(deploymentId)
         ).toEqual({
             note: "Waiting for guardian",
-            status: "restart-scheduled",
+            status: "verifying",
             updatedAt: startedAt,
         });
         expect(
@@ -141,7 +141,7 @@ describe("persistent job execution queue", () => {
 
     it("warns once when an orphaned cutover has no recovery handler", () => {
         const startedAt = "2026-07-26T03:00:00.000Z";
-        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const deploymentId = createVerifyingDeployment(startedAt);
         const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
         try {
             expect(
@@ -170,7 +170,7 @@ describe("persistent job execution queue", () => {
 
     it("terminalizes an inactive legacy cutover without a persisted full SHA", () => {
         const startedAt = "2026-07-26T03:00:00.000Z";
-        const deploymentId = createRestartScheduledDeployment(startedAt, "c0ffee12");
+        const deploymentId = createVerifyingDeployment(startedAt, "c0ffee12");
         const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
         const recovery = jest.fn(() => true);
         try {
@@ -216,7 +216,7 @@ describe("persistent job execution queue", () => {
 
     it("bounds an explicit unknown guardian state by scheduling recovery", () => {
         const startedAt = "2026-07-26T03:00:00.000Z";
-        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const deploymentId = createVerifyingDeployment(startedAt);
         const recovery = jest.fn(() => true);
 
         expect(
@@ -251,7 +251,7 @@ describe("persistent job execution queue", () => {
 
     it("bounds guardian inspection failures by scheduling rollback recovery", () => {
         const startedAt = "2026-07-26T03:00:00.000Z";
-        const deploymentId = createRestartScheduledDeployment(startedAt);
+        const deploymentId = createVerifyingDeployment(startedAt);
         const recovery = jest.fn(() => true);
 
         expect(
@@ -295,7 +295,7 @@ describe("persistent job execution queue", () => {
                 .get(deploymentId)
         ).toEqual({
             note: "Waiting for guardian",
-            status: "restart-scheduled",
+            status: "verifying",
             updatedAt: startedAt,
         });
         expect(
@@ -307,7 +307,7 @@ describe("persistent job execution queue", () => {
 
     it("accepts a loaded active unit when systemctl emits benign diagnostics", () => {
         const startedAt = "2026-07-26T03:00:00.000Z";
-        createRestartScheduledDeployment(startedAt);
+        createVerifyingDeployment(startedAt);
         const originalPath = process.env.PATH;
         let fakeBin: string | undefined;
         const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
@@ -480,8 +480,7 @@ printf 'LoadState=loaded\nActiveState=active\n'
                 "docker",
                 ["exec", "worker", "sh", "-c", 'printf "%s" "$JOB_COMMAND"'],
                 {
-                    MIRA_DASHBOARD_ENABLE_JOB_SCOPES: "1",
-                    MIRA_DASHBOARD_JOB_SCOPE_OWNER: "mira-dashboard-worker.service",
+                    NODE_ENV: "production",
                 }
             )
         );

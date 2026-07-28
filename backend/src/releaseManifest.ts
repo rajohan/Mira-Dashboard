@@ -710,12 +710,10 @@ export async function verifyReleaseArtifacts(
 }
 
 function inferProcessReleaseRoot(): string {
-    const configured = process.env.MIRA_DASHBOARD_RELEASE_ROOT?.trim();
-    const candidate = configured
-        ? path.resolve(configured)
-        : path.basename(process.cwd()) === "backend"
-          ? path.dirname(process.cwd())
-          : path.resolve(import.meta.dirname, "..", "..");
+    const candidate =
+        path.basename(process.cwd()) === "backend"
+            ? path.dirname(process.cwd())
+            : path.resolve(import.meta.dirname, "..", "..");
     try {
         return fs.realpathSync(candidate);
     } catch {

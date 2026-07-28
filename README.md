@@ -142,22 +142,22 @@ CI and local verification.
 
 ## Production checkout and PR worktrees
 
-`/home/ubuntu/projects/mira-dashboard` is the production checkout. Keep it on `main`; the running service and deploy workflow build from this path only after Raymond approves a merge/deploy.
+`/home/ubuntu/projects/mira-dashboard/production/checkout` is the clean production control checkout. Keep it on `main`; after Raymond approves a merge/deploy, the deploy workflow updates this source and builds the exact commit in an isolated detached worktree. Production never builds in or executes from the control checkout.
 
-Feature and autopilot work must use separate git worktrees under `/home/ubuntu/projects/mira-dashboard-worktrees`, for example:
+Feature and autopilot work must use separate git worktrees under `/home/ubuntu/projects/mira-dashboard/development/worktrees`, for example:
 
 ```bash
-mkdir -p /home/ubuntu/projects/mira-dashboard-worktrees
-git -C /home/ubuntu/projects/mira-dashboard fetch --prune origin
-git -C /home/ubuntu/projects/mira-dashboard worktree add \
+mkdir -p /home/ubuntu/projects/mira-dashboard/development/worktrees
+git -C /home/ubuntu/projects/mira-dashboard/production/checkout fetch --prune origin
+git -C /home/ubuntu/projects/mira-dashboard/production/checkout worktree add \
   -b mira/<short-slug> \
-  /home/ubuntu/projects/mira-dashboard-worktrees/<short-slug> \
+  /home/ubuntu/projects/mira-dashboard/development/worktrees/<short-slug> \
   main
 ```
 
 Run lint/build verification inside the worktree, not the production checkout. This prevents unapproved PR branches from writing live `dist/` or `backend/dist` artifacts.
 
-The Dashboard PR approval/rejection endpoints attempt to remove the matching local worktree after a PR is merged or rejected. Cleanup is best-effort: it only removes paths under `/home/ubuntu/projects/mira-dashboard-worktrees` and skips worktrees with uncommitted changes.
+The Dashboard PR approval/rejection endpoints attempt to remove the matching local worktree after a PR is merged or rejected. Cleanup is best-effort: it only removes paths under `/home/ubuntu/projects/mira-dashboard/development/worktrees` and skips worktrees with uncommitted changes.
 
 ## Safety notes for agents
 

@@ -37,7 +37,7 @@ export interface PullRequestSummary {
 /** Represents deployment job. */
 export interface DeploymentJob {
     id: string;
-    status: "building" | "restart-scheduled" | "isOk" | "failed";
+    status: "building" | "verifying" | "isOk" | "failed";
     startedAt: string;
     updatedAt: string;
     commit?: string;
@@ -94,6 +94,7 @@ export type PullRequestPreviewLifecycle =
 export interface PullRequestPreviewStatus {
     backendPort?: number;
     commitSha?: string;
+    controlsAvailable?: boolean;
     frontendPort?: number;
     message?: string;
     number?: number;

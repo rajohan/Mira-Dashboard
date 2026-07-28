@@ -1,12 +1,11 @@
 # Scheduler, Cache, And Backups
 
-Dashboard runs background jobs from `backend/src/workerStart.ts`. Production
-sets `MIRA_DASHBOARD_EXECUTION_ROLE=web` on the web unit and
-`MIRA_DASHBOARD_EXECUTION_ROLE=worker` on the worker unit. The backward-
-disables the in-process worker when explicitly requested. Ordinary local
-development uses `combined` with `MIRA_DASHBOARD_JOB_PROFILE=isolated`, keeping
-the scheduler/worker active without registering host backup, deploy, Docker,
-exec, log-rotation, PR, or OpenClaw-restart actions.
+Dashboard runs production background jobs from
+`backend/src/workerStart.ts`; the separate web entry point never starts an
+in-process production worker. Ordinary local development uses the combined
+server entry point, and dev safe mode keeps the scheduler/worker active without
+registering host backup, deploy, Docker, exec, log-rotation, PR, or
+OpenClaw-restart actions.
 
 ## Scheduled Jobs
 
@@ -225,23 +224,25 @@ History retention keeps:
 | chat replay snapshots and events            | 30 days and at most 200 snapshots globally; orphan events removed                     |
 
 Active, queued, and running execution/deployment rows are preserved. SQLite
-snapshot retention is 14 scheduled/14 days, 20 pre-deploy/90 days, and 20
-pre-migration/180 days. Unread notifications are preserved. The job does not
-run automatic `VACUUM`.
+snapshot retention is 5 orphan-safety cutover snapshots/2 days, 14
+scheduled/14 days, 20 pre-deploy/90 days, and 20 pre-migration/180 days. Normal
+successful or recovered cutovers discard their UUID-bound snapshot immediately;
+the retention bound is a crash-recovery fallback. Unread notifications are
+preserved. The job does not run automatic `VACUUM`.
 
 ## Operational Checks
 
 List scheduled job tables:
 
 ```bash
-sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+sqlite3 /home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db \
   "SELECT id, name, enabled, schedule_type, next_run_at, updated_at FROM scheduled_jobs ORDER BY id;"
 ```
 
 Inspect recent runs:
 
 ```bash
-sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+sqlite3 /home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db \
   "SELECT job_id, status, started_at, finished_at FROM scheduled_job_runs ORDER BY id DESC LIMIT 20;"
 ```
 
@@ -249,7 +250,7 @@ Inspect SQLite lifecycle state:
 
 ```bash
 set -euo pipefail
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 sqlite3 -readonly "$db_path" \
   "SELECT version, name, applied_at FROM schema_migrations ORDER BY version;"
 sqlite3 -readonly "$db_path" \
@@ -259,6 +260,6 @@ sqlite3 -readonly "$db_path" \
 Inspect cache freshness:
 
 ```bash
-sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+sqlite3 /home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db \
   "SELECT key, status, updated_at FROM cache_entries ORDER BY updated_at DESC LIMIT 30;"
 ```

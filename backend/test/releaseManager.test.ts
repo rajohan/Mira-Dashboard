@@ -57,14 +57,14 @@ const THIRD_COMMIT = "c".repeat(40);
 const FOURTH_COMMIT = "d".repeat(40);
 const TEST_FUTURE_MIGRATIONS: DatabaseMigrationIdentity[] = [
     {
-        checksum: "7".repeat(64),
-        name: "test-migration-7",
-        version: 7,
-    },
-    {
         checksum: "8".repeat(64),
         name: "test-migration-8",
         version: 8,
+    },
+    {
+        checksum: "9".repeat(64),
+        name: "test-migration-9",
+        version: 9,
     },
 ];
 
@@ -422,7 +422,10 @@ describe("Dashboard immutable release manager", () => {
                 },
                 root
             )
-        ).rejects.toThrow("slots changed");
+        ).resolves.toMatchObject({
+            current: { commitSha: SECOND_COMMIT },
+            previous: { commitSha: FIRST_COMMIT },
+        });
         await expect(readDashboardReleaseState(root)).resolves.toMatchObject({
             current: { commitSha: SECOND_COMMIT },
             previous: { commitSha: FIRST_COMMIT },
@@ -655,15 +658,15 @@ describe("Dashboard immutable release manager", () => {
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(candidatePath, {
             migrationRegistrySha256: "c".repeat(64),
-            schemaMaximum: 7,
+            schemaMaximum: 8,
             schemaMinimum: 6,
-            schemaTarget: 7,
+            schemaTarget: 8,
         });
         await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
 
         await expect(
             activateDashboardRelease(SECOND_COMMIT, root, SCHEMA_6_OPTIONS)
-        ).rejects.toThrow("cannot roll back after SQLite schema 7");
+        ).rejects.toThrow("cannot roll back after SQLite schema 8");
         expect(readlinkSync(path.join(root, "current"))).toBe(`releases/${FIRST_COMMIT}`);
         expect(existsSync(path.join(root, "previous"))).toBe(false);
     });
@@ -679,6 +682,21 @@ describe("Dashboard immutable release manager", () => {
         await expect(
             activateDashboardRelease(SECOND_COMMIT, registryRoot, SCHEMA_6_OPTIONS)
         ).rejects.toThrow("migration registry changed");
+        const restoredRegistryState = await restoreDashboardReleaseAfterFailedActivation(
+            {
+                ...SCHEMA_6_OPTIONS,
+                expected: {
+                    candidateCommitSha: SECOND_COMMIT,
+                    previousCommitSha: undefined,
+                    rollbackCommitSha: FIRST_COMMIT,
+                },
+            },
+            registryRoot
+        );
+        expect(restoredRegistryState).toMatchObject({
+            current: { commitSha: FIRST_COMMIT },
+        });
+        expect(restoredRegistryState.previous).toBeUndefined();
 
         const runtimeRoot = temporaryReleasesRoot();
         await createManagedRelease(runtimeRoot, FIRST_COMMIT, FIRST_COMMIT, "0.0.0");
@@ -697,27 +715,27 @@ describe("Dashboard immutable release manager", () => {
         const migratedPath = await createManagedRelease(root, SECOND_COMMIT);
         await createManagedRelease(root, THIRD_COMMIT);
         await rewriteManifest(rollbackPath, {
-            schemaMaximum: 7,
+            schemaMaximum: 8,
         });
         await rewriteManifest(migratedPath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 7,
-            schemaMinimum: 6,
-            schemaTarget: 7,
+            schemaMaximum: 8,
+            schemaMinimum: 7,
+            schemaTarget: 8,
         });
 
-        let liveSchemaVersion = 6;
+        let liveSchemaVersion = 7;
         const options = {
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
         };
         await activateDashboardRelease(FIRST_COMMIT, root, options);
         await activateDashboardRelease(SECOND_COMMIT, root, options);
-        liveSchemaVersion = 7;
+        liveSchemaVersion = 8;
         await rollbackDashboardRelease(root, options);
 
         await expect(
             activateDashboardRelease(THIRD_COMMIT, root, options)
-        ).rejects.toThrow("Activation release cannot open live SQLite schema 7");
+        ).rejects.toThrow("Activation release cannot open live SQLite schema 8");
         const state = await readDashboardReleaseState(root);
         expect(state.current?.commitSha).toBe(FIRST_COMMIT);
         expect(state.previous?.commitSha).toBe(SECOND_COMMIT);
@@ -728,43 +746,45 @@ describe("Dashboard immutable release manager", () => {
         const currentPath = await createManagedRelease(root, FIRST_COMMIT);
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(currentPath, {
-            schemaMaximum: 7,
+            schemaMaximum: 8,
         });
         await rewriteManifest(candidatePath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 7,
-            schemaMinimum: 6,
-            schemaTarget: 7,
+            schemaMaximum: 8,
+            schemaMinimum: 7,
+            schemaTarget: 8,
         });
-        await activateDashboardRelease(FIRST_COMMIT, root, SCHEMA_6_OPTIONS);
+        await activateDashboardRelease(FIRST_COMMIT, root, {
+            readLiveSchemaState: () => testLiveSchemaState(7),
+        });
 
         await expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
                 readLiveSchemaState: () =>
-                    testLiveSchemaState(7, {
-                        7: {
+                    testLiveSchemaState(8, {
+                        8: {
                             ...TEST_FUTURE_MIGRATIONS[0]!,
                             checksum: "f".repeat(64),
                         },
                     }),
             })
         ).rejects.toThrow(
-            "Activation release SQLite migration 7 identity does not match live history"
+            "Activation release SQLite migration 8 identity does not match live history"
         );
     });
 
-    it("requires an explicit coordinated mode for incompatible schema cutovers", async () => {
+    it("allows coordinated activation and requires it across incompatible schemas", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);
         const candidatePath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(candidatePath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 7,
-            schemaMinimum: 7,
-            schemaTarget: 7,
+            schemaMaximum: 8,
+            schemaMinimum: 8,
+            schemaTarget: 8,
         });
 
-        let liveSchemaVersion = 6;
+        let liveSchemaVersion = 7;
         const options = {
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
         };
@@ -774,26 +794,26 @@ describe("Dashboard immutable release manager", () => {
                 ...options,
                 schemaCutoverMode: "coordinated",
             })
-        ).rejects.toThrow(
-            "Coordinated schema cutover mode requires an incompatible schema boundary"
-        );
+        ).resolves.toMatchObject({
+            current: { commitSha: FIRST_COMMIT },
+        });
         await expect(
             activateDashboardRelease(SECOND_COMMIT, root, options)
-        ).rejects.toThrow("cannot roll back after SQLite schema 7");
+        ).rejects.toThrow("cannot roll back after SQLite schema 8");
 
         await runReleaseLifecycleCommand(
             ["activate", SECOND_COMMIT, "--coordinated-schema-cutover"],
             root,
             options
         );
-        liveSchemaVersion = 7;
+        liveSchemaVersion = 8;
         await expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
-                readLiveSchemaState: () => testLiveSchemaState(8),
+                readLiveSchemaState: () => testLiveSchemaState(9),
             })
-        ).rejects.toThrow("Activation release cannot open live SQLite schema 8");
+        ).rejects.toThrow("Activation release cannot open live SQLite schema 9");
         await expect(rollbackDashboardRelease(root, options)).rejects.toThrow(
-            "Rollback release cannot open SQLite schema 7"
+            "Rollback release cannot open SQLite schema 8"
         );
         expect(readlinkSync(path.join(root, "current"))).toBe(
             `releases/${SECOND_COMMIT}`
@@ -805,16 +825,16 @@ describe("Dashboard immutable release manager", () => {
         const compatibleOldPath = await createManagedRelease(root, FIRST_COMMIT);
         const migratedPath = await createManagedRelease(root, SECOND_COMMIT);
         await rewriteManifest(compatibleOldPath, {
-            schemaMaximum: 7,
+            schemaMaximum: 8,
         });
         await rewriteManifest(migratedPath, {
             migrationRegistrySha256: "d".repeat(64),
-            schemaMaximum: 7,
-            schemaMinimum: 7,
-            schemaTarget: 7,
+            schemaMaximum: 8,
+            schemaMinimum: 8,
+            schemaTarget: 8,
         });
 
-        let liveSchemaVersion = 6;
+        let liveSchemaVersion = 7;
         const options = {
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
         };
@@ -823,7 +843,7 @@ describe("Dashboard immutable release manager", () => {
             ...options,
             schemaCutoverMode: "coordinated",
         });
-        liveSchemaVersion = 7;
+        liveSchemaVersion = 8;
 
         const oldCode = await rollbackDashboardRelease(root, options);
         expect(oldCode.current?.commitSha).toBe(FIRST_COMMIT);
@@ -831,7 +851,7 @@ describe("Dashboard immutable release manager", () => {
         expect(migratedCode.current?.commitSha).toBe(SECOND_COMMIT);
     });
 
-    it("recovers the prior slots from an interrupted activation journal", async () => {
+    it("restores the prior slots from an interrupted activation journal", async () => {
         const root = temporaryReleasesRoot();
         await createManagedRelease(root, FIRST_COMMIT);
         await createManagedRelease(root, SECOND_COMMIT);
@@ -863,10 +883,16 @@ describe("Dashboard immutable release manager", () => {
         );
         expect(existsSync(path.join(root, ".release-transition.json"))).toBe(true);
 
-        const recovered = await activateDashboardRelease(
-            SECOND_COMMIT,
-            root,
-            SCHEMA_6_OPTIONS
+        const recovered = await restoreDashboardReleaseAfterFailedActivation(
+            {
+                ...SCHEMA_6_OPTIONS,
+                expected: {
+                    candidateCommitSha: THIRD_COMMIT,
+                    previousCommitSha: FIRST_COMMIT,
+                    rollbackCommitSha: SECOND_COMMIT,
+                },
+            },
+            root
         );
         expect(recovered.current?.commitSha).toBe(SECOND_COMMIT);
         expect(recovered.previous?.commitSha).toBe(FIRST_COMMIT);

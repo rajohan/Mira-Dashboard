@@ -2,39 +2,54 @@
 
 Production separates source control, immutable code, and persistent state:
 
-| Purpose                                           | Path                                                         |
-| ------------------------------------------------- | ------------------------------------------------------------ |
-| Control checkout and deployment scripts           | `/home/ubuntu/projects/mira-dashboard`                       |
-| Temporary detached build worktrees                | `/home/ubuntu/projects/mira-dashboard-worktrees/`            |
-| Shared managed PR-dev checkout                    | `/home/ubuntu/projects/mira-dashboard-preview`               |
-| Managed PR-dev state and dependency cache         | `/home/ubuntu/projects/mira-dashboard-preview-state/managed` |
-| Immutable releases and `current`/`previous` links | `/home/ubuntu/projects/mira-dashboard-releases`              |
-| Persistent production state                       | `/home/ubuntu/projects/mira-dashboard-state`                 |
+```text
+/home/ubuntu/projects/mira-dashboard/
+├── production/
+│   ├── checkout/
+│   ├── releases/
+│   └── state/
+└── development/
+    ├── preview/
+    ├── state/
+    │   ├── local/
+    │   └── preview/
+    └── worktrees/
+```
+
+| Purpose                                           | Path                                                             |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| Control checkout and deployment scripts           | `/home/ubuntu/projects/mira-dashboard/production/checkout`       |
+| Temporary detached build worktrees                | `/home/ubuntu/projects/mira-dashboard/development/worktrees/`    |
+| Shared managed PR-dev checkout                    | `/home/ubuntu/projects/mira-dashboard/development/preview`       |
+| Managed PR-dev state and dependency cache         | `/home/ubuntu/projects/mira-dashboard/development/state/preview` |
+| Immutable releases and `current`/`previous` links | `/home/ubuntu/projects/mira-dashboard/production/releases`       |
+| Persistent production state                       | `/home/ubuntu/projects/mira-dashboard/production/state`          |
 
 Web and worker execute from:
 
 ```text
-/home/ubuntu/projects/mira-dashboard-releases/current/backend
+/home/ubuntu/projects/mira-dashboard/production/releases/current/backend
 ```
 
 `current` and `previous` are atomic relative symlinks to full-SHA directories
-below `mira-dashboard-releases/releases/`. Production never builds in, writes
-to, or executes backend code from the control checkout.
+below `production/releases/releases/`. Production never builds in, writes to,
+or executes backend code from the control checkout.
 
 ## Persistent State
 
 Mutable state is deliberately outside both Git and every release:
 
-| State                              | Stable path                                                    |
-| ---------------------------------- | -------------------------------------------------------------- |
-| SQLite database                    | `/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db` |
-| SQLite WAL and shared-memory files | next to the database                                           |
-| Restore-verified SQLite backups    | `/home/ubuntu/projects/mira-dashboard-state/backups/`          |
-| Dashboard Gateway device identity  | `/home/ubuntu/projects/mira-dashboard-state/openclaw-client/`  |
-| Log-rotation lock                  | `/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock` |
+| State                              | Stable path                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------- |
+| SQLite database                    | `/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db` |
+| SQLite WAL and shared-memory files | next to the database                                                      |
+| Restore-verified SQLite backups    | `/home/ubuntu/projects/mira-dashboard/production/state/backups/`          |
+| Dashboard Gateway device identity  | `/home/ubuntu/projects/mira-dashboard/production/state/openclaw-client/`  |
+| Log-rotation lock                  | `/home/ubuntu/projects/mira-dashboard/production/state/log-rotation.lock` |
 
-The backup directory is derived from `dirname(MIRA_DASHBOARD_DB_PATH)`, so
-pre-deploy and pre-migration snapshots automatically stay under the state root.
+The backup directory is derived from the production state root, so cutover,
+pre-deploy, and pre-migration snapshots automatically stay under the state
+root.
 Kopia mounts `/home/ubuntu/projects` as its projects source; the separate state
 directory remains in that backup scope.
 
@@ -42,20 +57,18 @@ directory remains in that backup scope.
 application configuration, is listed in every release manifest, and is copied
 and checksum-verified with the other immutable release artifacts.
 
-Both managed units set the stable paths explicitly:
+Both managed units set one stable project root:
 
 ```text
-MIRA_DASHBOARD_DB_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
-MIRA_DASHBOARD_OPENCLAW_HOME=/home/ubuntu/projects/mira-dashboard-state/openclaw-client
-MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE=/home/ubuntu/projects/mira-dashboard-state/log-rotation.lock
-MIRA_DASHBOARD_RELEASE_ROOT=/home/ubuntu/projects/mira-dashboard-releases/current
-MIRA_DASHBOARD_RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
+MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
 ```
 
-Their Doppler command selectively preserves these five values plus `NODE_ENV`,
-`MIRA_DASHBOARD_EXECUTION_ROLE`, `MIRA_DASHBOARD_ENABLE_JOB_SCOPES`, and
-`MIRA_DASHBOARD_JOB_SCOPE_OWNER`, so production secrets cannot replace
-unit-owned state, release paths, or orchestration policy.
+The backend derives every production and development path in the layout above
+from that root. The Doppler command preserves only the root and `NODE_ENV`, so
+production secrets cannot replace unit-owned paths or runtime mode. The web and
+worker entry points define orchestration policy directly; it is not configurable
+through environment variables. Fine-grained path variables remain internal
+development, test, and one-shot recovery contracts.
 
 The OpenClaw home preserves the signed Gateway device identity across releases.
 Secrets remain in Doppler `rajohan/prd`; tracked unit files contain no secret
@@ -67,26 +80,34 @@ The Dashboard worker owns the deployment:
 
 1. Require a clean control checkout and fast-forward `main`.
 2. Create a detached build worktree below
-   `/home/ubuntu/projects/mira-dashboard-worktrees/`.
+   `/home/ubuntu/projects/mira-dashboard/development/worktrees/`.
 3. Install frozen frontend and backend dependencies.
 4. Run `deploy:prepare` against the stable production database.
 5. Verify the release manifest, component identities, schema contract, and
    every checksummed artifact.
 6. Copy only declared artifacts to a hidden directory and atomically publish
    it as `releases/<full-sha>`.
-7. Start a detached cutover guardian, which atomically switches `current` and
-   retains the old release as `previous`.
-8. Restart web and worker from inside that guardian.
-9. Require `/api/health/ready` to report the exact expected frontend/backend
-   commit and a fresh worker heartbeat from that commit.
-10. On failure, switch back to `previous`, restart both units, verify the old
-    commit, and mark the deployment failed.
-11. On success, retain `current`, `previous`, and one additional newest
-    verified release.
+7. Persist a unique cutover-snapshot id and start a detached guardian.
+8. Require the scheduling execution, snapshot id, deployment row, and release
+   lock to be durably consistent. Then stop web and worker, create and
+   restore-verify the exact SQLite cutover snapshot, and atomically switch
+   `current` while retaining the old release as `previous`.
+9. Start web and worker. Unsafe HTTP requests, explicit user-activity touches,
+   Gateway WebSockets, and worker execution claims remain paused while the
+   deployment row is `verifying`.
+10. Require `/api/health/ready` to report the exact expected frontend/backend
+    commit and a fresh, stable worker heartbeat from that commit.
+11. On failure, stop both units, atomically restore the recorded database
+    snapshot, restore the exact pre-activation release slots, restart both
+    units, verify the old commit, and mark the deployment failed.
+12. On success, retain `current`, `previous`, and one additional newest
+    verified release, record the terminal result, then discard the one-cutover
+    snapshot. Terminalizing first prevents a crash from leaving `verifying`
+    without its rollback snapshot.
 
-The executor fails closed unless both units already run from managed
-`current/backend` with the exact stable state paths. A deployment never modifies
-the running release.
+The executor fails closed unless both units use the expected project root and
+run from managed `current/backend`. A deployment never modifies the running
+release.
 
 ## Restart And Smoke Test
 
@@ -108,19 +129,26 @@ must still return `401`.
 
 ## Rollback
 
-Normal activation automatically rolls back on restart or commit-bound readiness
-failure. The preferred manual path is **Delivery → Production releases →
+Normal activation automatically rolls code and data back on restart or
+commit-bound readiness failure before the cutover reaches a terminal state. The
+preferred manual path is **Delivery → Production releases →
 Roll back**, which uses the same exclusive release lock, persistent job,
 detached guardian, web/worker restart, commit-bound readiness, and automatic
 restoration of the original release if the rollback target fails.
+
+A later manual rollback is intentionally code-only and remains constrained by
+the live schema compatibility window. It never restores a pre-deploy snapshot
+after a successful release, because doing so would discard writes accepted
+after deployment.
 
 Use the host-local fallback below only when the Dashboard UI is unavailable.
 First confirm no deployment or rollback action is running:
 
 ```bash
 set -euo pipefail
-RELEASES_ROOT=/home/ubuntu/projects/mira-dashboard-releases
-DATABASE_PATH=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
+RELEASES_ROOT="$MIRA_DASHBOARD_PROJECT_ROOT/production/releases"
+DATABASE_PATH="$MIRA_DASHBOARD_PROJECT_ROOT/production/state/mira-dashboard.db"
 
 assert_no_active_release_action() {
   local active_action
@@ -157,9 +185,7 @@ CURRENT_LIFECYCLE="$CURRENT_RELEASE/backend/dist/releaseLifecycle.js"
 test -f "$CURRENT_LIFECYCLE"
 test ! -L "$CURRENT_LIFECYCLE"
 STATUS="$(
-  env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-    MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-    NODE_ENV=production \
+  env NODE_ENV=production \
     bun "$CURRENT_LIFECYCLE" status
 )"
 TARGET_SHA="$(jq --raw-output '.previous.commitSha // empty' <<<"$STATUS")"
@@ -189,16 +215,12 @@ ready_for_commit() {
 }
 
 assert_no_active_release_action
-env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-  MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-  NODE_ENV=production \
+env NODE_ENV=production \
   bun "$CURRENT_LIFECYCLE" rollback "$CURRENT_SHA" "$TARGET_SHA"
 systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 if ! ready_for_commit "$TARGET_SHA"; then
   echo "Rollback target failed readiness. Restoring $CURRENT_SHA" >&2
-  env MIRA_DASHBOARD_DB_PATH="$DATABASE_PATH" \
-    MIRA_DASHBOARD_RELEASES_ROOT="$RELEASES_ROOT" \
-    NODE_ENV=production \
+  env NODE_ENV=production \
     bun "$CURRENT_LIFECYCLE" rollback "$TARGET_SHA" "$CURRENT_SHA"
   systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
   ready_for_commit "$CURRENT_SHA"
@@ -228,29 +250,36 @@ separate restore-verified `pre-migration` backup before running migration SQL.
 Do not copy only the main `.db` file while Dashboard is running. WAL mode may
 hold committed writes in the `-wal` sidecar until a checkpoint.
 
-Code rollback and data rollback are separate decisions. A code rollback may use
-the migrated database only when the older code is schema-compatible. Otherwise
-stop both units and restore the matching snapshot using the
-[SQLite restore runbook](../operations/runbooks.md#restore-dashboard-sqlite).
+Build preflight snapshots prove that migrations are runnable, but managed
+activation creates a separate `cutover` snapshot only after both Dashboard
+writers are stopped. That exact snapshot id is persisted in the deployment
+context so detached recovery cannot guess which backup belongs to the release.
+During candidate verification, production mutations and worker execution claims
+are paused. Failed activation restores data first and old code second.
+
+After activation succeeds, code rollback and data rollback are separate
+operator decisions. A later code rollback may use the migrated database only
+when the older code is schema-compatible. Otherwise use the
+[SQLite restore runbook](../operations/runbooks.md#restore-dashboard-sqlite)
+with an explicitly selected backup and accept that it is a data-loss recovery.
 
 ### Schema Compatibility
 
-Classify every migration before release:
+The manifest range describes which live schema versions that release can open;
+it does not describe a reversible SQL path. Classify every migration before
+release:
 
 - **expand/backward-compatible:** `previous` can safely use the migrated schema;
 - **contract/incompatible:** older code cannot safely use the new schema or
   data semantics, so automatic code-only rollback is blocked.
 
-Prefer expand/migrate/contract across separate releases. If an incompatible
-change cannot be phased, use a coordinated code-and-data cutover:
-
-1. require an idle execution queue;
-2. stop both units;
-3. rerun candidate preflight and record its fresh verified snapshot;
-4. activate with `--coordinated-schema-cutover`;
-5. start both units and require commit/schema readiness;
-6. on failure, stop both units, restore the recorded snapshot, switch code back,
-   and only then restart.
+Every managed deployment now uses the coordinated code-and-data cutover above,
+including schema-compatible releases. An incompatible migration may therefore
+cross the previous release's runtime window safely during initial activation:
+failure restores the old schema snapshot before old code starts. Once the
+candidate passes readiness, its cutover snapshot is discarded and the old
+release is no longer a valid manual rollback target unless it can open the live
+schema.
 
 The migration runner has no destructive down-migration path. Unknown newer
 migrations make older code fail closed.

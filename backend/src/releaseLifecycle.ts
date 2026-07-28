@@ -1,3 +1,10 @@
+import { Database } from "bun:sqlite";
+
+import {
+    assertMiraDatabasePathSafeForEnvironment,
+    getMiraDatabasePath,
+} from "./database.ts";
+import { validateDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
 import type {
     DashboardReleaseManagerOptions,
     DashboardReleaseState,
@@ -10,6 +17,12 @@ import {
     restoreDashboardReleaseAfterFailedActivation,
     rollbackDashboardRelease,
 } from "./releaseManager.ts";
+import {
+    createVerifiedSqliteCutoverSnapshot,
+    didDiscardSqliteCutoverSnapshot,
+    restoreVerifiedSqliteCutoverSnapshot,
+    verifySqliteCutoverSnapshot,
+} from "./sqliteBackup.ts";
 
 const COORDINATED_SCHEMA_CUTOVER_FLAG = "--coordinated-schema-cutover";
 const RELEASE_TRANSITION_LOCK_WAIT_MS = 30_000;
@@ -31,12 +44,100 @@ function releaseSummary(state: DashboardReleaseState) {
     };
 }
 
+function requireSnapshotId(arguments_: string[], command: string): string {
+    const [snapshotId] = arguments_;
+    if (!snapshotId || arguments_.length !== 1) {
+        throw new TypeError(
+            `Release lifecycle ${command} requires exactly one snapshot id`
+        );
+    }
+    return snapshotId;
+}
+
+function createCutoverDatabaseSnapshot(snapshotId: string) {
+    const databasePath = getMiraDatabasePath();
+    assertMiraDatabasePathSafeForEnvironment(databasePath);
+    const sourceDatabase = new Database(databasePath, { readonly: true });
+    try {
+        sourceDatabase.run("PRAGMA busy_timeout = 5000");
+        validateDatabaseMigrationHistory(sourceDatabase);
+        const snapshot = createVerifiedSqliteCutoverSnapshot(
+            sourceDatabase,
+            databasePath,
+            snapshotId,
+            { validateRestore: validateDatabaseMigrationHistory }
+        );
+        return {
+            bytes: snapshot.bytes,
+            createdAt: snapshot.createdAt,
+            snapshotId,
+        };
+    } finally {
+        sourceDatabase.close();
+    }
+}
+
+function restoreCutoverDatabaseSnapshot(snapshotId: string) {
+    const databasePath = getMiraDatabasePath();
+    assertMiraDatabasePathSafeForEnvironment(databasePath);
+    const snapshot = restoreVerifiedSqliteCutoverSnapshot(databasePath, snapshotId, {
+        validateRestore: validateDatabaseMigrationHistory,
+    });
+    return {
+        bytes: snapshot.bytes,
+        restored: true,
+        snapshotId,
+    };
+}
+
+function discardCutoverDatabaseSnapshot(snapshotId: string) {
+    const databasePath = getMiraDatabasePath();
+    assertMiraDatabasePathSafeForEnvironment(databasePath);
+    return {
+        discarded: didDiscardSqliteCutoverSnapshot(databasePath, snapshotId),
+        snapshotId,
+    };
+}
+
+function verifyCutoverDatabaseSnapshot(snapshotId: string) {
+    const databasePath = getMiraDatabasePath();
+    assertMiraDatabasePathSafeForEnvironment(databasePath);
+    const snapshot = verifySqliteCutoverSnapshot(databasePath, snapshotId, {
+        validateRestore: validateDatabaseMigrationHistory,
+    });
+    return {
+        bytes: snapshot.bytes,
+        snapshotId,
+        verified: true,
+    };
+}
+
 export async function runReleaseLifecycleCommand(
     arguments_: string[],
     releasesRoot = resolveDashboardReleasesRoot(),
     options: DashboardReleaseManagerOptions = {}
 ) {
     const [command, ...commandArguments] = arguments_;
+    if (command === "snapshot-database") {
+        return createCutoverDatabaseSnapshot(
+            requireSnapshotId(commandArguments, command)
+        );
+    }
+    if (command === "restore-database") {
+        return restoreCutoverDatabaseSnapshot(
+            requireSnapshotId(commandArguments, command)
+        );
+    }
+    if (command === "discard-database-snapshot") {
+        return discardCutoverDatabaseSnapshot(
+            requireSnapshotId(commandArguments, command)
+        );
+    }
+    if (command === "verify-database-snapshot") {
+        return verifyCutoverDatabaseSnapshot(
+            requireSnapshotId(commandArguments, command)
+        );
+    }
     const [commitSha, ...extra] = commandArguments;
     const isCoordinatedSchemaCutover =
         command === "activate" &&
@@ -134,7 +235,7 @@ export async function runReleaseLifecycleCommand(
         }
         default: {
             throw new TypeError(
-                "Usage: releaseLifecycle.js <status|activate COMMIT_SHA [--coordinated-schema-cutover]|restore EXPECTED_CANDIDATE_SHA EXPECTED_ROLLBACK_SHA [PREVIOUS_SHA]|rollback EXPECTED_CURRENT_SHA EXPECTED_TARGET_SHA|prune [RETAIN_COUNT]>"
+                "Usage: releaseLifecycle.js <status|activate COMMIT_SHA [--coordinated-schema-cutover]|snapshot-database SNAPSHOT_ID|verify-database-snapshot SNAPSHOT_ID|restore-database SNAPSHOT_ID|discard-database-snapshot SNAPSHOT_ID|restore EXPECTED_CANDIDATE_SHA EXPECTED_ROLLBACK_SHA [PREVIOUS_SHA]|rollback EXPECTED_CURRENT_SHA EXPECTED_TARGET_SHA|prune [RETAIN_COUNT]>"
             );
         }
     }

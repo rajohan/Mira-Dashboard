@@ -39,7 +39,6 @@ export function resolveGatewayToken(
 ): string | undefined {
     return (
         environment.OPENCLAW_GATEWAY_TOKEN?.trim() ||
-        environment.OPENCLAW_TOKEN?.trim() ||
         persistedToken()?.trim() ||
         undefined
     );
@@ -128,11 +127,8 @@ export function isDirectEntrypoint(isMain = import.meta.main): boolean {
     return isMain;
 }
 
-export function shouldStartOnImport(
-    startOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT,
-    isDirect = isDirectEntrypoint()
-): boolean {
-    return startOnImport === "1" || isDirect;
+export function shouldStartOnImport(isDirect = isDirectEntrypoint()): boolean {
+    return isDirect;
 }
 
 interface BackendServerEntrypointOptions {
@@ -140,8 +136,6 @@ interface BackendServerEntrypointOptions {
     isDirect?: boolean;
     reportFailure?: (error: unknown) => void;
     runServer?: () => Promise<void>;
-    startServer?: () => Promise<void> | void;
-    startOnImport?: string;
 }
 
 function reportBackendServerFailure(error: unknown): void {
@@ -174,14 +168,8 @@ export async function startBackendServerEntrypoint({
     isDirect = isDirectEntrypoint(),
     reportFailure = reportBackendServerFailure,
     runServer = runBackendServer,
-    startServer = startBackendServer,
-    startOnImport = process.env.MIRA_DASHBOARD_START_ON_IMPORT,
 }: BackendServerEntrypointOptions = {}): Promise<void> {
-    if (!shouldStartOnImport(startOnImport, isDirect)) {
-        return;
-    }
     if (!isDirect) {
-        await startServer();
         return;
     }
     let exitCode = 0;

@@ -1121,7 +1121,7 @@ function servicePlatform(service: ManagedServiceRow): string {
     }
     return typeof metadata.platform === "string" && metadata.platform
         ? metadata.platform
-        : process.env.MIRA_DOCKER_UPDATER_PLATFORM || hostDockerPlatform();
+        : hostDockerPlatform();
 }
 
 function isImageMatchPlatform(image: JsonRecord, platform: string): boolean {
@@ -1222,7 +1222,10 @@ async function lookupRegistryV2(service: ManagedServiceRow, signal?: AbortSignal
 
 async function lookupLatest(service: ManagedServiceRow, signal?: AbortSignal) {
     signal?.throwIfAborted();
-    if (process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY === "1") {
+    if (
+        process.env.NODE_ENV !== "production" &&
+        process.env.MIRA_DOCKER_UPDATER_SKIP_REGISTRY === "1"
+    ) {
         return {
             latestTag: service.current_tag,
             latestDigest: service.current_digest,

@@ -730,7 +730,7 @@ describe("OpenClaw adapter variants", () => {
             envelope(
                 "session.message",
                 {
-                    content: "/home/ubuntu/projects/mira-dashboard",
+                    content: "/workspace/mira-dashboard",
                     role: "toolResult",
                     toolCallId: "call-1",
                     toolName: "exec",
@@ -756,7 +756,7 @@ describe("OpenClaw adapter variants", () => {
         });
         expect(diagnostics).toHaveLength(1);
         expect(diagnostics?.[0]?.message.toolCalls?.[0]?.toolResult).toMatchObject({
-            content: "/home/ubuntu/projects/mira-dashboard",
+            content: "/workspace/mira-dashboard",
             id: "call-1",
             name: "exec",
         });

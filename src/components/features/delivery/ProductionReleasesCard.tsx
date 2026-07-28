@@ -97,8 +97,8 @@ export function ProductionReleasesCard({
                     <CardTitle className="text-base">Production releases</CardTitle>
                     <p className="mt-1 text-sm text-primary-400">
                         Active and previous are immutable release slots. A previous
-                        release is offered as a rollback target only while its latest
-                        runtime result is eligible.
+                        release is offered as a rollback target only while its runtime
+                        result and the live database schema remain compatible.
                     </p>
                 </div>
                 <Badge

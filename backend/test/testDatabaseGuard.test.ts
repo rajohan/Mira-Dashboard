@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "bun:test";
 
+import { resolveDashboardProjectPaths } from "../src/lib/dashboardPaths.ts";
+
 const realTemporaryRoot = realpathSync(path.resolve(tmpdir()));
 const realHomeRoot = realpathSync(path.resolve(homedir()));
 const nonTemporaryRelativePath = path.relative(realTemporaryRoot, realHomeRoot);
@@ -146,7 +148,7 @@ describe("database test safety guard", () => {
 
     it("refuses the production state database path while running tests", async () => {
         const { exitCode, stderr } = await importDatabaseInChild(
-            "/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db"
+            resolveDashboardProjectPaths({}).productionDatabasePath
         );
 
         expect(exitCode).not.toBe(0);

@@ -1380,7 +1380,7 @@ function didTerminalizeUnrecoverableDeploymentCutover(
                      updated_at = ?,
                      note = ?
                  WHERE id = ?
-                   AND status = 'restart-scheduled'`
+                   AND status = 'verifying'`
             )
             .run(
                 timestamp,
@@ -1423,7 +1423,7 @@ export function reconcileOrphanedDeploymentCutovers(
         .query(
             `SELECT id, commit_sha AS candidateCommit, updated_at AS updatedAt
              FROM deployment_jobs
-             WHERE status = 'restart-scheduled'`
+             WHERE status = 'verifying'`
         )
         .all() as Array<{
         candidateCommit: string | null;
@@ -1520,7 +1520,7 @@ function hasPendingDeploymentCutover(): boolean {
             .query(
                 `SELECT 1
                  FROM deployment_jobs
-                 WHERE status = 'restart-scheduled'
+                 WHERE status = 'verifying'
                  LIMIT 1`
             )
             .get()

@@ -10,10 +10,13 @@ export function resolveDashboardCookieNames(
     environment: Record<string, string | undefined> = process.env
 ): { pendingLogin: string; session: string } {
     const namespace =
-        environment.MIRA_DASHBOARD_COOKIE_NAMESPACE?.trim() || DEFAULT_COOKIE_NAMESPACE;
+        environment.NODE_ENV === "production"
+            ? DEFAULT_COOKIE_NAMESPACE
+            : environment.MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE?.trim() ||
+              DEFAULT_COOKIE_NAMESPACE;
     if (!COOKIE_NAMESPACE_PATTERN.test(namespace)) {
         throw new TypeError(
-            "MIRA_DASHBOARD_COOKIE_NAMESPACE must contain 1-48 lowercase letters, digits, or underscores"
+            "MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE must contain 1-48 lowercase letters, digits, or underscores"
         );
     }
     return {

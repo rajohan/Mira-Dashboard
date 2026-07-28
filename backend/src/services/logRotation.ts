@@ -3,7 +3,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { database } from "../database.ts";
-import { runProcess } from "../lib/processes.ts";
+import {
+    resolveDashboardProjectPathsForRuntime,
+    resolveDashboardRuntimePath,
+} from "../lib/dashboardPaths.ts";
+import { resolveBunExecutable, runProcess } from "../lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "../lib/safePath.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
@@ -68,18 +72,32 @@ const ELEVATED_LOG_ROTATION_TIMEOUT_MS = 5 * 60_000;
 const ELEVATED_LOG_ROTATION_MAX_BUFFER = 16 * 1024 * 1024;
 const LOG_ROTATION_JOB_ID = "ops.log-rotation";
 const LOG_ROTATION_FAILURE_OUTPUT_MAX_CHARS = 100_000;
-const BUN_EXECUTABLE = process.env.BUN_BINARY || "bun";
-const ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT = [
+const ELEVATED_LOG_ROTATION_RUNTIME_ENVIRONMENT = [
     "LANG",
     "NODE_ENV",
     "TZ",
+    "MIRA_DASHBOARD_PROJECT_ROOT",
+] as const;
+const ELEVATED_LOG_ROTATION_INTERNAL_ENVIRONMENT = [
     "MIRA_DASHBOARD_DB_PATH",
     "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE",
 ] as const;
 
+function elevatedLogRotationForwardedEnvironment(): readonly string[] {
+    return process.env.NODE_ENV === "production"
+        ? ELEVATED_LOG_ROTATION_RUNTIME_ENVIRONMENT
+        : [
+              ...ELEVATED_LOG_ROTATION_RUNTIME_ENVIRONMENT,
+              ...ELEVATED_LOG_ROTATION_INTERNAL_ENVIRONMENT,
+          ];
+}
+
 function resolveLogRotationLockFile(): string {
     return resolveAbsoluteNonRootPath(
-        process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE?.trim() || DEFAULT_LOCK_FILE,
+        resolveDashboardRuntimePath(
+            resolveDashboardProjectPathsForRuntime()?.productionLogRotationLockFile,
+            process.env.MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE
+        ) ?? DEFAULT_LOCK_FILE,
         "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE"
     );
 }
@@ -129,25 +147,6 @@ function defaultConfigPath(): string {
         return SOURCE_CONFIG_PATH;
     }
     return BUNDLED_CONFIG_PATH;
-}
-
-function resolveExecutableFromPath(executable: string): string | undefined {
-    if (path.isAbsolute(executable)) {
-        return executable;
-    }
-    if (executable.includes(path.sep)) {
-        return path.resolve(executable);
-    }
-
-    return Bun.which(executable) ?? undefined;
-}
-
-function resolveBunExecutable(): string {
-    const resolved = resolveExecutableFromPath(BUN_EXECUTABLE);
-    if (resolved) {
-        return resolved;
-    }
-    return BUN_EXECUTABLE === "bun" ? process.execPath : BUN_EXECUTABLE;
 }
 
 function fileHandleReadableStream(
@@ -2039,7 +2038,7 @@ function buildElevatedLogRotationCliArguments(
     ].join("\n");
     return [
         "-n",
-        `--preserve-env=${ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT.join(",")}`,
+        `--preserve-env=${elevatedLogRotationForwardedEnvironment().join(",")}`,
         resolveBunExecutable(),
         "--input-type=module",
         "--eval",
@@ -2054,7 +2053,7 @@ function elevatedLogRotationEnvironment(): NodeJS.ProcessEnv {
     const allowed = [
         "PATH",
         "HOME",
-        ...ELEVATED_LOG_ROTATION_FORWARDED_ENVIRONMENT,
+        ...elevatedLogRotationForwardedEnvironment(),
     ] as const;
     const environment: NodeJS.ProcessEnv = {};
     // Keep sudo environment preservation narrow: runtime lookup, locale, and state paths.

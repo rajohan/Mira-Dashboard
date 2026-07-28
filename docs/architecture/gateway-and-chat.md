@@ -21,8 +21,7 @@ auth.
 On backend startup, the Gateway token is selected in this order:
 
 1. `OPENCLAW_GATEWAY_TOKEN`
-2. `OPENCLAW_TOKEN`
-3. decrypted `app_config.gateway_token` AES-GCM envelope
+2. decrypted `app_config.gateway_token` AES-GCM envelope
 
 Environment tokens win over the persisted database token. This is intentional:
 production should prefer Doppler-managed state over older bootstrap state.
@@ -617,6 +616,6 @@ openclaw status
 Do not print Gateway token values while debugging. Inspect length/metadata only:
 
 ```bash
-sqlite3 /home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db \
+sqlite3 /home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db \
   "SELECT key, length(value), updated_at FROM app_config WHERE key='gateway_token';"
 ```

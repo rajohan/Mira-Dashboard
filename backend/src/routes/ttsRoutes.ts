@@ -2,11 +2,8 @@ import { json, readJson, readResponseTextFallback } from "../http.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 
 const ELEVENLABS_TTS_TIMEOUT_MS = 60_000;
-const ELEVENLABS_TTS_MODEL = process.env.ELEVENLABS_TTS_MODEL || "eleven_turbo_v2_5";
-const ELEVENLABS_TTS_VOICE_ID =
-    process.env.ELEVENLABS_TTS_VOICE_ID ||
-    process.env.ELEVENLABS_VOICE_ID ||
-    "q7O4dHCU5KzDbUYNsckR";
+const ELEVENLABS_TTS_MODEL = "eleven_turbo_v2_5";
+const ELEVENLABS_TTS_VOICE_ID = "q7O4dHCU5KzDbUYNsckR";
 const MAX_TTS_TEXT_LENGTH = 4000;
 
 interface TtsRequestBody {

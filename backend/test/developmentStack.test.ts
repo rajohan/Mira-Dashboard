@@ -82,8 +82,21 @@ function createSnapshotSource(databasePath: string): void {
         CREATE TABLE auth_sessions (id TEXT PRIMARY KEY);
         CREATE TABLE auth_pending_logins (id TEXT PRIMARY KEY);
         CREATE TABLE app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE deployment_lock (id INTEGER PRIMARY KEY);
-        CREATE TABLE deployment_jobs (id TEXT PRIMARY KEY);
+        CREATE TABLE deployment_lock (
+            id INTEGER PRIMARY KEY,
+            job_id TEXT NOT NULL
+        );
+        CREATE TABLE deployment_jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            commit_sha TEXT,
+            commit_title TEXT,
+            note TEXT,
+            stdout TEXT,
+            stderr TEXT
+        );
         CREATE TABLE scheduled_jobs (
             id TEXT PRIMARY KEY,
             enabled INTEGER NOT NULL,
@@ -110,7 +123,6 @@ function createSnapshotSource(databasePath: string): void {
         ["auth_webauthn_challenges", "challenge"],
         ["auth_sessions", "session"],
         ["auth_pending_logins", "pending"],
-        ["deployment_jobs", "deployment"],
         ["job_executions", "execution"],
         ["job_workers", "worker"],
         ["chat_runtime_snapshots", "scope"],
@@ -121,7 +133,45 @@ function createSnapshotSource(databasePath: string): void {
     database.run(
         "INSERT INTO app_config (key, value) VALUES ('gateway_token', 'encrypted'), ('theme', 'dark')"
     );
-    database.run("INSERT INTO deployment_lock (id) VALUES (1)");
+    database.run(`
+        INSERT INTO deployment_jobs (
+            id,
+            status,
+            started_at,
+            updated_at,
+            commit_sha,
+            commit_title,
+            note,
+            stdout,
+            stderr
+        )
+        VALUES
+            (
+                'deployment',
+                'isOk',
+                '2026-01-01T00:00:00.000Z',
+                '2026-01-01T00:01:00.000Z',
+                'abc123',
+                'Historical release',
+                'Ready',
+                NULL,
+                NULL
+            ),
+            (
+                'deployment-active',
+                'building',
+                '2026-01-02T00:00:00.000Z',
+                '2026-01-02T00:00:30.000Z',
+                'def456',
+                'Active release',
+                'Building',
+                NULL,
+                NULL
+            )
+    `);
+    database.run(
+        "INSERT INTO deployment_lock (id, job_id) VALUES (1, 'deployment-active')"
+    );
     database.run(`
         INSERT INTO scheduled_jobs (id, enabled, action_key, next_run_at)
         VALUES
@@ -162,7 +212,9 @@ describe("development stack", () => {
                 databaseSource: path.join(
                     root,
                     "projects",
-                    "mira-dashboard-state",
+                    "mira-dashboard",
+                    "production",
+                    "state",
                     "mira-dashboard.db"
                 ),
                 frontendHost: "127.0.0.1",
@@ -170,12 +222,20 @@ describe("development stack", () => {
                 gatewayUrl: "ws://127.0.0.1:18789",
                 hotReload: true,
                 publicOrigin: "http://localhost:5173",
-                releaseSource: path.join(root, "projects", "mira-dashboard-releases"),
+                releaseSource: path.join(
+                    root,
+                    "projects",
+                    "mira-dashboard",
+                    "production",
+                    "releases"
+                ),
                 rpId: "localhost",
                 stateRoot: path.join(
                     root,
                     "projects",
-                    "mira-dashboard-dev-state",
+                    "mira-dashboard",
+                    "development",
+                    "state",
                     "local"
                 ),
             });
@@ -322,7 +382,6 @@ describe("development stack", () => {
                 "user_totp_factors",
                 "user_recovery_codes",
                 "deployment_lock",
-                "deployment_jobs",
                 "job_executions",
                 "scheduled_job_runs",
                 "job_workers",
@@ -333,6 +392,21 @@ describe("development stack", () => {
                     snapshot.query(`SELECT COUNT(*) AS count FROM ${tableName}`).get()
                 ).toEqual({ count: 0 });
             }
+            expect(
+                snapshot
+                    .query(
+                        `SELECT id, status, commit_title
+                         FROM deployment_jobs
+                         ORDER BY id`
+                    )
+                    .all()
+            ).toEqual([
+                {
+                    commit_title: "Historical release",
+                    id: "deployment",
+                    status: "isOk",
+                },
+            ]);
             expect(
                 snapshot.query("SELECT key, value FROM app_config ORDER BY key").all()
             ).toEqual([{ key: "theme", value: "dark" }]);
@@ -415,16 +489,11 @@ describe("development stack", () => {
 
             const environment = developmentBackendEnvironment(config);
             expect(environment).toMatchObject({
-                BUN_BINARY: process.execPath,
-                MIRA_DASHBOARD_COOKIE_NAMESPACE: "mira_dashboard_dev_5173",
                 MIRA_DASHBOARD_DB_PATH: config.databasePath,
+                MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: "mira_dashboard_dev_5173",
                 MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
-                MIRA_DASHBOARD_DISABLE_SCHEDULER: "0",
-                MIRA_DASHBOARD_EXECUTION_ROLE: "combined",
                 MIRA_DASHBOARD_FRONTEND_PATH: root,
-                MIRA_DASHBOARD_JOB_PROFILE: "isolated",
                 MIRA_DASHBOARD_LOGS_ROOT: path.join(stateRoot, "logs"),
-                MIRA_DASHBOARD_METRICS_DISK_PATH: root,
                 OPENCLAW_GATEWAY_TOKEN: "development-gateway-token",
                 OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789/",
             });
@@ -432,6 +501,46 @@ describe("development stack", () => {
             expect(environment).not.toHaveProperty(
                 "MIRA_DASHBOARD_AUTOMATION_CREDENTIALS"
             );
+            const legacySnapshot = new Database(config.databasePath);
+            legacySnapshot.run("DELETE FROM deployment_jobs");
+            legacySnapshot.run(`
+                INSERT INTO deployment_jobs (
+                    id,
+                    status,
+                    started_at,
+                    updated_at
+                )
+                VALUES (
+                    'legacy-active-deployment',
+                    'verifying',
+                    '2026-01-03T00:00:00.000Z',
+                    '2026-01-03T00:01:00.000Z'
+                )
+            `);
+            legacySnapshot.run(
+                "INSERT INTO deployment_lock (id, job_id) VALUES (1, 'legacy-active-deployment')"
+            );
+            legacySnapshot.close();
+            expect(prepareDevelopmentState(config)).toEqual({
+                database: "reused",
+                releases: "reused",
+                workspace: "reused",
+            });
+            const backfilledSnapshot = new Database(config.databasePath, {
+                readonly: true,
+            });
+            expect(
+                backfilledSnapshot
+                    .query("SELECT id, status FROM deployment_jobs ORDER BY id")
+                    .all()
+            ).toEqual([{ id: "deployment", status: "isOk" }]);
+            expect(
+                backfilledSnapshot
+                    .query("SELECT id, job_id FROM deployment_lock ORDER BY id")
+                    .all()
+            ).toEqual([]);
+            backfilledSnapshot.close();
+            rmSync(sourceDatabase);
             expect(prepareDevelopmentState(config)).toEqual({
                 database: "reused",
                 releases: "reused",
@@ -456,9 +565,10 @@ describe("development stack", () => {
         const stateRoot = path.join(root, "state");
         createSnapshotSource(sourceDatabase);
         mkdirSync(path.join(root, ".openclaw", "workspace"), { recursive: true });
-        mkdirSync(path.join(root, "projects", "mira-dashboard-releases"), {
-            recursive: true,
-        });
+        mkdirSync(
+            path.join(root, "projects", "mira-dashboard", "production", "releases"),
+            { recursive: true }
+        );
         writeFileSync(path.join(root, ".openclaw", "openclaw.json"), "{}");
         const remoteConfig = resolveDevelopmentStackConfig(
             {
@@ -636,14 +746,17 @@ describe("development stack", () => {
         const databaseSource = path.join(
             root,
             "projects",
-            "mira-dashboard-state",
+            "mira-dashboard",
+            "production",
+            "state",
             "mira-dashboard.db"
         );
         mkdirSync(path.dirname(databaseSource), { recursive: true });
         new Database(databaseSource).close();
-        mkdirSync(path.join(root, "projects", "mira-dashboard-releases"), {
-            recursive: true,
-        });
+        mkdirSync(
+            path.join(root, "projects", "mira-dashboard", "production", "releases"),
+            { recursive: true }
+        );
         const config = resolveDevelopmentStackConfig(
             {
                 HOME: root,
@@ -676,7 +789,6 @@ describe("development stack", () => {
                 cwd: path.join(root, "backend"),
                 env: expect.objectContaining({
                     MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
-                    MIRA_DASHBOARD_JOB_PROFILE: "isolated",
                 }),
             });
             expect(spawnSpy.mock.calls[1]?.[0]).toEqual([

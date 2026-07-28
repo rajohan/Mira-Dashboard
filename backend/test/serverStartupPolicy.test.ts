@@ -10,30 +10,13 @@ import * as releaseManifestModule from "../src/releaseManifest.ts";
 const TEST_RELEASE_COMMIT = "a".repeat(40);
 
 describe("server start scheduler policy", () => {
-    it("starts scheduled jobs unless explicitly disabled", async () => {
+    it("starts scheduled jobs only in the combined non-production server", async () => {
         const { shouldStartScheduledJobs } = await import("../src/serverStartPolicy.ts");
 
         expect(shouldStartScheduledJobs({})).toBe(true);
-        expect(
-            shouldStartScheduledJobs({
-                MIRA_DASHBOARD_DISABLE_SCHEDULER: "0",
-            })
-        ).toBe(true);
-        expect(
-            shouldStartScheduledJobs({
-                MIRA_DASHBOARD_DISABLE_SCHEDULER: "1",
-            })
-        ).toBe(false);
-        expect(
-            shouldStartScheduledJobs({
-                MIRA_DASHBOARD_EXECUTION_ROLE: "web",
-            })
-        ).toBe(false);
-        expect(
-            shouldStartScheduledJobs({
-                MIRA_DASHBOARD_EXECUTION_ROLE: "combined",
-            })
-        ).toBe(true);
+        expect(shouldStartScheduledJobs({ NODE_ENV: "development" })).toBe(true);
+        expect(shouldStartScheduledJobs({ NODE_ENV: "test" })).toBe(true);
+        expect(shouldStartScheduledJobs({ NODE_ENV: "production" })).toBe(false);
     });
 
     it("keeps production frontend assets inside the checksummed release", async () => {
@@ -53,7 +36,7 @@ describe("server start scheduler policy", () => {
                 releaseRoot
             )
         ).toBe(releaseFrontend);
-        expect(() =>
+        expect(
             resolveFrontendPath(
                 {
                     MIRA_DASHBOARD_FRONTEND_PATH: "/tmp/unverified-frontend",
@@ -61,7 +44,7 @@ describe("server start scheduler policy", () => {
                 },
                 releaseRoot
             )
-        ).toThrow("cannot override the checksummed release frontend");
+        ).toBe(releaseFrontend);
         expect(
             resolveFrontendPath(
                 {
@@ -85,17 +68,10 @@ describe("server start scheduler policy", () => {
             resolveGatewayToken(
                 {
                     OPENCLAW_GATEWAY_TOKEN: " gateway-token ",
-                    OPENCLAW_TOKEN: "legacy-token",
                 },
                 () => "persisted-token"
             )
         ).toBe("gateway-token");
-        expect(
-            resolveGatewayToken(
-                { OPENCLAW_TOKEN: " legacy-token " },
-                () => "persisted-token"
-            )
-        ).toBe("legacy-token");
         expect(resolveGatewayToken({}, () => " persisted-token ")).toBe(
             "persisted-token"
         );
@@ -104,31 +80,15 @@ describe("server start scheduler policy", () => {
         expect(isDirectEntrypoint(true)).toBe(true);
         expect(isDirectEntrypoint(false)).toBe(false);
 
-        expect(shouldStartOnImport("1", false)).toBe(true);
-        expect(shouldStartOnImport(undefined, true)).toBe(true);
-        expect(shouldStartOnImport("0", false)).toBe(false);
+        expect(shouldStartOnImport(true)).toBe(true);
+        expect(shouldStartOnImport(false)).toBe(false);
 
         const disabledRunner = jest.fn(async () => {});
-        const disabledStarter = jest.fn(() => {});
         await startBackendServerEntrypoint({
             isDirect: false,
             runServer: disabledRunner,
-            startServer: disabledStarter,
-            startOnImport: "0",
         });
         expect(disabledRunner).not.toHaveBeenCalled();
-        expect(disabledStarter).not.toHaveBeenCalled();
-
-        const importedRunner = jest.fn(async () => {});
-        const importedStarter = jest.fn(() => {});
-        await startBackendServerEntrypoint({
-            isDirect: false,
-            runServer: importedRunner,
-            startServer: importedStarter,
-            startOnImport: "1",
-        });
-        expect(importedRunner).not.toHaveBeenCalled();
-        expect(importedStarter).toHaveBeenCalledTimes(1);
 
         const directServer = Promise.withResolvers<void>();
         const exitProcess = jest.fn(() => {});
@@ -148,17 +108,6 @@ describe("server start scheduler policy", () => {
         await directStartup;
         expect(isDirectStartupComplete).toBe(true);
         expect(exitProcess).toHaveBeenCalledWith(0);
-
-        const startupError = new Error("imported startup failed");
-        await expect(
-            startBackendServerEntrypoint({
-                isDirect: false,
-                startOnImport: "1",
-                startServer: () => {
-                    throw startupError;
-                },
-            })
-        ).rejects.toBe(startupError);
     });
 
     it("reports direct backend entrypoint failures", async () => {
@@ -242,17 +191,23 @@ describe("server start scheduler policy", () => {
 
     it("verifies the production worker release before opening SQLite", async () => {
         const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-worker-release-"));
-        const databasePath = path.join(temporaryRoot, "dashboard.db");
+        const databasePath = path.join(
+            temporaryRoot,
+            "production",
+            "state",
+            "mira-dashboard.db"
+        );
+        const backendRoot = path.join(temporaryRoot, "backend");
+        mkdirSync(backendRoot);
         const child = Bun.spawn({
             cmd: [
                 process.execPath,
                 path.resolve(import.meta.dirname, "../src/workerStart.ts"),
             ],
-            cwd: path.resolve(import.meta.dirname, ".."),
+            cwd: backendRoot,
             env: {
                 ...process.env,
-                MIRA_DASHBOARD_DB_PATH: databasePath,
-                MIRA_DASHBOARD_RELEASE_ROOT: temporaryRoot,
+                MIRA_DASHBOARD_PROJECT_ROOT: temporaryRoot,
                 NODE_ENV: "production",
             },
             stderr: "pipe",
@@ -279,17 +234,23 @@ describe("server start scheduler policy", () => {
 
     it("verifies the production backend release before opening SQLite", async () => {
         const temporaryRoot = mkdtempSync(path.join(tmpdir(), "mira-backend-release-"));
-        const databasePath = path.join(temporaryRoot, "dashboard.db");
+        const databasePath = path.join(
+            temporaryRoot,
+            "production",
+            "state",
+            "mira-dashboard.db"
+        );
+        const backendRoot = path.join(temporaryRoot, "backend");
+        mkdirSync(backendRoot);
         const child = Bun.spawn({
             cmd: [
                 process.execPath,
                 path.resolve(import.meta.dirname, "../src/serverStart.ts"),
             ],
-            cwd: path.resolve(import.meta.dirname, ".."),
+            cwd: backendRoot,
             env: {
                 ...process.env,
-                MIRA_DASHBOARD_DB_PATH: databasePath,
-                MIRA_DASHBOARD_RELEASE_ROOT: temporaryRoot,
+                MIRA_DASHBOARD_PROJECT_ROOT: temporaryRoot,
                 NODE_ENV: "production",
                 PORT: "0",
             },
@@ -433,8 +394,8 @@ describe("server start scheduler policy", () => {
 
     it("starts listening-time services with a configured gateway token", async () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
-        const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
-        process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = "1";
+        const originalNodeEnvironment = process.env.NODE_ENV;
+        process.env.NODE_ENV = "production";
         const gatewayModule = await import("../src/gateway.ts");
         const { database } = await import("../src/database.ts");
         const serverStartModule = await import("../src/serverStart.ts");
@@ -462,10 +423,10 @@ describe("server start scheduler policy", () => {
             } else {
                 process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
             }
-            if (originalSchedulerDisabled === undefined) {
-                delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+            if (originalNodeEnvironment === undefined) {
+                delete process.env.NODE_ENV;
             } else {
-                process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = originalSchedulerDisabled;
+                process.env.NODE_ENV = originalNodeEnvironment;
             }
             database
                 .prepare("DELETE FROM cache_entries WHERE key = 'quotas.summary'")
@@ -475,11 +436,9 @@ describe("server start scheduler policy", () => {
 
     it("starts the combined worker with the verified release identity", async () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
-        const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
-        const originalExecutionRole = process.env.MIRA_DASHBOARD_EXECUTION_ROLE;
+        const originalNodeEnvironment = process.env.NODE_ENV;
         process.env.OPENCLAW_GATEWAY_TOKEN = "test-token";
-        delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
-        process.env.MIRA_DASHBOARD_EXECUTION_ROLE = "combined";
+        process.env.NODE_ENV = "development";
         const gatewayModule = await import("../src/gateway.ts");
         const jobWorker = await import("../src/services/jobWorker.ts");
         const serverStartModule = await import("../src/serverStart.ts");
@@ -500,26 +459,19 @@ describe("server start scheduler policy", () => {
             } else {
                 process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
             }
-            if (originalSchedulerDisabled === undefined) {
-                delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+            if (originalNodeEnvironment === undefined) {
+                delete process.env.NODE_ENV;
             } else {
-                process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = originalSchedulerDisabled;
-            }
-            if (originalExecutionRole === undefined) {
-                delete process.env.MIRA_DASHBOARD_EXECUTION_ROLE;
-            } else {
-                process.env.MIRA_DASHBOARD_EXECUTION_ROLE = originalExecutionRole;
+                process.env.NODE_ENV = originalNodeEnvironment;
             }
         }
     });
 
     it("warns but keeps startup alive when no gateway token is configured", async () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
-        const originalLegacyToken = process.env.OPENCLAW_TOKEN;
-        const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
-        process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = "1";
+        const originalNodeEnvironment = process.env.NODE_ENV;
+        process.env.NODE_ENV = "production";
         delete process.env.OPENCLAW_GATEWAY_TOKEN;
-        delete process.env.OPENCLAW_TOKEN;
         const gatewayModule = await import("../src/gateway.ts");
         const { database } = await import("../src/database.ts");
         const serverStartModule = await import("../src/serverStart.ts");
@@ -553,15 +505,10 @@ describe("server start scheduler policy", () => {
             } else {
                 process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
             }
-            if (originalLegacyToken === undefined) {
-                delete process.env.OPENCLAW_TOKEN;
+            if (originalNodeEnvironment === undefined) {
+                delete process.env.NODE_ENV;
             } else {
-                process.env.OPENCLAW_TOKEN = originalLegacyToken;
-            }
-            if (originalSchedulerDisabled === undefined) {
-                delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
-            } else {
-                process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = originalSchedulerDisabled;
+                process.env.NODE_ENV = originalNodeEnvironment;
             }
             database
                 .prepare("DELETE FROM cache_entries WHERE key = 'quotas.summary'")
@@ -582,8 +529,8 @@ describe("server start scheduler policy", () => {
 
     it("rolls back listening-time startup when Gateway initialization fails", async () => {
         const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
-        const originalSchedulerDisabled = process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
-        process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = "1";
+        const originalNodeEnvironment = process.env.NODE_ENV;
+        process.env.NODE_ENV = "production";
         process.env.OPENCLAW_GATEWAY_TOKEN = "broken-token";
         const gatewayModule = await import("../src/gateway.ts");
         const serverStartModule = await import("../src/serverStart.ts");
@@ -615,10 +562,10 @@ describe("server start scheduler policy", () => {
             } else {
                 process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
             }
-            if (originalSchedulerDisabled === undefined) {
-                delete process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER;
+            if (originalNodeEnvironment === undefined) {
+                delete process.env.NODE_ENV;
             } else {
-                process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = originalSchedulerDisabled;
+                process.env.NODE_ENV = originalNodeEnvironment;
             }
         }
     });
@@ -664,8 +611,9 @@ describe("server start scheduler policy", () => {
     it("starts, stops, and handles web shutdown signals with isolated runtime state", async () => {
         const environmentKeys = [
             "MIRA_DASHBOARD_DB_PATH",
-            "MIRA_DASHBOARD_DISABLE_SCHEDULER",
+            "MIRA_DASHBOARD_DEV_SAFE_MODE",
             "MIRA_DASHBOARD_FRONTEND_PATH",
+            "NODE_ENV",
             "OPENCLAW_HOME",
         ] as const;
         const originalEnvironment = Object.fromEntries(
@@ -680,8 +628,9 @@ describe("server start scheduler policy", () => {
         writeFileSync(path.join(openclawRoot, "openclaw.json"), "{}\n");
 
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(temporaryRoot, "dashboard.db");
-        process.env.MIRA_DASHBOARD_DISABLE_SCHEDULER = "1";
+        process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
         process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
+        process.env.NODE_ENV = "test";
         process.env.OPENCLAW_HOME = openclawRoot;
         const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
@@ -780,8 +729,7 @@ describe("server start scheduler policy", () => {
                 MIRA_DASHBOARD_ALLOWED_ORIGINS: "",
                 MIRA_DASHBOARD_AUTOMATION_CREDENTIALS: "",
                 MIRA_DASHBOARD_DB_PATH: path.join(temporaryRoot, "dashboard.db"),
-                MIRA_DASHBOARD_DISABLE_SCHEDULER: "1",
-                MIRA_DASHBOARD_EXECUTION_ROLE: "web",
+                MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
                 MIRA_DASHBOARD_FRONTEND_PATH: frontendRoot,
                 MIRA_DASHBOARD_OPENCLAW_HOME: path.join(temporaryRoot, "openclaw-client"),
                 MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY: new Uint8Array(32)
@@ -789,9 +737,9 @@ describe("server start scheduler policy", () => {
                     .toBase64(),
                 MIRA_DASHBOARD_WEBAUTHN_ORIGINS: "",
                 MIRA_DASHBOARD_WEBAUTHN_RP_ID: "",
+                NODE_ENV: "development",
                 OPENCLAW_GATEWAY_TOKEN: "",
                 OPENCLAW_HOME: openclawRoot,
-                OPENCLAW_TOKEN: "",
                 PORT: String(port),
             },
             stderr: "pipe",
@@ -889,7 +837,10 @@ describe("server start scheduler policy", () => {
                 }) as unknown as Server<unknown>) as typeof Bun.serve
         );
         let handleDashboardClientSpy: { mockRestore: () => void } | undefined;
-        let getAuthSessionSpy: { mockRestore: () => void } | undefined;
+        let getAuthSessionSpy:
+            { mockClear: () => void; mockRestore: () => void } | undefined;
+        let deploymentCutoverSpy: { mockRestore: () => void } | undefined;
+        let isDeploymentCutoverActive = false;
         try {
             const now = new Date().toISOString();
             const authModule = await import("../src/auth.ts");
@@ -911,6 +862,11 @@ describe("server start scheduler policy", () => {
             handleDashboardClientSpy = jest
                 .spyOn(gatewayModule.default, "handleDashboardClient")
                 .mockImplementation(() => {});
+            const deploymentCutoverModule =
+                await import("../src/services/deploymentCutoverState.ts");
+            deploymentCutoverSpy = jest
+                .spyOn(deploymentCutoverModule, "isProductionDeploymentCutoverActive")
+                .mockImplementation(() => isDeploymentCutoverActive);
             const { createServer } = await import("../src/server.ts");
             const optionsSymbol = Symbol.for("mira.test.options");
             const server = createServer(0, "127.0.0.1") as Server<unknown> & {
@@ -1001,6 +957,17 @@ describe("server start scheduler policy", () => {
             );
             expect(wsForbidden.status).toBe(403);
 
+            isDeploymentCutoverActive = true;
+            const wsDuringCutover = await options.fetch(
+                new Request("https://test.local/ws", {
+                    headers: { Origin: "https://test.local" },
+                }),
+                server
+            );
+            expect(wsDuringCutover.status).toBe(503);
+            expect(wsDuringCutover.headers.get("retry-after")).toBe("5");
+            isDeploymentCutoverActive = false;
+
             const closeHandler = jest.fn();
             const errorHandler = jest.fn();
             const messageHandler = jest.fn();
@@ -1038,6 +1005,40 @@ describe("server start scheduler policy", () => {
             expect(closeSpy).toHaveBeenCalledWith(1000, "done");
             expect(sendSpy).toHaveBeenCalledWith("state");
 
+            closeSpy.mockClear();
+            messageHandler.mockClear();
+            isDeploymentCutoverActive = true;
+            options.websocket.open(ws);
+            expect(closeSpy).toHaveBeenCalledWith(
+                1012,
+                "Dashboard release cutover in progress"
+            );
+            expect(handleDashboardClientSpy).toHaveBeenCalledTimes(1);
+
+            closeSpy.mockClear();
+            getAuthSessionSpy.mockClear();
+            ws.data.sessionToken = "dev-session";
+            ws.data.userId = 7;
+            options.websocket.message(
+                ws,
+                JSON.stringify({
+                    id: "cutover-request",
+                    method: "chat.send",
+                    type: "request",
+                    userActivity: true,
+                })
+            );
+            expect(closeSpy).toHaveBeenCalledWith(
+                1012,
+                "Dashboard release cutover in progress"
+            );
+            expect(getAuthSessionSpy).not.toHaveBeenCalled();
+            expect(messageHandler).not.toHaveBeenCalled();
+            isDeploymentCutoverActive = false;
+            delete ws.data.sessionToken;
+            delete ws.data.userId;
+
+            closeSpy.mockClear();
             options.websocket.message(ws, new TextEncoder().encode("hello"));
             expect(closeSpy).toHaveBeenCalledWith(
                 4401,
@@ -1085,6 +1086,7 @@ describe("server start scheduler policy", () => {
             expect(errorHandler).toHaveBeenCalledWith(expect.any(Error));
             expect(closeHandler).toHaveBeenCalled();
         } finally {
+            deploymentCutoverSpy?.mockRestore();
             getAuthSessionSpy?.mockRestore();
             handleDashboardClientSpy?.mockRestore();
             serveSpy.mockRestore();

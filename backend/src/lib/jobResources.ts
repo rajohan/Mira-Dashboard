@@ -26,6 +26,7 @@ interface JobResourcePolicy {
 }
 
 const resourceContext = new AsyncLocalStorage<JobResourceContext>();
+const PRODUCTION_JOB_SCOPE_OWNER = "mira-dashboard-worker.service";
 
 const resourcePolicies: Record<JobResourceClass, JobResourcePolicy> = {
     interactive: {
@@ -124,9 +125,14 @@ export function scopedJobProcessEnvironment(
 }
 
 function scopeOwnerProperties(environment: Record<string, string | undefined>): string[] {
-    const owner = environment.MIRA_DASHBOARD_JOB_SCOPE_OWNER?.trim();
-    if (!owner || !/^[A-Za-z0-9_.@-]+\.service$/u.test(owner)) return [];
-    return ["--property", `BindsTo=${owner}`, "--property", `After=${owner}`];
+    return environment.NODE_ENV === "production"
+        ? [
+              "--property",
+              `BindsTo=${PRODUCTION_JOB_SCOPE_OWNER}`,
+              "--property",
+              `After=${PRODUCTION_JOB_SCOPE_OWNER}`,
+          ]
+        : [];
 }
 
 /** Wraps child commands in a constrained transient scope while a worker action runs. */
@@ -139,7 +145,7 @@ export function scopedJobProcessCommand(
     if (
         !context ||
         isSystemdRunExecutable(executable) ||
-        environment.MIRA_DASHBOARD_ENABLE_JOB_SCOPES !== "1"
+        environment.NODE_ENV !== "production"
     ) {
         return { arguments: [...arguments_], executable };
     }

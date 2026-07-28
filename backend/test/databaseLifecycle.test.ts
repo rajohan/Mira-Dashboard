@@ -28,12 +28,17 @@ import {
     secureSqliteFilePermissions,
     sqliteBackupDirectory,
 } from "../src/databaseStorage.ts";
+import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
 import { RELEASE_READINESS_FAILURE_NOTE_PREFIX } from "../src/services/deploymentRuntimeResults.ts";
 import { pruneDatabaseHistory } from "../src/services/sqliteMaintenance.ts";
 import {
     createVerifiedSqliteBackup,
+    createVerifiedSqliteCutoverSnapshot,
+    didDiscardSqliteCutoverSnapshot,
     getSqliteBackupInventory,
     pruneSqliteBackups,
+    restoreVerifiedSqliteCutoverSnapshot,
+    verifySqliteCutoverSnapshot,
 } from "../src/sqliteBackup.ts";
 
 const temporaryRoots: string[] = [];
@@ -110,10 +115,10 @@ describe("Dashboard SQLite lifecycle", () => {
             const first = applyDatabaseMigrations(database, databasePath);
             const second = applyDatabaseMigrations(database, databasePath);
 
-            expect(first.applied).toEqual([1, 2, 3, 4, 5, 6]);
+            expect(first.applied).toEqual([1, 2, 3, 4, 5, 6, 7]);
             expect(first.backup).toBeUndefined();
             expect(second).toEqual({ applied: [] });
-            expect(validateDatabaseMigrationHistory(database)).toBe(6);
+            expect(validateDatabaseMigrationHistory(database)).toBe(7);
             expect(
                 database
                     .query("SELECT name FROM pragma_table_info('auth_sessions')")
@@ -155,7 +160,7 @@ describe("Dashboard SQLite lifecycle", () => {
                     usage: "USING COVERING INDEX",
                     sql: `SELECT id
                           FROM deployment_jobs
-                          WHERE status NOT IN ('building', 'restart-scheduled')
+                          WHERE status NOT IN ('building', 'verifying')
                           ORDER BY started_at DESC, id DESC
                           LIMIT -1 OFFSET 500`,
                 },
@@ -246,7 +251,7 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("upgrades an existing version 3 database with migrations 4 through 6", () => {
+    it("upgrades an existing version 3 database with migrations 4 through 7", () => {
         const root = temporaryRoot("mira-db-migrations-v3-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
@@ -255,9 +260,9 @@ describe("Dashboard SQLite lifecycle", () => {
 
             expect(validateDatabaseMigrationHistory(database)).toBe(3);
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [4, 5, 6],
+                applied: [4, 5, 6, 7],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(6);
+            expect(validateDatabaseMigrationHistory(database)).toBe(7);
             expect(
                 database
                     .query(
@@ -289,7 +294,7 @@ describe("Dashboard SQLite lifecycle", () => {
         }
     });
 
-    it("upgrades an existing version 4 database with migrations 5 and 6", () => {
+    it("upgrades an existing version 4 database with migrations 5 through 7", () => {
         const root = temporaryRoot("mira-db-migrations-v4-");
         const databasePath = path.join(root, "dashboard.db");
         const database = openWalDatabase(databasePath);
@@ -298,9 +303,9 @@ describe("Dashboard SQLite lifecycle", () => {
 
             expect(validateDatabaseMigrationHistory(database)).toBe(4);
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [5, 6],
+                applied: [5, 6, 7],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(6);
+            expect(validateDatabaseMigrationHistory(database)).toBe(7);
             expect(
                 database
                     .query(
@@ -370,12 +375,62 @@ describe("Dashboard SQLite lifecycle", () => {
                 database.query("SELECT COUNT(*) AS count FROM auth_sessions").get()
             ).toEqual({ count: 2 });
             expect(migrateDisposableDatabaseCopy(database)).toEqual({
-                applied: [6],
+                applied: [6, 7],
             });
-            expect(validateDatabaseMigrationHistory(database)).toBe(6);
+            expect(validateDatabaseMigrationHistory(database)).toBe(7);
             expect(
                 database.query("SELECT COUNT(*) AS count FROM auth_sessions").get()
             ).toEqual({ count: 0 });
+        } finally {
+            database.close();
+        }
+    });
+
+    it("replaces the legacy deployment retention index when upgrading version 6", () => {
+        const root = temporaryRoot("mira-db-migrations-v6-retention-");
+        const databasePath = path.join(root, "dashboard.db");
+        const database = openWalDatabase(databasePath);
+        try {
+            seedMigrationVersion(database, 6);
+            const legacyIndex = database
+                .query(
+                    `SELECT sql
+                     FROM sqlite_schema
+                     WHERE type = 'index'
+                       AND name = 'idx_deployment_jobs_retention'`
+                )
+                .get() as { sql: string };
+            expect(legacyIndex.sql).toContain("'restart-scheduled'");
+
+            expect(migrateDisposableDatabaseCopy(database)).toEqual({
+                applied: [7],
+            });
+            expect(validateDatabaseMigrationHistory(database)).toBe(7);
+
+            const currentIndex = database
+                .query(
+                    `SELECT sql
+                     FROM sqlite_schema
+                     WHERE type = 'index'
+                       AND name = 'idx_deployment_jobs_retention'`
+                )
+                .get() as { sql: string };
+            expect(currentIndex.sql).toContain("'verifying'");
+            expect(currentIndex.sql).not.toContain("'restart-scheduled'");
+
+            const plan = database
+                .query(
+                    `EXPLAIN QUERY PLAN
+                     SELECT id
+                     FROM deployment_jobs
+                     WHERE status NOT IN ('building', 'verifying')
+                     ORDER BY started_at DESC, id DESC
+                     LIMIT -1 OFFSET 500`
+                )
+                .all() as Array<{ detail: string }>;
+            expect(plan.map((row) => row.detail).join("\n")).toContain(
+                "USING COVERING INDEX idx_deployment_jobs_retention"
+            );
         } finally {
             database.close();
         }
@@ -453,7 +508,7 @@ describe("Dashboard SQLite lifecycle", () => {
         try {
             expect(
                 database.query("SELECT COUNT(*) AS count FROM schema_migrations").get()
-            ).toEqual({ count: 6 });
+            ).toEqual({ count: 7 });
         } finally {
             database.close();
         }
@@ -479,7 +534,7 @@ describe("Dashboard SQLite lifecycle", () => {
                 );
 
             const result = applyDatabaseMigrations(database, databasePath);
-            expect(result.applied).toEqual([1, 2, 3, 4, 5, 6]);
+            expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7]);
             expect(result.backup).toMatchObject({
                 kind: "pre-migration",
                 restoreVerified: true,
@@ -533,23 +588,23 @@ describe("Dashboard SQLite lifecycle", () => {
                 .prepare(
                     `INSERT INTO schema_migrations (
                         version, name, checksum, applied_at
-                     ) VALUES (7, 'unknown', 'unknown', ?)`
+                     ) VALUES (8, 'unknown', 'unknown', ?)`
                 )
                 .run("2026-07-23T00:00:00.000Z");
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
-                "incompatible SQLite migration version 7"
+                "incompatible SQLite migration version 8"
             );
             database
                 .prepare(
-                    "UPDATE schema_migrations SET name = ?, checksum = ? WHERE version = 7"
+                    "UPDATE schema_migrations SET name = ?, checksum = ? WHERE version = 8"
                 )
                 .run("future-additive", "a".repeat(64));
-            expect(validateDatabaseMigrationHistory(database, 7)).toBe(7);
-            expect(() => validateDatabaseMigrationHistory(database, 6)).toThrow(
-                "incompatible SQLite migration version 7"
+            expect(validateDatabaseMigrationHistory(database, 8)).toBe(8);
+            expect(() => validateDatabaseMigrationHistory(database, 7)).toThrow(
+                "incompatible SQLite migration version 8"
             );
 
-            database.prepare("DELETE FROM schema_migrations WHERE version = 7").run();
+            database.prepare("DELETE FROM schema_migrations WHERE version = 8").run();
             database.prepare("DELETE FROM schema_migrations WHERE version = 2").run();
             expect(() => validateDatabaseMigrationHistory(database)).toThrow(
                 "not contiguous"
@@ -589,6 +644,130 @@ describe("Dashboard SQLite lifecycle", () => {
             }
         } finally {
             database.close();
+        }
+    });
+
+    it("restores the exact guarded cutover snapshot before old code restarts", () => {
+        const root = temporaryRoot("mira-db-cutover-");
+        const databasePath = path.join(root, "dashboard.db");
+        const snapshotId = "019fa351-e832-7000-ae09-435160fd5ccc";
+        const database = openWalDatabase(databasePath);
+        database.run("CREATE TABLE cutover_values (value TEXT NOT NULL)");
+        database
+            .prepare("INSERT INTO cutover_values (value) VALUES (?)")
+            .run("before-cutover");
+        const snapshot = createVerifiedSqliteCutoverSnapshot(
+            database,
+            databasePath,
+            snapshotId
+        );
+        expect(() =>
+            createVerifiedSqliteCutoverSnapshot(database, databasePath, snapshotId)
+        ).toThrow("SQLite cutover snapshot already exists");
+        database
+            .prepare("INSERT INTO cutover_values (value) VALUES (?)")
+            .run("candidate-write");
+        database.close();
+
+        expect(verifySqliteCutoverSnapshot(databasePath, snapshotId)).toMatchObject({
+            kind: "cutover",
+            path: snapshot.path,
+            restoreVerified: true,
+        });
+        expect(() =>
+            verifySqliteCutoverSnapshot(databasePath, "../not-a-snapshot")
+        ).toThrow("SQLite cutover snapshot id must be a lowercase UUIDv7");
+        expect(
+            restoreVerifiedSqliteCutoverSnapshot(databasePath, snapshotId)
+        ).toMatchObject({
+            kind: "cutover",
+            path: snapshot.path,
+            restoreVerified: true,
+        });
+        const restored = new Database(databasePath, { readonly: true });
+        try {
+            expect(
+                restored.query("SELECT value FROM cutover_values ORDER BY value").all()
+            ).toEqual([{ value: "before-cutover" }]);
+        } finally {
+            restored.close();
+        }
+        expect(didDiscardSqliteCutoverSnapshot(databasePath, snapshotId)).toBe(true);
+        expect(didDiscardSqliteCutoverSnapshot(databasePath, snapshotId)).toBe(false);
+    });
+
+    it("exposes cutover snapshots through bounded release lifecycle commands", async () => {
+        const root = temporaryRoot("mira-db-cutover-lifecycle-");
+        const databasePath = path.join(root, "dashboard.db");
+        const snapshotId = "019fa351-e832-7000-ae09-435160fd5ccd";
+        const database = openWalDatabase(databasePath);
+        applyDatabaseMigrations(database, databasePath);
+        database.run("CREATE TABLE lifecycle_values (value TEXT NOT NULL)");
+        database
+            .prepare("INSERT INTO lifecycle_values (value) VALUES (?)")
+            .run("before-cutover");
+        database.close();
+
+        const originalDatabasePath = process.env.MIRA_DASHBOARD_DB_PATH;
+        process.env.MIRA_DASHBOARD_DB_PATH = databasePath;
+        try {
+            await expect(
+                runReleaseLifecycleCommand(["snapshot-database", snapshotId])
+            ).resolves.toMatchObject({
+                snapshotId,
+            });
+            await expect(
+                runReleaseLifecycleCommand(["verify-database-snapshot", snapshotId])
+            ).resolves.toEqual({
+                bytes: expect.any(Number),
+                snapshotId,
+                verified: true,
+            });
+
+            const candidateDatabase = openWalDatabase(databasePath);
+            candidateDatabase
+                .prepare("INSERT INTO lifecycle_values (value) VALUES (?)")
+                .run("candidate-write");
+            candidateDatabase.close();
+
+            await expect(
+                runReleaseLifecycleCommand(["restore-database", snapshotId])
+            ).resolves.toEqual({
+                bytes: expect.any(Number),
+                restored: true,
+                snapshotId,
+            });
+            const restoredDatabase = new Database(databasePath, { readonly: true });
+            try {
+                expect(
+                    restoredDatabase
+                        .query("SELECT value FROM lifecycle_values ORDER BY value")
+                        .all()
+                ).toEqual([{ value: "before-cutover" }]);
+            } finally {
+                restoredDatabase.close();
+            }
+            await expect(
+                runReleaseLifecycleCommand(["discard-database-snapshot", snapshotId])
+            ).resolves.toEqual({
+                discarded: true,
+                snapshotId,
+            });
+            await expect(
+                runReleaseLifecycleCommand(["discard-database-snapshot", snapshotId])
+            ).resolves.toEqual({
+                discarded: false,
+                snapshotId,
+            });
+            await expect(
+                runReleaseLifecycleCommand(["snapshot-database"])
+            ).rejects.toThrow("requires exactly one snapshot id");
+        } finally {
+            if (originalDatabasePath === undefined) {
+                delete process.env.MIRA_DASHBOARD_DB_PATH;
+            } else {
+                process.env.MIRA_DASHBOARD_DB_PATH = originalDatabasePath;
+            }
         }
     });
 
@@ -632,8 +811,8 @@ describe("Dashboard SQLite lifecycle", () => {
         expect(preflightResult).toMatchObject({
             backup: { kind: "pre-deploy", restoreVerified: true },
             migrationTest: {
-                applied: [1, 2, 3, 4, 5, 6],
-                currentVersion: 6,
+                applied: [1, 2, 3, 4, 5, 6, 7],
+                currentVersion: 7,
             },
         });
         expect(getSqliteBackupInventory(databasePath).count).toBe(1);
@@ -884,9 +1063,21 @@ describe("Dashboard SQLite lifecycle", () => {
                         id, status, started_at, updated_at
                      ) VALUES
                        ('old-deployment', 'isOk', ?, ?),
-                       ('current-deployment', 'isOk', ?, ?)`
+                       ('current-deployment', 'isOk', ?, ?),
+                       ('active-deployment', 'verifying', ?, ?),
+                       ('legacy-restart-scheduled-deployment',
+                        'restart-scheduled', ?, ?)`
                 )
-                .run(oldTimestamp, oldTimestamp, currentTimestamp, currentTimestamp);
+                .run(
+                    oldTimestamp,
+                    oldTimestamp,
+                    currentTimestamp,
+                    currentTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp,
+                    oldTimestamp
+                );
             database
                 .prepare(
                     `INSERT INTO agent_task_history (
@@ -977,7 +1168,7 @@ describe("Dashboard SQLite lifecycle", () => {
             expect(changes).toMatchObject({
                 agentTaskHistory: 1,
                 authSessions: 1,
-                deploymentJobs: 1,
+                deploymentJobs: 2,
                 dockerUpdateEvents: 1,
                 jobExecutions: 1,
                 jobWorkers: 1,
@@ -994,6 +1185,9 @@ describe("Dashboard SQLite lifecycle", () => {
             expect(
                 database.query("SELECT id FROM job_executions ORDER BY id").all()
             ).toEqual([{ id: "current-execution" }]);
+            expect(
+                database.query("SELECT id FROM deployment_jobs ORDER BY id").all()
+            ).toEqual([{ id: "active-deployment" }, { id: "current-deployment" }]);
             expect(database.query("SELECT task FROM agent_task_history").all()).toEqual([
                 { task: "Current" },
             ]);

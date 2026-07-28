@@ -55,7 +55,7 @@ which they were started. There is no permanent development systemd unit.
 Local state defaults to:
 
 ```text
-/home/ubuntu/projects/mira-dashboard-dev-state/local/
+/home/ubuntu/projects/mira-dashboard/development/state/local/
 ```
 
 It contains:
@@ -72,15 +72,16 @@ database, OpenClaw workspace, and managed releases. Later starts reuse them so
 changes made while testing remain available.
 
 The database snapshot removes active sessions and pending logins, WebAuthn
-challenges, TOTP/recovery secrets, the persisted Gateway token, deployment/job
-runtime state, and chat replay snapshots. Existing Dashboard users and password
-hashes remain available. WebAuthn public credentials remain available only when
-the source and development relying-party IDs match. For a different RP, such as
-the default `localhost`, the snapshot removes incompatible credentials and
-disables MFA so password login and local factor enrollment remain possible.
-Cache refresh and SQLite maintenance jobs retain their enabled state and
-schedule. Backup, Docker, deploy, workspace-sync, and log-rotation jobs are
-forced disabled.
+challenges, TOTP/recovery secrets, the persisted Gateway token, active
+deployment locks/nonterminal deployment jobs, job-execution runtime, and chat
+replay snapshots. Terminal release-job history remains available as read-only
+dev context. Existing Dashboard users and password hashes remain available.
+WebAuthn public credentials remain available only when the source and
+development relying-party IDs match. For a different RP, such as the default
+`localhost`, the snapshot removes incompatible credentials and disables MFA so
+password login and local factor enrollment remain possible. Cache refresh and
+SQLite maintenance jobs retain their enabled state and schedule. Backup,
+Docker, deploy, workspace-sync, and log-rotation jobs are forced disabled.
 
 The workspace copy rejects symlinks and excludes Git metadata, credential/secret
 directories, private-key names, `.env` files, and token/secret files. Safe
@@ -138,14 +139,14 @@ The Delivery page exposes one shared **PR dev** slot:
 - Only PRs targeting `main` from the configured trusted-author allowlist can
   start.
 - The exact PR commit is checked out at
-  `/home/ubuntu/projects/mira-dashboard-preview`.
+  `/home/ubuntu/projects/mira-dashboard/development/preview`.
 - Dependencies install with frozen lockfiles and lifecycle scripts disabled.
 - Source and Git metadata are read-only inside a Bubblewrap sandbox.
 - Source watchers and frontend HMR are disabled because the managed checkout is
   fixed and read-only. Ordinary `bun run dev` and `bun run dev:remote` still
   provide frontend and backend hot reload from their current worktree.
 - State is stored under
-  `/home/ubuntu/projects/mira-dashboard-preview-state/managed/states/pr-<number>/`.
+  `/home/ubuntu/projects/mira-dashboard/development/state/preview/states/pr-<number>/`.
 - Tailscale publishes HTTPS only after the managed frontend/backend pair is
   locally ready.
 - Separate transient user units run the sandbox and a host-owned Gateway
@@ -163,10 +164,10 @@ The Delivery page exposes one shared **PR dev** slot:
 - Status reconciliation performs the same unit, route, and credential cleanup
   if a transient unit exits, is collected, or reaches its four-hour limit.
 
-`managed/bun-cache` is a shared dependency cache retained between PRs to speed up
-frozen installs. `managed/installer-home` is an isolated, normally empty home
-directory for those installs; neither directory contains per-PR application
-state.
+`bun-cache` is a shared dependency cache retained between PRs to speed up frozen
+installs. `installer-home` is an isolated, normally empty home directory for
+those installs; both live directly under `development/state/preview`, and
+neither contains per-PR application state.
 
 The production backend decrypts its persisted Gateway token only when starting
 trusted PR dev. It atomically writes that token to an owner-only `0600` file
@@ -188,6 +189,7 @@ The stack validates all configured ports, origins, URLs, and paths. Useful
 overrides include:
 
 ```text
+MIRA_DASHBOARD_PROJECT_ROOT
 MIRA_DASHBOARD_DEV_FRONTEND_PORT
 MIRA_DASHBOARD_DEV_BACKEND_PORT
 MIRA_DASHBOARD_DEV_HOT_RELOAD
@@ -199,12 +201,11 @@ MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE
 MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE
 MIRA_DASHBOARD_DEV_GATEWAY_URL
 MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE
-MIRA_DASHBOARD_PREVIEW_ROOT
-MIRA_DASHBOARD_PREVIEW_WORKTREE_PATH
 ```
 
 Use overrides only with absolute, non-root state/source paths. The ordinary
 commands already select the host's production snapshots and runtime Gateway.
+Managed PR dev paths are always derived from `MIRA_DASHBOARD_PROJECT_ROOT`.
 
 ## Verification
 

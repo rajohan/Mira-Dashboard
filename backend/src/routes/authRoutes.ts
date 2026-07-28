@@ -206,11 +206,7 @@ function isGatewayAuthFailure(error: unknown): boolean {
 }
 
 function environmentGatewayToken(): string | undefined {
-    return (
-        process.env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
-        process.env.OPENCLAW_TOKEN?.trim() ||
-        undefined
-    );
+    return process.env.OPENCLAW_GATEWAY_TOKEN?.trim() || undefined;
 }
 
 const firstUserBootstrapState = {

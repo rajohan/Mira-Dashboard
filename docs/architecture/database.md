@@ -11,17 +11,21 @@ backend/data/mira-dashboard.db
 That default is for development. Production units set:
 
 ```text
-/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 ```
 
 The `-wal`/`-shm` sidecars and `backups/` directory stay below the same
 persistent state root, outside the control checkout and immutable releases.
 
-Override:
+Isolated development, tests, and one-shot recovery checks may inject a
+temporary database into their child process:
 
 ```bash
 MIRA_DASHBOARD_DB_PATH=/absolute/path/to/mira-dashboard.db
 ```
+
+This is not a production service/Doppler override. Production derives the
+database path from `MIRA_DASHBOARD_PROJECT_ROOT`.
 
 ## Startup Behavior
 
@@ -122,8 +126,10 @@ legacy reusable session ids do not survive the upgrade.
 The deploy flow uses one combined build/preflight command before restart:
 
 ```bash
-cd /home/ubuntu/projects/mira-dashboard
-/usr/local/bin/doppler run --config prd --project rajohan -- \
+export MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard
+cd /home/ubuntu/projects/mira-dashboard/production/checkout
+/usr/local/bin/doppler run --config prd --project rajohan \
+  --preserve-env=MIRA_DASHBOARD_PROJECT_ROOT -- \
   bun run deploy:prepare
 ```
 
@@ -134,7 +140,11 @@ validates its recorded migration prefix, creates a `pre-deploy` snapshot with
 requires `PRAGMA quick_check = ok` plus valid migration history, then applies
 every pending migration to that disposable copy and validates it again. The
 retained `pre-deploy` snapshot and live database remain unchanged. Ordinary
-builds remain side-effect free.
+builds remain side-effect free. Managed activation later stops both Dashboard
+writers and creates a separate UUID-bound `cutover` snapshot. User mutations
+and worker claims stay paused until readiness succeeds. A failed activation
+atomically restores that snapshot before the exact old release slots restart; a
+successful activation discards it.
 
 The enabled `database.maintenance` worker job runs daily at `02:40`. It creates
 and restore-verifies a `scheduled` backup before pruning bounded history,
@@ -151,12 +161,13 @@ schema enforces append-only history. Any future archive/retention design must
 arrive through a reviewed forward migration that preserves required audit
 history.
 
-Snapshots live below `dirname(MIRA_DASHBOARD_DB_PATH)/backups/`. This is
-`backend/data/backups/` in development and
-`/home/ubuntu/projects/mira-dashboard-state/backups/` in production:
+Snapshots live beside the active database below `backups/`. This is
+`backend/data/backups/` for an unwrapped source process and
+`/home/ubuntu/projects/mira-dashboard/production/state/backups/` in production:
 
 | Kind            | Maximum age | Maximum count |
 | --------------- | ----------- | ------------- |
+| `cutover`       | 2 days      | 5             |
 | `scheduled`     | 14 days     | 14            |
 | `pre-deploy`    | 90 days     | 20            |
 | `pre-migration` | 180 days    | 20            |
@@ -171,7 +182,7 @@ Use the same explicit path as the managed production units:
 
 ```bash
 set -euo pipefail
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 sqlite3 -readonly "$db_path" ".tables"
 sqlite3 -readonly "$db_path" "PRAGMA integrity_check;"
 sqlite3 -readonly "$db_path" \
@@ -197,8 +208,8 @@ Use this only when Raymond explicitly wants to re-run setup.
 
 ```bash
 set -euo pipefail
-backend_dir=/home/ubuntu/projects/mira-dashboard-releases/current/backend
-db_path=/home/ubuntu/projects/mira-dashboard-state/mira-dashboard.db
+backend_dir=/home/ubuntu/projects/mira-dashboard/production/releases/current/backend
+db_path=/home/ubuntu/projects/mira-dashboard/production/state/mira-dashboard.db
 cd "$backend_dir"
 /usr/local/bin/doppler run --config prd --project rajohan -- \
   env MIRA_DASHBOARD_DB_PATH="$db_path" bun run db:preflight
