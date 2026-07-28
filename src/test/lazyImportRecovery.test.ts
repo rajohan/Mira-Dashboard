@@ -106,6 +106,32 @@ describe("lazy import recovery", () => {
         void importRequest;
     });
 
+    it("recovers when a stored reload timestamp is later than the current clock", async () => {
+        const importError = new TypeError("Importing a module script failed");
+        const storage = recoveryStorage("90000");
+        const reload = jest.fn();
+        const importRequest = loadLazyModule(
+            "route-clock-reset",
+            async () => {
+                throw importError;
+            },
+            {
+                now: () => 30_000,
+                reload,
+                storage,
+            }
+        );
+
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(reload).toHaveBeenCalledTimes(1);
+        expect(storage.setItem).toHaveBeenCalledWith(
+            "mira-dashboard:lazy-import-reload:route-clock-reset",
+            "30000"
+        );
+        void importRequest;
+    });
+
     it("uses the in-memory loop guard when storage is unavailable", async () => {
         const importError = new TypeError("error loading dynamically imported module");
         const storage = {

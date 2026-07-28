@@ -46,11 +46,14 @@ const ChatMarkdown = lazy(async () => {
 
 function SettledChatMarkdown({ onLoad, text }: { onLoad: () => void; text: string }) {
     const onLoadReference = useRef(onLoad);
-    onLoadReference.current = onLoad;
+
+    useLayoutEffect(() => {
+        onLoadReference.current = onLoad;
+    }, [onLoad]);
 
     useLayoutEffect(() => {
         onLoadReference.current();
-    }, []);
+    }, [text]);
 
     return <ChatMarkdown text={text} />;
 }

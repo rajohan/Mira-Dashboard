@@ -2686,7 +2686,7 @@ describe("shared component helpers", () => {
             size: 5,
         };
 
-        const { container, rerender } = render(
+        const { rerender } = render(
             <FileContentViewer
                 fileContent={{ ...baseFile, size: 2_000_000 }}
                 editedContent="hello"
@@ -2844,9 +2844,9 @@ describe("shared component helpers", () => {
         rerender(
             <CodePreview language="graphql" content="query Viewer { viewer { id } }" />
         );
-        expect(
-            container.querySelector(":scope code.language-graphql .token")
-        ).toHaveTextContent("query");
+        const graphQlKeyword = screen.getByText("query", { selector: ".token" });
+        expect(graphQlKeyword).toHaveTextContent("query");
+        expect(graphQlKeyword).toHaveStyle({ color: "#f92672" });
     });
 
     it("drives file explorer hook directory loading, JSON validation, and saves", async () => {

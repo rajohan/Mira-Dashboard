@@ -84,9 +84,12 @@ export async function loadLazyModule<T>(
         const lastReloadAt =
             storedReloadAt(storage ?? undefined, storageKey) ??
             reloadAttempts.get(storageKey);
+        const elapsedSinceReload =
+            lastReloadAt === undefined ? undefined : now - lastReloadAt;
         if (
-            lastReloadAt !== undefined &&
-            now - lastReloadAt < LAZY_IMPORT_RELOAD_COOLDOWN_MS
+            elapsedSinceReload !== undefined &&
+            elapsedSinceReload >= 0 &&
+            elapsedSinceReload < LAZY_IMPORT_RELOAD_COOLDOWN_MS
         ) {
             throw error;
         }

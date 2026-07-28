@@ -30,7 +30,7 @@ import typescript from "react-syntax-highlighter/dist/esm/languages/hljs/typescr
 import xml from "react-syntax-highlighter/dist/esm/languages/hljs/xml";
 import yaml from "react-syntax-highlighter/dist/esm/languages/hljs/yaml";
 import graphql from "react-syntax-highlighter/dist/esm/languages/prism/graphql";
-import { okaidia } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { monokaiSublime } from "react-syntax-highlighter/dist/esm/styles/hljs";
 
 const languages = {
     bash,
@@ -63,6 +63,31 @@ const languages = {
 };
 const prismLanguages = { graphql };
 
+function monokaiStyle(name: string) {
+    return monokaiSublime[name] ?? {};
+}
+
+const prismMonokaiSublime: NonNullable<SyntaxHighlighterProps["style"]> = {
+    'code[class*="language-"]': monokaiStyle("hljs"),
+    'pre[class*="language-"]': monokaiStyle("hljs"),
+    "attr-name": monokaiStyle("hljs-attribute"),
+    "attr-value": monokaiStyle("hljs-string"),
+    boolean: monokaiStyle("hljs-number"),
+    builtin: monokaiStyle("hljs-built_in"),
+    "class-name": monokaiStyle("hljs-title"),
+    comment: monokaiStyle("hljs-comment"),
+    constant: monokaiStyle("hljs-number"),
+    function: monokaiStyle("hljs-title"),
+    keyword: monokaiStyle("hljs-keyword"),
+    number: monokaiStyle("hljs-number"),
+    operator: monokaiStyle("hljs"),
+    property: monokaiStyle("hljs-attr"),
+    punctuation: monokaiStyle("hljs-tag"),
+    string: monokaiStyle("hljs-string"),
+    tag: monokaiStyle("hljs-name"),
+    variable: monokaiStyle("hljs-variable"),
+};
+
 for (const [name, language] of Object.entries(languages)) {
     HighlightJsSyntaxHighlighter.registerLanguage(name, language);
 }
@@ -80,7 +105,11 @@ export function CodeSyntaxHighlighter({
     ...properties
 }: SyntaxHighlighterProps) {
     return language === "graphql" ? (
-        <PrismSyntaxHighlighter {...properties} language={language} style={okaidia} />
+        <PrismSyntaxHighlighter
+            {...properties}
+            language={language}
+            style={prismMonokaiSublime}
+        />
     ) : (
         <HighlightJsSyntaxHighlighter {...properties} language={language} style={style} />
     );
