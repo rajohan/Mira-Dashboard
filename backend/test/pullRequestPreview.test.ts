@@ -511,11 +511,12 @@ describe("managed pull request preview", () => {
         let didProxyReceiveDisposableToken = false;
         let didProxyReceiveUpstreamToken = false;
         let didProxyStartWithStartingRecord = false;
-        let isMissingWorktreeRegistered = true;
+        let isMissingWorktreeRegistered = false;
         const activeUnits = new Set<string>();
         const commands: string[] = [];
         mkdirSync(config.dashboardRoot, { recursive: true });
         mkdirSync(config.gitCommonDirectory, { recursive: true });
+        mkdirSync(worktreePath, { recursive: true });
         chmodSync(root, 0o755);
 
         const processSpy = jest
@@ -628,6 +629,13 @@ describe("managed pull request preview", () => {
                     executable === "git" &&
                     commandArguments.includes("--show-toplevel")
                 ) {
+                    if (readdirSync(worktreePath).length === 0) {
+                        return {
+                            code: 128,
+                            stderr: "fatal: not a git repository (or any of the parent directories): .git",
+                            stdout: "",
+                        };
+                    }
                     return { code: 0, stderr: "", stdout: `${worktreePath}\n` };
                 }
                 if (executable === "git" && commandArguments.includes("status")) {
@@ -707,16 +715,10 @@ describe("managed pull request preview", () => {
                 url: "https://preview-node.ts.net:5173",
             });
             expect(statSync(root).mode & 0o777).toBe(0o755);
-            const staleRemovalIndex = commands.findIndex((command) =>
-                command.includes(
-                    `worktree remove --force --force ${config.managedWorktreePath}`
-                )
-            );
             const worktreeAddIndex = commands.findIndex((command) =>
                 command.includes(`worktree add --detach ${config.managedWorktreePath}`)
             );
-            expect(staleRemovalIndex).toBeGreaterThanOrEqual(0);
-            expect(worktreeAddIndex).toBeGreaterThan(staleRemovalIndex);
+            expect(worktreeAddIndex).toBeGreaterThanOrEqual(0);
             expect(prepareStateSpy).toHaveBeenCalledTimes(1);
             expect(protectFromCancellation).toHaveBeenCalledTimes(1);
             expect(fetchSpy).toHaveBeenCalledWith(
@@ -817,6 +819,8 @@ describe("managed pull request preview", () => {
                 status: "stopped",
             });
 
+            rmSync(worktreePath, { force: true, recursive: true });
+            isMissingWorktreeRegistered = true;
             await expect(
                 startPullRequestPreview(candidate, {
                     config,
@@ -826,6 +830,16 @@ describe("managed pull request preview", () => {
                 commitSha: COMMIT,
                 status: "running",
             });
+            const staleRemovalIndex = commands.findIndex((command) =>
+                command.includes(
+                    `worktree remove --force --force ${config.managedWorktreePath}`
+                )
+            );
+            const recreatedWorktreeIndex = commands.findLastIndex((command) =>
+                command.includes(`worktree add --detach ${config.managedWorktreePath}`)
+            );
+            expect(staleRemovalIndex).toBeGreaterThanOrEqual(0);
+            expect(recreatedWorktreeIndex).toBeGreaterThan(staleRemovalIndex);
             expect(prepareStateSpy).toHaveBeenCalledTimes(3);
             await expect(
                 startPullRequestPreview(

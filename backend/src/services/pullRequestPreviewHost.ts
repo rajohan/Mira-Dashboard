@@ -12,6 +12,7 @@ import {
     readSync,
     realpathSync,
     renameSync,
+    rmdirSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
@@ -596,7 +597,7 @@ function previewWorktreePath(config: PullRequestPreviewConfig): string {
     return config.managedWorktreePath;
 }
 
-async function unregisterMissingPreviewWorktree(
+async function unregisterPreviewWorktreeIfRegistered(
     config: PullRequestPreviewConfig,
     worktreePath: string,
     signal?: AbortSignal
@@ -641,7 +642,11 @@ async function removePreviewWorktree(
         throw new Error("Refusing to remove an unmanaged preview worktree");
     }
     if (!existsSync(resolvedWorktreePath)) {
-        return unregisterMissingPreviewWorktree(config, resolvedWorktreePath, signal);
+        return unregisterPreviewWorktreeIfRegistered(
+            config,
+            resolvedWorktreePath,
+            signal
+        );
     }
     if (!isRealDirectory(resolvedWorktreePath)) {
         throw new Error("Preview worktree path must be a real directory");
@@ -709,6 +714,14 @@ async function ensurePreviewWorktree(
         if (!isRealDirectory(worktreePath)) {
             throw new Error("Preview worktree path must be a real directory");
         }
+        if (readdirSync(worktreePath).length === 0) {
+            await unregisterPreviewWorktreeIfRegistered(config, worktreePath, signal);
+            if (existsSync(worktreePath)) {
+                rmdirSync(worktreePath);
+            }
+        }
+    }
+    if (existsSync(worktreePath)) {
         const { stdout: registeredRoot } = await runCommand(
             "git",
             ["-C", worktreePath, "rev-parse", "--show-toplevel"],
@@ -732,7 +745,7 @@ async function ensurePreviewWorktree(
             signal,
         });
     } else {
-        await unregisterMissingPreviewWorktree(config, worktreePath, signal);
+        await unregisterPreviewWorktreeIfRegistered(config, worktreePath, signal);
         await runCommand(
             "git",
             [
