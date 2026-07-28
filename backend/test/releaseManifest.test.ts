@@ -580,4 +580,22 @@ describe("Dashboard release manifest", () => {
             ready: true,
         });
     });
+
+    it("uses the Git identity for source development when a generated manifest remains", async () => {
+        const root = temporaryReleaseRoot();
+        await writeReleaseManifest(manifestOptions(root));
+        runGit(root, ["init", "--initial-branch=main"]);
+        runGit(root, ["add", "."]);
+        runGit(root, ["commit", "-m", "Test development source"]);
+        const commit = runGit(root, ["rev-parse", "--short=8", "HEAD"]);
+
+        await expect(
+            loadRuntimeReleaseIdentity(root, "development", "development")
+        ).resolves.toEqual({
+            backendCommit: commit,
+            frontendCommit: commit,
+            ready: true,
+            source: "git",
+        });
+    });
 });

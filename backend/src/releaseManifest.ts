@@ -736,11 +736,24 @@ function fallbackGitCommit(releaseRoot: string): string {
     }
 }
 
+function developmentRuntimeReleaseIdentity(releaseRoot: string): RuntimeReleaseIdentity {
+    const commit = fallbackGitCommit(releaseRoot);
+    return {
+        backendCommit: commit,
+        frontendCommit: commit,
+        ready: true,
+        source: commit === "unknown" ? "unknown" : "git",
+    };
+}
+
 export async function loadRuntimeReleaseIdentity(
     releaseRoot = PROCESS_RELEASE_ROOT,
     environment = process.env.NODE_ENV,
     backendBuildCommit = getBackendBuildCommit()
 ): Promise<RuntimeReleaseIdentity> {
+    if (environment !== "production" && backendBuildCommit === "development") {
+        return developmentRuntimeReleaseIdentity(releaseRoot);
+    }
     try {
         const realReleaseRoot = await fsp.realpath(releaseRoot);
         const manifest = await loadReleaseManifest(realReleaseRoot);
@@ -786,18 +799,19 @@ export async function loadRuntimeReleaseIdentity(
             source: "manifest",
         };
     } catch (error) {
-        const commit = fallbackGitCommit(releaseRoot);
         const isMissing = (error as NodeJS.ErrnoException).code === "ENOENT";
         const isDevelopmentFallback = environment !== "production" && isMissing;
+        if (isDevelopmentFallback) {
+            return developmentRuntimeReleaseIdentity(releaseRoot);
+        }
+        const commit = fallbackGitCommit(releaseRoot);
         return {
             backendCommit: commit,
             frontendCommit: commit,
-            ...(!isDevelopmentFallback && {
-                issue: isMissing
-                    ? ("manifest-missing" as const)
-                    : ("manifest-invalid" as const),
-            }),
-            ready: isDevelopmentFallback,
+            issue: isMissing
+                ? ("manifest-missing" as const)
+                : ("manifest-invalid" as const),
+            ready: false,
             source: commit === "unknown" ? "unknown" : "git",
         };
     }
