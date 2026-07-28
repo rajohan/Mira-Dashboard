@@ -173,7 +173,7 @@ describe("frontend build artifacts", () => {
         await Promise.all([
             fs.writeFile(
                 path.join(outdir, "index.html"),
-                '<div id="root"></div><script type="module" crossorigin src="/assets/unrelated.js"></script>'
+                '<div id="root"></div><script type="module" crossorigin src="/assets/unrelated.js"></script >'
             ),
             fs.writeFile(
                 path.join(outdir, "assets", "application.js"),
