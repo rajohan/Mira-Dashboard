@@ -14,7 +14,7 @@ const COMPRESSIBLE_EXTENSIONS = new Set([
 ]);
 const MINIMUM_COMPRESSION_BYTES = 512;
 const FRONTEND_APP_INPUT = "src/main.tsx";
-const SCRIPT_TAG_PATTERN = /<script\b[^>]*><\/script\s*>/giu;
+const SCRIPT_TAG_PATTERN = /<script\b[^>]*><\/script(?:\s+[^>]*)?>/giu;
 const SCRIPT_SOURCE_ATTRIBUTE_PATTERN = /\bsrc=(["'])([^"']+)\1/iu;
 const MODULE_SCRIPT_TYPE_PATTERN = /\btype=(["'])module\1/iu;
 
