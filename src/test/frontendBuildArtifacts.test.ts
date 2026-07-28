@@ -173,7 +173,7 @@ describe("frontend build artifacts", () => {
         await Promise.all([
             fs.writeFile(
                 path.join(outdir, "index.html"),
-                '<div id="root"></div><script type="module" crossorigin src="/assets/unrelated.js"></script data-generated>'
+                '<div id="root"></div><script type="module" crossorigin src="/assets/unrelated.js">void 0;</script data-generated>'
             ),
             fs.writeFile(
                 path.join(outdir, "assets", "application.js"),
@@ -215,9 +215,9 @@ describe("frontend build artifacts", () => {
         await expect(writeFrontendHtmlAppEntrypoint(metafile, outdir)).resolves.toBe(
             "/assets/application.js"
         );
-        expect(await fs.readFile(path.join(outdir, "index.html"), "utf8")).toContain(
-            'src="/assets/application.js"'
-        );
+        const correctedHtml = await fs.readFile(path.join(outdir, "index.html"), "utf8");
+        expect(correctedHtml).toContain('src="/assets/application.js"');
+        expect(correctedHtml).toContain("void 0;</script data-generated>");
     });
 
     it("fails closed when build metadata has no application entrypoint", async () => {
