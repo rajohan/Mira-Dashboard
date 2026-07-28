@@ -536,6 +536,12 @@ describe("Dashboard release manifest", () => {
             issue: "manifest-invalid",
             ready: false,
         });
+        await expect(
+            loadRuntimeReleaseIdentity(root, "test", TEST_COMMIT)
+        ).resolves.toMatchObject({
+            issue: "manifest-invalid",
+            ready: false,
+        });
     });
 
     it("coalesces readiness verification and revalidates after invalidation", async () => {
@@ -578,6 +584,24 @@ describe("Dashboard release manifest", () => {
         });
         await expect(loadRuntimeReleaseIdentity(root, "test")).resolves.toMatchObject({
             ready: true,
+        });
+    });
+
+    it("uses the Git identity for source development when a generated manifest remains", async () => {
+        const root = temporaryReleaseRoot();
+        await writeReleaseManifest(manifestOptions(root));
+        runGit(root, ["init", "--initial-branch=main"]);
+        runGit(root, ["add", "."]);
+        runGit(root, ["commit", "-m", "Test development source"]);
+        const commit = runGit(root, ["rev-parse", "--short=8", "HEAD"]);
+
+        await expect(
+            loadRuntimeReleaseIdentity(root, "development", "development")
+        ).resolves.toEqual({
+            backendCommit: commit,
+            frontendCommit: commit,
+            ready: true,
+            source: "git",
         });
     });
 });

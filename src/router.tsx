@@ -2,28 +2,80 @@ import {
     createRootRoute,
     createRoute,
     createRouter,
+    lazyRouteComponent,
     Outlet,
     redirect,
 } from "@tanstack/react-router";
 
 import { Layout } from "./components/layout/Layout";
-import { Agents } from "./pages/Agents";
-import { Chat } from "./pages/Chat";
-import { Dashboard } from "./pages/Dashboard";
-import { Database } from "./pages/Database";
-import { Delivery } from "./pages/Delivery";
-import { Docker } from "./pages/Docker";
-import { Files } from "./pages/Files";
-import { Jobs } from "./pages/Jobs";
-import { Login } from "./pages/Login";
-import { Logs } from "./pages/Logs";
-import { Moltbook } from "./pages/Moltbook";
-import { Reports } from "./pages/Reports";
-import { Sessions } from "./pages/Sessions";
-import { Settings } from "./pages/Settings";
-import { Tasks } from "./pages/Tasks";
-import { Terminal } from "./pages/Terminal";
+import { loadLazyModule } from "./lib/lazyImportRecovery";
+import { routeModules } from "./lib/routeModules";
 import { authActions, authStore } from "./stores/authStore";
+
+const Agents = lazyRouteComponent(
+    () => loadLazyModule("route-agents", routeModules.agents),
+    "Agents"
+);
+const Chat = lazyRouteComponent(
+    () => loadLazyModule("route-chat", routeModules.chat),
+    "Chat"
+);
+const Dashboard = lazyRouteComponent(
+    () => loadLazyModule("route-dashboard", routeModules.dashboard),
+    "Dashboard"
+);
+const Database = lazyRouteComponent(
+    () => loadLazyModule("route-database", routeModules.database),
+    "Database"
+);
+const Delivery = lazyRouteComponent(
+    () => loadLazyModule("route-delivery", routeModules.delivery),
+    "Delivery"
+);
+const Docker = lazyRouteComponent(
+    () => loadLazyModule("route-docker", routeModules.docker),
+    "Docker"
+);
+const Files = lazyRouteComponent(
+    () => loadLazyModule("route-files", routeModules.files),
+    "Files"
+);
+const Jobs = lazyRouteComponent(
+    () => loadLazyModule("route-jobs", routeModules.jobs),
+    "Jobs"
+);
+const Login = lazyRouteComponent(
+    () => loadLazyModule("route-login", routeModules.login),
+    "Login"
+);
+const Logs = lazyRouteComponent(
+    () => loadLazyModule("route-logs", routeModules.logs),
+    "Logs"
+);
+const Moltbook = lazyRouteComponent(
+    () => loadLazyModule("route-moltbook", routeModules.moltbook),
+    "Moltbook"
+);
+const Reports = lazyRouteComponent(
+    () => loadLazyModule("route-reports", routeModules.reports),
+    "Reports"
+);
+const Sessions = lazyRouteComponent(
+    () => loadLazyModule("route-sessions", routeModules.sessions),
+    "Sessions"
+);
+const Settings = lazyRouteComponent(
+    () => loadLazyModule("route-settings", routeModules.settings),
+    "Settings"
+);
+const Tasks = lazyRouteComponent(
+    () => loadLazyModule("route-tasks", routeModules.tasks),
+    "Tasks"
+);
+const Terminal = lazyRouteComponent(
+    () => loadLazyModule("route-terminal", routeModules.terminal),
+    "Terminal"
+);
 
 const rootRoute = createRootRoute({
     component: () => <Outlet />,

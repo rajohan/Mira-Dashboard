@@ -2615,6 +2615,7 @@ describe("shared component helpers", () => {
         expect(
             screen.getByText("Bash").closest("[class*='border-amber']")
         ).not.toContainElement(screen.getByText("answer"));
+        await waitFor(() => expect(onDynamicContentLoad).toHaveBeenCalled());
 
         await user.click(screen.getByRole("button", { name: /follow/i }));
         expect(onUserScrollIntent).not.toHaveBeenCalled();
@@ -2839,6 +2840,13 @@ describe("shared component helpers", () => {
 
         rerender(<CodePreview language="ts" content="const covered = true;" />);
         expect(screen.getByText(/covered/)).toBeInTheDocument();
+
+        rerender(
+            <CodePreview language="graphql" content="query Viewer { viewer { id } }" />
+        );
+        const graphQlKeyword = screen.getByText("query", { selector: ".token" });
+        expect(graphQlKeyword).toHaveTextContent("query");
+        expect(graphQlKeyword).toHaveStyle({ color: "#f92672" });
     });
 
     it("drives file explorer hook directory loading, JSON validation, and saves", async () => {

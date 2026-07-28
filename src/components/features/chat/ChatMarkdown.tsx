@@ -2,10 +2,10 @@ import ReactJsonView from "@microlink/react-json-view";
 import JSON5 from "json5";
 import { Children, isValidElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import SyntaxHighlighter from "react-syntax-highlighter";
-import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
+import { monokaiSublime } from "react-syntax-highlighter/dist/esm/styles/hljs";
 import remarkGfm from "remark-gfm";
 
+import { CodeSyntaxHighlighter } from "../../../lib/syntaxHighlighter";
 import { cn } from "../../../utils/cn";
 
 const JSON_LANGUAGES = new Set(["json", "json5", "jsonc"]);
@@ -131,9 +131,9 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
             <div className="border-b border-white/10 px-2 py-0.5 text-[10px] tracking-wide text-primary-400 uppercase">
                 {language}
             </div>
-            <SyntaxHighlighter
+            <CodeSyntaxHighlighter
                 language={normalizeSyntaxLanguage(language)}
-                style={monokai}
+                style={monokaiSublime}
                 customStyle={{
                     margin: 0,
                     padding: "0.5rem",
@@ -148,7 +148,7 @@ function ChatCodeBlock({ code, language }: { code: string; language: string }) {
                 }}
             >
                 {code}
-            </SyntaxHighlighter>
+            </CodeSyntaxHighlighter>
         </div>
     );
 }

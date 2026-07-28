@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { brotliCompressSync, gzipSync } from "node:zlib";
 
 import type { Server } from "bun";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -266,14 +267,17 @@ describe("Mira Dashboard backend integration", () => {
         );
         await fs.writeFile(composeWrapper, "#!/bin/sh\nprintf 'compose:%s\\n' \"$*\"\n");
         await fs.chmod(composeWrapper, 0o755);
-        await fs.writeFile(
-            path.join(frontendRoot, "index.html"),
-            '<!doctype html><html><body><div id="root"></div></body></html>'
-        );
-        await fs.writeFile(
-            path.join(frontendRoot, "assets", "index-fixture.js"),
-            "export const isOk = true;\n"
-        );
+        const frontendIndexPath = path.join(frontendRoot, "index.html");
+        const frontendIndex =
+            '<!doctype html><html><body><div id="root"></div></body></html>';
+        await fs.writeFile(frontendIndexPath, frontendIndex);
+        await fs.writeFile(`${frontendIndexPath}.br`, brotliCompressSync(frontendIndex));
+        await fs.writeFile(`${frontendIndexPath}.gz`, gzipSync(frontendIndex));
+        const frontendChunkPath = path.join(frontendRoot, "assets", "index-a1b2c3d4.js");
+        const frontendChunk = "export const isOk = true;\n".repeat(32);
+        await fs.writeFile(frontendChunkPath, frontendChunk);
+        await fs.writeFile(`${frontendChunkPath}.br`, brotliCompressSync(frontendChunk));
+        await fs.writeFile(`${frontendChunkPath}.gz`, gzipSync(frontendChunk));
 
         process.env.MIRA_DASHBOARD_DB_PATH = path.join(
             testState.temporaryRoot,
@@ -423,18 +427,62 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("serves the app shell only for app routes, not missing assets", async () => {
-        const appRoute = await fetch(`${testState.baseUrl}/tasks`);
+        const appRoute = await fetch(`${testState.baseUrl}/tasks`, {
+            headers: { "Accept-Encoding": "br, gzip" },
+        });
         expect(appRoute.status).toBe(200);
         expect(appRoute.headers.get("content-type")).toContain("text/html");
+        expect(appRoute.headers.get("cache-control")).toBe("no-cache");
+        expect(appRoute.headers.get("content-encoding")).toBe("br");
+        expect(appRoute.headers.get("vary")).toContain("Accept-Encoding");
+        expect(appRoute.headers.get("etag")).toBeTruthy();
+        expect(appRoute.headers.get("last-modified")).toBeTruthy();
+        expect(await appRoute.text()).toContain('<div id="root"></div>');
+        const revalidatedAppRoute = await fetch(`${testState.baseUrl}/tasks`, {
+            headers: {
+                "Accept-Encoding": "br, gzip",
+                "If-Modified-Since": appRoute.headers.get("last-modified") ?? "",
+            },
+        });
+        expect(revalidatedAppRoute.status).toBe(304);
 
         const assetsPath = path.join(testState.temporaryRoot, "frontend", "assets");
         const builtAssets = await fs.readdir(assetsPath);
-        const builtChunk = builtAssets.find((file) => /^index-.+\.js$/u.test(file));
+        const builtChunk = builtAssets.find((file) =>
+            /^index-[\da-z]{8}\.js$/u.test(file)
+        );
         expect(builtChunk).toBeDefined();
 
-        const rootChunk = await fetch(`${testState.baseUrl}/assets/${builtChunk}`);
+        const chunkUrl = `${testState.baseUrl}/assets/${builtChunk}`;
+        const rootChunk = await fetch(chunkUrl, {
+            headers: { "Accept-Encoding": "br, gzip" },
+        });
         expect(rootChunk.status).toBe(200);
-        expect(rootChunk.headers.get("cache-control")).toBe("no-store");
+        expect(rootChunk.headers.get("cache-control")).toBe(
+            "public, max-age=31536000, immutable"
+        );
+        expect(rootChunk.headers.get("content-encoding")).toBe("br");
+        expect(rootChunk.headers.get("vary")).toContain("Accept-Encoding");
+        expect(rootChunk.headers.get("etag")).toBeTruthy();
+        expect(rootChunk.headers.get("last-modified")).toBeTruthy();
+        expect(await rootChunk.text()).toContain("export const isOk = true");
+
+        const cachedChunk = await fetch(chunkUrl, {
+            headers: {
+                "Accept-Encoding": "br, gzip",
+                "If-None-Match": rootChunk.headers.get("etag") ?? "",
+            },
+        });
+        expect(cachedChunk.status).toBe(304);
+
+        const gzipChunk = await fetch(chunkUrl, {
+            headers: { "Accept-Encoding": "br;q=0, gzip;q=1" },
+        });
+        expect(gzipChunk.headers.get("content-encoding")).toBe("gzip");
+        expect(await gzipChunk.text()).toContain("export const isOk = true");
+
+        const directSidecar = await fetch(`${chunkUrl}.br`);
+        expect(directSidecar.status).toBe(404);
 
         const missingChunk = await fetch(
             `${testState.baseUrl}/assets/index-missing-after-deploy.js`

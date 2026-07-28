@@ -1,5 +1,6 @@
-import SyntaxHighlighter from "react-syntax-highlighter";
-import { monokai } from "react-syntax-highlighter/dist/esm/styles/hljs";
+import { monokaiSublime } from "react-syntax-highlighter/dist/esm/styles/hljs";
+
+import { CodeSyntaxHighlighter } from "../../../../lib/syntaxHighlighter";
 
 /** Provides props for code preview. */
 interface CodePreviewProperties {
@@ -11,9 +12,9 @@ interface CodePreviewProperties {
 export function CodePreview({ language, content }: CodePreviewProperties) {
     return (
         <div className="h-full min-w-0 overflow-auto">
-            <SyntaxHighlighter
+            <CodeSyntaxHighlighter
                 language={language}
-                style={monokai}
+                style={monokaiSublime}
                 customStyle={{
                     margin: 0,
                     padding: "1rem",
@@ -29,7 +30,7 @@ export function CodePreview({ language, content }: CodePreviewProperties) {
                 }}
             >
                 {content}
-            </SyntaxHighlighter>
+            </CodeSyntaxHighlighter>
         </div>
     );
 }

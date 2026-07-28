@@ -11,16 +11,19 @@ import {
 } from "lucide-react";
 import {
     type KeyboardEvent,
+    lazy,
     type PointerEvent,
     type RefObject,
+    Suspense,
     useEffect,
+    useLayoutEffect,
     useRef,
     useState,
 } from "react";
 
+import { loadLazyModule } from "../../../lib/lazyImportRecovery";
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
-import { ChatMarkdown } from "./ChatMarkdown";
 import { ChatMessageDetails } from "./ChatMessageDetails";
 import type {
     ChatAttachmentDisplay,
@@ -35,6 +38,25 @@ import {
     TOOL_ROLE_VARIANTS,
 } from "./chatTypes";
 import { chatErrorMessage } from "./chatUtilities";
+
+const ChatMarkdown = lazy(async () => {
+    const module = await loadLazyModule("chat-markdown", () => import("./ChatMarkdown"));
+    return { default: module.ChatMarkdown };
+});
+
+function SettledChatMarkdown({ onLoad, text }: { onLoad: () => void; text: string }) {
+    const onLoadReference = useRef(onLoad);
+
+    useLayoutEffect(() => {
+        onLoadReference.current = onLoad;
+    }, [onLoad]);
+
+    useLayoutEffect(() => {
+        onLoadReference.current();
+    }, [text]);
+
+    return <ChatMarkdown text={text} />;
+}
 
 const SCROLL_KEYS = new Set([
     " ",
@@ -685,7 +707,18 @@ export function ChatMessagesList({
                                             </div>
                                         ) : undefined}
                                         {shouldRenderPrimaryText ? (
-                                            <ChatMarkdown text={row.message.text} />
+                                            <Suspense
+                                                fallback={
+                                                    <div className="whitespace-pre-wrap">
+                                                        {row.message.text}
+                                                    </div>
+                                                }
+                                            >
+                                                <SettledChatMarkdown
+                                                    onLoad={onDynamicContentLoad}
+                                                    text={row.message.text}
+                                                />
+                                            </Suspense>
                                         ) : undefined}
                                         <AttachmentList
                                             attachments={
