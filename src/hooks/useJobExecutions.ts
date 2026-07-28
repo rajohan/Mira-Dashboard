@@ -5,6 +5,7 @@ import {
     useQueryClient,
 } from "@tanstack/react-query";
 
+import { refreshPolicy } from "../lib/refreshPolicy";
 import { apiFetchRequired, apiPostRequired } from "./useApi";
 
 export type JobResourceClass =
@@ -54,7 +55,6 @@ export const jobExecutionKeys = {
     list: () => [...jobExecutionKeys.all, "list"] as const,
 };
 
-const JOB_EXECUTION_REFRESH_MS = 5000;
 const JOB_EXECUTION_ENQUEUE_REFRESH_DELAY_MS = 250;
 
 /**
@@ -81,7 +81,7 @@ export function useJobExecutions() {
     return useQuery({
         queryKey: jobExecutionKeys.list(),
         queryFn: () => apiFetchRequired<JobExecutionsResponse>("/job-executions"),
-        refetchInterval: JOB_EXECUTION_REFRESH_MS,
+        refetchInterval: refreshPolicy.active,
         refetchIntervalInBackground: false,
         staleTime: 500,
     });

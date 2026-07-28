@@ -1,4 +1,5 @@
-import { json, readJson } from "../http.ts";
+import { HttpError, json, readJson } from "../http.ts";
+import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import { errorMessage, httpStatusCode } from "../lib/errors.ts";
 import {
     buildAgentStatuses,
@@ -23,6 +24,24 @@ function missingConfig(): Response {
     return json({ error: "Agent configuration not found" }, { status: 404 });
 }
 
+const agentStatusesSnapshot = new CoalescedSnapshot<{
+    agents: Awaited<ReturnType<typeof buildAgentStatuses>>;
+    timestamp: number;
+}>({
+    freshForMs: 1500,
+    load: async () => {
+        closeStaleActiveTasks();
+        const config = parseAgentsConfig();
+        if (!config) throw new HttpError("Agent configuration not found", 404);
+        return {
+            agents: await buildAgentStatuses(config),
+            timestamp: Date.now(),
+        };
+    },
+    name: "openclaw.agent-statuses",
+    staleForMs: 5000,
+});
+
 export const agentRoutes = {
     "/api/agents/:id/metadata": {
         PUT: async (request: ParametersRequest<"id">) => {
@@ -37,7 +56,11 @@ export const agentRoutes = {
                 if (!body || typeof body !== "object" || Array.isArray(body)) {
                     return json({ error: "Missing or invalid body" }, { status: 400 });
                 }
-                return json(await updateAgentCurrentTask(agentId, body?.currentTask));
+                try {
+                    return json(await updateAgentCurrentTask(agentId, body?.currentTask));
+                } finally {
+                    agentStatusesSnapshot.invalidate();
+                }
             } catch (error) {
                 return agentError(error, "Agent metadata update failed");
             }
@@ -79,13 +102,7 @@ export const agentRoutes = {
     "/api/agents/status": {
         GET: async () => {
             try {
-                closeStaleActiveTasks();
-                const config = parseAgentsConfig();
-                if (!config) return missingConfig();
-                return json({
-                    agents: await buildAgentStatuses(config),
-                    timestamp: Date.now(),
-                });
+                return json(await agentStatusesSnapshot.read());
             } catch (error) {
                 return agentError(error, "Agent status failed");
             }

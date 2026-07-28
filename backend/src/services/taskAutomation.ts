@@ -1,9 +1,9 @@
 import { TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors.ts";
 import { database } from "../database.ts";
-import gateway from "../gateway.ts";
 import { errorMessage } from "../lib/errors.ts";
 import type { JobDisableIntent } from "./jobDisableIntent.ts";
 import { openClawCronDisableIntentsByJobId } from "./openClawCronMetadata.ts";
+import { getOpenClawCronListSnapshot } from "./openClawCronSnapshot.ts";
 
 export interface CronTaskLink {
     number: number;
@@ -179,9 +179,7 @@ export async function getHeartbeatAutomationSnapshot(): Promise<HeartbeatAutomat
     let cronError: string | undefined;
     let cronJobs: CronJob[] = [];
     try {
-        cronJobs = normalizedCronJobs(
-            await gateway.request("cron.list", { includeDisabled: true })
-        );
+        cronJobs = normalizedCronJobs(await getOpenClawCronListSnapshot());
     } catch (error) {
         isCronDataAvailable = false;
         cronError = errorMessage(error, "OpenClaw cron list unavailable");

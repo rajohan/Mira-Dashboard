@@ -202,7 +202,7 @@ import {
     SecurityVerificationCancelledError,
     waitForSecurityVerification,
 } from "../lib/securityVerification";
-import { createSocketClient } from "../lib/socket/socketClient";
+import { createSocketClient, socketReconnectDelayMs } from "../lib/socket/socketClient";
 import { handleSocketMessage } from "../lib/socket/socketMessageRouter";
 import {
     hasRecentUserActivity,
@@ -1744,6 +1744,69 @@ describe("Mira Dashboard frontend behavior", () => {
             expect(deletes).toEqual([]);
         } finally {
             restore();
+        }
+    });
+
+    it("uses bounded exponential WebSocket reconnect backoff with jitter", () => {
+        expect(socketReconnectDelayMs(0, () => 0.5)).toBe(2000);
+        expect(socketReconnectDelayMs(1, () => 0.5)).toBe(4000);
+        expect(socketReconnectDelayMs(2, () => 0)).toBe(6400);
+        expect(socketReconnectDelayMs(2, () => 1)).toBe(9600);
+        expect(socketReconnectDelayMs(20, () => 1)).toBe(30_000);
+    });
+
+    it("defers WebSocket connect and reconnect while the page is hidden", () => {
+        const originalWebSocket = WebSocket;
+        const visibilityDescriptor = Object.getOwnPropertyDescriptor(
+            document,
+            "visibilityState"
+        );
+        FakeWebSocket.instances = [];
+        Object.defineProperty(globalThis, "WebSocket", {
+            configurable: true,
+            value: FakeWebSocket,
+            writable: true,
+        });
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            value: "hidden",
+        });
+        const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
+        const client = createSocketClient({ url: "ws://dashboard.test/socket" });
+
+        try {
+            client.connect();
+            expect(FakeWebSocket.instances).toHaveLength(0);
+
+            Object.defineProperty(document, "visibilityState", {
+                configurable: true,
+                value: "visible",
+            });
+            client.connect();
+            const socket = FakeWebSocket.instances[0]!;
+            socket.open();
+
+            Object.defineProperty(document, "visibilityState", {
+                configurable: true,
+                value: "hidden",
+            });
+            const timeoutCount = timeoutSpy.mock.calls.length;
+            socket.close();
+            expect(timeoutSpy).toHaveBeenCalledTimes(timeoutCount);
+        } finally {
+            client.disconnect();
+            timeoutSpy.mockRestore();
+            Object.defineProperty(globalThis, "WebSocket", {
+                configurable: true,
+                value: originalWebSocket,
+                writable: true,
+            });
+            if (visibilityDescriptor) {
+                Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+            } else {
+                delete (document as unknown as { visibilityState?: string })
+                    .visibilityState;
+            }
         }
     });
 

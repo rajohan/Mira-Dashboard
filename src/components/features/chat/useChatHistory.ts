@@ -7,6 +7,7 @@ import {
     useState,
 } from "react";
 
+import { isBrowserPollingAllowed, refreshPolicy } from "../../../lib/refreshPolicy";
 import {
     nextHistoryLoadSendError,
     nextRefreshedChatMessages,
@@ -20,7 +21,7 @@ import {
 } from "./chatUtilities";
 import type { ChatTransport } from "./transport/chatTransport";
 
-const LIVE_HISTORY_POLL_MS = 2000;
+const LIVE_HISTORY_POLL_MS = refreshPolicy.live;
 
 interface ChatHistoryOptions {
     isConnected: boolean;
@@ -246,7 +247,7 @@ export function useChatHistory({
         const refreshVisibleHistory = async () => {
             if (
                 isRefreshInFlight ||
-                document.visibilityState === "hidden" ||
+                !isBrowserPollingAllowed() ||
                 !shouldStickToBottomReference.current
             ) {
                 return;

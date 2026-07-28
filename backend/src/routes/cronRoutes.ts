@@ -10,6 +10,10 @@ import {
     getOpenClawCronDisableIntent,
     setOpenClawCronDisableIntent,
 } from "../services/openClawCronMetadata.ts";
+import {
+    getOpenClawCronListSnapshot,
+    invalidateOpenClawCronListSnapshot,
+} from "../services/openClawCronSnapshot.ts";
 import { withCronTaskLinks } from "../services/taskAutomation.ts";
 
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
@@ -45,6 +49,14 @@ function cronError(error: unknown, fallback: string): Response {
     );
 }
 
+async function runCronMutation<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+        return await operation();
+    } finally {
+        invalidateOpenClawCronListSnapshot();
+    }
+}
+
 async function updateCronWithDisableIntent(
     jobId: string,
     patch: Record<string, unknown>,
@@ -71,9 +83,7 @@ export const cronRoutes = {
     "/api/cron/jobs": {
         GET: async () => {
             try {
-                const payload = await gateway.request("cron.list", {
-                    includeDisabled: true,
-                });
+                const payload = await getOpenClawCronListSnapshot();
                 return json({ jobs: withCronTaskLinks(normalizeJobs(payload)) });
             } catch (error) {
                 return cronError(error, "Failed to list cron jobs");
@@ -87,9 +97,11 @@ export const cronRoutes = {
             try {
                 previousIntent = getOpenClawCronDisableIntent(request.params.id);
                 setOpenClawCronDisableIntent(request.params.id, undefined);
-                const payload = await gateway.request("cron.remove", {
-                    jobId: request.params.id,
-                });
+                const payload = await runCronMutation(() =>
+                    gateway.request("cron.remove", {
+                        jobId: request.params.id,
+                    })
+                );
                 return json({ isOk: true, payload });
             } catch (error) {
                 try {
@@ -108,9 +120,11 @@ export const cronRoutes = {
     "/api/cron/jobs/:id/run": {
         POST: async (request: ParametersRequest<"id">) => {
             try {
-                const payload = await gateway.request("cron.run", {
-                    jobId: request.params.id,
-                });
+                const payload = await runCronMutation(() =>
+                    gateway.request("cron.run", {
+                        jobId: request.params.id,
+                    })
+                );
                 return json({ isOk: true, payload });
             } catch (error) {
                 return cronError(error, "Failed to run cron job");
@@ -144,10 +158,12 @@ export const cronRoutes = {
                     ? undefined
                     : normalizeJobDisableIntent(body.disableIntent);
                 if (disableIntent) assertJobDisableIntentIsCurrent(disableIntent);
-                await updateCronWithDisableIntent(
-                    request.params.id,
-                    { enabled: body.enabled },
-                    disableIntent
+                await runCronMutation(() =>
+                    updateCronWithDisableIntent(
+                        request.params.id,
+                        { enabled: body.enabled },
+                        disableIntent
+                    )
                 );
                 return json({ isOk: true });
             } catch (error) {
@@ -172,16 +188,20 @@ export const cronRoutes = {
                 }
                 const cronPatch = patch as Record<string, unknown>;
                 if (cronPatch.enabled === true) {
-                    await updateCronWithDisableIntent(
-                        request.params.id,
-                        cronPatch,
-                        undefined
+                    await runCronMutation(() =>
+                        updateCronWithDisableIntent(
+                            request.params.id,
+                            cronPatch,
+                            undefined
+                        )
                     );
                 } else {
-                    await gateway.request("cron.update", {
-                        jobId: request.params.id,
-                        patch: cronPatch,
-                    });
+                    await runCronMutation(() =>
+                        gateway.request("cron.update", {
+                            jobId: request.params.id,
+                            patch: cronPatch,
+                        })
+                    );
                 }
                 return json({ isOk: true });
             } catch (error) {

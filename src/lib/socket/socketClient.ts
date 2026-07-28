@@ -1,5 +1,6 @@
 import type { SocketEnvelope } from "../../types/socket";
 import { recoverOrHandleUnauthorizedSession } from "../authBoundary";
+import { isBrowserPollingAllowed, refreshPolicy } from "../refreshPolicy";
 import {
     dispatchSecurityVerificationRequired,
     isSecurityVerificationCode,
@@ -10,6 +11,27 @@ import { hasRecentUserActivity } from "../userActivity";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const RECONNECT_JITTER_RATIO = 0.2;
+
+/** Returns bounded exponential reconnect delay with symmetric jitter. */
+export function socketReconnectDelayMs(
+    attempt: number,
+    random: () => number = Math.random
+): number {
+    const normalizedAttempt = Math.max(0, Math.min(10, Math.trunc(attempt)));
+    const exponentialDelay = Math.min(
+        refreshPolicy.live * 2 ** normalizedAttempt,
+        MAX_RECONNECT_DELAY_MS
+    );
+    const randomValue = Math.min(1, Math.max(0, random()));
+    const jitterMultiplier =
+        1 - RECONNECT_JITTER_RATIO + randomValue * RECONNECT_JITTER_RATIO * 2;
+    return Math.min(
+        MAX_RECONNECT_DELAY_MS,
+        Math.max(250, Math.round(exponentialDelay * jitterMultiplier))
+    );
+}
 
 function normalizedRequestTimeoutMs(requestedTimeoutMs: number | undefined): number {
     return typeof requestedTimeoutMs === "number" &&
@@ -64,6 +86,8 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     let shouldReconnect = true;
     let isRecoveringAuthorization = false;
     let requestId = 0;
+    let reconnectAttempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     const pendingRequests = new Map<string, PendingRequest>();
     const connectionWaiters = new Set<{
         reject: (reason: Error) => void;
@@ -89,6 +113,28 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             waiter.reject(new Error(message));
         }
         connectionWaiters.clear();
+    };
+
+    const clearReconnectTimer = () => {
+        if (reconnectTimer === undefined) return;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+    };
+
+    const scheduleReconnect = () => {
+        if (
+            !shouldReconnect ||
+            reconnectTimer !== undefined ||
+            !isBrowserPollingAllowed()
+        ) {
+            return;
+        }
+        const delayMs = socketReconnectDelayMs(reconnectAttempt);
+        reconnectAttempt += 1;
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = undefined;
+            if (shouldReconnect && isBrowserPollingAllowed()) connect();
+        }, delayMs);
     };
 
     const waitForOpenSocket = (requestOptions?: SocketRequestOptions): Promise<void> => {
@@ -165,6 +211,8 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
 
         shouldReconnect = true;
         isRecoveringAuthorization = false;
+        if (!isBrowserPollingAllowed()) return;
+        clearReconnectTimer();
         const socket = new WebSocket(options.url);
         ws = socket;
 
@@ -172,6 +220,8 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
             if (ws !== socket) {
                 return;
             }
+            reconnectAttempt = 0;
+            clearReconnectTimer();
             resolveConnectionWaiters();
             options.onOpen?.();
         });
@@ -260,13 +310,7 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
                 })();
                 return;
             }
-            if (shouldReconnect) {
-                setTimeout(() => {
-                    if (shouldReconnect) {
-                        connect();
-                    }
-                }, 2000);
-            }
+            scheduleReconnect();
         });
 
         socket.addEventListener("error", () => {
@@ -281,6 +325,8 @@ export function createSocketClient(options: SocketClientOptions): SocketClient {
     const disconnect = () => {
         shouldReconnect = false;
         isRecoveringAuthorization = false;
+        reconnectAttempt = 0;
+        clearReconnectTimer();
         const socket = ws;
         ws = undefined;
         rejectPendingRequests();

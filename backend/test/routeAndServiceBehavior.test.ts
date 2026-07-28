@@ -2830,6 +2830,22 @@ describe("backend route and service behavior", () => {
         const response = await metricsRoutes["/api/metrics"].GET();
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toMatchObject({
+            polling: {
+                snapshots: expect.arrayContaining([
+                    expect.objectContaining({
+                        activeLoads: 1,
+                        loads: 1,
+                        name: "system.metrics",
+                        requests: 1,
+                    }),
+                ]),
+            },
+            processes: expect.objectContaining({
+                active: expect.any(Number),
+                failed: expect.any(Number),
+                started: expect.any(Number),
+                succeeded: expect.any(Number),
+            }),
             tokens: {
                 byAgent: [
                     {
@@ -3621,7 +3637,10 @@ describe("backend route and service behavior", () => {
                 .run(executionBaseline.rowId);
         });
 
-        const containers = await dockerRoutes["/api/docker/containers"].GET();
+        const containers = await dockerRoutes["/api/docker/containers"].GET(
+            new Request("https://test.local/api/docker/containers")
+        );
+        const containerEtag = containers.headers.get("etag");
         await expect(containers.json()).resolves.toMatchObject({
             containers: [
                 {
@@ -3634,6 +3653,13 @@ describe("backend route and service behavior", () => {
                 },
             ],
         });
+        expect(containerEtag).toBeTruthy();
+        const revalidatedContainers = await dockerRoutes["/api/docker/containers"].GET(
+            new Request("https://test.local/api/docker/containers", {
+                headers: { "If-None-Match": containerEtag! },
+            })
+        );
+        expect(revalidatedContainers.status).toBe(304);
 
         const containerStats = await dockerRoutes["/api/docker/containers/stats"].GET();
         await expect(containerStats.json()).resolves.toMatchObject({

@@ -15,6 +15,7 @@ import {
     type AuthSessionIdentity,
     isSignaledAuthSessionRotation,
 } from "../lib/authBoundary";
+import { isBrowserPollingAllowed, refreshPolicy } from "../lib/refreshPolicy";
 import {
     createSocketClient,
     type SocketClient,
@@ -55,6 +56,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const previousAuthIdentityReference = useRef<AuthSessionIdentity | undefined>(
         undefined
     );
+    const sessionListRefreshReference = useRef<Promise<void> | undefined>(undefined);
 
     const [isConnected, setIsConnected] = useState(false);
     const [hasConfirmedSessionList, setHasConfirmedSessionList] = useState(false);
@@ -72,6 +74,29 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         }
         replaceSessionsFromWebSocket(sessions);
         setHasConfirmedSessionList(true);
+    };
+
+    /** Coalesces session resync triggers within this browser connection. */
+    const refreshSessionList = async (client: SocketClient): Promise<void> => {
+        const existing = sessionListRefreshReference.current;
+        if (existing) {
+            await existing;
+            return;
+        }
+
+        const load = async () => {
+            const payload = await client.request("sessions.list");
+            applySessionsListResponse(client, payload);
+        };
+        const refresh = load();
+        sessionListRefreshReference.current = refresh;
+        try {
+            await refresh;
+        } finally {
+            if (sessionListRefreshReference.current === refresh) {
+                sessionListRefreshReference.current = undefined;
+            }
+        }
     };
 
     /** Performs connect. */
@@ -93,14 +118,9 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                     if (!client) {
                         return;
                     }
-                    void (async () => {
-                        try {
-                            const payload = await client.request("sessions.list");
-                            applySessionsListResponse(client, payload);
-                        } catch {
-                            // Best-effort socket resync.
-                        }
-                    })();
+                    void refreshSessionList(client).catch(() => {
+                        // Best-effort socket resync.
+                    });
                 },
                 onClose: () => {
                     setIsConnected(false);
@@ -148,6 +168,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
     const disconnect = () => {
         clientReference.current?.disconnect();
         clientReference.current = undefined;
+        sessionListRefreshReference.current = undefined;
         setIsConnected(false);
         setHasConfirmedSessionList(false);
     };
@@ -223,15 +244,14 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         }
 
         const interval = setInterval(() => {
-            if (!clientReference.current?.isOpen()) {
+            if (!isBrowserPollingAllowed() || !clientReference.current?.isOpen()) {
                 return;
             }
 
             const client = clientReference.current;
             void (async () => {
                 try {
-                    const payload = await client.request("sessions.list");
-                    applySessionsListResponse(client, payload);
+                    await refreshSessionList(client);
                 } catch {
                     if (clientReference.current !== client) {
                         return;
@@ -242,7 +262,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                     client.connect();
                 }
             })();
-        }, 10_000);
+        }, refreshPolicy.active * 2);
 
         return () => clearInterval(interval);
     }, [isConnected, connectionId]);
@@ -254,7 +274,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
 
         /** Performs resync visible socket. */
         const resyncVisibleSocket = () => {
-            if (document.visibilityState === "hidden") {
+            if (!isBrowserPollingAllowed()) {
                 return;
             }
 
@@ -269,8 +289,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
                     if (!client) {
                         return;
                     }
-                    const payload = await client.request("sessions.list");
-                    applySessionsListResponse(client, payload);
+                    await refreshSessionList(client);
                 } catch {
                     // Best-effort socket resync.
                 }
@@ -292,6 +311,7 @@ export function OpenClawSocketProvider({ children }: { children: ReactNode }) {
         return () => {
             clientReference.current?.disconnect();
             clientReference.current = undefined;
+            sessionListRefreshReference.current = undefined;
         };
     }, []);
 
