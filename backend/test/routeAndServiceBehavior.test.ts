@@ -103,6 +103,10 @@ case "$args" in
     printf '%s\n' '{"ID":"abc123def456","CPUPerc":"1.00%","MemPerc":"2.00%","MemUsage":"10MiB / 1GiB","NetIO":"1kB / 2kB","BlockIO":"3kB / 4kB","PIDs":"5"}'
     ;;
   'inspect abc123def456'|'inspect abc123def456 abc123def456')
+    if [[ "$MIRA_TEST_DOCKER_INSPECT_FAILURE" == "1" ]]; then
+      echo 'container disappeared before inspect' >&2
+      exit 1
+    fi
     cat <<'JSON'
 [{"Id":"abc123def4567890","Created":"2026-06-25T00:00:00Z","Image":"sha256:image123","RestartCount":2,"Config":{"Env":["PUBLIC=value","API_TOKEN=secret","URL=https://user:pass@example.test"],"Labels":{"com.docker.compose.project":"stack","com.docker.compose.service":"web","secret.url":"https://user:pass@example.test"}},"Mounts":[{"Type":"volume","Name":"data","Source":"/var/lib/docker/volumes/data","Destination":"/data","Mode":"rw","RW":true}],"NetworkSettings":{"Networks":{"bridge":{"Gateway":"172.17.0.1","IPAddress":"172.17.0.2","MacAddress":"aa:bb"}}},"State":{"StartedAt":"2026-06-25T00:00:01Z","FinishedAt":"","Health":{"Status":"healthy"}}}]
 JSON
@@ -3601,6 +3605,7 @@ describe("backend route and service behavior", () => {
     it("serves Docker inventory and safe mutations through a fake Docker CLI", async () => {
         rememberEnvironment("PATH");
         rememberEnvironment("MIRA_DOCKER_COMPOSE_WRAPPER");
+        rememberEnvironment("MIRA_TEST_DOCKER_INSPECT_FAILURE");
         rememberEnvironment("MIRA_DOCKER_ROOT");
         const fakeBin = createTemporaryRoot("mira-docker-route-bin-");
         const dockerRoot = createTemporaryRoot("mira-docker-route-root-");
@@ -3637,6 +3642,19 @@ describe("backend route and service behavior", () => {
                 .run(executionBaseline.rowId);
         });
 
+        process.env.MIRA_TEST_DOCKER_INSPECT_FAILURE = "1";
+        const containerStats = await dockerRoutes["/api/docker/containers/stats"].GET();
+        await expect(containerStats.json()).resolves.toMatchObject({
+            stats: [
+                {
+                    cpu: "1.00%",
+                    id: "abc123def456",
+                    memory: "10MiB / 1GiB",
+                },
+            ],
+        });
+        process.env.MIRA_TEST_DOCKER_INSPECT_FAILURE = "0";
+
         const containers = await dockerRoutes["/api/docker/containers"].GET(
             new Request("https://test.local/api/docker/containers")
         );
@@ -3660,17 +3678,6 @@ describe("backend route and service behavior", () => {
             })
         );
         expect(revalidatedContainers.status).toBe(304);
-
-        const containerStats = await dockerRoutes["/api/docker/containers/stats"].GET();
-        await expect(containerStats.json()).resolves.toMatchObject({
-            stats: [
-                {
-                    cpu: "1.00%",
-                    id: "abc123def456",
-                    memory: "10MiB / 1GiB",
-                },
-            ],
-        });
 
         const details = await dockerRoutes["/api/docker/containers/:containerId"].GET(
             requestWithParameters("/api/docker/containers/demo", { containerId: "demo" })

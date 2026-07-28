@@ -738,31 +738,32 @@ async function runStackAction(request: Request): Promise<Response> {
     });
 }
 
-async function loadDockerStateSnapshot() {
-    const statsRows = await getContainerStatsRows();
-    return {
-        containers: await getContainers(statsRows),
-        statsRows,
-    };
-}
-
-const dockerStateSnapshot = new CoalescedSnapshot<
-    Awaited<ReturnType<typeof loadDockerStateSnapshot>>
+const dockerStatsSnapshot = new CoalescedSnapshot<
+    Awaited<ReturnType<typeof getContainerStatsRows>>
 >({
     freshForMs: 2000,
-    load: loadDockerStateSnapshot,
+    load: getContainerStatsRows,
+    name: "docker.stats",
+    staleForMs: 15_000,
+});
+
+const dockerStateSnapshot = new CoalescedSnapshot<
+    Awaited<ReturnType<typeof getContainers>>
+>({
+    freshForMs: 2000,
+    load: async () => getContainers(await dockerStatsSnapshot.read()),
     name: "docker.state",
     staleForMs: 15_000,
 });
 
 /** Returns the shared read-only container sampler for polling routes. */
 export async function getDockerContainersSnapshot() {
-    const state = await dockerStateSnapshot.read();
-    return state.containers;
+    return await dockerStateSnapshot.read();
 }
 
 function invalidateDockerReadSnapshots(): void {
     dockerStateSnapshot.invalidate();
+    dockerStatsSnapshot.invalidate();
 }
 
 function dockerSnapshotJson(request: Request | undefined, data: unknown): Response {
@@ -778,7 +779,7 @@ export const dockerRoutes = {
     },
     "/api/docker/containers/stats": {
         GET: async (request?: Request) => {
-            const { statsRows } = await dockerStateSnapshot.read();
+            const statsRows = await dockerStatsSnapshot.read();
             return dockerSnapshotJson(request, {
                 stats: statsRows.map((row) => ({
                     blockIO: row.BlockIO,
