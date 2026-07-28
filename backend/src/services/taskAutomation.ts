@@ -1,17 +1,13 @@
-import { TASK_ASSIGNEES, type TaskAssigneeId } from "../constants/taskActors.ts";
+import type { CronJob, CronTaskLink } from "../../../contracts/cron.ts";
+import type { JobDisableIntent } from "../../../contracts/jobs.ts";
+import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../contracts/tasks.ts";
 import { database } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
-import type { JobDisableIntent } from "./jobDisableIntent.ts";
 import { openClawCronDisableIntentsByJobId } from "./openClawCronMetadata.ts";
 import {
     getOpenClawCronListSnapshot,
     normalizeOpenClawCronJobs,
 } from "./openClawCronSnapshot.ts";
-
-export interface CronTaskLink {
-    number: number;
-    title: string;
-}
 
 interface TaskAutomationRow {
     id: number;
@@ -20,15 +16,6 @@ interface TaskAutomationRow {
     priority: "high" | "low" | "medium";
     assignee: TaskAssigneeId | null | undefined;
     automation_json: string;
-}
-
-interface CronJob {
-    enabled?: boolean;
-    id?: string;
-    jobId?: string;
-    name?: string;
-    state?: Record<string, unknown>;
-    [key: string]: unknown;
 }
 
 interface HeartbeatTaskAutomation {

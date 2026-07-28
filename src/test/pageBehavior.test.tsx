@@ -19,6 +19,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
+import type { Metrics } from "../../contracts/metrics";
 import { logsCollection } from "../collections/logs";
 import { sessionsCollection } from "../collections/sessions";
 import {
@@ -268,6 +269,118 @@ function parseRequestBody(init: RequestInit | undefined) {
     return JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
 }
 
+function dashboardMetricsResponse(): Metrics {
+    return {
+        cacheRefresh: {
+            active: 0,
+            averageDurationMs: 4,
+            coalesced: 0,
+            failures: 0,
+            lastDurationMs: 4,
+            maxDurationMs: 4,
+            refreshes: 1,
+            requests: 1,
+            totalDurationMs: 4,
+        },
+        cpu: {
+            count: 4,
+            loadAvg: [0.1, 0.2, 0.3],
+            loadPercent: 5,
+            model: "test cpu",
+        },
+        database: {
+            available: true,
+            averageDurationMs: 1,
+            fileBytes: 4096,
+            freelistBytes: 0,
+            freelistPages: 0,
+            freelistPercent: 0,
+            latencyMs: 0.5,
+            lockErrors: 0,
+            maxDurationMs: 1,
+            operations: 1,
+            shmBytes: 0,
+            walBytes: 0,
+        },
+        disk: {
+            percent: 25,
+            total: 1000,
+            totalGB: 1000,
+            used: 250,
+            usedGB: 250,
+        },
+        gateway: {
+            connectFailures: 0,
+            connected: true,
+            connections: 1,
+            disconnects: 0,
+            pendingRequests: 0,
+            reconnects: 0,
+        },
+        http: {
+            averageDurationMs: 1,
+            errors: 0,
+            maxDurationMs: 1,
+            requests: 1,
+            routes: [],
+        },
+        memory: {
+            free: 60,
+            percent: 40,
+            total: 100,
+            totalGB: 100,
+            used: 40,
+            usedGB: 40,
+        },
+        network: { downloadMbps: 1, uploadMbps: 2 },
+        polling: { snapshots: [] },
+        processes: {
+            active: 0,
+            averageDurationMs: 1,
+            failed: 0,
+            lastDurationMs: 1,
+            maxDurationMs: 1,
+            started: 1,
+            succeeded: 1,
+            totalDurationMs: 1,
+        },
+        runtime: {
+            eventLoopDelayMs: 0.25,
+            externalBytes: 1024,
+            heapTotalBytes: 4096,
+            heapUsedBytes: 2048,
+            rssBytes: 8192,
+            uptimeSeconds: 120,
+        },
+        scheduler: {
+            activeResourceClasses: [],
+            dueJobs: 0,
+            executorActive: true,
+            executorTickRunning: false,
+            lastTickDurationMs: 1,
+            queueFailures: 0,
+            queued: 0,
+            running: 0,
+            scheduleLagMs: 0,
+            schedulerActive: true,
+            schedulerTickRunning: false,
+            tickFailures: 0,
+            ticks: 1,
+            workerCapacity: 2,
+            workerCount: 1,
+            workerOnline: true,
+        },
+        system: { uptime: 120, hostname: "dashboard-test", platform: "linux" },
+        timestamp: 1_719_216_000_000,
+        tokens: {
+            total: 42,
+            byModel: { codex: 42 },
+            sessionsByModel: { codex: 1 },
+            byAgent: [{ label: "Mira", model: "codex", tokens: 42, type: "MAIN" }],
+        },
+    };
+}
+
 function apiResponse(url: string, method: string, init?: RequestInit) {
     if (method === "POST" && url === "/api/sessions/agent%3Amain%3Amain/action") {
         expect(parseRequestBody(init)).toEqual({ action: "compact" });
@@ -420,34 +533,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
     }
 
     if (url === "/api/metrics") {
-        return Response.json({
-            cpu: { count: 4, loadAvg: [0.1, 0.2, 0.3], loadPercent: 5 },
-            memory: {
-                total: 100,
-                totalGB: 100,
-                used: 40,
-                usedGB: 40,
-                free: 60,
-                percent: 40,
-            },
-            disk: {
-                total: 1000,
-                totalGB: 1000,
-                used: 250,
-                usedGB: 250,
-                free: 750,
-                percent: 25,
-            },
-            network: { downloadMbps: 1, uploadMbps: 2 },
-            system: { uptime: 120, hostname: "dashboard-test", platform: "linux" },
-            tokens: {
-                total: 42,
-                byModel: { codex: 42 },
-                sessionsByModel: { codex: 1 },
-                byAgent: [{ label: "Mira", model: "codex", tokens: 42, type: "MAIN" }],
-            },
-            timestamp: 1_719_216_000_000,
-        });
+        return Response.json(dashboardMetricsResponse());
     }
 
     if (url === "/api/cache/weather.spydeberg") {
@@ -1930,11 +2016,13 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
 
     if (url === "/api/exec/job-1") {
         return Response.json({
+            code: terminalApiState.wasJobStopped ? 0 : undefined,
+            endedAt: terminalApiState.wasJobStopped ? 2 : undefined,
             jobId: "job-1",
             status: terminalApiState.wasJobStopped ? "done" : "running",
-            stdout: terminalApiState.wasJobStopped ? "ok" : "",
             stderr: "",
-            code: terminalApiState.wasJobStopped ? 0 : undefined,
+            startedAt: 1,
+            stdout: terminalApiState.wasJobStopped ? "ok" : "",
         });
     }
 
@@ -2175,7 +2263,16 @@ describe("Mira Dashboard pages", () => {
                     const method = init?.method ?? "GET";
 
                     if (method === "PUT" && url === "/api/files/README.md") {
-                        return Response.json({ error: "Save failed" }, { status: 500 });
+                        return Response.json(
+                            {
+                                error: {
+                                    code: "internal_error",
+                                    message: "Save failed",
+                                    requestId: "file-save-failure",
+                                },
+                            },
+                            { status: 500 }
+                        );
                     }
 
                     return apiResponse(url, method, init);
@@ -2365,7 +2462,13 @@ describe("Mira Dashboard pages", () => {
 
                 if (url === "/api/agents/status" && method === "GET") {
                     return Response.json(
-                        { error: "Agents status unavailable" },
+                        {
+                            error: {
+                                code: "service_unavailable",
+                                message: "Agents status unavailable",
+                                requestId: "agents-status-unavailable",
+                            },
+                        },
                         { status: 503 }
                     );
                 }
@@ -2397,7 +2500,13 @@ describe("Mira Dashboard pages", () => {
                     scheduledJobsRequestCount += 1;
                     if (scheduledJobsRequestCount > 1) {
                         return Response.json(
-                            { error: "Scheduled jobs temporarily unavailable" },
+                            {
+                                error: {
+                                    code: "service_unavailable",
+                                    message: "Scheduled jobs temporarily unavailable",
+                                    requestId: "scheduled-jobs-unavailable",
+                                },
+                            },
                             { status: 503 }
                         );
                     }
@@ -2407,7 +2516,13 @@ describe("Mira Dashboard pages", () => {
                     cronJobsRequestCount += 1;
                     if (cronJobsRequestCount > 1) {
                         return Response.json(
-                            { error: "Cron jobs temporarily unavailable" },
+                            {
+                                error: {
+                                    code: "service_unavailable",
+                                    message: "Cron jobs temporarily unavailable",
+                                    requestId: "cron-jobs-unavailable",
+                                },
+                            },
                             { status: 503 }
                         );
                     }
@@ -2912,7 +3027,12 @@ describe("Mira Dashboard pages", () => {
                 if (url === "/api/pull-requests/preview") {
                     return Response.json(
                         {
-                            error: "bun executable must resolve to an absolute path",
+                            error: {
+                                code: "internal_error",
+                                message:
+                                    "bun executable must resolve to an absolute path",
+                                requestId: "preview-start-failure",
+                            },
                         },
                         { status: 500 }
                     );
@@ -3210,7 +3330,13 @@ describe("Mira Dashboard pages", () => {
                 const method = init?.method ?? "GET";
                 if (method === "GET" && url === "/api/pull-requests") {
                     return Response.json(
-                        { error: "GitHub listing unavailable" },
+                        {
+                            error: {
+                                code: "service_unavailable",
+                                message: "GitHub listing unavailable",
+                                requestId: "github-listing-unavailable",
+                            },
+                        },
                         { status: 503 }
                     );
                 }
@@ -4440,7 +4566,13 @@ describe("Mira Dashboard pages", () => {
                 const method = init?.method ?? "GET";
                 if (method === "POST" && url === "/api/docker/exec/start") {
                     return Response.json(
-                        { error: "console unavailable" },
+                        {
+                            error: {
+                                code: "service_unavailable",
+                                message: "console unavailable",
+                                requestId: "docker-console-unavailable",
+                            },
+                        },
                         { status: 503 }
                     );
                 }
@@ -4497,8 +4629,11 @@ describe("Mira Dashboard pages", () => {
                 if (method === "POST" && url === "/api/docker/stack/action") {
                     return Response.json(
                         {
-                            code: "step_up_required",
-                            error: "Recent MFA verification is required",
+                            error: {
+                                code: "step_up_required",
+                                message: "Recent MFA verification is required",
+                                requestId: "docker-stack-step-up",
+                            },
                         },
                         { status: 403 }
                     );

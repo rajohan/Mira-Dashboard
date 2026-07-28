@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetchRequired, apiPostRequired } from "./useApi";
+import type { ExecJobResponse } from "../../contracts/exec";
+import { parseExecJobResponse, parseExecStartResponse } from "../../contracts/exec";
+import { apiFetchParsed, apiPostParsed } from "./useApi";
 import {
     jobExecutionKeys,
     refreshJobExecutionQueueWhilePending,
@@ -25,21 +27,6 @@ export interface OpsActionDefinition {
     confirmMessage: string;
     scope: "system" | "openclaw";
     danger?: boolean;
-}
-
-/** Represents the exec API response. */
-export interface ExecResponse {
-    code: number | undefined;
-    stdout: string;
-    stderr: string;
-}
-
-/** Represents the exec job API response. */
-export interface ExecJobResponse extends ExecResponse {
-    jobId: string;
-    status: "running" | "done";
-    startedAt: number;
-    endedAt: number | undefined;
 }
 
 /** Defines ops actions. */
@@ -115,7 +102,7 @@ export function useStartOpsAction() {
         mutationFn: async (action: OpsActionDefinition) =>
             refreshJobExecutionQueueWhilePending(
                 queryClient,
-                apiPostRequired<{ jobId: string }>("/exec/start", {
+                apiPostParsed("/exec/start", parseExecStartResponse, {
                     command: action.command,
                     shell: true,
                 })
@@ -131,7 +118,10 @@ export function useExecJob(jobId: string | undefined) {
     return useQuery({
         queryKey: ["exec-job", jobId],
         queryFn: () =>
-            apiFetchRequired<ExecJobResponse>(`/exec/${encodeURIComponent(jobId || "")}`),
+            apiFetchParsed(
+                `/exec/${encodeURIComponent(jobId || "")}`,
+                parseExecJobResponse
+            ),
         enabled: Boolean(jobId),
         refetchInterval: (query) => {
             const status = (query.state.data as ExecJobResponse | undefined)?.status;

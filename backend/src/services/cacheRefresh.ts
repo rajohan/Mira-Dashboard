@@ -10,6 +10,8 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 
+import type { JobResourceClass } from "../../../contracts/jobs.ts";
+import type { CacheRefreshMetrics } from "../../../contracts/metrics.ts";
 import { database } from "../database.ts";
 import {
     getCacheEntry,
@@ -17,7 +19,6 @@ import {
     parseJsonField,
 } from "../lib/cacheStore.ts";
 import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
-import type { JobResourceClass } from "../lib/jobResources.ts";
 import { runProcess } from "../lib/processes.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
@@ -1905,6 +1906,31 @@ function redactOpenAiQuotaAccount(openai: Awaited<ReturnType<typeof checkOpenAiQ
 }
 
 const inFlightCacheRefreshes = new Map<string, Promise<{ refreshed: string[] }>>();
+const cacheRefreshMetricsState: Omit<CacheRefreshMetrics, "averageDurationMs"> = {
+    active: 0,
+    coalesced: 0,
+    failures: 0,
+    lastDurationMs: 0,
+    maxDurationMs: 0,
+    refreshes: 0,
+    requests: 0,
+    totalDurationMs: 0,
+};
+
+/** Returns aggregate producer timing without cache keys or cached payloads. */
+export function getCacheRefreshMetrics(): CacheRefreshMetrics {
+    return {
+        ...cacheRefreshMetricsState,
+        averageDurationMs:
+            cacheRefreshMetricsState.refreshes === 0
+                ? 0
+                : Math.round(
+                      (cacheRefreshMetricsState.totalDurationMs /
+                          cacheRefreshMetricsState.refreshes) *
+                          100
+                  ) / 100,
+    };
+}
 
 class SerialOperationQueue {
     private tail: Promise<void> = Promise.resolve();
@@ -2143,6 +2169,7 @@ export async function refreshCacheProducer(
     signal?: AbortSignal,
     options: { force?: boolean } = {}
 ) {
+    cacheRefreshMetricsState.requests += 1;
     if (signal?.aborted) {
         throw abortError();
     }
@@ -2157,6 +2184,7 @@ export async function refreshCacheProducer(
         )
         .toSorted(([left], [right]) => left.length - right.length)[0]?.[1];
     if (existing !== undefined && !options.force) {
+        cacheRefreshMetricsState.coalesced += 1;
         return await waitForExistingRefresh(key, scopeKey, existing, signal);
     }
     const childRefreshes = inFlightEntries
@@ -2172,13 +2200,29 @@ export async function refreshCacheProducer(
         childRefreshes.length > 0
             ? refreshAfterChildRefreshes(childRefreshes, key, signal)
             : runBoundedCacheRefresh(() => refreshCacheProducerUnlocked(key), signal);
+    const startedAt = performance.now();
+    cacheRefreshMetricsState.active += 1;
+    cacheRefreshMetricsState.refreshes += 1;
     inFlightCacheRefreshes.set(scopeKey, refresh);
     void (async () => {
         try {
             await refresh;
         } catch {
+            cacheRefreshMetricsState.failures += 1;
             // The caller observes refresh failures.
         } finally {
+            const durationMs =
+                Math.round(Math.max(0, performance.now() - startedAt) * 100) / 100;
+            cacheRefreshMetricsState.lastDurationMs = durationMs;
+            cacheRefreshMetricsState.maxDurationMs = Math.max(
+                cacheRefreshMetricsState.maxDurationMs,
+                durationMs
+            );
+            cacheRefreshMetricsState.totalDurationMs += durationMs;
+            cacheRefreshMetricsState.active = Math.max(
+                0,
+                cacheRefreshMetricsState.active - 1
+            );
             if (inFlightCacheRefreshes.get(scopeKey) === refresh) {
                 inFlightCacheRefreshes.delete(scopeKey);
             }

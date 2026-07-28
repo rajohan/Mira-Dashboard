@@ -1,6 +1,7 @@
 import { Newspaper } from "lucide-react";
 
-import { type ReportItem, useReports } from "../../../hooks/useReports";
+import type { Report as ReportItem } from "../../../../contracts/reports";
+import { useReports } from "../../../hooks/useReports";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Card } from "../../ui/Card";

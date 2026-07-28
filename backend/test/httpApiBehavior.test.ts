@@ -6,6 +6,9 @@ import { brotliCompressSync, gzipSync } from "node:zlib";
 import type { Server } from "bun";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
+import type { ApiErrorResponse } from "../../contracts/apiErrors.ts";
+import type { DashboardDiagnosticsResponse } from "../../contracts/health.ts";
+
 const testState: {
     baseUrl: string;
     openclawRoot: string;
@@ -334,9 +337,17 @@ describe("Mira Dashboard backend integration", () => {
         });
         expect(readyHead).toEqual({ body: undefined, status: 503 });
 
-        const diagnostics = await api<{ error: string }>("/api/health/diagnostics");
+        const diagnostics = await api<{
+            error: { code: string; message: string; requestId: string };
+        }>("/api/health/diagnostics");
         expect(diagnostics.status).toBe(401);
-        expect(diagnostics.body).toEqual({ error: "Unauthorized" });
+        expect(diagnostics.body).toEqual({
+            error: {
+                code: "unauthorized",
+                message: "Unauthorized",
+                requestId: expect.any(String),
+            },
+        });
 
         const bootstrap = await api<{
             isBootstrapRequired: boolean;
@@ -359,16 +370,16 @@ describe("Mira Dashboard backend integration", () => {
             isBootstrapRequired: true,
         });
 
-        const preBootstrapLogin = await api<{ error: string }>(
+        const preBootstrapLogin = await api<ApiErrorResponse>(
             "/api/auth/login",
             json("POST", { username: "session-test-user", password: "test-password" })
         );
         expect(preBootstrapLogin.status).toBe(409);
-        expect(preBootstrapLogin.body.error).toBe(
+        expect(preBootstrapLogin.body.error.message).toBe(
             "Create the first user before logging in"
         );
 
-        const invalidBootstrap = await api<{ error: string }>(
+        const invalidBootstrap = await api<ApiErrorResponse>(
             "/api/auth/register-first-user",
             json("POST", {
                 username: "x",
@@ -377,11 +388,11 @@ describe("Mira Dashboard backend integration", () => {
             })
         );
         expect(invalidBootstrap.status).toBe(400);
-        expect(invalidBootstrap.body.error).toBe(
+        expect(invalidBootstrap.body.error.message).toBe(
             "Username must be 3-32 chars: letters, numbers, dot, dash, underscore"
         );
 
-        const malformedBootstrapBody = await api<{ error: string }>(
+        const malformedBootstrapBody = await api<ApiErrorResponse>(
             "/api/auth/register-first-user",
             {
                 body: "{",
@@ -390,21 +401,21 @@ describe("Mira Dashboard backend integration", () => {
             }
         );
         expect(malformedBootstrapBody.status).toBe(400);
-        expect(malformedBootstrapBody.body.error).toBe("Invalid JSON");
+        expect(malformedBootstrapBody.body.error.message).toBe("Invalid JSON");
 
-        const invalidBootstrapBody = await api<{ error: string }>(
+        const invalidBootstrapBody = await api<ApiErrorResponse>(
             "/api/auth/register-first-user",
             json("POST", ["not", "an", "object"])
         );
         expect(invalidBootstrapBody.status).toBe(400);
-        expect(invalidBootstrapBody.body.error).toBe("Invalid request body");
+        expect(invalidBootstrapBody.body.error.message).toBe("Invalid request body");
 
-        const invalidLoginBody = await api<{ error: string }>(
+        const invalidLoginBody = await api<ApiErrorResponse>(
             "/api/auth/login",
             json("POST", "not an object")
         );
         expect(invalidLoginBody.status).toBe(409);
-        expect(invalidLoginBody.body.error).toBe(
+        expect(invalidLoginBody.body.error.message).toBe(
             "Create the first user before logging in"
         );
 
@@ -423,6 +434,40 @@ describe("Mira Dashboard backend integration", () => {
             authMethod: "webauthn",
             mfaVerifiedAt: verifiedAt,
             userAgent: "Mira Dashboard integration tests",
+        });
+
+        const authenticatedDiagnostics = await api<DashboardDiagnosticsResponse>(
+            "/api/health/diagnostics"
+        );
+        expect(authenticatedDiagnostics.status).toBe(200);
+        expect(authenticatedDiagnostics.body.observability).toMatchObject({
+            cacheRefresh: {
+                failures: expect.any(Number),
+                refreshes: expect.any(Number),
+            },
+            database: {
+                available: true,
+                latencyMs: expect.any(Number),
+                lockErrors: expect.any(Number),
+            },
+            gateway: {
+                pendingRequests: expect.any(Number),
+                reconnects: expect.any(Number),
+            },
+            processes: {
+                active: expect.any(Number),
+                averageDurationMs: expect.any(Number),
+            },
+            runtime: {
+                eventLoopDelayMs: expect.any(Number),
+                rssBytes: expect.any(Number),
+            },
+            scheduler: {
+                dueJobs: expect.any(Number),
+                queued: expect.any(Number),
+                running: expect.any(Number),
+                scheduleLagMs: expect.any(Number),
+            },
         });
     });
 
@@ -496,7 +541,13 @@ describe("Mira Dashboard backend integration", () => {
             headers: sessionHeaders(),
         });
         expect(apiMiss.status).toBe(404);
-        expect(await apiMiss.json()).toEqual({ error: "Not found" });
+        expect(await apiMiss.json()).toEqual({
+            error: {
+                code: "not_found",
+                message: "Not found",
+                requestId: expect.any(String),
+            },
+        });
 
         const badEncoding = await fetch(`${testState.baseUrl}/%E0%A4%A`);
         expect(badEncoding.status).toBe(400);
@@ -673,12 +724,12 @@ describe("Mira Dashboard backend integration", () => {
         expect(clearOtherSource.status).toBe(200);
         expect(clearOtherSource.body.deleted).toBe(0);
 
-        const rejectNullSource = await api<{ error: string }>(
+        const rejectNullSource = await api<ApiErrorResponse>(
             "/api/notifications/clear-read",
             json("POST", { source: omittedValue })
         );
         expect(rejectNullSource.status).toBe(400);
-        expect(rejectNullSource.body.error).toBe("source must be a string");
+        expect(rejectNullSource.body.error.message).toBe("source must be a string");
 
         const clearCache = await api<{ deleted: number; isOk: boolean }>(
             "/api/notifications/clear-read",
@@ -1049,12 +1100,12 @@ describe("Mira Dashboard backend integration", () => {
         expect(persisted.status).toBe(200);
         expect(persisted.body).toMatchObject(updated.body);
 
-        const invalid = await api<{ error: string }>(
+        const invalid = await api<ApiErrorResponse>(
             "/api/settings",
             json("PUT", { theme: "blue" })
         );
         expect(invalid.status).toBe(400);
-        expect(invalid.body.error).toBe("Invalid theme");
+        expect(invalid.body.error.message).toBe("Invalid theme");
     });
 
     it("reports cache heartbeat entries and individual cache state", async () => {
@@ -1297,13 +1348,14 @@ describe("Mira Dashboard backend integration", () => {
         expect(entry.status).toBe(200);
         expect(entry.body).toMatchObject({ key: "moltbook.home", status: "fresh" });
 
-        const missing = await api<{ error: string; key: string }>(
-            "/api/cache/not-present"
-        );
+        const missing = await api<ApiErrorResponse>("/api/cache/not-present");
         expect(missing.status).toBe(404);
         expect(missing.body).toEqual({
-            error: "Cache key not found",
-            key: "not-present",
+            error: {
+                code: "not_found",
+                message: "Cache key not found",
+                requestId: expect.any(String),
+            },
         });
     });
 
@@ -1468,12 +1520,12 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("validates exec and session action API contracts", async () => {
-        const directExec = await api<{ error: string }>(
+        const directExec = await api<ApiErrorResponse>(
             "/api/exec",
             json("POST", { args: ["hello"], command: "printf" })
         );
         expect(directExec.status).toBe(400);
-        expect(directExec.body.error).toBe("command executable is not approved");
+        expect(directExec.body.error.message).toBe("command executable is not approved");
 
         const { registerExecExecutionActions } =
             await import("../src/services/execJobs.ts");
@@ -1508,19 +1560,19 @@ describe("Mira Dashboard backend integration", () => {
             totalTokens: 0,
         });
 
-        const unsupportedAction = await api<{ error: string }>(
+        const unsupportedAction = await api<ApiErrorResponse>(
             "/api/sessions/session-1/action",
             json("POST", { action: "archive" })
         );
         expect(unsupportedAction.status).toBe(400);
-        expect(unsupportedAction.body.error).toBe("Unsupported action: archive");
+        expect(unsupportedAction.body.error.message).toBe("Unsupported action: archive");
 
-        const malformedAction = await api<{ error: string }>(
+        const malformedAction = await api<ApiErrorResponse>(
             "/api/sessions/session-1/action",
             json("POST", [])
         );
         expect(malformedAction.status).toBe(400);
-        expect(malformedAction.body.error).toBe("Request body must be an object");
+        expect(malformedAction.body.error.message).toBe("Request body must be an object");
     });
 
     it("lists, updates, runs, and reports scheduled jobs through the API", async () => {
@@ -1565,34 +1617,47 @@ describe("Mira Dashboard backend integration", () => {
             job: { enabled: true, intervalSeconds: 300 },
         });
 
-        const invalidPatch = await api<{ error: string }>(
+        const invalidPatch = await api<ApiErrorResponse>(
             "/api/jobs/functional.test.job",
             json("PATCH", { patch: { unknown: true } })
         );
         expect(invalidPatch.status).toBe(400);
-        expect(invalidPatch.body.error).toBe("invalid patch field: unknown");
+        expect(invalidPatch.body.error).toMatchObject({
+            code: "invalid_request",
+            details: {
+                issues: [
+                    {
+                        message: "is not allowed",
+                        path: "body.patch.unknown",
+                    },
+                ],
+            },
+            message: "body.patch.unknown: is not allowed",
+        });
 
-        const nonObjectPatch = await api<{ error: string }>(
+        const nonObjectPatch = await api<ApiErrorResponse>(
             "/api/jobs/functional.test.job",
             json("PATCH", { patch: [] })
         );
         expect(nonObjectPatch.status).toBe(400);
-        expect(nonObjectPatch.body.error).toBe("patch must be an object");
+        expect(nonObjectPatch.body.error.message).toBe("body.patch: must be an object");
 
-        const invalidEnabledPatch = await api<{ error: string }>(
+        const invalidEnabledPatch = await api<ApiErrorResponse>(
             "/api/jobs/functional.test.job",
             json("PATCH", { patch: { enabled: "yes" } })
         );
         expect(invalidEnabledPatch.status).toBe(400);
-        expect(invalidEnabledPatch.body.error).toBe("invalid patch field: enabled");
+        expect(invalidEnabledPatch.body.error.message).toBe(
+            "body.patch.enabled: must be a boolean"
+        );
 
-        const invalidScheduleTypePatch = await api<{ error: string }>(
+        const invalidScheduleTypePatch = await api<ApiErrorResponse>(
             "/api/jobs/functional.test.job",
             json("PATCH", { patch: { scheduleType: "weekly" } })
         );
         expect(invalidScheduleTypePatch.status).toBe(400);
-        expect(invalidScheduleTypePatch.body.error).toBe(
-            "invalid patch field: scheduleType"
+        expect(invalidScheduleTypePatch.body.error.message).toBe(
+            "body.patch.scheduleType: must be one of: interval, daily, cron"
         );
 
         const malformedPatch = await fetch(
@@ -1606,14 +1671,20 @@ describe("Mira Dashboard backend integration", () => {
             }
         );
         expect(malformedPatch.status).toBe(400);
-        await expect(malformedPatch.json()).resolves.toEqual({ error: "Invalid JSON" });
+        await expect(malformedPatch.json()).resolves.toEqual({
+            error: {
+                code: "invalid_json",
+                message: "Invalid JSON",
+                requestId: expect.any(String),
+            },
+        });
 
-        const missingPatchTarget = await api<{ error: string }>(
+        const missingPatchTarget = await api<ApiErrorResponse>(
             "/api/jobs/not-present",
             json("PATCH", { patch: { enabled: true } })
         );
         expect(missingPatchTarget.status).toBe(404);
-        expect(missingPatchTarget.body.error).toBe("Scheduled job not found");
+        expect(missingPatchTarget.body.error.message).toBe("Scheduled job not found");
 
         const run = await api<{
             isOk: boolean;
@@ -1660,11 +1731,11 @@ describe("Mira Dashboard backend integration", () => {
             status: "queued",
         });
 
-        const invalidExecutionId = await api<{ error: string }>(
+        const invalidExecutionId = await api<ApiErrorResponse>(
             "/api/job-executions/not-a-uuid"
         );
         expect(invalidExecutionId.status).toBe(400);
-        expect(invalidExecutionId.body.error).toBe("Invalid job execution id");
+        expect(invalidExecutionId.body.error.message).toBe("Invalid job execution id");
 
         const cancelled = await api<{
             execution: { id: string; status: string };
@@ -1690,35 +1761,35 @@ describe("Mira Dashboard backend integration", () => {
             })
         );
 
-        const missing = await api<{ error: string }>("/api/jobs/not-present");
+        const missing = await api<ApiErrorResponse>("/api/jobs/not-present");
         expect(missing.status).toBe(404);
-        expect(missing.body.error).toBe("Scheduled job not found");
+        expect(missing.body.error.message).toBe("Scheduled job not found");
 
-        const missingRun = await api<{ error: string }>("/api/jobs/not-present/run", {
+        const missingRun = await api<ApiErrorResponse>("/api/jobs/not-present/run", {
             method: "POST",
         });
         expect(missingRun.status).toBe(404);
-        expect(missingRun.body.error).toBe("Scheduled job not found");
+        expect(missingRun.body.error.message).toBe("Scheduled job not found");
 
-        const missingRuns = await api<{ error: string }>("/api/jobs/not-present/runs");
+        const missingRuns = await api<ApiErrorResponse>("/api/jobs/not-present/runs");
         expect(missingRuns.status).toBe(404);
-        expect(missingRuns.body.error).toBe("Scheduled job not found");
+        expect(missingRuns.body.error.message).toBe("Scheduled job not found");
     });
 
     it("validates legacy cron route payloads and reports log rotation state", async () => {
-        const invalidToggle = await api<{ error: string }>(
+        const invalidToggle = await api<ApiErrorResponse>(
             "/api/cron/jobs/example/toggle",
             json("POST", { enabled: "yes" })
         );
         expect(invalidToggle.status).toBe(400);
-        expect(invalidToggle.body.error).toBe("enabled must be a boolean");
+        expect(invalidToggle.body.error.message).toBe("enabled must be a boolean");
 
-        const invalidUpdate = await api<{ error: string }>(
+        const invalidUpdate = await api<ApiErrorResponse>(
             "/api/cron/jobs/example/update",
             json("POST", { patch: [] })
         );
         expect(invalidUpdate.status).toBe(400);
-        expect(invalidUpdate.body.error).toBe("patch must be an object");
+        expect(invalidUpdate.body.error.message).toBe("patch must be an object");
 
         const { database, sqlNullable } = await import("../src/database.ts");
         database
@@ -1834,17 +1905,17 @@ describe("Mira Dashboard backend integration", () => {
             lineIds: ["11", "23", "34"],
         });
 
-        const invalidLines = await api<{ error: string }>(
+        const invalidLines = await api<ApiErrorResponse>(
             "/api/logs/content?file=openclaw-dashboard-functional-test.log&lines=abc"
         );
         expect(invalidLines.status).toBe(400);
-        expect(invalidLines.body.error).toBe("Invalid lines");
+        expect(invalidLines.body.error.message).toBe("Invalid lines");
 
-        const traversal = await api<{ error: string }>(
+        const traversal = await api<ApiErrorResponse>(
             "/api/logs/content?file=../openclaw-dashboard-functional-test.log"
         );
         expect(traversal.status).toBe(404);
-        expect(traversal.body.error).toBe("Log file not found");
+        expect(traversal.body.error.message).toBe("Log file not found");
 
         const media = await fetch(
             `${testState.baseUrl}/api/media?path=images/dashboard-test.txt`,
@@ -1855,15 +1926,15 @@ describe("Mira Dashboard backend integration", () => {
         expect(media.headers.get("x-content-type-options")).toBe("nosniff");
         expect(await media.text()).toBe("media fixture\n");
 
-        const missingMedia = await api<{ error: string }>(
+        const missingMedia = await api<ApiErrorResponse>(
             "/api/media?path=images/not-present.txt"
         );
         expect(missingMedia.status).toBe(404);
-        expect(missingMedia.body.error).toBe("Media not found");
+        expect(missingMedia.body.error.message).toBe("Media not found");
 
-        const deniedMedia = await api<{ error: string }>("/api/media");
+        const deniedMedia = await api<ApiErrorResponse>("/api/media");
         expect(deniedMedia.status).toBe(403);
-        expect(deniedMedia.body.error).toBe("Access denied");
+        expect(deniedMedia.body.error.message).toBe("Access denied");
     });
 
     it("reports idle backup state and validates pull request action inputs", async () => {
@@ -1880,26 +1951,26 @@ describe("Mira Dashboard backend integration", () => {
         const clearKopia = await withTestScheduledExecutor(
             registerBackupScheduledJobs,
             () =>
-                api<{ error: string }>("/api/backups/kopia/clear-needs-attention", {
+                api<ApiErrorResponse>("/api/backups/kopia/clear-needs-attention", {
                     method: "POST",
                 })
         );
         expect(clearKopia.status).toBe(404);
-        expect(clearKopia.body.error).toBe("KOPIA backup job not found");
+        expect(clearKopia.body.error.message).toBe("KOPIA backup job not found");
 
-        const invalidApprove = await api<{ error: string }>(
+        const invalidApprove = await api<ApiErrorResponse>(
             "/api/pull-requests/not-a-number/approve",
             { method: "POST" }
         );
         expect(invalidApprove.status).toBe(400);
-        expect(invalidApprove.body.error).toBe("Invalid pull request number");
+        expect(invalidApprove.body.error.message).toBe("Invalid pull request number");
 
-        const invalidReject = await api<{ error: string }>(
+        const invalidReject = await api<ApiErrorResponse>(
             "/api/pull-requests/0/reject",
             json("POST", { comment: "Nope" })
         );
         expect(invalidReject.status).toBe(400);
-        expect(invalidReject.body.error).toBe("Invalid pull request number");
+        expect(invalidReject.body.error.message).toBe("Invalid pull request number");
     });
 
     it("maps deployment rows into recent pull request deployment summaries", async () => {
@@ -1991,25 +2062,28 @@ describe("Mira Dashboard backend integration", () => {
             newCwd: path.join(testState.temporaryRoot, "workspace"),
         });
 
-        const invalidTerminalCd = await api<{ error: string; isSuccess: boolean }>(
+        const invalidTerminalCd = await api<ApiErrorResponse>(
             "/api/terminal/cd",
             json("POST", { cwd: testState.temporaryRoot, path: "\0" })
         );
         expect(invalidTerminalCd.status).toBe(400);
         expect(invalidTerminalCd.body).toMatchObject({
-            error: "Missing or invalid path",
-            isSuccess: false,
+            error: {
+                code: "bad_request",
+                message: "Missing or invalid path",
+                requestId: expect.any(String),
+            },
         });
 
         const previousElevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
         delete process.env.ELEVENLABS_API_KEY;
         try {
-            const tts = await api<{ error: string }>(
+            const tts = await api<ApiErrorResponse>(
                 "/api/tts/speak",
                 json("POST", { text: "hello" })
             );
             expect(tts.status).toBe(500);
-            expect(tts.body.error).toBe("ELEVENLABS_API_KEY is not configured");
+            expect(tts.body.error.message).toBe("ELEVENLABS_API_KEY is not configured");
         } finally {
             if (previousElevenLabsApiKey === undefined) {
                 delete process.env.ELEVENLABS_API_KEY;
@@ -2024,21 +2098,27 @@ describe("Mira Dashboard backend integration", () => {
             method: "POST",
         });
         expect(stt.status).toBe(400);
-        expect(await stt.json()).toEqual({ error: "Missing audio payload" });
+        expect(await stt.json()).toEqual({
+            error: {
+                code: "bad_request",
+                message: "Missing audio payload",
+                requestId: expect.any(String),
+            },
+        });
 
-        const invalidConfigPut = await api<{ error: string }>(
+        const invalidConfigPut = await api<ApiErrorResponse>(
             "/api/config",
             json("PUT", { theme: "dark" })
         );
         expect(invalidConfigPut.status).toBe(400);
-        expect(invalidConfigPut.body.error).toBe("Config hash is required");
+        expect(invalidConfigPut.body.error.message).toBe("Config hash is required");
 
-        const invalidSkill = await api<{ error: string }>(
+        const invalidSkill = await api<ApiErrorResponse>(
             "/api/skills/__proto__",
             json("POST", { __hash: "hash", enabled: true })
         );
         expect(invalidSkill.status).toBe(400);
-        expect(invalidSkill.body.error).toBe("Invalid skill name");
+        expect(invalidSkill.body.error.message).toBe("Invalid skill name");
 
         const metrics = await api<{
             cpu: { count: number; loadAvg: number[] };
@@ -2056,9 +2136,9 @@ describe("Mira Dashboard backend integration", () => {
 
         const { database } = await import("../src/database.ts");
         database.prepare("DELETE FROM cache_entries WHERE key = ?").run("moltbook.home");
-        const missingMoltbook = await api<{ error: string }>("/api/moltbook/home");
+        const missingMoltbook = await api<ApiErrorResponse>("/api/moltbook/home");
         expect(missingMoltbook.status).toBe(503);
-        expect(missingMoltbook.body.error).toBe(
+        expect(missingMoltbook.body.error.message).toBe(
             "Moltbook cache entry not found or not fresh: moltbook.home"
         );
     });
@@ -2149,12 +2229,14 @@ describe("Mira Dashboard backend integration", () => {
         });
 
         delete process.env.ELEVENLABS_API_KEY;
-        const missingApiKey = await api<{ error: string }>(
+        const missingApiKey = await api<ApiErrorResponse>(
             "/api/tts/speak",
             json("POST", { text: "Hei" })
         );
         expect(missingApiKey.status).toBe(500);
-        expect(missingApiKey.body.error).toBe("ELEVENLABS_API_KEY is not configured");
+        expect(missingApiKey.body.error.message).toBe(
+            "ELEVENLABS_API_KEY is not configured"
+        );
 
         process.env.ELEVENLABS_API_KEY = "test-elevenlabs-key";
         const fetchMock = async (input: Request | URL | string, init?: RequestInit) => {
@@ -2186,29 +2268,33 @@ describe("Mira Dashboard backend integration", () => {
             });
             expect(invalidJson.status).toBe(400);
             expect(await invalidJson.json()).toMatchObject({
-                error: expect.stringContaining("JSON"),
+                error: {
+                    message: expect.stringContaining("JSON"),
+                },
             });
 
-            const missingText = await api<{ error: string }>(
+            const missingText = await api<ApiErrorResponse>(
                 "/api/tts/speak",
                 json("POST", { text: " ".repeat(3) })
             );
             expect(missingText.status).toBe(400);
-            expect(missingText.body.error).toBe("Missing text");
+            expect(missingText.body.error.message).toBe("Missing text");
 
-            const tooLong = await api<{ error: string }>(
+            const tooLong = await api<ApiErrorResponse>(
                 "/api/tts/speak",
                 json("POST", { text: "x".repeat(4001) })
             );
             expect(tooLong.status).toBe(400);
-            expect(tooLong.body.error).toBe("Text is too long. Max is 4000 characters.");
+            expect(tooLong.body.error.message).toBe(
+                "Text is too long. Max is 4000 characters."
+            );
 
-            const providerFailure = await api<{ error: string }>(
+            const providerFailure = await api<ApiErrorResponse>(
                 "/api/tts/speak",
                 json("POST", { text: "provider should fail" })
             );
             expect(providerFailure.status).toBe(502);
-            expect(providerFailure.body.error).toBe(
+            expect(providerFailure.body.error.message).toBe(
                 "TTS service temporarily unavailable"
             );
 
@@ -2220,7 +2306,13 @@ describe("Mira Dashboard backend integration", () => {
                 method: "POST",
             });
             expect(stt.status).toBe(500);
-            expect(await stt.json()).toEqual({ error: "Failed to transcribe audio" });
+            expect(await stt.json()).toEqual({
+                error: {
+                    code: "internal_error",
+                    message: "Failed to transcribe audio",
+                    requestId: expect.any(String),
+                },
+            });
         } finally {
             Object.defineProperty(console, "error", {
                 configurable: true,
@@ -2262,7 +2354,7 @@ describe("Mira Dashboard backend integration", () => {
             path: "notes/test.md",
         });
 
-        const traversal = await api<{ error: string }>("/api/files/..%2Foutside.txt");
+        const traversal = await api<ApiErrorResponse>("/api/files/..%2Foutside.txt");
         expect(traversal.status).toBe(403);
 
         const config = await api<{ content: string; relativePath: string }>(
@@ -2306,12 +2398,14 @@ describe("Mira Dashboard backend integration", () => {
             relativePath: "hooks/transforms/agentmail.ts",
         });
 
-        const deniedConfig = await api<{ error: string }>(
+        const deniedConfig = await api<ApiErrorResponse>(
             "/api/config-files/agents/main/config.json",
             json("PUT", { content: "{}" })
         );
         expect(deniedConfig.status).toBe(403);
-        expect(deniedConfig.body.error).toBe("Access denied: file not in allowed list");
+        expect(deniedConfig.body.error.message).toBe(
+            "Access denied: file not in allowed list"
+        );
     });
 
     it("loads agent config, status, metadata updates, and task history from OpenClaw home", async () => {
@@ -2319,9 +2413,9 @@ describe("Mira Dashboard backend integration", () => {
         const agentSessions = path.join(agentsRoot, "mira-2026", "sessions");
         await fs.mkdir(agentSessions, { recursive: true });
 
-        const missingConfig = await api<{ error: string }>("/api/agents/config");
+        const missingConfig = await api<ApiErrorResponse>("/api/agents/config");
         expect(missingConfig.status).toBe(404);
-        expect(missingConfig.body.error).toBe("Agent configuration not found");
+        expect(missingConfig.body.error.message).toBe("Agent configuration not found");
 
         await fs.writeFile(
             path.join(testState.openclawRoot, "openclaw.json"),
@@ -2365,12 +2459,12 @@ describe("Mira Dashboard backend integration", () => {
             expect.objectContaining({ id: "mira-2026" })
         );
 
-        const invalidMetadataBody = await api<{ error: string }>(
+        const invalidMetadataBody = await api<ApiErrorResponse>(
             "/api/agents/mira-2026/metadata",
             json("PUT", {})
         );
         expect(invalidMetadataBody.status).toBe(400);
-        expect(invalidMetadataBody.body.error).toBe("Provide currentTask");
+        expect(invalidMetadataBody.body.error.message).toBe("Provide currentTask");
 
         const metadata = await api<{ currentTask: string; updatedAt: string }>(
             "/api/agents/mira-2026/metadata",
@@ -2398,9 +2492,9 @@ describe("Mira Dashboard backend integration", () => {
             })
         );
 
-        const unknownAgent = await api<{ error: string }>("/api/agents/unknown/status");
+        const unknownAgent = await api<ApiErrorResponse>("/api/agents/unknown/status");
         expect(unknownAgent.status).toBe(404);
-        expect(unknownAgent.body.error).toBe("Agent 'unknown' not found");
+        expect(unknownAgent.body.error.message).toBe("Agent 'unknown' not found");
 
         const singleStatus = await api<{ currentTask?: string; id: string }>(
             "/api/agents/mira-2026/status"
@@ -2438,7 +2532,7 @@ describe("Mira Dashboard backend integration", () => {
             })
         );
 
-        const invalidMetadata = await api<{ error: string }>(
+        const invalidMetadata = await api<ApiErrorResponse>(
             "/api/agents/../metadata",
             json("PUT", { currentTask: "escape" })
         );
@@ -2462,12 +2556,12 @@ describe("Mira Dashboard backend integration", () => {
     });
 
     it("rejects Docker Compose service names that look like options", async () => {
-        const result = await api<{ error: string }>(
+        const result = await api<ApiErrorResponse>(
             "/api/docker/stack/action",
             json("POST", { action: "restart", service: "--profile" })
         );
 
         expect(result.status).toBe(400);
-        expect(result.body.error).toBe("Invalid service name");
+        expect(result.body.error.message).toBe("Invalid service name");
     });
 });

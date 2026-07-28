@@ -1,4 +1,5 @@
 import { validateAuthenticationConfig, validateStoredSecretConfig } from "./auth.ts";
+import { installStructuredConsole } from "./lib/structuredLogger.ts";
 import {
     getRuntimeReleaseIdentity,
     requireRunnableReleaseCommit,
@@ -19,6 +20,7 @@ export function createWorkerKeepAliveHandle(): NodeJS.Timeout {
 }
 
 export async function runDashboardWorker(): Promise<void> {
+    installStructuredConsole();
     const release = await getRuntimeReleaseIdentity();
     const releaseCommit = requireRunnableReleaseCommit(release, "Worker");
     validateAuthenticationConfig();

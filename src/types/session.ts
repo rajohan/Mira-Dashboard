@@ -57,27 +57,3 @@ export interface AgentInfo {
     model?: string;
     status?: string;
 }
-
-// Agent with real-time status
-/** Represents agent. */
-export interface Agent {
-    id: string;
-    status: "active" | "thinking" | "idle" | "offline";
-    model: string;
-    currentTask: string | undefined;
-    currentActivity: string | undefined;
-    lastActivity: string | undefined;
-    sessionKey: string | undefined;
-    channel: string | undefined;
-}
-
-/** Represents agent task history item. */
-export interface AgentTaskHistoryItem {
-    id: number;
-    agentId: string;
-    task: string;
-    status: string;
-    startedAt: string;
-    completedAt: string | undefined;
-    lastActivityAt: string;
-}

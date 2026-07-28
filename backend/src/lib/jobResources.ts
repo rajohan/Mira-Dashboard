@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import type { JobResourceClass } from "../../../contracts/jobs.ts";
+
 export const jobResourceClasses = [
     "interactive",
     "light",
@@ -7,8 +9,6 @@ export const jobResourceClasses = [
     "host-heavy",
     "exclusive",
 ] as const;
-
-export type JobResourceClass = (typeof jobResourceClasses)[number];
 
 interface JobResourceContext {
     resourceClass: JobResourceClass;

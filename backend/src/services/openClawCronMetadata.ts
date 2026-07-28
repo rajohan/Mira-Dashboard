@@ -1,5 +1,6 @@
+import type { JobDisableIntent } from "../../../contracts/jobs.ts";
 import { database } from "../database.ts";
-import { type JobDisableIntent, parseJobDisableIntent } from "./jobDisableIntent.ts";
+import { parseJobDisableIntent } from "./jobDisableIntent.ts";
 
 interface OpenClawCronJobMetadataRow {
     job_id: string;

@@ -2,6 +2,7 @@ import { isIP } from "node:net";
 
 import type { Server } from "bun";
 
+import { normalizeApiErrorResponse } from "./apiErrors.ts";
 import type { AuthUser } from "./auth.ts";
 import { hasRecentMfaVerification } from "./auth.ts";
 import {
@@ -15,20 +16,20 @@ import {
     isDevelopmentGatewayMethodAllowed,
     isGatewayMethodRecentMfaExempt,
 } from "./development/developmentGatewayPolicy.ts";
+import { authSession, isTrustedProxyAddress, json, requestIp } from "./http.ts";
 import {
-    authSession,
-    HttpError,
-    isTrustedProxyAddress,
-    json,
-    requestIp,
-} from "./http.ts";
-import { errorMessage, httpStatusCode } from "./lib/errors.ts";
+    recordHttpRequestMetric,
+    resetHttpRequestMetrics,
+} from "./lib/httpRequestMetrics.ts";
+import { hashedLogCorrelation, runWithLogContext } from "./lib/logContext.ts";
+import { structuredLog } from "./lib/structuredLogger.ts";
 import { runWithRequestAuditContext } from "./requestAuditContext.ts";
 import {
     isAllowedMutationSource,
     requestIdFor,
     withRequestSecurity,
 } from "./requestSecurity.ts";
+import { routeErrorResponse } from "./routeSupport.ts";
 import {
     type AuditActor,
     type AuditOutcome,
@@ -481,193 +482,216 @@ function secureHandler(
     persistAuditEvent: typeof writeAuditEvent
 ): BunHandler {
     return async (request, server) => {
-        const response = await (async () => {
-            const pathname = new URL(request.url).pathname || routePath;
-            const isApi = isApiRoute(pathname);
-            const requestIdentifier = requestIdFor(request);
-            const rateRule = isAuthRoute(pathname)
-                ? authRule
-                : isApi
-                  ? apiRule
-                  : undefined;
-            if (rateRule) {
-                const limited = checkRateLimit(request, server, rateRule);
-                if (limited) return limited;
-            }
-
-            if (isApi && !isAllowedMutationSource(request)) {
-                return json({ error: "Forbidden request origin" }, { status: 403 });
-            }
-            if (isApi && isDeploymentCutoverMutationBlocked(request)) {
-                return json(
-                    {
-                        code: "deployment_cutover_in_progress",
-                        error: "Dashboard writes are paused while the release is verified",
-                    },
-                    { headers: { "Retry-After": "5" }, status: 503 }
-                );
-            }
-
-            const requiresAuthentication = isApi && !isPublicApiRoute(request);
-            const automationAuthentication = requiresAuthentication
-                ? authenticateAutomation(request)
-                : ({ kind: "absent" } as const);
-            if (automationAuthentication.kind === "invalid") {
-                return json({ error: "Invalid automation credential" }, { status: 401 });
-            }
-            const automationPrincipal =
-                automationAuthentication.kind === "authenticated"
-                    ? automationAuthentication.principal
-                    : undefined;
-            const automationScope = automationPrincipal
-                ? requiredAutomationScope(request)
-                : undefined;
-            if (
-                automationPrincipal &&
-                (!automationScope || !automationPrincipal.scopes.has(automationScope))
-            ) {
-                return auditedForbiddenResponse(
-                    requestActor(undefined, automationPrincipal),
-                    request,
-                    requestIdentifier,
-                    routePath,
-                    automationScope,
-                    { error: "Automation credential scope denied" },
-                    persistAuditEvent
-                );
-            }
-            const isAuditedMutationRequest = isAuditedMutation(
-                isApi,
-                request,
-                automationScope
-            );
-            const session =
-                !automationPrincipal &&
-                (requiresAuthentication || isAuditedMutationRequest)
-                    ? authSession(request)
-                    : undefined;
-            if (requiresAuthentication && !session && !automationPrincipal) {
-                return json({ error: "Unauthorized" }, { status: 401 });
-            }
-
-            const user = session
-                ? { id: session.id, username: session.username }
-                : undefined;
-            const actor = requestActor(user, automationPrincipal);
-            if (isApi && isDevelopmentHostMutationBlocked(request)) {
-                return auditedForbiddenResponse(
-                    actor,
-                    request,
-                    requestIdentifier,
-                    routePath,
-                    automationScope,
-                    {
-                        error: "Host-control actions are disabled in Dashboard dev",
-                    },
-                    persistAuditEvent
-                );
-            }
-            const isPrivilegedRequest =
-                Boolean(session) && !automationPrincipal && requiresRecentMfa(request);
-            if (
-                isPrivilegedRequest &&
-                session &&
-                (!session.mfaEnabled || !hasRecentMfaVerification(session))
-            ) {
-                return auditedForbiddenResponse(
-                    actor,
-                    request,
-                    requestIdentifier,
-                    routePath,
-                    automationScope,
-                    {
-                        code: session.mfaEnabled
-                            ? "step_up_required"
-                            : "mfa_enrollment_required",
-                        error: session.mfaEnabled
-                            ? "Recent MFA verification is required"
-                            : "Multi-factor authentication must be enabled",
-                    },
-                    persistAuditEvent
-                );
-            }
-            const isMutation = isAuditedMutationRequest || isPrivilegedRequest;
-            let handlerResponse: Response;
-            let didRecordAttempt = false;
-            if (isMutation) {
-                didRecordAttempt = didWriteRequestAudit(
-                    actor,
-                    "attempted",
-                    request,
-                    requestIdentifier,
-                    routePath,
-                    undefined,
-                    automationScope,
-                    persistAuditEvent
-                );
-                if (!didRecordAttempt) {
-                    return json({ error: "Audit trail unavailable" }, { status: 503 });
+        const startedAt = performance.now();
+        const requestIdentifier = requestIdFor(request);
+        let correlatedSessionId: string | undefined;
+        let responseStatus = 500;
+        try {
+            const response = await (async () => {
+                const pathname = new URL(request.url).pathname || routePath;
+                const isApi = isApiRoute(pathname);
+                const rateRule = isAuthRoute(pathname)
+                    ? authRule
+                    : isApi
+                      ? apiRule
+                      : undefined;
+                if (rateRule) {
+                    const limited = checkRateLimit(request, server, rateRule);
+                    if (limited) return limited;
                 }
-            }
-            try {
-                handlerResponse = await runWithRequestAuditContext(
-                    { actor, requestId: requestIdentifier },
-                    () => callHandler(handler, request, server)
-                );
-            } catch (error) {
-                if (error instanceof HttpError) {
-                    handlerResponse = json(
-                        { error: error.message },
-                        { status: error.statusCode }
+
+                if (isApi && !isAllowedMutationSource(request)) {
+                    return json({ error: "Forbidden request origin" }, { status: 403 });
+                }
+                if (isApi && isDeploymentCutoverMutationBlocked(request)) {
+                    return json(
+                        {
+                            code: "deployment_cutover_in_progress",
+                            error: "Dashboard writes are paused while the release is verified",
+                        },
+                        { headers: { "Retry-After": "5" }, status: 503 }
                     );
-                } else if (error instanceof SyntaxError) {
-                    handlerResponse = json({ error: "Invalid JSON" }, { status: 400 });
-                } else {
-                    const mappedStatus = httpStatusCode(error);
-                    if (mappedStatus === 500) {
-                        console.error(
-                            `[BunServer] Request ${requestIdentifier} failed:`,
-                            error
-                        );
-                        handlerResponse = json(
-                            { error: "Internal server error" },
-                            { status: 500 }
-                        );
-                    } else {
-                        handlerResponse = json(
-                            { error: errorMessage(error, "Request failed") },
-                            { status: mappedStatus }
+                }
+
+                const requiresAuthentication = isApi && !isPublicApiRoute(request);
+                const automationAuthentication = requiresAuthentication
+                    ? authenticateAutomation(request)
+                    : ({ kind: "absent" } as const);
+                if (automationAuthentication.kind === "invalid") {
+                    return json(
+                        { error: "Invalid automation credential" },
+                        { status: 401 }
+                    );
+                }
+                const automationPrincipal =
+                    automationAuthentication.kind === "authenticated"
+                        ? automationAuthentication.principal
+                        : undefined;
+                const automationScope = automationPrincipal
+                    ? requiredAutomationScope(request)
+                    : undefined;
+                if (
+                    automationPrincipal &&
+                    (!automationScope || !automationPrincipal.scopes.has(automationScope))
+                ) {
+                    return auditedForbiddenResponse(
+                        requestActor(undefined, automationPrincipal),
+                        request,
+                        requestIdentifier,
+                        routePath,
+                        automationScope,
+                        { error: "Automation credential scope denied" },
+                        persistAuditEvent
+                    );
+                }
+                const isAuditedMutationRequest = isAuditedMutation(
+                    isApi,
+                    request,
+                    automationScope
+                );
+                const session =
+                    !automationPrincipal &&
+                    (requiresAuthentication || isAuditedMutationRequest)
+                        ? authSession(request)
+                        : undefined;
+                correlatedSessionId = session
+                    ? hashedLogCorrelation("dashboard-session", session.sessionId)
+                    : undefined;
+                if (requiresAuthentication && !session && !automationPrincipal) {
+                    return json({ error: "Unauthorized" }, { status: 401 });
+                }
+
+                const user = session
+                    ? { id: session.id, username: session.username }
+                    : undefined;
+                const actor = requestActor(user, automationPrincipal);
+                if (isApi && isDevelopmentHostMutationBlocked(request)) {
+                    return auditedForbiddenResponse(
+                        actor,
+                        request,
+                        requestIdentifier,
+                        routePath,
+                        automationScope,
+                        {
+                            error: "Host-control actions are disabled in Dashboard dev",
+                        },
+                        persistAuditEvent
+                    );
+                }
+                const isPrivilegedRequest =
+                    Boolean(session) &&
+                    !automationPrincipal &&
+                    requiresRecentMfa(request);
+                if (
+                    isPrivilegedRequest &&
+                    session &&
+                    (!session.mfaEnabled || !hasRecentMfaVerification(session))
+                ) {
+                    return auditedForbiddenResponse(
+                        actor,
+                        request,
+                        requestIdentifier,
+                        routePath,
+                        automationScope,
+                        {
+                            code: session.mfaEnabled
+                                ? "step_up_required"
+                                : "mfa_enrollment_required",
+                            error: session.mfaEnabled
+                                ? "Recent MFA verification is required"
+                                : "Multi-factor authentication must be enabled",
+                        },
+                        persistAuditEvent
+                    );
+                }
+                const isMutation = isAuditedMutationRequest || isPrivilegedRequest;
+                let handlerResponse: Response;
+                let didRecordAttempt = false;
+                if (isMutation) {
+                    didRecordAttempt = didWriteRequestAudit(
+                        actor,
+                        "attempted",
+                        request,
+                        requestIdentifier,
+                        routePath,
+                        undefined,
+                        automationScope,
+                        persistAuditEvent
+                    );
+                    if (!didRecordAttempt) {
+                        return json(
+                            { error: "Audit trail unavailable" },
+                            { status: 503 }
                         );
                     }
                 }
-            }
+                try {
+                    handlerResponse = await runWithRequestAuditContext(
+                        { actor, requestId: requestIdentifier },
+                        () =>
+                            runWithLogContext(
+                                {
+                                    requestId: requestIdentifier,
+                                    ...(correlatedSessionId && {
+                                        sessionId: correlatedSessionId,
+                                    }),
+                                },
+                                () => callHandler(handler, request, server)
+                            )
+                    );
+                } catch (error) {
+                    handlerResponse = routeErrorResponse(request, error, {
+                        context: "request.handler",
+                        message: "Internal server error",
+                    });
+                }
 
-            if (isMutation && didRecordAttempt) {
-                didWriteRequestAudit(
-                    actor,
-                    auditOutcomeForStatus(handlerResponse.status),
-                    request,
-                    requestIdentifier,
-                    routePath,
-                    handlerResponse.status,
-                    automationScope,
-                    persistAuditEvent
+                if (isMutation && didRecordAttempt) {
+                    didWriteRequestAudit(
+                        actor,
+                        auditOutcomeForStatus(handlerResponse.status),
+                        request,
+                        requestIdentifier,
+                        routePath,
+                        handlerResponse.status,
+                        automationScope,
+                        persistAuditEvent
+                    );
+                }
+
+                if (!rateRule) return handlerResponse;
+                const key = rateLimitKey(rateRule, request, server);
+                const bucket = buckets.get(key);
+                if (!bucket) return handlerResponse;
+                return withRateLimitHeaders(
+                    handlerResponse,
+                    rateRule,
+                    rateRule.max - bucket.used,
+                    bucket.resetAt
                 );
-            }
+            })();
 
-            if (!rateRule) return handlerResponse;
-            const key = rateLimitKey(rateRule, request, server);
-            const bucket = buckets.get(key);
-            if (!bucket) return handlerResponse;
-            return withRateLimitHeaders(
-                handlerResponse,
-                rateRule,
-                rateRule.max - bucket.used,
-                bucket.resetAt
-            );
-        })();
-
-        return withRequestSecurity(request, response, server);
+            const normalizedResponse = await normalizeApiErrorResponse(request, response);
+            responseStatus = normalizedResponse.status;
+            return withRequestSecurity(request, normalizedResponse, server);
+        } finally {
+            const durationMs =
+                Math.round(Math.max(0, performance.now() - startedAt) * 100) / 100;
+            recordHttpRequestMetric({
+                durationMs,
+                method: request.method,
+                route: routePath,
+                status: responseStatus,
+            });
+            structuredLog("info", "http.request", {
+                durationMs,
+                method: request.method.toUpperCase(),
+                requestId: requestIdentifier,
+                route: routePath,
+                ...(correlatedSessionId && { sessionId: correlatedSessionId }),
+                status: responseStatus,
+            });
+        }
     };
 }
 
@@ -716,6 +740,7 @@ export function withRequestPolicy<T extends Record<string, unknown>>(
 
 export function resetRequestPolicyForTests(): void {
     buckets.clear();
+    resetHttpRequestMetrics();
     if (rateLimitState.bucketCleanupTimer) {
         clearInterval(rateLimitState.bucketCleanupTimer);
         rateLimitState.bucketCleanupTimer = undefined;

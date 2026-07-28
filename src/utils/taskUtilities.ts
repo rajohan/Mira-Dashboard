@@ -1,4 +1,4 @@
-import type { ColumnId, Task } from "../types/task";
+import type { ColumnId, Task } from "../../contracts/tasks";
 
 /** Defines priority colors. */
 export const PRIORITY_COLORS: Record<string, string> = {
@@ -12,7 +12,7 @@ export interface ColumnConfig {
     id: ColumnId;
     title: string;
     dotColor: string;
-    label: string;
+    label: ColumnId;
     acceptsTask: (t: Task) => boolean;
 }
 

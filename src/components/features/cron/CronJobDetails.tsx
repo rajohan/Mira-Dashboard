@@ -1,7 +1,7 @@
 import { Pencil, Play, Save, Trash2, X } from "lucide-react";
 import { useId } from "react";
 
-import type { CronJob } from "../../../hooks";
+import type { CronJob } from "../../../../contracts/cron";
 import {
     formatCronLastStatus,
     formatCronTimestamp,

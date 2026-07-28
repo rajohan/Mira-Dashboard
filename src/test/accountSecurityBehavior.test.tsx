@@ -521,7 +521,13 @@ describe("Dashboard account security", () => {
                     removalAttempts += 1;
                     if (removalAttempts === 1) {
                         return Response.json(
-                            { error: "Temporary removal failure" },
+                            {
+                                error: {
+                                    code: "internal_error",
+                                    message: "Temporary removal failure",
+                                    requestId: "security-removal-failure",
+                                },
+                            },
                             { status: 500 }
                         );
                     }
@@ -831,8 +837,11 @@ describe("Dashboard account security", () => {
                     return verificationRequests === 1
                         ? Response.json(
                               {
-                                  code: "recent_verification_required",
-                                  error: "Recent verification is required",
+                                  error: {
+                                      code: "recent_verification_required",
+                                      message: "Recent verification is required",
+                                      requestId: "security-registration-step-up",
+                                  },
                               },
                               { status: 403 }
                           )

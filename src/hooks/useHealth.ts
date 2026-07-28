@@ -1,34 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { parseDashboardDiagnosticsResponse } from "../../contracts/health";
 import { refreshPolicy } from "../lib/refreshPolicy";
-import { apiFetchRequired } from "./useApi";
-
-/** Represents the health API response. */
-export interface HealthResponse {
-    checks: {
-        release: {
-            backendCommit: string;
-            frontendCommit: string;
-            ready: boolean;
-        };
-        worker: {
-            ready: boolean;
-        };
-    };
-    dependencies: {
-        gatewayConnected: boolean;
-    };
-    releaseDetails: {
-        backendCommit: string;
-        frontendCommit: string;
-    };
-    sessionCount: number;
-    status: "isReady" | "notReady";
-}
+import { apiFetchParsed } from "./useApi";
 
 /** Fetches health. */
 function fetchHealth() {
-    return apiFetchRequired<HealthResponse>("/health/diagnostics");
+    return apiFetchParsed("/health/diagnostics", parseDashboardDiagnosticsResponse);
 }
 
 /** Provides health. */

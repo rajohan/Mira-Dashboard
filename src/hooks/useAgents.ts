@@ -1,41 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 
+import type {
+    Agent,
+    AgentsConfig,
+    AgentsStatusResponse,
+    AgentTaskHistoryResponse,
+} from "../../contracts/agents";
 import { refreshPolicy } from "../lib/refreshPolicy";
-import type { Agent, AgentTaskHistoryItem } from "../types/session";
 import { apiFetchRequired } from "./useApi";
-
-/** Represents the agents status API response. */
-interface AgentsStatusResponse {
-    agents: Agent[];
-    timestamp: number;
-}
-
-/** Represents the agent task history API response. */
-interface AgentTaskHistoryResponse {
-    tasks: AgentTaskHistoryItem[];
-    timestamp: number;
-}
-
-/** Represents the agents config API response. */
-interface AgentsConfigResponse {
-    defaults: {
-        model?: {
-            primary?: string;
-            fallbacks?: string[];
-        };
-    };
-    list: Array<{
-        id: string;
-        default?: boolean;
-        model?: {
-            primary?: string;
-            fallbacks?: string[];
-        };
-        subagents?: {
-            allowAgents?: string[];
-        };
-    }>;
-}
 
 /** Provides agents status. */
 export function useAgentsStatus() {
@@ -49,9 +21,9 @@ export function useAgentsStatus() {
 
 /** Provides agents config. */
 export function useAgentsConfig() {
-    return useQuery<AgentsConfigResponse>({
+    return useQuery<AgentsConfig>({
         queryKey: ["agents", "config"],
-        queryFn: () => apiFetchRequired<AgentsConfigResponse>("/agents/config"),
+        queryFn: () => apiFetchRequired<AgentsConfig>("/agents/config"),
         staleTime: 60_000,
     });
 }

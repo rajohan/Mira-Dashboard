@@ -1,6 +1,6 @@
 import { ExternalLink, MonitorPlay, Square } from "lucide-react";
 
-import type { PullRequestPreviewStatus } from "../../../hooks";
+import type { PullRequestPreviewStatus } from "../../../../contracts/delivery";
 import { formatDate } from "../../../utils/format";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";

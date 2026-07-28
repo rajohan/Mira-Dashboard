@@ -1,3 +1,5 @@
+import type { ContractParser } from "../../contracts/runtime";
+import { apiErrorFromResponse, UnauthorizedError } from "../lib/apiError";
 import { recoverOrHandleUnauthorizedSession } from "../lib/authBoundary";
 import {
     dispatchSecurityVerificationRequired,
@@ -7,7 +9,6 @@ import {
 import { hasRecentUserActivity } from "../lib/userActivity";
 
 const API_BASE = "/api";
-
 /** Extends fetch options with independent auth-recovery replay controls. */
 export interface ApiRequestOptions extends RequestInit {
     canRetryAfterUnauthorizedRecovery?: boolean;
@@ -15,27 +16,6 @@ export interface ApiRequestOptions extends RequestInit {
 }
 
 type ApiMethodOptions = Omit<ApiRequestOptions, "body" | "method">;
-
-/** Represents a structured non-success API response. */
-export class ApiError extends Error {
-    readonly status: number;
-    readonly code?: string;
-
-    constructor(message: string, status: number, code?: string) {
-        super(message);
-        this.name = "ApiError";
-        this.status = status;
-        this.code = code;
-    }
-}
-
-/** Implements unauthorized error. */
-export class UnauthorizedError extends ApiError {
-    constructor() {
-        super("Unauthorized", 401, "unauthorized");
-        this.name = "UnauthorizedError";
-    }
-}
 
 /** Performs API fetch. */
 export async function apiFetch<T>(
@@ -72,36 +52,32 @@ export async function apiFetch<T>(
                 canRetryAfterUnauthorized = false;
                 continue;
             }
-            throw new UnauthorizedError();
+            const unauthorizedError = await apiErrorFromResponse(
+                response,
+                "Unauthorized"
+            );
+            throw new UnauthorizedError({
+                requestId: unauthorizedError.requestId,
+                retryAfter: unauthorizedError.retryAfter,
+            });
         }
 
         if (!response.ok) {
-            let error: { code?: string; error?: string };
-            try {
-                error = (await response.json()) as {
-                    code?: string;
-                    error?: string;
-                };
-            } catch {
-                error = { error: "Unknown error" };
-            }
-            if (isSecurityVerificationCode(error.code)) {
+            const error = await apiErrorFromResponse(response);
+            const errorCode = error.code;
+            if (isSecurityVerificationCode(errorCode)) {
                 if (
                     canRetryAfterVerification &&
-                    (await waitForSecurityVerification(error.code))
+                    (await waitForSecurityVerification(errorCode))
                 ) {
                     canRetryAfterVerification = false;
                     continue;
                 }
                 if (!canRetryAfterVerification) {
-                    dispatchSecurityVerificationRequired(error.code);
+                    dispatchSecurityVerificationRequired(errorCode);
                 }
             }
-            throw new ApiError(
-                error.error || `HTTP ${response.status}`,
-                response.status,
-                error.code
-            );
+            throw error;
         }
 
         if (response.status === 204) {
@@ -136,6 +112,44 @@ export async function apiFetchRequired<T>(
     options?: ApiRequestOptions
 ): Promise<T> {
     return requireApiResponse(await apiFetch<T>(endpoint, options));
+}
+
+/** Fetches and validates a required success response at the browser trust boundary. */
+export async function apiFetchParsed<T>(
+    endpoint: string,
+    parser: ContractParser<T>,
+    options?: ApiRequestOptions
+): Promise<T> {
+    return parser(requireApiResponse(await apiFetch<unknown>(endpoint, options)));
+}
+
+/** Posts and validates a required success response at the browser trust boundary. */
+export async function apiPostParsed<T>(
+    endpoint: string,
+    parser: ContractParser<T>,
+    body?: unknown,
+    options?: ApiMethodOptions
+): Promise<T> {
+    return parser(requireApiResponse(await apiPost<unknown>(endpoint, body, options)));
+}
+
+/** Patches and validates a required success response at the browser trust boundary. */
+export async function apiPatchParsed<T>(
+    endpoint: string,
+    parser: ContractParser<T>,
+    body: unknown,
+    options?: ApiMethodOptions
+): Promise<T> {
+    return parser(requireApiResponse(await apiPatch<unknown>(endpoint, body, options)));
+}
+
+/** Deletes and validates a required success response at the browser trust boundary. */
+export async function apiDeleteParsed<T>(
+    endpoint: string,
+    parser: ContractParser<T>,
+    options?: ApiMethodOptions
+): Promise<T> {
+    return parser(requireApiResponse(await apiDelete<unknown>(endpoint, options)));
 }
 
 /** Posts to an API endpoint that must include a JSON body response. */

@@ -3721,7 +3721,13 @@ describe("shared component helpers", () => {
                     realRunRequests += 1;
                     if (realRunRequests === 1) {
                         return Response.json(
-                            { error: "Scheduled job is already running" },
+                            {
+                                error: {
+                                    code: "conflict",
+                                    message: "Scheduled job is already running",
+                                    requestId: "scheduled-job-conflict",
+                                },
+                            },
                             { status: 409 }
                         );
                     }

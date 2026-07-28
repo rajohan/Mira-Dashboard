@@ -15,6 +15,13 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
+import type {
+    DashboardReleaseSummary,
+    DeploymentJob,
+    ProductionCheckoutStatus,
+    PullRequestPreviewStatus,
+    PullRequestSummary,
+} from "../../contracts/delivery";
 import { ProductionReleasesCard } from "../components/features/delivery/ProductionReleasesCard";
 import { PullRequestDevelopmentCard } from "../components/features/delivery/PullRequestDevelopmentCard";
 import { Alert } from "../components/ui/Alert";
@@ -25,13 +32,6 @@ import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { LoadingState } from "../components/ui/LoadingState";
 import { PageState } from "../components/ui/PageState";
 import { RefreshButton } from "../components/ui/RefreshButton";
-import type {
-    DashboardReleaseSummary,
-    DeploymentJob,
-    ProductionCheckoutStatus,
-    PullRequestPreviewStatus,
-    PullRequestSummary,
-} from "../hooks";
 import {
     useApprovePullRequest,
     useApprovePullRequestReview,

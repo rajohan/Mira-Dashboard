@@ -1,6 +1,9 @@
 import { Play, RotateCw, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import type { CronJob } from "../../contracts/cron";
+import type { JobDisableIntent } from "../../contracts/jobs";
+import type { ScheduledJob, ScheduledJobPatch } from "../../contracts/jobs";
 import { CronJobDetails, CronJobList } from "../components/features/cron";
 import { JobDisableIntentStatus } from "../components/features/jobs/JobDisableIntentStatus";
 import { JobExecutionQueueCard } from "../components/features/jobs/JobExecutionQueueCard";
@@ -19,7 +22,6 @@ import { Modal } from "../components/ui/Modal";
 import { Select } from "../components/ui/Select";
 import { Switch } from "../components/ui/Switch";
 import { Textarea } from "../components/ui/Textarea";
-import type { CronJob, ScheduledJob, ScheduledJobPatch } from "../hooks";
 import {
     useCronJobs,
     useDeleteCronJob,
@@ -31,7 +33,6 @@ import {
     useUpdateCronJob,
     useUpdateScheduledJob,
 } from "../hooks";
-import type { JobDisableIntent } from "../types/job";
 import {
     getCronJobId,
     isCronExpressionValid,

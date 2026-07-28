@@ -13,13 +13,14 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { TASK_ASSIGNEES, type TaskAssigneeId } from "../../../constants/taskActors";
-import type {
-    ColumnId,
-    Task,
-    TaskAutomationInput,
-    TaskUpdate,
-} from "../../../types/task";
+import {
+    type ColumnId,
+    type Task,
+    TASK_ASSIGNEES,
+    type TaskAssigneeId,
+    type TaskAutomationInput,
+    type TaskUpdate,
+} from "../../../../contracts/tasks";
 import {
     formatCronLastStatus,
     formatCronTimestamp,

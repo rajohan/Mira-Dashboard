@@ -1,4 +1,7 @@
-import { json, readJson } from "../http.ts";
+import { parseExecRequest } from "../../../contracts/exec.ts";
+import { apiErrorResponse } from "../apiErrors.ts";
+import { json } from "../http.ts";
+import { readApiJson } from "../routeSupport.ts";
 import {
     execErrorResponse,
     getExecJob,
@@ -9,18 +12,19 @@ import {
 
 type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
 
-function errorResponse(error: unknown): Response {
-    const mapped = execErrorResponse(error);
-    return json({ error: mapped.error }, { status: mapped.status });
+function errorResponse(request: Request, error: unknown): Response {
+    return apiErrorResponse(request, execErrorResponse(error), "exec");
 }
 
 export const execRoutes = {
     "/api/exec": {
         POST: async (request: Request) => {
             try {
-                return json(await runExecOnce(await readJson(request)));
+                return json(
+                    await runExecOnce(await readApiJson(request, parseExecRequest))
+                );
             } catch (error) {
-                return errorResponse(error);
+                return errorResponse(request, error);
             }
         },
     },
@@ -30,7 +34,7 @@ export const execRoutes = {
             try {
                 return json(getExecJob(String(request.params.jobId)));
             } catch (error) {
-                return errorResponse(error);
+                return errorResponse(request, error);
             }
         },
     },
@@ -40,7 +44,7 @@ export const execRoutes = {
             try {
                 return json(stopExecJob(String(request.params.jobId)));
             } catch (error) {
-                return errorResponse(error);
+                return errorResponse(request, error);
             }
         },
     },
@@ -48,9 +52,9 @@ export const execRoutes = {
     "/api/exec/start": {
         POST: async (request: Request) => {
             try {
-                return json(startExecJob(await readJson(request)));
+                return json(startExecJob(await readApiJson(request, parseExecRequest)));
             } catch (error) {
-                return errorResponse(error);
+                return errorResponse(request, error);
             }
         },
     },

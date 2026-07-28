@@ -367,7 +367,11 @@ describe("scoped automation authentication", () => {
         );
         expect(readOnlyWrite.status).toBe(403);
         await expect(readOnlyWrite.json()).resolves.toEqual({
-            error: "Automation credential scope denied",
+            error: {
+                code: "forbidden",
+                message: "Automation credential scope denied",
+                requestId: expect.any(String),
+            },
         });
         expect(auditRows(readOnlyWrite.headers.get("x-request-id"))).toEqual([
             expect.objectContaining({
@@ -445,7 +449,11 @@ describe("scoped automation authentication", () => {
 
             expect(response.status).toBe(503);
             await expect(response.json()).resolves.toEqual({
-                error: "Audit trail unavailable",
+                error: {
+                    code: "service_unavailable",
+                    message: "Audit trail unavailable",
+                    requestId: expect.any(String),
+                },
             });
             expect(handler).not.toHaveBeenCalled();
             expect(errorSpy).toHaveBeenCalledWith(

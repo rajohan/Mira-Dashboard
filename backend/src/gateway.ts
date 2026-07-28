@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import Path from "node:path";
 
+import type { GatewayMetrics } from "../../contracts/metrics.ts";
 import { OpenClawChatBridge } from "./chat/openClawChatBridge.ts";
 import { SqliteOpenClawChatSnapshotStore } from "./chat/openClawChatSnapshotStore.ts";
 import type { DashboardSocket } from "./dashboardSocket.ts";
@@ -10,6 +11,7 @@ import {
     resolveDashboardRuntimePath,
 } from "./lib/dashboardPaths.ts";
 import { errorMessage } from "./lib/errors.ts";
+import { hashedLogCorrelation, runWithLogContext } from "./lib/logContext.ts";
 import {
     type DeviceIdentity,
     loadOrCreateDeviceIdentity,
@@ -188,6 +190,12 @@ const gatewayState: {
     requestId: 1000,
     currentToken: undefined,
     connectError: undefined,
+};
+const gatewayMetricsState: Omit<GatewayMetrics, "connected" | "pendingRequests"> = {
+    connectFailures: 0,
+    connections: 0,
+    disconnects: 0,
+    reconnects: 0,
 };
 const DEFAULT_GATEWAY_CONNECTION_WAIT_MS = 45_000;
 const subscribers = new Set<DashboardSocket>();
@@ -864,6 +872,11 @@ function init(token: string): void {
         if (!activeClient) {
             return;
         }
+        if (gatewayMetricsState.connections > 0) {
+            gatewayMetricsState.reconnects += 1;
+        }
+        gatewayMetricsState.connections += 1;
+        gatewayMetricsState.lastConnectedAt = new Date().toISOString();
         gatewayState.isConnected = true;
         broadcast({ type: "connected", gatewayConnected: true });
         /** Subscribes to Gateway session index events for live session updates. */
@@ -915,12 +928,17 @@ function init(token: string): void {
             return;
         }
         gatewayState.connectError = error.message;
+        gatewayMetricsState.connectFailures += 1;
         console.error("[Gateway] Connect failed:", error.message);
     }
     /** Marks Gateway state disconnected and informs dashboard clients. */
     function handleGatewayClose(): void {
         if (!getCurrentInitGatewayClient()) {
             return;
+        }
+        if (gatewayState.isConnected) {
+            gatewayMetricsState.disconnects += 1;
+            gatewayMetricsState.lastDisconnectedAt = new Date().toISOString();
         }
         gatewayState.isConnected = false;
         gatewayState.sessions = [];
@@ -1025,7 +1043,7 @@ function captureChatSendRequestBoundary(
     );
 }
 
-async function requestWithReplayBoundary(
+async function requestWithReplayBoundaryInContext(
     client: OpenClawGatewayClientInstance,
     method: string,
     parameters: Record<string, unknown>,
@@ -1057,6 +1075,30 @@ async function requestWithReplayBoundary(
         }
         throw error;
     }
+}
+
+async function requestWithReplayBoundary(
+    client: OpenClawGatewayClientInstance,
+    method: string,
+    parameters: Record<string, unknown>,
+    options?: OpenClawGatewayRequestOptions
+): Promise<unknown> {
+    const sessionIdentifier =
+        typeof parameters.sessionKey === "string"
+            ? parameters.sessionKey
+            : typeof parameters.sessionId === "string"
+              ? parameters.sessionId
+              : typeof parameters.key === "string" && method.startsWith("sessions.")
+                ? parameters.key
+                : undefined;
+    return runWithLogContext(
+        {
+            ...(sessionIdentifier && {
+                sessionId: hashedLogCorrelation("openclaw-session", sessionIdentifier),
+            }),
+        },
+        () => requestWithReplayBoundaryInContext(client, method, parameters, options)
+    );
 }
 
 /** Performs forward request. */
@@ -1309,6 +1351,16 @@ function isConnected(): boolean {
     return gatewayState.isConnected;
 }
 
+/** Returns connection counters and pending volume without request payloads. */
+function getMetrics(): GatewayMetrics {
+    return {
+        ...gatewayMetricsState,
+        connected: gatewayState.isConnected,
+        pendingRequests:
+            gatewayState.client?.pendingRequestCount?.() ?? pendingRequests.size,
+    };
+}
+
 /** Returns gateway ws. */
 function getGatewayWs(): undefined {
     return;
@@ -1378,6 +1430,7 @@ async function request(
 /** Stops the active Gateway client and clears connected state. */
 function shutdown(): void {
     const previousGatewayClient = gatewayState.client;
+    const wasConnected = gatewayState.isConnected;
     try {
         previousGatewayClient?.stop();
     } catch (error) {
@@ -1385,6 +1438,10 @@ function shutdown(): void {
             error,
             hadPreviousGatewayClient: previousGatewayClient !== undefined,
         });
+    }
+    if (wasConnected && gatewayState.isConnected) {
+        gatewayMetricsState.disconnects += 1;
+        gatewayMetricsState.lastDisconnectedAt = new Date().toISOString();
     }
     if (gatewayState.client === previousGatewayClient) {
         gatewayState.client = undefined;
@@ -1406,6 +1463,7 @@ export default {
     getStatus,
     getSessions,
     isConnected,
+    getMetrics,
     getGatewayWs,
     sendSessionMessage,
     abortSessionRun,

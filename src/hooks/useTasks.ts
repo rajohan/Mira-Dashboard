@@ -1,9 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import type { TaskAssigneeId } from "../constants/taskActors";
+import type {
+    AssignTaskRequest,
+    ColumnId,
+    CreateTaskRequest,
+    CreateTaskUpdateRequest,
+    MoveTaskRequest,
+    Task,
+    TaskAssigneeId,
+    TaskAutomationInput,
+    TaskUpdate,
+    UpdateTaskRequest,
+    UpdateTaskUpdateRequest,
+} from "../../contracts/tasks";
+import {
+    parseTaskMutationResponse,
+    parseTaskResponse,
+    parseTasksResponse,
+    parseTaskUpdateResponse,
+    parseTaskUpdatesResponse,
+} from "../../contracts/tasks";
 import { AUTO_REFRESH_MS } from "../lib/queryClient";
-import type { Task, TaskAutomationInput, TaskUpdate } from "../types/task";
-import { apiDelete, apiFetchRequired, apiPatchRequired, apiPostRequired } from "./useApi";
+import { apiDeleteParsed, apiFetchParsed, apiPatchParsed, apiPostParsed } from "./useApi";
 
 /** Defines task keys. */
 export const taskKeys = {
@@ -14,7 +32,7 @@ export const taskKeys = {
 
 /** Fetches tasks. */
 async function fetchTasks(): Promise<Task[]> {
-    return apiFetchRequired<Task[]>("/tasks");
+    return apiFetchParsed("/tasks", parseTasksResponse);
 }
 
 /** Creates task. */
@@ -25,40 +43,41 @@ async function createTask(
     assignee: TaskAssigneeId,
     automation?: TaskAutomationInput
 ): Promise<Task> {
-    return apiPostRequired<Task>("/tasks", { title, body, labels, assignee, automation });
+    const request: CreateTaskRequest = {
+        assignee,
+        body,
+        labels,
+        title,
+        ...(automation && { automation }),
+    };
+    return apiPostParsed("/tasks", parseTaskResponse, request);
 }
 
 /** Performs update task. */
-async function updateTask(
-    number: number,
-    updates: {
-        title?: string;
-        body?: string;
-        labels?: string[];
-        automation?: TaskAutomationInput | null | undefined;
-    }
-): Promise<Task> {
-    return apiPatchRequired<Task>(`/tasks/${number}`, updates);
+async function updateTask(number: number, updates: UpdateTaskRequest): Promise<Task> {
+    return apiPatchParsed(`/tasks/${number}`, parseTaskResponse, updates);
 }
 
 /** Performs move task. */
-async function moveTask(number: number, columnLabel: string): Promise<Task> {
-    return apiPostRequired<Task>(`/tasks/${number}/move`, { columnLabel });
+async function moveTask(number: number, columnLabel: ColumnId): Promise<Task> {
+    const request: MoveTaskRequest = { columnLabel };
+    return apiPostParsed(`/tasks/${number}/move`, parseTaskResponse, request);
 }
 
 /** Performs assign task. */
 async function assignTask(number: number, assignee: TaskAssigneeId): Promise<Task> {
-    return apiPostRequired<Task>(`/tasks/${number}/assign`, { assignee });
+    const request: AssignTaskRequest = { assignee };
+    return apiPostParsed(`/tasks/${number}/assign`, parseTaskResponse, request);
 }
 
 /** Performs delete task. */
 async function deleteTask(number: number): Promise<void> {
-    await apiDelete(`/tasks/${number}`);
+    await apiDeleteParsed(`/tasks/${number}`, parseTaskMutationResponse);
 }
 
 /** Fetches task updates. */
 async function fetchTaskUpdates(taskId: number): Promise<TaskUpdate[]> {
-    return apiFetchRequired<TaskUpdate[]>(`/tasks/${taskId}/updates`);
+    return apiFetchParsed(`/tasks/${taskId}/updates`, parseTaskUpdatesResponse);
 }
 
 /** Creates task update. */
@@ -67,7 +86,8 @@ async function createTaskUpdate(
     author: TaskAssigneeId,
     messageMd: string
 ): Promise<TaskUpdate> {
-    return apiPostRequired<TaskUpdate>(`/tasks/${taskId}/updates`, { author, messageMd });
+    const request: CreateTaskUpdateRequest = { author, messageMd };
+    return apiPostParsed(`/tasks/${taskId}/updates`, parseTaskUpdateResponse, request);
 }
 
 /** Performs update task update. */
@@ -76,14 +96,20 @@ async function updateTaskUpdate(
     updateId: number,
     messageMd: string
 ): Promise<TaskUpdate> {
-    return apiPatchRequired<TaskUpdate>(`/tasks/${taskId}/updates/${updateId}`, {
-        messageMd,
-    });
+    const request: UpdateTaskUpdateRequest = { messageMd };
+    return apiPatchParsed(
+        `/tasks/${taskId}/updates/${updateId}`,
+        parseTaskUpdateResponse,
+        request
+    );
 }
 
 /** Performs delete task update. */
 async function deleteTaskUpdate(taskId: number, updateId: number): Promise<void> {
-    await apiDelete(`/tasks/${taskId}/updates/${updateId}`);
+    await apiDeleteParsed(
+        `/tasks/${taskId}/updates/${updateId}`,
+        parseTaskMutationResponse
+    );
 }
 
 /** Provides tasks. */
@@ -130,12 +156,7 @@ export function useUpdateTask() {
             updates,
         }: {
             number: number;
-            updates: {
-                title?: string;
-                body?: string;
-                labels?: string[];
-                automation?: TaskAutomationInput | null | undefined;
-            };
+            updates: UpdateTaskRequest;
         }) => updateTask(number, updates),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
@@ -148,8 +169,13 @@ export function useMoveTask() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ number, columnLabel }: { number: number; columnLabel: string }) =>
-            moveTask(number, columnLabel),
+        mutationFn: ({
+            number,
+            columnLabel,
+        }: {
+            number: number;
+            columnLabel: ColumnId;
+        }) => moveTask(number, columnLabel),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: taskKeys.list() });
         },

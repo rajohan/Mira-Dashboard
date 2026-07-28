@@ -1,53 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { CreateReportInput, ReportsFilters } from "../../contracts/reports";
+import {
+    parseCreateReportResponse,
+    parseDeleteReportResponse,
+    parseReportResponse,
+    parseReportsResponse,
+} from "../../contracts/reports";
 import { refreshPolicy } from "../lib/refreshPolicy";
-import { apiDeleteRequired, apiFetchRequired, apiPostRequired } from "./useApi";
-
-export type ReportType = "daily_brief" | "daily_summary" | "heartbeat" | "custom";
-export type ReportStatus = "ok" | "warning" | "error";
-
-export interface ReportItem {
-    id: number;
-    type: ReportType;
-    status: ReportStatus;
-    title: string;
-    bodyMd: string;
-    summary: string;
-    source: string | undefined;
-    sourceJobId: string | undefined;
-    dedupeKey: string | undefined;
-    metadata: Record<string, unknown>;
-    createdAt: string;
-    updatedAt: string;
-    occurredAt: string;
-}
-
-interface ReportsResponse {
-    items: ReportItem[];
-}
-
-interface ReportResponse {
-    report: ReportItem;
-}
-
-interface CreateReportInput {
-    type: ReportType;
-    status?: ReportStatus;
-    title: string;
-    bodyMd: string;
-    summary?: string;
-    source?: string;
-    sourceJobId?: string;
-    dedupeKey?: string;
-    metadata?: Record<string, unknown>;
-    occurredAt?: string;
-    notify?: boolean;
-}
-
-interface ReportsFilters {
-    status?: ReportStatus;
-    type?: ReportType;
-}
+import { apiDeleteParsed, apiFetchParsed, apiPostParsed } from "./useApi";
 
 const REPORTS_REFRESH_INTERVAL_MS = refreshPolicy.background;
 
@@ -69,7 +30,7 @@ export function useReports(filters: ReportsFilters = {}) {
     return useQuery({
         queryKey: reportKeys.list(filters),
         queryFn: () =>
-            apiFetchRequired<ReportsResponse>(`/reports${reportQueryString(filters)}`),
+            apiFetchParsed(`/reports${reportQueryString(filters)}`, parseReportsResponse),
         refetchInterval: REPORTS_REFRESH_INTERVAL_MS,
         staleTime: 5000,
     });
@@ -79,7 +40,7 @@ export function useReport(id: number | undefined) {
     return useQuery({
         enabled: id !== undefined,
         queryKey: reportKeys.detail(id),
-        queryFn: () => apiFetchRequired<ReportResponse>(`/reports/${id}`),
+        queryFn: () => apiFetchParsed(`/reports/${id}`, parseReportResponse),
         refetchInterval: REPORTS_REFRESH_INTERVAL_MS,
         staleTime: 5000,
     });
@@ -90,7 +51,7 @@ export function useCreateReport() {
 
     return useMutation({
         mutationFn: (payload: CreateReportInput) =>
-            apiPostRequired<{ isOk: boolean; report: ReportItem }>("/reports", payload),
+            apiPostParsed("/reports", parseCreateReportResponse, payload),
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: reportKeys.all });
             void queryClient.invalidateQueries({ queryKey: ["notifications"] });
@@ -103,7 +64,7 @@ export function useDeleteReport() {
 
     return useMutation({
         mutationFn: (id: number) =>
-            apiDeleteRequired<{ deleted: number; isOk: boolean }>(`/reports/${id}`),
+            apiDeleteParsed(`/reports/${id}`, parseDeleteReportResponse),
         onSuccess: (_data, id) => {
             queryClient.removeQueries({ exact: true, queryKey: reportKeys.detail(id) });
             void queryClient.invalidateQueries({ queryKey: reportKeys.all });

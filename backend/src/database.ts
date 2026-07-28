@@ -13,6 +13,7 @@ import {
     resolveDashboardProjectPathsForRuntime,
     resolveDashboardRuntimePath,
 } from "./lib/dashboardPaths.ts";
+import { recordDatabaseOperation } from "./lib/databaseMetrics.ts";
 
 type DatabaseSync = Database;
 
@@ -213,6 +214,44 @@ const activeDatabaseState: {
     path: undefined,
 };
 
+const instrumentedStatements = new WeakMap<object, object>();
+const measuredStatementMethods = new Set(["all", "get", "run", "values"]);
+
+function measuredDatabaseOperation<T>(operation: () => T): T {
+    const startedAt = performance.now();
+    try {
+        const result = operation();
+        recordDatabaseOperation(performance.now() - startedAt);
+        return result;
+    } catch (error) {
+        recordDatabaseOperation(performance.now() - startedAt, error);
+        throw error;
+    }
+}
+
+function instrumentStatement<T extends object>(statement: T): T {
+    const cached = instrumentedStatements.get(statement);
+    if (cached) return cached as T;
+    const instrumented = new Proxy(statement, {
+        get(target, property) {
+            const value = Reflect.get(target, property, target);
+            if (
+                typeof value === "function" &&
+                typeof property === "string" &&
+                measuredStatementMethods.has(property)
+            ) {
+                return (...arguments_: unknown[]) =>
+                    measuredDatabaseOperation(() =>
+                        Reflect.apply(value, target, arguments_)
+                    );
+            }
+            return typeof value === "function" ? value.bind(target) : value;
+        },
+    });
+    instrumentedStatements.set(statement, instrumented);
+    return instrumented;
+}
+
 function currentDatabase(): DatabaseSync {
     if (process.env.NODE_ENV !== "test" && activeDatabaseState.database !== undefined) {
         return activeDatabaseState.database;
@@ -252,6 +291,19 @@ export const database = new Proxy({} as DatabaseSync, {
         }
         const active = currentDatabase();
         const value = Reflect.get(active, property, active);
-        return typeof value === "function" ? value.bind(active) : value;
+        if (typeof value !== "function") return value;
+        if (property === "prepare" || property === "query") {
+            return (...arguments_: unknown[]) => {
+                const statement = Reflect.apply(value, active, arguments_) as unknown;
+                return statement !== null && typeof statement === "object"
+                    ? instrumentStatement(statement)
+                    : statement;
+            };
+        }
+        if (property === "exec" || property === "run") {
+            return (...arguments_: unknown[]) =>
+                measuredDatabaseOperation(() => Reflect.apply(value, active, arguments_));
+        }
+        return value.bind(active);
     },
 });

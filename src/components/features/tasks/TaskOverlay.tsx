@@ -1,4 +1,4 @@
-import type { Task } from "../../../types/task";
+import type { Task } from "../../../../contracts/tasks";
 import { getPriority, PRIORITY_COLORS } from "../../../utils/taskUtilities";
 import { Badge } from "../../ui/Badge";
 

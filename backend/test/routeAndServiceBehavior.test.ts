@@ -984,13 +984,14 @@ describe("backend route and service behavior", () => {
         );
         expect(getInvalid.status).toBe(400);
 
+        const clearAutomation = JSON.parse("null") as null;
         const patch = await taskRoutes["/api/tasks/:id"].PATCH(
             requestWithParameters(
                 `/api/tasks/${id}`,
                 { id: String(id) },
                 {
                     body: JSON.stringify({
-                        automation: {},
+                        automation: clearAutomation,
                         labels: ["done", "priority-low"],
                         title: "Coverage route task updated",
                     }),
@@ -1125,7 +1126,6 @@ describe("backend route and service behavior", () => {
                 { id: String(id), updateId: String(updateId) },
                 {
                     body: JSON.stringify({
-                        author: "rajohan",
                         messageMd: "Raymond update",
                     }),
                     method: "PATCH",
@@ -2282,7 +2282,19 @@ describe("backend route and service behavior", () => {
         );
         expect(invalidJobPatchField.status).toBe(400);
         await expect(invalidJobPatchField.json()).resolves.toEqual({
-            error: "invalid patch field: enabled",
+            error: {
+                code: "invalid_request",
+                details: {
+                    issues: [
+                        {
+                            message: "must be a boolean",
+                            path: "body.patch.enabled",
+                        },
+                    ],
+                },
+                message: "body.patch.enabled: must be a boolean",
+                requestId: expect.any(String),
+            },
         });
 
         const missingJobRun = await jobRoutes["/api/jobs/:id/run"].POST(
@@ -4150,12 +4162,14 @@ describe("backend route and service behavior", () => {
 
         const teapotError = Object.assign(new Error("nope"), { statusCode: 418 });
         expect(execErrorResponse(teapotError)).toEqual({
-            error: "nope",
+            code: "exec_request_failed",
+            message: "nope",
             status: 418,
         });
         const unknownExecError = JSON.parse("null") as unknown;
         expect(execErrorResponse(unknownExecError)).toEqual({
-            error: "internal server error",
+            code: "exec_internal_error",
+            message: "internal server error",
             status: 500,
         });
 
@@ -4531,7 +4545,7 @@ describe("backend route and service behavior", () => {
 
     it("cached quota/system readers and notification checks", async () => {
         const { TASK_ASSIGNEE_IDS, TASK_ASSIGNEES } =
-            await import("../src/constants/taskActors.ts");
+            await import("../../contracts/tasks.ts");
         const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
         const { fetchCachedQuotas, hasQuotaStatus } =
             await import("../src/lib/quotasCache.ts");

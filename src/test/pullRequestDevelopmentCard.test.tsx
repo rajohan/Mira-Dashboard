@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, jest } from "bun:test";
 
+import type { PullRequestPreviewStatus } from "../../contracts/delivery";
 import { PullRequestDevelopmentCard } from "../components/features/delivery/PullRequestDevelopmentCard";
-import type { PullRequestPreviewStatus } from "../hooks";
 
 function preview(
     status: PullRequestPreviewStatus["status"],

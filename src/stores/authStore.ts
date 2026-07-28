@@ -1,5 +1,7 @@
 import { Store, useSelector } from "@tanstack/react-store";
 
+import { apiErrorFromResponse } from "../lib/apiError";
+
 /** Represents auth user. */
 export interface AuthUser {
     id: number;
@@ -74,7 +76,7 @@ async function fetchSession(): Promise<SessionResponse> {
     });
 
     if (!response.ok) {
-        throw new Error("Failed to fetch auth session");
+        throw await apiErrorFromResponse(response, "Failed to fetch auth session");
     }
 
     return response.json() as Promise<SessionResponse>;

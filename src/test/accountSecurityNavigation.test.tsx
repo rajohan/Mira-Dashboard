@@ -8,7 +8,7 @@ import {
     useRevokeAllSessions,
     useRevokeSession,
 } from "../hooks/useAccountSecurity";
-import { ApiError } from "../hooks/useApi";
+import { ApiError } from "../lib/apiError";
 import {
     notifyAuthSessionRotated,
     UNAUTHORIZED_EVENT_NAME,
@@ -142,8 +142,11 @@ describe("Account security logout navigation", () => {
                         return revokeRequests === 1
                             ? Response.json(
                                   {
-                                      code: "recent_verification_required",
-                                      error: "Recent verification is required",
+                                      error: {
+                                          code: "recent_verification_required",
+                                          message: "Recent verification is required",
+                                          requestId: "security-session-step-up",
+                                      },
                                   },
                                   { status: 403 }
                               )
@@ -216,7 +219,16 @@ describe("Account security logout navigation", () => {
                         init?.method === "DELETE"
                     ) {
                         revokeRequests += 1;
-                        return Response.json({ error: "Unauthorized" }, { status: 401 });
+                        return Response.json(
+                            {
+                                error: {
+                                    code: "unauthorized",
+                                    message: "Unauthorized",
+                                    requestId: "security-session-unauthorized",
+                                },
+                            },
+                            { status: 401 }
+                        );
                     }
                     if (String(input) === "/api/auth/session") {
                         return Response.json({
@@ -292,8 +304,11 @@ describe("Account security logout navigation", () => {
                         return confirmationRequests === 1
                             ? Response.json(
                                   {
-                                      code: "recent_verification_required",
-                                      error: "Recent verification is required",
+                                      error: {
+                                          code: "recent_verification_required",
+                                          message: "Recent verification is required",
+                                          requestId: "security-totp-step-up",
+                                      },
                                   },
                                   { status: 403 }
                               )

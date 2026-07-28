@@ -1,16 +1,23 @@
+import type {
+    JobDisableIntent,
+    JobResourceClass,
+    ScheduledJobPatch as PublicScheduledJobPatch,
+    ScheduledJobRunStatus,
+    ScheduledJobScheduleType,
+    ScheduledJobTriggerType,
+} from "../../../contracts/jobs.ts";
+import type { SchedulerMetrics } from "../../../contracts/metrics.ts";
 import { database, sqlNullable } from "../database.ts";
 import { errorMessage } from "../lib/errors.ts";
-import {
-    isJobResourceClass,
-    type JobResourceClass,
-    withJobResourceClass,
-} from "../lib/jobResources.ts";
-import { type JobDisableIntent, parseJobDisableIntent } from "./jobDisableIntent.ts";
+import { isJobResourceClass, withJobResourceClass } from "../lib/jobResources.ts";
+import { runWithLogContext } from "../lib/logContext.ts";
+import { parseJobDisableIntent } from "./jobDisableIntent.ts";
 import {
     claimNextJobExecution,
     didHeartbeatJobWorker,
     finishJobExecution,
     getJobExecution,
+    getJobExecutionSummary,
     heartbeatJobExecution,
     insertJobExecution,
     type JobExecution,
@@ -68,8 +75,13 @@ const scheduledJobRuntimeState: {
     isSchedulerTickRunning: boolean;
     isExecutorClaimingPaused: boolean;
     isExecutorTickRunning: boolean;
+    lastSchedulerTickAt: string | undefined;
+    lastSchedulerTickDurationMs: number;
     missingCutoverRecoveryWarningKey: string | undefined;
     nextDeploymentCutoverReconcileAt: number;
+    schedulerQueueFailures: number;
+    schedulerTickFailures: number;
+    schedulerTicks: number;
     workerId: string;
 } = {
     scheduler: undefined,
@@ -80,15 +92,16 @@ const scheduledJobRuntimeState: {
     isSchedulerTickRunning: false,
     isExecutorClaimingPaused: false,
     isExecutorTickRunning: false,
+    lastSchedulerTickAt: undefined,
+    lastSchedulerTickDurationMs: 0,
     missingCutoverRecoveryWarningKey: undefined,
     nextDeploymentCutoverReconcileAt: 0,
+    schedulerQueueFailures: 0,
+    schedulerTickFailures: 0,
+    schedulerTicks: 0,
     workerId: "",
 };
 
-export type ScheduledJobScheduleType = "interval" | "daily" | "cron";
-export type ScheduledJobRunStatus =
-    "queued" | "running" | "success" | "failed" | "cancelled";
-export type ScheduledJobTriggerType = "manual" | "schedule" | "startup" | "system";
 export interface ScheduledJobActionContext {
     executionId: string;
     pauseWorkerClaims: () => () => void;
@@ -185,14 +198,8 @@ export interface ScheduledJobDefinition {
     timeoutMs?: number;
 }
 
-export interface ScheduledJobPatch {
+interface ScheduledJobPatch extends PublicScheduledJobPatch {
     clearDisableIntent?: boolean;
-    disableIntent?: JobDisableIntent | undefined;
-    enabled?: boolean;
-    scheduleType?: ScheduledJobScheduleType;
-    intervalSeconds?: number;
-    timeOfDay?: string | null | undefined;
-    cronExpression?: string | null | undefined;
 }
 
 interface ScheduledJobRow {
@@ -1227,6 +1234,7 @@ async function runDueJobs(): Promise<void> {
             enqueueScheduledJob(row.id, "schedule");
         } catch (error) {
             if (!isStaleScheduledRunError(error)) {
+                scheduledJobRuntimeState.schedulerQueueFailures += 1;
                 console.warn("[ScheduledJobs] Failed to queue due scheduled job:", error);
             }
             // Keep later due jobs queueing even if a persisted row is stale.
@@ -1239,10 +1247,12 @@ async function observeClaimedExecution(
     controller: AbortController
 ): Promise<void> {
     try {
-        await executeClaimedJobExecution(
-            execution,
-            scheduledJobRuntimeState.workerId,
-            controller.signal
+        await runWithLogContext({ jobId: execution.id }, () =>
+            executeClaimedJobExecution(
+                execution,
+                scheduledJobRuntimeState.workerId,
+                controller.signal
+            )
         );
     } catch (error) {
         console.warn("[ScheduledJobs] Queued execution failed unexpectedly:", error);
@@ -1565,15 +1575,76 @@ function scheduleTick(): void {
         return;
     }
     scheduledJobRuntimeState.isSchedulerTickRunning = true;
+    scheduledJobRuntimeState.schedulerTicks += 1;
+    scheduledJobRuntimeState.lastSchedulerTickAt = nowIso();
+    const startedAt = performance.now();
     void (async () => {
         try {
             await runDueJobs();
         } catch (error) {
+            scheduledJobRuntimeState.schedulerTickFailures += 1;
             console.warn("[ScheduledJobs] Scheduler tick failed:", error);
         } finally {
+            scheduledJobRuntimeState.lastSchedulerTickDurationMs =
+                Math.round(Math.max(0, performance.now() - startedAt) * 100) / 100;
             scheduledJobRuntimeState.isSchedulerTickRunning = false;
         }
     })();
+}
+
+/** Returns queue, worker, and due-schedule telemetry without job payloads. */
+export function getScheduledJobSchedulerMetrics(
+    timestamp = Date.now()
+): SchedulerMetrics {
+    const dueAt = new Date(timestamp).toISOString();
+    let due: {
+        count: number | null | undefined;
+        oldest_due_at: string | null | undefined;
+    } = { count: 0, oldest_due_at: undefined };
+    let queue: ReturnType<typeof getJobExecutionSummary> = {
+        activeResourceClasses: [],
+        oldestQueuedAgeMs: undefined,
+        oldestQueuedAt: undefined,
+        queued: 0,
+        running: 0,
+        workerCapacity: 0,
+        workerCount: 0,
+        workerLastHeartbeatAt: undefined,
+        workerOnline: false,
+    };
+    try {
+        due = database
+            .prepare(
+                `SELECT COUNT(*) AS count, MIN(next_run_at) AS oldest_due_at
+                 FROM scheduled_jobs
+                 WHERE enabled = 1
+                   AND next_run_at IS NOT NULL
+                   AND next_run_at <= ?`
+            )
+            .get(dueAt) as typeof due;
+        queue = getJobExecutionSummary(timestamp);
+    } catch {
+        // Diagnostics must remain available while readiness reports a database fault.
+    }
+    const oldestDueAt = due.oldest_due_at ?? undefined;
+    const parsedOldestDueAt = oldestDueAt ? Date.parse(oldestDueAt) : NaN;
+    return {
+        ...queue,
+        dueJobs: Number(due.count ?? 0),
+        executorActive: scheduledJobRuntimeState.executor !== undefined,
+        executorTickRunning: scheduledJobRuntimeState.isExecutorTickRunning,
+        lastTickAt: scheduledJobRuntimeState.lastSchedulerTickAt,
+        lastTickDurationMs: scheduledJobRuntimeState.lastSchedulerTickDurationMs,
+        oldestDueAt,
+        queueFailures: scheduledJobRuntimeState.schedulerQueueFailures,
+        scheduleLagMs: Number.isFinite(parsedOldestDueAt)
+            ? Math.max(0, timestamp - parsedOldestDueAt)
+            : 0,
+        schedulerActive: scheduledJobRuntimeState.scheduler !== undefined,
+        schedulerTickRunning: scheduledJobRuntimeState.isSchedulerTickRunning,
+        tickFailures: scheduledJobRuntimeState.schedulerTickFailures,
+        ticks: scheduledJobRuntimeState.schedulerTicks,
+    };
 }
 
 export function startScheduledJobScheduler(): void {

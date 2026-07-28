@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { FlaskConical, Play, RotateCw } from "lucide-react";
 
+import type { ScheduledJob } from "../../../../contracts/jobs";
 import { cacheKeys } from "../../../hooks/useCache";
 import {
     logRotationKeys,
@@ -8,7 +9,6 @@ import {
     useRunLogRotationDryRun,
 } from "../../../hooks/useLogRotation";
 import {
-    type ScheduledJob,
     ScheduledJobRunError,
     useRunScheduledJobNow,
     useScheduledJobs,

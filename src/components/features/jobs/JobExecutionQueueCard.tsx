@@ -1,10 +1,7 @@
 import { Activity, Clock3, Cpu, Layers3, XCircle } from "lucide-react";
 
-import {
-    type JobExecution,
-    useCancelJobExecution,
-    useJobExecutions,
-} from "../../../hooks";
+import type { JobExecution } from "../../../../contracts/jobs";
+import { useCancelJobExecution, useJobExecutions } from "../../../hooks";
 import { cn } from "../../../utils/cn";
 import { formatDate, formatDuration } from "../../../utils/format";
 import { Alert } from "../../ui/Alert";

@@ -8,6 +8,7 @@ import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card, CardTitle } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
+import { apiErrorFromResponse } from "../lib/apiError";
 import { authActions, authStore } from "../stores/authStore";
 
 /** Represents the bootstrap API response. */
@@ -26,16 +27,16 @@ interface LoginResponse {
 }
 
 async function responsePayload<T>(response: Response): Promise<T> {
-    let payload: T & { error?: string };
+    if (!response.ok) {
+        throw await apiErrorFromResponse(response, "Authentication failed");
+    }
+    let payload: unknown;
     try {
-        payload = (await response.json()) as T & { error?: string };
+        payload = await response.json();
     } catch {
         throw new Error("Authentication failed");
     }
-    if (!response.ok) {
-        throw new Error(payload.error || "Authentication failed");
-    }
-    return payload;
+    return payload as T;
 }
 
 /** Renders password-first login followed by a configured second factor. */

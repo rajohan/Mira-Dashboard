@@ -677,8 +677,11 @@ describe("backend service utilities", () => {
             expect(response.status).toBe(503);
             expect(response.headers.get("retry-after")).toBe("5");
             await expect(response.json()).resolves.toEqual({
-                code: "deployment_cutover_in_progress",
-                error: "Dashboard writes are paused while the release is verified",
+                error: {
+                    code: "deployment_cutover_in_progress",
+                    message: "Dashboard writes are paused while the release is verified",
+                    requestId: expect.any(String),
+                },
             });
             expect(handler).not.toHaveBeenCalled();
         } finally {
@@ -1187,7 +1190,11 @@ describe("backend service utilities", () => {
 
         expect(response.status).toBe(503);
         await expect(response.json()).resolves.toEqual({
-            error: "Audit trail unavailable",
+            error: {
+                code: "service_unavailable",
+                message: "Audit trail unavailable",
+                requestId: expect.any(String),
+            },
         });
         expect(handler).not.toHaveBeenCalled();
         expect(errorSpy).toHaveBeenCalledWith(
@@ -1274,7 +1281,11 @@ describe("backend service utilities", () => {
             );
             expect(sameOriginMutation.status).toBe(401);
             await expect(sameOriginMutation.json()).resolves.toEqual({
-                error: "Unauthorized",
+                error: {
+                    code: "unauthorized",
+                    message: "Unauthorized",
+                    requestId: expect.any(String),
+                },
             });
 
             const publicSameOriginMutation = await callTestRoute(
@@ -1316,7 +1327,11 @@ describe("backend service utilities", () => {
             );
             expect(crossOriginMutation.status).toBe(403);
             await expect(crossOriginMutation.json()).resolves.toEqual({
-                error: "Forbidden request origin",
+                error: {
+                    code: "forbidden",
+                    message: "Forbidden request origin",
+                    requestId: expect.any(String),
+                },
             });
             const crossOriginRequestId =
                 crossOriginMutation.headers.get("x-request-id") || "";
@@ -1344,19 +1359,31 @@ describe("backend service utilities", () => {
             const privateResponse = await callTestRoute(routes, "/api/private", server);
             expect(privateResponse.status).toBe(401);
             await expect(privateResponse.json()).resolves.toEqual({
-                error: "Unauthorized",
+                error: {
+                    code: "unauthorized",
+                    message: "Unauthorized",
+                    requestId: expect.any(String),
+                },
             });
 
             const syntaxResponse = await callTestRoute(routes, "/syntax", server);
             expect(syntaxResponse.status).toBe(400);
             await expect(syntaxResponse.json()).resolves.toEqual({
-                error: "Invalid JSON",
+                error: {
+                    code: "invalid_json",
+                    message: "Invalid JSON",
+                    requestId: expect.any(String),
+                },
             });
 
             const statusResponse = await callTestRoute(routes, "/status-error", server);
             expect(statusResponse.status).toBe(409);
             await expect(statusResponse.json()).resolves.toEqual({
-                error: "Job capacity is full",
+                error: {
+                    code: "conflict",
+                    message: "Job capacity is full",
+                    requestId: expect.any(String),
+                },
             });
 
             resetRequestPolicyForTests();
@@ -1385,7 +1412,11 @@ describe("backend service utilities", () => {
                 const generic = await callTestRoute(routes, "/generic-error", server);
                 expect(generic.status).toBe(500);
                 await expect(generic.json()).resolves.toEqual({
-                    error: "Internal server error",
+                    error: {
+                        code: "internal_error",
+                        message: "Internal server error",
+                        requestId: expect.any(String),
+                    },
                 });
             } finally {
                 Object.defineProperty(console, "error", {
