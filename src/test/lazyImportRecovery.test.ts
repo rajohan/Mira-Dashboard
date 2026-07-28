@@ -1,6 +1,7 @@
 import { describe, expect, it, jest } from "bun:test";
 
 import { loadLazyModule } from "../lib/lazyImportRecovery";
+import { preloadModule } from "../lib/routeModules";
 
 function recoveryStorage(initialValue?: string) {
     let value = initialValue;
@@ -16,6 +17,16 @@ function recoveryStorage(initialValue?: string) {
 }
 
 describe("lazy import recovery", () => {
+    it("keeps speculative preload failures silent", async () => {
+        const importError = new TypeError("Failed to fetch dynamically imported module");
+        const load = jest.fn(async () => {
+            throw importError;
+        });
+
+        await expect(preloadModule(load)).resolves.toBeUndefined();
+        expect(load).toHaveBeenCalledTimes(1);
+    });
+
     it("clears the module reload guard after a successful import", async () => {
         const storage = recoveryStorage("100");
         const routeModule = { Tasks: () => {} };

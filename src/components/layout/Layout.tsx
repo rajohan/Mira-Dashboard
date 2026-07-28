@@ -25,6 +25,7 @@ import {
 } from "react";
 
 import { DELIVERY_NAV_REFRESH_MS, useCacheEntry, usePullRequests } from "../../hooks";
+import { preloadRouteModule } from "../../lib/routeModules";
 import { cn } from "../../utils/cn";
 import { AppHeader } from "./AppHeader";
 
@@ -110,8 +111,9 @@ export function Layout({ children }: LayoutProperties) {
                         <Link
                             key={item.to}
                             to={item.to}
-                            preload="intent"
                             aria-current={isActive ? "page" : undefined}
+                            onFocus={() => preloadRouteModule(item.to)}
+                            onMouseEnter={() => preloadRouteModule(item.to)}
                             className={cn(
                                 "mb-1 flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 transition-colors",
                                 isActive

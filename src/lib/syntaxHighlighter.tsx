@@ -1,4 +1,8 @@
-import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
+import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
+import {
+    Light as HighlightJsSyntaxHighlighter,
+    PrismLight as PrismSyntaxHighlighter,
+} from "react-syntax-highlighter";
 import bash from "react-syntax-highlighter/dist/esm/languages/hljs/bash";
 import c from "react-syntax-highlighter/dist/esm/languages/hljs/c";
 import cpp from "react-syntax-highlighter/dist/esm/languages/hljs/cpp";
@@ -25,6 +29,8 @@ import swift from "react-syntax-highlighter/dist/esm/languages/hljs/swift";
 import typescript from "react-syntax-highlighter/dist/esm/languages/hljs/typescript";
 import xml from "react-syntax-highlighter/dist/esm/languages/hljs/xml";
 import yaml from "react-syntax-highlighter/dist/esm/languages/hljs/yaml";
+import graphql from "react-syntax-highlighter/dist/esm/languages/prism/graphql";
+import { okaidia } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 const languages = {
     bash,
@@ -55,9 +61,27 @@ const languages = {
     xml,
     yaml,
 };
+const prismLanguages = { graphql };
 
 for (const [name, language] of Object.entries(languages)) {
-    SyntaxHighlighter.registerLanguage(name, language);
+    HighlightJsSyntaxHighlighter.registerLanguage(name, language);
+}
+for (const [name, language] of Object.entries(prismLanguages)) {
+    PrismSyntaxHighlighter.registerLanguage(name, language);
 }
 
-export { Light as CodeSyntaxHighlighter } from "react-syntax-highlighter";
+/**
+ * Uses the smaller Highlight.js registry generally and Prism's GraphQL grammar
+ * only where Highlight.js has no equivalent language module.
+ */
+export function CodeSyntaxHighlighter({
+    language,
+    style,
+    ...properties
+}: SyntaxHighlighterProps) {
+    return language === "graphql" ? (
+        <PrismSyntaxHighlighter {...properties} language={language} style={okaidia} />
+    ) : (
+        <HighlightJsSyntaxHighlighter {...properties} language={language} style={style} />
+    );
+}

@@ -9,70 +9,71 @@ import {
 
 import { Layout } from "./components/layout/Layout";
 import { loadLazyModule } from "./lib/lazyImportRecovery";
+import { routeModules } from "./lib/routeModules";
 import { authActions, authStore } from "./stores/authStore";
 
 const Agents = lazyRouteComponent(
-    () => loadLazyModule("route-agents", () => import("./pages/Agents")),
+    () => loadLazyModule("route-agents", routeModules.agents),
     "Agents"
 );
 const Chat = lazyRouteComponent(
-    () => loadLazyModule("route-chat", () => import("./pages/Chat")),
+    () => loadLazyModule("route-chat", routeModules.chat),
     "Chat"
 );
 const Dashboard = lazyRouteComponent(
-    () => loadLazyModule("route-dashboard", () => import("./pages/Dashboard")),
+    () => loadLazyModule("route-dashboard", routeModules.dashboard),
     "Dashboard"
 );
 const Database = lazyRouteComponent(
-    () => loadLazyModule("route-database", () => import("./pages/Database")),
+    () => loadLazyModule("route-database", routeModules.database),
     "Database"
 );
 const Delivery = lazyRouteComponent(
-    () => loadLazyModule("route-delivery", () => import("./pages/Delivery")),
+    () => loadLazyModule("route-delivery", routeModules.delivery),
     "Delivery"
 );
 const Docker = lazyRouteComponent(
-    () => loadLazyModule("route-docker", () => import("./pages/Docker")),
+    () => loadLazyModule("route-docker", routeModules.docker),
     "Docker"
 );
 const Files = lazyRouteComponent(
-    () => loadLazyModule("route-files", () => import("./pages/Files")),
+    () => loadLazyModule("route-files", routeModules.files),
     "Files"
 );
 const Jobs = lazyRouteComponent(
-    () => loadLazyModule("route-jobs", () => import("./pages/Jobs")),
+    () => loadLazyModule("route-jobs", routeModules.jobs),
     "Jobs"
 );
 const Login = lazyRouteComponent(
-    () => loadLazyModule("route-login", () => import("./pages/Login")),
+    () => loadLazyModule("route-login", routeModules.login),
     "Login"
 );
 const Logs = lazyRouteComponent(
-    () => loadLazyModule("route-logs", () => import("./pages/Logs")),
+    () => loadLazyModule("route-logs", routeModules.logs),
     "Logs"
 );
 const Moltbook = lazyRouteComponent(
-    () => loadLazyModule("route-moltbook", () => import("./pages/Moltbook")),
+    () => loadLazyModule("route-moltbook", routeModules.moltbook),
     "Moltbook"
 );
 const Reports = lazyRouteComponent(
-    () => loadLazyModule("route-reports", () => import("./pages/Reports")),
+    () => loadLazyModule("route-reports", routeModules.reports),
     "Reports"
 );
 const Sessions = lazyRouteComponent(
-    () => loadLazyModule("route-sessions", () => import("./pages/Sessions")),
+    () => loadLazyModule("route-sessions", routeModules.sessions),
     "Sessions"
 );
 const Settings = lazyRouteComponent(
-    () => loadLazyModule("route-settings", () => import("./pages/Settings")),
+    () => loadLazyModule("route-settings", routeModules.settings),
     "Settings"
 );
 const Tasks = lazyRouteComponent(
-    () => loadLazyModule("route-tasks", () => import("./pages/Tasks")),
+    () => loadLazyModule("route-tasks", routeModules.tasks),
     "Tasks"
 );
 const Terminal = lazyRouteComponent(
-    () => loadLazyModule("route-terminal", () => import("./pages/Terminal")),
+    () => loadLazyModule("route-terminal", routeModules.terminal),
     "Terminal"
 );
 
