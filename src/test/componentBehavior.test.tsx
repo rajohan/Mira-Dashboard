@@ -2615,6 +2615,7 @@ describe("shared component helpers", () => {
         expect(
             screen.getByText("Bash").closest("[class*='border-amber']")
         ).not.toContainElement(screen.getByText("answer"));
+        await waitFor(() => expect(onDynamicContentLoad).toHaveBeenCalled());
 
         await user.click(screen.getByRole("button", { name: /follow/i }));
         expect(onUserScrollIntent).not.toHaveBeenCalled();

@@ -16,10 +16,12 @@ import {
     type RefObject,
     Suspense,
     useEffect,
+    useLayoutEffect,
     useRef,
     useState,
 } from "react";
 
+import { loadLazyModule } from "../../../lib/lazyImportRecovery";
 import { formatDate, formatSize } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
 import { ChatMessageDetails } from "./ChatMessageDetails";
@@ -38,9 +40,20 @@ import {
 import { chatErrorMessage } from "./chatUtilities";
 
 const ChatMarkdown = lazy(async () => {
-    const module = await import("./ChatMarkdown");
+    const module = await loadLazyModule("chat-markdown", () => import("./ChatMarkdown"));
     return { default: module.ChatMarkdown };
 });
+
+function SettledChatMarkdown({ onLoad, text }: { onLoad: () => void; text: string }) {
+    const onLoadReference = useRef(onLoad);
+    onLoadReference.current = onLoad;
+
+    useLayoutEffect(() => {
+        onLoadReference.current();
+    }, []);
+
+    return <ChatMarkdown text={text} />;
+}
 
 const SCROLL_KEYS = new Set([
     " ",
@@ -698,7 +711,10 @@ export function ChatMessagesList({
                                                     </div>
                                                 }
                                             >
-                                                <ChatMarkdown text={row.message.text} />
+                                                <SettledChatMarkdown
+                                                    onLoad={onDynamicContentLoad}
+                                                    text={row.message.text}
+                                                />
                                             </Suspense>
                                         ) : undefined}
                                         <AttachmentList
