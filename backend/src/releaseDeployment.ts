@@ -83,13 +83,20 @@ const MANAGED_RELEASE_BUILD_ENVIRONMENT = [
 ] as const;
 
 function managedReleaseEnvironment(
-    contract: ManagedDashboardUnitContract
+    contract: ManagedDashboardUnitContract,
+    bunExecutable: string
 ): NodeJS.ProcessEnv {
     const environment: NodeJS.ProcessEnv = {};
     for (const key of MANAGED_RELEASE_BUILD_ENVIRONMENT) {
         if (process.env[key] !== undefined) {
             environment[key] = process.env[key];
         }
+    }
+    if (path.isAbsolute(bunExecutable)) {
+        const bunBinDirectory = path.dirname(bunExecutable);
+        environment.PATH = [bunBinDirectory, environment.PATH]
+            .filter(Boolean)
+            .join(path.delimiter);
     }
     return {
         ...environment,
@@ -326,7 +333,7 @@ export async function stageDashboardRelease(
         options.onProgress?.("Preflighting existing immutable release");
         await commandRunner(bunExecutable, ["dist/databasePreflight.js"], {
             cwd: path.join(existingRelease.path, "backend"),
-            environment: managedReleaseEnvironment(contract),
+            environment: managedReleaseEnvironment(contract, bunExecutable),
             signal: options.signal,
             timeoutMs: 120_000,
         });
@@ -347,7 +354,7 @@ export async function stageDashboardRelease(
         worktreeRoot,
         `release-${expectedCommit.slice(0, 12)}-${randomUUID()}`
     );
-    const environment = managedReleaseEnvironment(contract);
+    const environment = managedReleaseEnvironment(contract, bunExecutable);
     let isWorktreeCreated = false;
     let stagedRelease: ManagedDashboardRelease | undefined;
     let stagingError: Error | undefined;

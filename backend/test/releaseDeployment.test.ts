@@ -278,8 +278,57 @@ describe("immutable release deployment", () => {
         }
     });
 
+    it("exposes the selected Bun executable to nested release scripts", async () => {
+        const options = stagingOptions();
+        const bunExecutable = path.join(options.sourceRoot, "bun-runtime", "bin", "bun");
+        let deployPath = "";
+        const runner: DashboardReleaseCommandRunner = async (
+            command,
+            arguments_,
+            commandOptions
+        ) => {
+            if (command === "git" && arguments_[0] === "worktree") {
+                if (arguments_[1] === "add") {
+                    const worktreePath = String(arguments_[3]);
+                    mkdirSync(worktreePath);
+                    await createReleaseFixture(worktreePath, COMMIT_SHA);
+                } else if (arguments_[1] === "remove") {
+                    rmSync(String(arguments_[3]), { force: true, recursive: true });
+                }
+            }
+            if (
+                command === bunExecutable &&
+                arguments_[0] === "run" &&
+                arguments_[1] === "deploy:prepare"
+            ) {
+                deployPath = commandOptions.environment.PATH ?? "";
+            }
+            return {
+                stderr: "",
+                stdout:
+                    command === "git" && arguments_[0] === "rev-parse"
+                        ? `${COMMIT_SHA}\n`
+                        : "",
+            };
+        };
+
+        await stageDashboardRelease(COMMIT_SHA, {
+            ...options,
+            bunExecutable,
+            commandRunner: runner,
+        });
+
+        expect(deployPath.split(path.delimiter)[0]).toBe(path.dirname(bunExecutable));
+    });
+
     it("reruns database preflight when reusing a verified immutable release", async () => {
         const options = stagingOptions();
+        const bunExecutable = path.join(
+            options.sourceRoot,
+            "existing-bun-runtime",
+            "bin",
+            "bun"
+        );
         const buildRoot = path.join(options.worktreeRoot, "prepared");
         mkdirSync(buildRoot);
         await createReleaseFixture(buildRoot, COMMIT_SHA);
@@ -312,9 +361,11 @@ describe("immutable release deployment", () => {
             command: string;
             cwd: string;
             dashboardEnvironment: Record<string, string | undefined>;
+            pathEnvironment: string;
         }> = [];
         const reused = await stageDashboardRelease(COMMIT_SHA, {
             ...options,
+            bunExecutable,
             commandRunner: (command, arguments_, commandOptions) => {
                 return Promise.try(() => {
                     calls.push({
@@ -326,6 +377,7 @@ describe("immutable release deployment", () => {
                                 key.startsWith("MIRA_DASHBOARD_")
                             )
                         ),
+                        pathEnvironment: commandOptions.environment.PATH ?? "",
                     });
                     return { stderr: "", stdout: "" };
                 });
@@ -336,14 +388,18 @@ describe("immutable release deployment", () => {
         expect(calls).toEqual([
             {
                 arguments_: ["dist/databasePreflight.js"],
-                command: process.execPath,
+                command: bunExecutable,
                 cwd: path.join(reused.path, "backend"),
                 dashboardEnvironment: {
                     MIRA_DASHBOARD_PROJECT_ROOT:
                         resolveDashboardProjectPaths().projectRoot,
                 },
+                pathEnvironment: expect.any(String),
             },
         ]);
+        expect(calls[0]?.pathEnvironment.split(path.delimiter)[0]).toBe(
+            path.dirname(bunExecutable)
+        );
         expect(
             stageDashboardRelease(COMMIT_SHA, {
                 ...options,
