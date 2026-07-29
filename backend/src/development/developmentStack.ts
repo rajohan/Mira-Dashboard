@@ -105,10 +105,14 @@ function developmentAppLogPath(config: DevelopmentStackConfig): string {
     return path.join(developmentLogsRoot(config), "dashboard.ndjson");
 }
 
+function syntheticDevelopmentOpenClawLogsRoot(config: DevelopmentStackConfig): string {
+    return path.join(developmentLogsRoot(config), "openclaw");
+}
+
 function developmentOpenClawLogsRoot(config: DevelopmentStackConfig): string {
     return config.openClawLogMode === "host-read-only"
         ? HOST_OPENCLAW_LOGS_ROOT
-        : path.join(developmentLogsRoot(config), "openclaw");
+        : syntheticDevelopmentOpenClawLogsRoot(config);
 }
 
 interface DevelopmentLogFixtureEntry {
@@ -151,7 +155,7 @@ function developmentLogPath(
     timestamp = new Date()
 ): string {
     return path.join(
-        developmentOpenClawLogsRoot(config),
+        syntheticDevelopmentOpenClawLogsRoot(config),
         `openclaw-${formatOpenClawLogDate(timestamp)}.log`
     );
 }
@@ -244,7 +248,7 @@ function prepareDevelopmentLog(config: DevelopmentStackConfig): void {
         }
         return;
     }
-    ensurePrivateStateDirectory(config, developmentOpenClawLogsRoot(config));
+    ensurePrivateStateDirectory(config, syntheticDevelopmentOpenClawLogsRoot(config));
     const timestamp = new Date();
     seedDevelopmentOpenClawLog(config, timestamp);
     seedDevelopmentOpenClawLog(
