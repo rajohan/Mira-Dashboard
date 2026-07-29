@@ -188,7 +188,12 @@ describe("managed Bun runtimes", () => {
         expect(hasManagedBunRuntime(retainedIdentity, runtimeRoot)).toBe(true);
         expect(hasManagedBunRuntime(removedIdentity, runtimeRoot)).toBe(false);
         expect(readdirSync(runtimeRoot).toSorted()).toEqual([retainedIdentity, "README"]);
-        expect(pruneManagedBunRuntimes([removedIdentity], runtimeRoot)).rejects.toThrow(
+        const unavailableRuntimeError = await pruneManagedBunRuntimes(
+            [removedIdentity],
+            runtimeRoot
+        ).catch((error: unknown) => error);
+        expect(unavailableRuntimeError).toBeInstanceOf(Error);
+        expect((unavailableRuntimeError as Error).message).toBe(
             `Retained release requires unavailable managed Bun runtime ${removedIdentity}`
         );
     });
