@@ -323,6 +323,12 @@ describe("immutable release deployment", () => {
 
     it("reruns database preflight when reusing a verified immutable release", async () => {
         const options = stagingOptions();
+        const bunExecutable = path.join(
+            options.sourceRoot,
+            "existing-bun-runtime",
+            "bin",
+            "bun"
+        );
         const buildRoot = path.join(options.worktreeRoot, "prepared");
         mkdirSync(buildRoot);
         await createReleaseFixture(buildRoot, COMMIT_SHA);
@@ -355,9 +361,11 @@ describe("immutable release deployment", () => {
             command: string;
             cwd: string;
             dashboardEnvironment: Record<string, string | undefined>;
+            pathEnvironment: string;
         }> = [];
         const reused = await stageDashboardRelease(COMMIT_SHA, {
             ...options,
+            bunExecutable,
             commandRunner: (command, arguments_, commandOptions) => {
                 return Promise.try(() => {
                     calls.push({
@@ -369,6 +377,7 @@ describe("immutable release deployment", () => {
                                 key.startsWith("MIRA_DASHBOARD_")
                             )
                         ),
+                        pathEnvironment: commandOptions.environment.PATH ?? "",
                     });
                     return { stderr: "", stdout: "" };
                 });
@@ -379,14 +388,18 @@ describe("immutable release deployment", () => {
         expect(calls).toEqual([
             {
                 arguments_: ["dist/databasePreflight.js"],
-                command: process.execPath,
+                command: bunExecutable,
                 cwd: path.join(reused.path, "backend"),
                 dashboardEnvironment: {
                     MIRA_DASHBOARD_PROJECT_ROOT:
                         resolveDashboardProjectPaths().projectRoot,
                 },
+                pathEnvironment: expect.any(String),
             },
         ]);
+        expect(calls[0]?.pathEnvironment.split(path.delimiter)[0]).toBe(
+            path.dirname(bunExecutable)
+        );
         expect(
             stageDashboardRelease(COMMIT_SHA, {
                 ...options,
