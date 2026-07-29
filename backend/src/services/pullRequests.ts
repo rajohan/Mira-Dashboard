@@ -36,7 +36,7 @@ import {
     stageDashboardRelease,
 } from "../releaseDeployment.ts";
 import {
-    assertDashboardReleaseHostRuntimeCompatible,
+    assertDashboardReleaseRuntimeAvailable,
     assertManagedDashboardReleaseRollbackSchemaCompatible,
     type ManagedDashboardRelease,
     readDashboardReleaseState,
@@ -2740,7 +2740,7 @@ async function runDeploymentJob(
                 );
             }
         }
-        assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
+        assertDashboardReleaseRuntimeAvailable(rollbackRelease);
 
         const candidate = await stageDashboardRelease(expectedCommit, {
             bunExecutable: resolveBunExecutable(),
@@ -2834,7 +2834,7 @@ async function runRollbackJob(
                 `Previous release is not eligible for rollback: ${ineligibilityReason}`
             );
         }
-        assertDashboardReleaseHostRuntimeCompatible(state.previous);
+        assertDashboardReleaseRuntimeAvailable(state.previous);
 
         const cutoverJob: DeploymentJob = {
             ...currentJob,
@@ -3021,7 +3021,7 @@ export async function prepareAndStartRollback(
                 { statusCode: 409 }
             );
         }
-        assertDashboardReleaseHostRuntimeCompatible(state.previous);
+        assertDashboardReleaseRuntimeAvailable(state.previous);
 
         job = {
             id: deploymentId,

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { databaseMigrations } from "../../src/databaseMigrations/index.ts";
+import { currentBunRuntimeIdentity } from "../../src/managedBunRuntime.ts";
 import {
     databaseMigrationInventorySha256,
     loadReleaseManifest,
@@ -52,7 +53,7 @@ export async function createReleaseFixture(
         writeFileSync(
             path.join(componentRoot, "build-identity.json"),
             `${JSON.stringify({
-                bunVersion: Bun.version,
+                bunVersion: currentBunRuntimeIdentity(),
                 commitSha,
                 component,
                 formatVersion: 1,

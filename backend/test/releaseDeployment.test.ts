@@ -68,7 +68,9 @@ function stagingOptions() {
     mkdirSync(sourceRoot);
     mkdirSync(worktreeRoot);
     return {
+        cacheBunRuntime: () => Promise.resolve(process.execPath),
         releasesRoot,
+        resolveBunRuntime: () => process.execPath,
         sourceRoot,
         worktreeRoot,
     };
@@ -92,6 +94,7 @@ describe("immutable release deployment", () => {
             developmentPreviewStateRoot: "/srv/dashboard/development/state/preview",
             developmentWorktreeRoot: "/srv/dashboard/development/worktrees",
             productionCheckoutRoot: "/srv/dashboard/production/checkout",
+            productionBunRuntimeRoot: "/srv/dashboard/production/runtimes/bun",
             productionDatabasePath: "/srv/dashboard/production/state/mira-dashboard.db",
             productionReleasesRoot: "/srv/dashboard/production/releases",
             projectRoot: "/srv/dashboard",
@@ -163,6 +166,10 @@ describe("immutable release deployment", () => {
             expect(unit).toContain(
                 `Environment=MIRA_DASHBOARD_PROJECT_ROOT=${PRODUCTION_PATHS.projectRoot}`
             );
+            expect(unit).toContain(
+                `${PRODUCTION_PATHS.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh`
+            );
+            expect(unit).not.toContain("/home/ubuntu/.bun/bin/bun");
             for (const obsoleteEnvironment of [
                 "MIRA_DASHBOARD_DB_PATH",
                 "MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE",
@@ -206,6 +213,7 @@ describe("immutable release deployment", () => {
             cwd: string;
             dashboardEnvironment: Record<string, string | undefined>;
         }> = [];
+        const runtimeCacheCalls: Array<{ source: string; version: string }> = [];
         const progress: string[] = [];
         const runner: DashboardReleaseCommandRunner = async (
             command,
@@ -242,6 +250,10 @@ describe("immutable release deployment", () => {
 
         const release = await stageDashboardRelease(COMMIT_SHA, {
             ...options,
+            cacheBunRuntime: (source, version) => {
+                runtimeCacheCalls.push({ source, version });
+                return Promise.resolve(process.execPath);
+            },
             commandRunner: runner,
             onProgress: (message) => {
                 progress.push(message);
@@ -269,7 +281,14 @@ describe("immutable release deployment", () => {
             "Creating isolated release worktree",
             "Installing release dependencies",
             "Building and preflighting release",
+            "Caching release Bun runtime",
             "Publishing verified immutable release",
+        ]);
+        expect(runtimeCacheCalls).toEqual([
+            {
+                source: process.execPath,
+                version: release.manifest.bunVersion,
+            },
         ]);
         for (const call of calls) {
             expect(call.dashboardEnvironment).toEqual({
@@ -363,9 +382,16 @@ describe("immutable release deployment", () => {
             dashboardEnvironment: Record<string, string | undefined>;
             pathEnvironment: string;
         }> = [];
+        const runtimeCacheCalls: Array<{ source: string; version: string }> = [];
+        let runtimeCached = false;
         const reused = await stageDashboardRelease(COMMIT_SHA, {
             ...options,
             bunExecutable,
+            cacheBunRuntime: (source, version) => {
+                runtimeCacheCalls.push({ source, version });
+                runtimeCached = true;
+                return Promise.resolve(bunExecutable);
+            },
             commandRunner: (command, arguments_, commandOptions) => {
                 return Promise.try(() => {
                     calls.push({
@@ -381,6 +407,12 @@ describe("immutable release deployment", () => {
                     });
                     return { stderr: "", stdout: "" };
                 });
+            },
+            resolveBunRuntime: () => {
+                if (!runtimeCached) {
+                    throw new Error("runtime is not cached yet");
+                }
+                return bunExecutable;
             },
         });
 
@@ -400,6 +432,12 @@ describe("immutable release deployment", () => {
         expect(calls[0]?.pathEnvironment.split(path.delimiter)[0]).toBe(
             path.dirname(bunExecutable)
         );
+        expect(runtimeCacheCalls).toEqual([
+            {
+                source: bunExecutable,
+                version: reused.manifest.bunVersion,
+            },
+        ]);
         expect(
             stageDashboardRelease(COMMIT_SHA, {
                 ...options,

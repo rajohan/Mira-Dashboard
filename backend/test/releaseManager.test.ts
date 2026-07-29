@@ -25,7 +25,7 @@ import {
 import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
 import {
     activateDashboardRelease,
-    assertDashboardReleaseHostRuntimeCompatible,
+    assertDashboardReleaseRuntimeAvailable,
     assertReleaseTransitionLockCommandSucceeded,
     ensureDashboardReleaseLayout,
     loadManagedRelease,
@@ -695,36 +695,42 @@ describe("Dashboard immutable release manager", () => {
         const runtimeRoot = temporaryReleasesRoot();
         await createManagedRelease(runtimeRoot, FIRST_COMMIT, FIRST_COMMIT, "0.0.0");
         const incompatibleRelease = await loadManagedRelease(runtimeRoot, FIRST_COMMIT);
-        expect(() =>
-            assertDashboardReleaseHostRuntimeCompatible(incompatibleRelease)
-        ).toThrow("requires Bun 0.0.0");
+        expect(() => assertDashboardReleaseRuntimeAvailable(incompatibleRelease)).toThrow(
+            "requires unavailable managed Bun runtime 0.0.0"
+        );
         expect(
             activateDashboardRelease(FIRST_COMMIT, runtimeRoot, SCHEMA_6_OPTIONS)
-        ).rejects.toThrow("requires Bun 0.0.0");
+        ).rejects.toThrow("requires unavailable managed Bun runtime 0.0.0");
 
-        const forwardCompatibleRoot = temporaryReleasesRoot();
+        const cachedMajorRuntimeRoot = temporaryReleasesRoot();
         await createManagedRelease(
-            forwardCompatibleRoot,
+            cachedMajorRuntimeRoot,
             FIRST_COMMIT,
             FIRST_COMMIT,
             "1.3.14"
         );
-        const forwardCompatibleRelease = await loadManagedRelease(
-            forwardCompatibleRoot,
+        const cachedMajorRuntimeRelease = await loadManagedRelease(
+            cachedMajorRuntimeRoot,
             FIRST_COMMIT
         );
         expect(() =>
-            assertDashboardReleaseHostRuntimeCompatible(forwardCompatibleRelease, "1.4.0")
+            assertDashboardReleaseRuntimeAvailable(cachedMajorRuntimeRelease, {
+                hasRuntime: (version) => version === "1.3.14",
+                isCurrentRuntime: () => false,
+            })
         ).not.toThrow();
         expect(() =>
-            assertDashboardReleaseHostRuntimeCompatible(
-                forwardCompatibleRelease,
-                "1.3.13"
-            )
-        ).toThrow("requires Bun 1.3.14 or newer within the same major");
+            assertDashboardReleaseRuntimeAvailable(cachedMajorRuntimeRelease, {
+                hasRuntime: () => false,
+                isCurrentRuntime: () => false,
+            })
+        ).toThrow("requires unavailable managed Bun runtime 1.3.14");
         expect(() =>
-            assertDashboardReleaseHostRuntimeCompatible(forwardCompatibleRelease, "2.0.0")
-        ).toThrow("requires Bun 1.3.14 or newer within the same major");
+            assertDashboardReleaseRuntimeAvailable(cachedMajorRuntimeRelease, {
+                hasRuntime: () => false,
+                isCurrentRuntime: (version) => version === "1.3.14",
+            })
+        ).not.toThrow();
     });
 
     it("checks the effective live schema after a code-only rollback", async () => {

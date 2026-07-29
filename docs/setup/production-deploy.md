@@ -7,6 +7,7 @@ Production separates source control, immutable code, and persistent state:
 ├── production/
 │   ├── checkout/
 │   ├── releases/
+│   ├── runtimes/
 │   └── state/
 └── development/
     ├── preview/
@@ -23,6 +24,7 @@ Production separates source control, immutable code, and persistent state:
 | Shared managed PR-dev checkout                    | `/home/ubuntu/projects/mira-dashboard/development/preview`       |
 | Managed PR-dev state and dependency cache         | `/home/ubuntu/projects/mira-dashboard/development/state/preview` |
 | Immutable releases and `current`/`previous` links | `/home/ubuntu/projects/mira-dashboard/production/releases`       |
+| Exact Bun runtimes declared by release manifests  | `/home/ubuntu/projects/mira-dashboard/production/runtimes/bun`   |
 | Persistent production state                       | `/home/ubuntu/projects/mira-dashboard/production/state`          |
 
 Web and worker execute from:
@@ -109,13 +111,15 @@ The executor fails closed unless both units use the expected project root and
 run from managed `current/backend`. A deployment never modifies the running
 release.
 
-Release manifests record the Bun runtime used for both component builds. A
-release may run on that version or a newer runtime within the same Bun major.
-Runtime downgrades, major-version changes, malformed versions, and component
-build identities that differ from the manifest all fail closed. Keep the exact
-older runtime available during a runtime-channel cutover until both managed
-release slots were built by code that implements this forward-compatibility
-rule, so the first automatic rollback can still start the older code.
+Release manifests record the exact Bun runtime used for both component builds.
+Staging atomically caches that verified executable below
+`production/runtimes/bun/<version>/bun`. The systemd launcher reads the active
+manifest and starts web or worker with that exact cached runtime. Activation,
+rollback, and failed-activation restoration all fail closed when a required
+runtime is absent, malformed, noncanonical, or reports a different version.
+This permits Bun major upgrades without assuming that a new major can execute
+an older release: the candidate uses its new runtime while automatic rollback
+keeps using the previous release's runtime.
 
 The release parser temporarily permits the obsolete `backend/package.json` and
 `backend/bun.lock` artifacts so the single managed rollback slot created before

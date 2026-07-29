@@ -20,9 +20,13 @@ import {
 import { guardedPath, writeTextNoFollowGuarded } from "./lib/guardedOps.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
+    hasManagedBunRuntime,
+    isBunRuntimeVersion,
+    isCurrentBunRuntime,
+} from "./managedBunRuntime.ts";
+import {
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     type DashboardReleaseManifest,
-    isBunRuntimeCompatible,
     loadReleaseManifest,
     RELEASE_MANIFEST_FILE_NAME,
     verifyReleaseArtifacts,
@@ -78,6 +82,11 @@ export interface DashboardReleaseManagerOptions {
     ) => DashboardLiveSchemaState | Promise<DashboardLiveSchemaState>;
     schemaCutoverMode?: "coordinated";
     transitionLockWaitMs?: number;
+}
+
+export interface DashboardReleaseRuntimeAvailabilityOptions {
+    hasRuntime?: (version: string) => boolean;
+    isCurrentRuntime?: (version: string) => boolean;
 }
 
 export interface DashboardReleaseRollbackExpectation {
@@ -714,13 +723,19 @@ export function assertReleaseCanOpenLiveSchema(
     }
 }
 
-export function assertDashboardReleaseHostRuntimeCompatible(
+export function assertDashboardReleaseRuntimeAvailable(
     release: ManagedDashboardRelease,
-    hostBunVersion = Bun.version
+    options: DashboardReleaseRuntimeAvailabilityOptions = {}
 ): void {
-    if (!isBunRuntimeCompatible(release.manifest.bunVersion, hostBunVersion)) {
+    const releaseVersion = release.manifest.bunVersion;
+    const hasRuntime = options.hasRuntime ?? hasManagedBunRuntime;
+    const isCurrentRuntime = options.isCurrentRuntime ?? isCurrentBunRuntime;
+    if (
+        !isBunRuntimeVersion(releaseVersion) ||
+        (!isCurrentRuntime(releaseVersion) && !hasRuntime(releaseVersion))
+    ) {
         throw new Error(
-            `Release ${release.commitSha} requires Bun ${release.manifest.bunVersion} or newer within the same major; host runs ${hostBunVersion}`
+            `Release ${release.commitSha} requires unavailable managed Bun runtime ${releaseVersion}`
         );
     }
 }
@@ -1296,7 +1311,7 @@ export async function activateDashboardRelease(
         async () => {
             await recoverInterruptedReleaseTransition(layout);
             const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
-            assertDashboardReleaseHostRuntimeCompatible(candidate);
+            assertDashboardReleaseRuntimeAvailable(candidate);
             const state = await readActivationReleaseStateFromLayout(layout);
             if (state.current) {
                 assertReleaseActivationCompatible(
@@ -1397,7 +1412,7 @@ export async function rollbackDashboardRelease(
 
             const activeRelease = state.current;
             const rollbackRelease = state.previous;
-            assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
+            assertDashboardReleaseRuntimeAvailable(rollbackRelease);
             await assertManagedDashboardReleaseRollbackSchemaCompatible(
                 activeRelease,
                 rollbackRelease,
@@ -1469,7 +1484,7 @@ export async function restoreDashboardReleaseAfterFailedActivation(
                 state.current?.commitSha === rollbackCommitSha &&
                 state.previous?.commitSha === previousCommitSha
             ) {
-                assertDashboardReleaseHostRuntimeCompatible(state.current);
+                assertDashboardReleaseRuntimeAvailable(state.current);
                 await assertManagedDashboardReleaseRollbackSchemaCompatible(
                     state.current,
                     state.current,
@@ -1488,7 +1503,7 @@ export async function restoreDashboardReleaseAfterFailedActivation(
 
             const candidateRelease = state.current;
             const rollbackRelease = state.previous;
-            assertDashboardReleaseHostRuntimeCompatible(rollbackRelease);
+            assertDashboardReleaseRuntimeAvailable(rollbackRelease);
             const restoredPreviousRelease = previousCommitSha
                 ? await loadManagedReleaseFromLayout(layout, previousCommitSha)
                 : undefined;

@@ -51,7 +51,8 @@ Create the managed runtime roots:
 ```bash
 install -d -m 0755 \
   /home/ubuntu/projects/mira-dashboard/development/worktrees \
-  /home/ubuntu/projects/mira-dashboard/production/releases
+  /home/ubuntu/projects/mira-dashboard/production/releases \
+  /home/ubuntu/projects/mira-dashboard/production/runtimes
 install -d -m 0700 \
   /home/ubuntu/projects/mira-dashboard/development/state \
   /home/ubuntu/projects/mira-dashboard/production/state
@@ -105,7 +106,10 @@ env \
 The one-shot initialization creates the fresh database in WAL mode and applies
 the immutable migration registry. The staging command then installs frozen
 dependencies, runs the normal database-aware `deploy:prepare`, and atomically
-publishes only manifest-declared artifacts.
+publishes only manifest-declared artifacts. It also copies the exact verified
+Bun executable into `production/runtimes/bun/<version>/bun`; the managed units
+select that runtime from the active release manifest, including across future
+major-version upgrades and rollback.
 The control checkout is not a production runtime directory. See
 [Production deploy](production-deploy.md) for the release/state layout,
 automatic rollback, retention, and recovery contract.

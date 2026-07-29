@@ -12,13 +12,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { databaseMigrationIdentities } from "../src/databaseMigrations/index.ts";
+import { currentBunRuntimeIdentity } from "../src/managedBunRuntime.ts";
 import {
     createReleaseManifest,
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
     databaseMigrationInventorySha256,
     getRuntimeReleaseIdentity,
     invalidateRuntimeReleaseIdentityCache,
-    isBunRuntimeCompatible,
     loadReleaseManifest,
     loadRuntimeReleaseIdentity,
     parseReleaseManifest,
@@ -32,7 +32,7 @@ import {
 const temporaryRoots: string[] = [];
 const TEST_COMMIT = "a".repeat(40);
 const TEST_BUILT_AT = new Date("2026-07-25T15:00:00.000Z");
-const TEST_BUN_VERSION = Bun.version;
+const TEST_BUN_VERSION = currentBunRuntimeIdentity();
 
 function writeTestBuildIdentities(
     root: string,
@@ -137,15 +137,6 @@ afterEach(() => {
 });
 
 describe("Dashboard release manifest", () => {
-    it("accepts only same-major Bun runtime upgrades", () => {
-        expect(isBunRuntimeCompatible("1.3.14", "1.3.14")).toBe(true);
-        expect(isBunRuntimeCompatible("1.3.14", "1.4.0")).toBe(true);
-        expect(isBunRuntimeCompatible("1.4.0", "1.3.14")).toBe(false);
-        expect(isBunRuntimeCompatible("1.4.0", "2.0.0")).toBe(false);
-        expect(isBunRuntimeCompatible("invalid", "1.4.0")).toBe(false);
-        expect(isBunRuntimeCompatible("1.4.0", "invalid")).toBe(false);
-    });
-
     it("accepts only runtime identities that can safely start services", () => {
         expect(
             requireRunnableReleaseCommit(
@@ -509,35 +500,40 @@ describe("Dashboard release manifest", () => {
         });
     });
 
-    it("keeps an older same-major release runnable on a newer Bun host", async () => {
+    it("requires the exact revision-qualified Bun build identity at runtime", async () => {
         const root = temporaryReleaseRoot();
-        const releaseBunVersion = "1.3.14";
-        writeTestBuildIdentities(root, TEST_COMMIT, releaseBunVersion);
+        const otherRuntime = "99.0.0+deadbeef";
+        writeTestBuildIdentities(root, TEST_COMMIT, otherRuntime);
         await writeReleaseManifest({
             ...manifestOptions(root),
-            bunVersion: releaseBunVersion,
+            bunVersion: otherRuntime,
         });
 
         expect(
-            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT, "1.4.0")
-        ).resolves.toMatchObject({
-            ready: true,
-            source: "manifest",
-        });
-        expect(
-            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT, "1.3.13")
+            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT)
         ).resolves.toMatchObject({
             issue: "manifest-code-mismatch",
             ready: false,
             source: "manifest",
         });
+    });
+
+    it("rejects malformed Bun versions in manifests and build identities", async () => {
+        const root = temporaryReleaseRoot();
         expect(
-            loadRuntimeReleaseIdentity(root, "production", TEST_COMMIT, "2.0.0")
-        ).resolves.toMatchObject({
-            issue: "manifest-code-mismatch",
-            ready: false,
-            source: "manifest",
-        });
+            createReleaseManifest({
+                ...manifestOptions(root),
+                bunVersion: "1.3",
+            })
+        ).rejects.toThrow("Release Bun runtime version is invalid");
+
+        const manifest = await writeReleaseManifest(manifestOptions(root));
+        expect(() =>
+            parseReleaseManifest({
+                ...manifest,
+                bunVersion: "1.3.14foo",
+            })
+        ).toThrow("Release manifest identity is invalid");
     });
 
     it("rejects a manifest built by another Bun runtime", async () => {

@@ -7,6 +7,10 @@ import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
 import { runProcess } from "./lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
+    installManagedBunRuntime,
+    requireManagedBunRuntime,
+} from "./managedBunRuntime.ts";
+import {
     type DashboardReleaseRetentionResult,
     loadManagedRelease,
     type ManagedDashboardRelease,
@@ -14,6 +18,7 @@ import {
     publishVerifiedDashboardRelease,
     resolveDashboardReleasesRoot,
 } from "./releaseManager.ts";
+import { loadReleaseManifest } from "./releaseManifest.ts";
 
 const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const MAX_PROCESS_OUTPUT_BYTES = 20 * 1024 * 1024;
@@ -48,9 +53,11 @@ export type DashboardReleaseCommandRunner = (
 
 export interface StageDashboardReleaseOptions {
     bunExecutable?: string;
+    cacheBunRuntime?: (sourceExecutable: string, version: string) => Promise<string>;
     commandRunner?: DashboardReleaseCommandRunner;
     onProgress?: (message: string) => void;
     releasesRoot?: string;
+    resolveBunRuntime?: (version: string) => string;
     signal?: AbortSignal;
     sourceRoot?: string;
     worktreeRoot?: string;
@@ -319,6 +326,8 @@ export async function stageDashboardRelease(
         "Dashboard releases root"
     );
     const commandRunner = options.commandRunner ?? defaultCommandRunner;
+    const cacheBunRuntime = options.cacheBunRuntime ?? installManagedBunRuntime;
+    const resolveBunRuntime = options.resolveBunRuntime ?? requireManagedBunRuntime;
     const projectPaths = resolveDashboardProjectPaths();
     const contract = managedDashboardUnitContract(releasesRoot);
     let existingRelease: ManagedDashboardRelease | undefined;
@@ -330,10 +339,17 @@ export async function stageDashboardRelease(
         }
     }
     if (existingRelease) {
+        let releaseBunExecutable: string;
+        try {
+            releaseBunExecutable = resolveBunRuntime(existingRelease.manifest.bunVersion);
+        } catch {
+            await cacheBunRuntime(bunExecutable, existingRelease.manifest.bunVersion);
+            releaseBunExecutable = resolveBunRuntime(existingRelease.manifest.bunVersion);
+        }
         options.onProgress?.("Preflighting existing immutable release");
-        await commandRunner(bunExecutable, ["dist/databasePreflight.js"], {
+        await commandRunner(releaseBunExecutable, ["dist/databasePreflight.js"], {
             cwd: path.join(existingRelease.path, "backend"),
-            environment: managedReleaseEnvironment(contract, bunExecutable),
+            environment: managedReleaseEnvironment(contract, releaseBunExecutable),
             signal: options.signal,
             timeoutMs: 120_000,
         });
@@ -395,6 +411,9 @@ export async function stageDashboardRelease(
             signal: options.signal,
             timeoutMs: 12 * 60 * 1000,
         });
+        const preparedManifest = await loadReleaseManifest(worktreePath);
+        options.onProgress?.("Caching release Bun runtime");
+        await cacheBunRuntime(bunExecutable, preparedManifest.bunVersion);
         options.onProgress?.("Publishing verified immutable release");
         stagedRelease = await publishVerifiedDashboardRelease(
             worktreePath,
