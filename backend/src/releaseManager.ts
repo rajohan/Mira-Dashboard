@@ -22,7 +22,7 @@ import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
     hasManagedBunRuntime,
     isBunRuntimeVersion,
-    isCurrentBunRuntime,
+    pruneManagedBunRuntimes,
 } from "./managedBunRuntime.ts";
 import {
     DASHBOARD_DATABASE_SCHEMA_COMPATIBILITY,
@@ -72,21 +72,22 @@ export interface DashboardReleaseState {
 
 export interface DashboardReleaseRetentionResult {
     removed: string[];
+    removedRuntimes: string[];
     retained: string[];
+    retainedRuntimes: string[];
     warnings: string[];
 }
 
-export interface DashboardReleaseManagerOptions {
+export interface DashboardReleaseRuntimeAvailabilityOptions {
+    hasRuntime?: (version: string) => boolean;
+}
+
+export interface DashboardReleaseManagerOptions extends DashboardReleaseRuntimeAvailabilityOptions {
     readLiveSchemaState?: (
         maximumCompatibleVersion: number
     ) => DashboardLiveSchemaState | Promise<DashboardLiveSchemaState>;
     schemaCutoverMode?: "coordinated";
     transitionLockWaitMs?: number;
-}
-
-export interface DashboardReleaseRuntimeAvailabilityOptions {
-    hasRuntime?: (version: string) => boolean;
-    isCurrentRuntime?: (version: string) => boolean;
 }
 
 export interface DashboardReleaseRollbackExpectation {
@@ -110,6 +111,7 @@ export interface DashboardReleaseFailedActivationRestoreOptions extends Dashboar
 
 export interface DashboardReleasePublicationOptions {
     onTransitionLockContention?: () => void;
+    prepareManifest?: (manifest: DashboardReleaseManifest) => Promise<void>;
 }
 
 export interface DashboardLiveSchemaState {
@@ -729,11 +731,7 @@ export function assertDashboardReleaseRuntimeAvailable(
 ): void {
     const releaseVersion = release.manifest.bunVersion;
     const hasRuntime = options.hasRuntime ?? hasManagedBunRuntime;
-    const isCurrentRuntime = options.isCurrentRuntime ?? isCurrentBunRuntime;
-    if (
-        !isBunRuntimeVersion(releaseVersion) ||
-        (!isCurrentRuntime(releaseVersion) && !hasRuntime(releaseVersion))
-    ) {
+    if (!isBunRuntimeVersion(releaseVersion) || !hasRuntime(releaseVersion)) {
         throw new Error(
             `Release ${release.commitSha} requires unavailable managed Bun runtime ${releaseVersion}`
         );
@@ -1163,6 +1161,7 @@ export async function publishVerifiedDashboardRelease(
         "exclusive",
         async () => {
             await recoverInterruptedReleaseTransition(layout);
+            await options.prepareManifest?.(manifest);
             try {
                 return await loadManagedReleaseFromLayout(layout, commitSha);
             } catch (error) {
@@ -1311,7 +1310,7 @@ export async function activateDashboardRelease(
         async () => {
             await recoverInterruptedReleaseTransition(layout);
             const candidate = await loadManagedReleaseFromLayout(layout, commitSha);
-            assertDashboardReleaseRuntimeAvailable(candidate);
+            assertDashboardReleaseRuntimeAvailable(candidate, options);
             const state = await readActivationReleaseStateFromLayout(layout);
             if (state.current) {
                 assertReleaseActivationCompatible(
@@ -1412,7 +1411,7 @@ export async function rollbackDashboardRelease(
 
             const activeRelease = state.current;
             const rollbackRelease = state.previous;
-            assertDashboardReleaseRuntimeAvailable(rollbackRelease);
+            assertDashboardReleaseRuntimeAvailable(rollbackRelease, options);
             await assertManagedDashboardReleaseRollbackSchemaCompatible(
                 activeRelease,
                 rollbackRelease,
@@ -1484,7 +1483,7 @@ export async function restoreDashboardReleaseAfterFailedActivation(
                 state.current?.commitSha === rollbackCommitSha &&
                 state.previous?.commitSha === previousCommitSha
             ) {
-                assertDashboardReleaseRuntimeAvailable(state.current);
+                assertDashboardReleaseRuntimeAvailable(state.current, options);
                 await assertManagedDashboardReleaseRollbackSchemaCompatible(
                     state.current,
                     state.current,
@@ -1503,7 +1502,7 @@ export async function restoreDashboardReleaseAfterFailedActivation(
 
             const candidateRelease = state.current;
             const rollbackRelease = state.previous;
-            assertDashboardReleaseRuntimeAvailable(rollbackRelease);
+            assertDashboardReleaseRuntimeAvailable(rollbackRelease, options);
             const restoredPreviousRelease = previousCommitSha
                 ? await loadManagedReleaseFromLayout(layout, previousCommitSha)
                 : undefined;
@@ -1543,7 +1542,8 @@ export async function restoreDashboardReleaseAfterFailedActivation(
 
 export async function pruneDashboardReleases(
     retainCount = 3,
-    releasesRoot = resolveDashboardReleasesRoot()
+    releasesRoot = resolveDashboardReleasesRoot(),
+    runtimeRoot?: string
 ): Promise<DashboardReleaseRetentionResult> {
     if (!Number.isSafeInteger(retainCount) || retainCount < 3 || retainCount > 20) {
         throw new TypeError("Managed release retention must be between 3 and 20");
@@ -1680,6 +1680,21 @@ export async function pruneDashboardReleases(
             }
             retained.add(release.commitSha);
         }
+        const retainedReleases = newestFirst
+            .map(({ release }) => release)
+            .filter((release) => retained.has(release.commitSha));
+        const retainedRuntimeVersions = new Set(
+            retainedReleases.map((release) => release.manifest.bunVersion)
+        );
+        if (runtimeRoot) {
+            for (const version of retainedRuntimeVersions) {
+                if (!hasManagedBunRuntime(version, runtimeRoot)) {
+                    throw new Error(
+                        `Retained release requires unavailable managed Bun runtime ${version}`
+                    );
+                }
+            }
+        }
 
         const removed: string[] = [];
         for (const { release } of newestFirst.toReversed()) {
@@ -1720,13 +1735,17 @@ export async function pruneDashboardReleases(
             await syncDirectory(layout.releasesPath);
         }
 
+        const runtimeRetention = runtimeRoot
+            ? await pruneManagedBunRuntimes(retainedRuntimeVersions, runtimeRoot)
+            : { removed: [], retained: [], warnings: [] };
         return {
             removed,
-            retained: newestFirst
-                .map(({ release }) => release)
-                .filter((release) => retained.has(release.commitSha))
-                .map((release) => release.commitSha),
-            warnings: warnings.toSorted(compareStrings),
+            removedRuntimes: runtimeRetention.removed,
+            retained: retainedReleases.map((release) => release.commitSha),
+            retainedRuntimes: runtimeRetention.retained,
+            warnings: [...warnings, ...runtimeRetention.warnings].toSorted(
+                compareStrings
+            ),
         };
     });
 }

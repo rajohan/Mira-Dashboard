@@ -38,12 +38,13 @@ if [[ "$canonical_project_root" != "$project_root" ]]; then
 fi
 
 releases_root="$project_root/production/releases"
+release_store="$releases_root/releases"
 release_backend="$(/usr/bin/pwd -P)"
 release_root="${release_backend%/backend}"
 release_commit="${release_root##*/}"
 if [[
     "$release_backend" != "$release_root/backend" ||
-    "${release_root%/*}" != "$releases_root" ||
+    "${release_root%/*}" != "$release_store" ||
     ! "$release_commit" =~ ^[0-9a-f]{40}$
 ]]; then
     echo "Managed Dashboard working directory is not an immutable release" >&2

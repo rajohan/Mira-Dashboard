@@ -30,6 +30,11 @@ import {
 import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
+    hasManagedBunRuntime,
+    installManagedBunRuntime,
+    requireManagedBunRuntime,
+} from "../managedBunRuntime.ts";
+import {
     assertManagedDashboardUnitProperties,
     MANAGED_DASHBOARD_UNITS,
     managedDashboardUnitContract,
@@ -38,6 +43,7 @@ import {
 import {
     assertDashboardReleaseRuntimeAvailable,
     assertManagedDashboardReleaseRollbackSchemaCompatible,
+    loadManagedRelease,
     type ManagedDashboardRelease,
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
@@ -2078,13 +2084,16 @@ if (!isReady) process.exitCode = 1;
     ].join(" ");
 }
 
-function releaseLifecycleInvocation(lifecycleCommand: string): string {
+function releaseLifecycleInvocation(
+    lifecycleCommand: string,
+    bunExecutable: string
+): string {
     return [
         `MIRA_DASHBOARD_PROJECT_ROOT=${shellQuote(
             resolveDashboardProjectPaths().projectRoot
         )}`,
         "NODE_ENV=production",
-        shellQuote(resolveBunExecutable()),
+        shellQuote(bunExecutable),
         shellQuote(lifecycleCommand),
     ].join(" ");
 }
@@ -2105,6 +2114,19 @@ function releaseCutoverShellFunctions(): string[] {
         "    dashboard_port=3100",
         "  fi",
         '  printf "%s" "$dashboard_port"',
+        "}",
+        "resolve_release_bun() {",
+        '  release_root="$1"',
+        '  bun_version="$(/usr/bin/jq --exit-status --raw-output \'.bunVersion | select(type == "string" and length > 0 and length <= 64)\' "$release_root/release-manifest.json")" || return 1',
+        String.raw`  [[ "$bun_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || return 1`,
+        '  runtime_path="$project_root/production/runtimes/bun/$bun_version/bun"',
+        '  [ -f "$runtime_path" ] && [ -x "$runtime_path" ] && [ ! -L "$runtime_path" ] || return 1',
+        '  [ "$(/usr/bin/realpath --canonicalize-existing "$runtime_path")" = "$runtime_path" ] || return 1',
+        '  [ "$(/usr/bin/stat --format=\'%h\' -- "$runtime_path")" = 1 ] || return 1',
+        '  runtime_revision="$("$runtime_path" --revision)" || return 1',
+        '  runtime_version="$("$runtime_path" --version)" || return 1',
+        '  [ "$runtime_revision" = "$bun_version" ] || [ "$runtime_version" = "$bun_version" ] || return 1',
+        '  printf "%s" "$runtime_path"',
         "}",
         "worker_identity() {",
         "  worker_properties=$(/usr/bin/systemctl --user show mira-dashboard-worker.service --property=ActiveState --property=SubState --property=MainPID --property=ExecMainStartTimestampMonotonic --no-pager 2>/dev/null) || return 1",
@@ -2173,6 +2195,16 @@ async function assertManagedDashboardServiceContract(
     }
 }
 
+async function ensureManagedRuntimeForRelease(
+    release: ManagedDashboardRelease,
+    sourceExecutable = resolveBunExecutable()
+): Promise<void> {
+    if (!hasManagedBunRuntime(release.manifest.bunVersion)) {
+        await installManagedBunRuntime(sourceExecutable, release.manifest.bunVersion);
+    }
+    assertDashboardReleaseRuntimeAvailable(release);
+}
+
 /**
  * Schedules detached service restart, commit-bound readiness, and rollback.
  * @returns Promise resolving to the schedule release cutover result.
@@ -2223,6 +2255,11 @@ async function scheduleReleaseCutover(
         );
     }
     const releasesRoot = resolveDashboardReleasesRoot();
+    const candidateRelease = await loadManagedRelease(releasesRoot, candidateCommit);
+    assertDashboardReleaseRuntimeAvailable(candidateRelease);
+    const candidateBunExecutable = requireManagedBunRuntime(
+        candidateRelease.manifest.bunVersion
+    );
     const guardedLifecycleCommand = path.join(
         releasesRoot,
         "releases",
@@ -2232,7 +2269,8 @@ async function scheduleReleaseCutover(
         "releaseLifecycle.js"
     );
     const guardedLifecycleEnvironment = releaseLifecycleInvocation(
-        guardedLifecycleCommand
+        guardedLifecycleCommand,
+        candidateBunExecutable
     );
     const snapshotCommand = `${guardedLifecycleEnvironment} snapshot-database ${shellQuote(databaseSnapshotId)}`;
     const restoreDatabaseCommand = `${guardedLifecycleEnvironment} restore-database ${shellQuote(databaseSnapshotId)}`;
@@ -2394,6 +2432,11 @@ async function scheduleReleaseRollback(
     }
 
     const releasesRoot = resolveDashboardReleasesRoot();
+    const originalRelease = await loadManagedRelease(releasesRoot, originalCommit);
+    assertDashboardReleaseRuntimeAvailable(originalRelease);
+    const originalBunExecutable = requireManagedBunRuntime(
+        originalRelease.manifest.bunVersion
+    );
     const lifecycleCommand = path.join(
         releasesRoot,
         "releases",
@@ -2402,7 +2445,10 @@ async function scheduleReleaseRollback(
         "dist",
         "releaseLifecycle.js"
     );
-    const lifecycleEnvironment = releaseLifecycleInvocation(lifecycleCommand);
+    const lifecycleEnvironment = releaseLifecycleInvocation(
+        lifecycleCommand,
+        originalBunExecutable
+    );
     const targetShort = targetCommit.slice(0, 8);
     const originalShort = originalCommit.slice(0, 8);
     const okJob: DeploymentJob = {
@@ -2533,12 +2579,12 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         `pre_activation_previous_commit=${shellQuote(
             persistedCutover?.preActivationPreviousCommit ?? ""
         )}`,
-        `bun_executable=${shellQuote(resolveBunExecutable())}`,
         "resolve_trusted_lifecycles() {",
         '  candidate_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/releases/$candidate_commit") || return 1',
         '  [ "$candidate_release" = "$releases_root/releases/$candidate_commit" ] || return 1',
         '  candidate_lifecycle="$candidate_release/backend/dist/releaseLifecycle.js"',
         '  [ -f "$candidate_lifecycle" ] && [ ! -L "$candidate_lifecycle" ] || return 1',
+        '  candidate_bun_executable="$(resolve_release_bun "$candidate_release")" || return 1',
         '  current_release=$(/usr/bin/readlink --canonicalize-existing "$releases_root/current") || return 1',
         '  current_commit="$(/usr/bin/basename -- "$current_release")"',
         '  [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || return 1',
@@ -2556,17 +2602,18 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         '  [[ "$activation_commit" =~ ^[0-9a-f]{40}$ ]] || return 1',
         '  [ "$activation_release" = "$releases_root/releases/$activation_commit" ] || return 1',
         '  activation_lifecycle="$activation_release/backend/dist/releaseLifecycle.js"',
-        '  [ -f "$activation_lifecycle" ] && [ ! -L "$activation_lifecycle" ]',
+        '  [ -f "$activation_lifecycle" ] && [ ! -L "$activation_lifecycle" ] || return 1',
+        '  activation_bun_executable="$(resolve_release_bun "$activation_release")" || return 1',
         "}",
         "run_activation_lifecycle() {",
         '  MIRA_DASHBOARD_PROJECT_ROOT="$project_root" \\',
         "  NODE_ENV=production \\",
-        '  "$bun_executable" "$activation_lifecycle" "$@"',
+        '  "$activation_bun_executable" "$activation_lifecycle" "$@"',
         "}",
         "run_candidate_lifecycle() {",
         '  MIRA_DASHBOARD_PROJECT_ROOT="$project_root" \\',
         "  NODE_ENV=production \\",
-        '  "$bun_executable" "$candidate_lifecycle" "$@"',
+        '  "$candidate_bun_executable" "$candidate_lifecycle" "$@"',
         "}",
         "restore_failed_candidate() {",
         '  case "$recovery_mode" in',
@@ -2740,10 +2787,9 @@ async function runDeploymentJob(
                 );
             }
         }
-        assertDashboardReleaseRuntimeAvailable(rollbackRelease);
+        await ensureManagedRuntimeForRelease(rollbackRelease);
 
         const candidate = await stageDashboardRelease(expectedCommit, {
-            bunExecutable: resolveBunExecutable(),
             commandRunner: async (command, arguments_, options) =>
                 runCommand(command, [...arguments_], {
                     cwd: options.cwd,

@@ -112,7 +112,10 @@ run from managed `current/backend`. A deployment never modifies the running
 release.
 
 Release manifests record the exact Bun runtime used for both component builds.
-Staging atomically caches that verified executable below
+Candidate install/build commands use the host bootstrap
+`/home/ubuntu/.bun/bin/bun` (or the explicit
+`MIRA_DASHBOARD_DEPLOY_BUN_EXECUTABLE` override), never the active worker's
+release-specific runtime. Staging atomically caches that verified executable below
 `production/runtimes/bun/<version>/bun`. The systemd launcher reads the active
 manifest and starts web or worker with that exact cached runtime. Activation,
 rollback, and failed-activation restoration all fail closed when a required
@@ -120,6 +123,14 @@ runtime is absent, malformed, noncanonical, or reports a different version.
 This permits Bun major upgrades without assuming that a new major can execute
 an older release: the candidate uses its new runtime while automatic rollback
 keeps using the previous release's runtime.
+
+Successful retention cleanup garbage-collects cached Bun runtimes only after
+release pruning determines the final retained set. A runtime is removed only
+when no retained release manifest references its identity; runtimes for
+`current`, `previous`, and the newest additional verified release therefore
+remain available for restart and rollback. Interrupted `.retired-*` runtime
+cleanup is completed by the next prune, while missing runtimes for retained
+releases fail the operation before an old release is removed.
 
 The release parser temporarily permits the obsolete `backend/package.json` and
 `backend/bun.lock` artifacts so the single managed rollback slot created before
@@ -202,9 +213,23 @@ CURRENT_SHA="$(basename -- "$CURRENT_RELEASE")"
 CURRENT_LIFECYCLE="$CURRENT_RELEASE/backend/dist/releaseLifecycle.js"
 test -f "$CURRENT_LIFECYCLE"
 test ! -L "$CURRENT_LIFECYCLE"
+CURRENT_BUN_ID="$(
+  jq --exit-status --raw-output '.bunVersion' \
+    "$CURRENT_RELEASE/release-manifest.json"
+)"
+CURRENT_BUN="$MIRA_DASHBOARD_PROJECT_ROOT/production/runtimes/bun/$CURRENT_BUN_ID/bun"
+test -f "$CURRENT_BUN"
+test -x "$CURRENT_BUN"
+test ! -L "$CURRENT_BUN"
+[[ "$(realpath --canonicalize-existing "$CURRENT_BUN")" == "$CURRENT_BUN" ]]
+[[ "$(stat --format='%h' -- "$CURRENT_BUN")" == "1" ]]
+CURRENT_BUN_REVISION="$("$CURRENT_BUN" --revision)"
+CURRENT_BUN_VERSION="$("$CURRENT_BUN" --version)"
+[[ "$CURRENT_BUN_REVISION" == "$CURRENT_BUN_ID" ||
+   "$CURRENT_BUN_VERSION" == "$CURRENT_BUN_ID" ]]
 STATUS="$(
   env NODE_ENV=production \
-    bun "$CURRENT_LIFECYCLE" status
+    "$CURRENT_BUN" "$CURRENT_LIFECYCLE" status
 )"
 TARGET_SHA="$(jq --raw-output '.previous.commitSha // empty' <<<"$STATUS")"
 [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -234,12 +259,12 @@ ready_for_commit() {
 
 assert_no_active_release_action
 env NODE_ENV=production \
-  bun "$CURRENT_LIFECYCLE" rollback "$CURRENT_SHA" "$TARGET_SHA"
+  "$CURRENT_BUN" "$CURRENT_LIFECYCLE" rollback "$CURRENT_SHA" "$TARGET_SHA"
 systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
 if ! ready_for_commit "$TARGET_SHA"; then
   echo "Rollback target failed readiness. Restoring $CURRENT_SHA" >&2
   env NODE_ENV=production \
-    bun "$CURRENT_LIFECYCLE" rollback "$TARGET_SHA" "$CURRENT_SHA"
+    "$CURRENT_BUN" "$CURRENT_LIFECYCLE" rollback "$TARGET_SHA" "$CURRENT_SHA"
   systemctl --user restart mira-dashboard-worker.service mira-dashboard.service
   ready_for_commit "$CURRENT_SHA"
   exit 1

@@ -23,6 +23,10 @@ import { database, sqlNullable } from "../src/database.ts";
 import { resolveDashboardProjectPaths } from "../src/lib/dashboardPaths.ts";
 import * as processModule from "../src/lib/processes.ts";
 import {
+    currentBunRuntimeIdentity,
+    installManagedBunRuntime,
+} from "../src/managedBunRuntime.ts";
+import {
     ensureDashboardReleaseLayout,
     managedReleasePath,
 } from "../src/releaseManager.ts";
@@ -65,6 +69,14 @@ function createTemporaryRoot(prefix: string): string {
         rmSync(root, { force: true, recursive: true });
     });
     return root;
+}
+
+async function installCurrentTestRuntime(projectRoot: string): Promise<void> {
+    await installManagedBunRuntime(process.execPath, currentBunRuntimeIdentity(), {
+        runtimeRoot: resolveDashboardProjectPaths({
+            MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
+        }).productionBunRuntimeRoot,
+    });
 }
 
 async function executeSuccessfulGuardianPath(script: string): Promise<void> {
@@ -1705,6 +1717,8 @@ describe("backend service behavior", () => {
 
     it("reports managed release slots and queues rollback through the release lock", async () => {
         rememberEnvironment("MIRA_DASHBOARD_RELEASES_ROOT");
+        rememberEnvironment("MIRA_DASHBOARD_PROJECT_ROOT");
+        const projectRoot = createTemporaryRoot("mira-release-status-project-");
         const releasesRoot = createTemporaryRoot("mira-release-status-");
         const currentCommit = "a".repeat(40);
         const previousCommit = "b".repeat(40);
@@ -1729,6 +1743,8 @@ describe("backend service behavior", () => {
             path.join(releasesRoot, "previous"),
             "dir"
         );
+        await installCurrentTestRuntime(projectRoot);
+        process.env.MIRA_DASHBOARD_PROJECT_ROOT = projectRoot;
         process.env.MIRA_DASHBOARD_RELEASES_ROOT = releasesRoot;
 
         const { getDashboardReleaseStatus, prepareAndStartRollback } =
@@ -2076,6 +2092,7 @@ describe("backend service behavior", () => {
             path.join(releasesRoot, "previous"),
             "dir"
         );
+        await installCurrentTestRuntime(fakeRoot);
         writeFileSync(
             path.join(fakeBin, "systemctl"),
             String.raw`#!/usr/bin/env bash
@@ -2091,7 +2108,7 @@ else
 fi
 printf '%s\n' \
   "Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- bun $entrypoint ; }" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${projectPaths.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
   "WorkingDirectory=${releasesRoot}/current/backend"
 `
         );
@@ -2636,7 +2653,7 @@ else
 fi
 printf '%s\n' \
   "Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${fakeRoot}" \
-  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- bun $entrypoint ; }" \
+  "ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT -- ${projectPaths.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh $entrypoint ; }" \
   'WorkingDirectory=${releasesRoot}/current/backend'
 `
         );

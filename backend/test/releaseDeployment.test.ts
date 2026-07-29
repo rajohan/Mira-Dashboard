@@ -15,6 +15,7 @@ import {
     resolveDashboardProjectPathsForRuntime,
     resolveDashboardRuntimePath,
 } from "../src/lib/dashboardPaths.ts";
+import { currentBunRuntimeIdentity } from "../src/managedBunRuntime.ts";
 import {
     assertManagedDashboardUnitProperties,
     type DashboardReleaseCommandRunner,
@@ -71,6 +72,7 @@ function stagingOptions() {
         cacheBunRuntime: () => Promise.resolve(process.execPath),
         releasesRoot,
         resolveBunRuntime: () => process.execPath,
+        resolveBunRuntimeIdentity: () => currentBunRuntimeIdentity(),
         sourceRoot,
         worktreeRoot,
     };
@@ -143,6 +145,7 @@ describe("immutable release deployment", () => {
             projectRoot: PRODUCTION_PATHS.projectRoot,
             releaseRoot: `${releasesRoot}/current`,
             releasesRoot,
+            runtimeLauncher: `${PRODUCTION_PATHS.productionCheckoutRoot}/scripts/runManagedDashboardRelease.sh`,
             sourceRoot: PRODUCTION_PATHS.productionCheckoutRoot,
             worktreeRoot: PRODUCTION_PATHS.developmentWorktreeRoot,
         };
@@ -651,7 +654,7 @@ describe("immutable release deployment", () => {
         const properties = [
             `WorkingDirectory=${contract.releaseRoot}/backend`,
             `Environment=NODE_ENV=production MIRA_DASHBOARD_PROJECT_ROOT=${contract.projectRoot}`,
-            `ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=${MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT.join(",")} -- bun dist/serverStart.js ; }`,
+            `ExecStart={ path=/usr/local/bin/doppler ; argv[]=/usr/local/bin/doppler run --preserve-env=${MANAGED_DASHBOARD_PRESERVED_ENVIRONMENT.join(",")} -- ${contract.runtimeLauncher} dist/serverStart.js ; }`,
         ].join("\n");
         expect(() =>
             assertManagedDashboardUnitProperties(
@@ -660,6 +663,13 @@ describe("immutable release deployment", () => {
                 contract
             )
         ).not.toThrow();
+        expect(() =>
+            assertManagedDashboardUnitProperties(
+                "mira-dashboard.service",
+                properties.replace(contract.runtimeLauncher, "/home/ubuntu/.bun/bin/bun"),
+                contract
+            )
+        ).toThrow("must use the managed Bun runtime launcher");
         expect(() =>
             assertManagedDashboardUnitProperties(
                 "mira-dashboard.service",
@@ -688,8 +698,8 @@ describe("immutable release deployment", () => {
             assertManagedDashboardUnitProperties(
                 "mira-dashboard.service",
                 properties.replace(
-                    "bun dist/serverStart.js",
-                    "bun not-dist/serverStart.js"
+                    `${contract.runtimeLauncher} dist/serverStart.js`,
+                    `${contract.runtimeLauncher} not-dist/serverStart.js`
                 ),
                 contract
             )
@@ -744,6 +754,12 @@ describe("immutable release deployment", () => {
         ).rejects.toThrow("unexpected arguments");
         expect(
             await runReleaseDeploymentCommand(["prune"], options.releasesRoot)
-        ).toEqual({ removed: [], retained: [], warnings: [] });
+        ).toEqual({
+            removed: [],
+            removedRuntimes: [],
+            retained: [],
+            retainedRuntimes: [],
+            warnings: [],
+        });
     });
 });

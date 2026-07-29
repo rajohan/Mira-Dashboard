@@ -7,8 +7,11 @@ import { resolveDashboardProjectPaths } from "./lib/dashboardPaths.ts";
 import { runProcess } from "./lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "./lib/safePath.ts";
 import {
+    bunExecutableRuntimeIdentity,
     installManagedBunRuntime,
     requireManagedBunRuntime,
+    resolveDashboardReleaseBuildBunExecutable,
+    resolveManagedBunRuntimeRoot,
 } from "./managedBunRuntime.ts";
 import {
     type DashboardReleaseRetentionResult,
@@ -18,7 +21,6 @@ import {
     publishVerifiedDashboardRelease,
     resolveDashboardReleasesRoot,
 } from "./releaseManager.ts";
-import { loadReleaseManifest } from "./releaseManifest.ts";
 
 const RELEASE_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
 const MAX_PROCESS_OUTPUT_BYTES = 20 * 1024 * 1024;
@@ -58,6 +60,7 @@ export interface StageDashboardReleaseOptions {
     onProgress?: (message: string) => void;
     releasesRoot?: string;
     resolveBunRuntime?: (version: string) => string;
+    resolveBunRuntimeIdentity?: (executablePath: string) => string | undefined;
     signal?: AbortSignal;
     sourceRoot?: string;
     worktreeRoot?: string;
@@ -72,6 +75,7 @@ export interface ManagedDashboardUnitContract {
     projectRoot: string;
     releaseRoot: string;
     releasesRoot: string;
+    runtimeLauncher: string;
     sourceRoot: string;
     worktreeRoot: string;
 }
@@ -252,6 +256,11 @@ export function managedDashboardUnitContract(
         projectRoot: projectPaths.projectRoot,
         releaseRoot: path.join(root, "current"),
         releasesRoot: root,
+        runtimeLauncher: path.join(
+            projectPaths.productionCheckoutRoot,
+            "scripts",
+            "runManagedDashboardRelease.sh"
+        ),
         sourceRoot: resolveAbsoluteNonRootPath(
             projectPaths.productionCheckoutRoot,
             "Dashboard source root"
@@ -290,6 +299,9 @@ export function assertManagedDashboardUnitProperties(
         );
     }
     const execStart = actual.get("ExecStart") ?? "";
+    if (!hasExactSerializedToken(execStart, contract.runtimeLauncher)) {
+        throw new Error(`${unit} must use the managed Bun runtime launcher`);
+    }
     if (!hasExactSerializedToken(execStart, MANAGED_DASHBOARD_UNITS[unit])) {
         throw new Error(`${unit} has an unexpected managed release entrypoint`);
     }
@@ -319,8 +331,14 @@ export async function stageDashboardRelease(
     options: StageDashboardReleaseOptions = {}
 ): Promise<ManagedDashboardRelease> {
     const expectedCommit = assertFullCommitSha(commitSha);
-    // Default to the current Bun binary because managed workers do not inherit the user PATH.
-    const bunExecutable = options.bunExecutable ?? process.execPath;
+    const bunExecutable =
+        options.bunExecutable ?? resolveDashboardReleaseBuildBunExecutable();
+    const bunRuntimeIdentity = (
+        options.resolveBunRuntimeIdentity ?? bunExecutableRuntimeIdentity
+    )(bunExecutable);
+    if (!bunRuntimeIdentity) {
+        throw new Error("Dashboard release build Bun identity is unavailable");
+    }
     const releasesRoot = resolveAbsoluteNonRootPath(
         options.releasesRoot ?? resolveDashboardReleasesRoot(),
         "Dashboard releases root"
@@ -411,14 +429,22 @@ export async function stageDashboardRelease(
             signal: options.signal,
             timeoutMs: 12 * 60 * 1000,
         });
-        const preparedManifest = await loadReleaseManifest(worktreePath);
         options.onProgress?.("Caching release Bun runtime");
-        await cacheBunRuntime(bunExecutable, preparedManifest.bunVersion);
         options.onProgress?.("Publishing verified immutable release");
         stagedRelease = await publishVerifiedDashboardRelease(
             worktreePath,
             expectedCommit,
-            contract.releasesRoot
+            contract.releasesRoot,
+            {
+                prepareManifest: async (manifest) => {
+                    if (manifest.bunVersion !== bunRuntimeIdentity) {
+                        throw new Error(
+                            `Built release requires Bun ${manifest.bunVersion}, expected ${bunRuntimeIdentity}`
+                        );
+                    }
+                    await cacheBunRuntime(bunExecutable, manifest.bunVersion);
+                },
+            }
         );
     } catch (error) {
         stagingError =
@@ -464,7 +490,12 @@ export async function prunePublishedDashboardReleases(
     retainCount = 3,
     releasesRoot = resolveDashboardReleasesRoot()
 ): Promise<DashboardReleaseRetentionResult> {
-    return pruneDashboardReleases(retainCount, releasesRoot);
+    const productionReleasesRoot = resolveDashboardProjectPaths().productionReleasesRoot;
+    const runtimeRoot =
+        path.resolve(releasesRoot) === path.resolve(productionReleasesRoot)
+            ? resolveManagedBunRuntimeRoot()
+            : undefined;
+    return pruneDashboardReleases(retainCount, releasesRoot, runtimeRoot);
 }
 
 export async function runReleaseDeploymentCommand(

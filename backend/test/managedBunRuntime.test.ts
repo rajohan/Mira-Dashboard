@@ -21,7 +21,9 @@ import {
     installManagedBunRuntime,
     isBunRuntimeVersion,
     managedBunRuntimeExecutablePath,
+    pruneManagedBunRuntimes,
     requireManagedBunRuntime,
+    resolveDashboardReleaseBuildBunExecutable,
 } from "../src/managedBunRuntime.ts";
 
 const temporaryRoots: string[] = [];
@@ -131,11 +133,85 @@ describe("managed Bun runtimes", () => {
         );
     });
 
+    it("recovers an interrupted hardlink publication on retry", async () => {
+        const root = temporaryRoot("mira-managed-bun-recovery");
+        const runtimeRoot = path.join(root, "runtimes");
+        const source = path.join(root, "bun-source");
+        const identity = "1.4.0-canary.1+feedface";
+        writeFakeBun(source, "1.4.0-canary.1", identity);
+        const installed = await installManagedBunRuntime(source, identity, {
+            runtimeRoot,
+        });
+        linkSync(
+            installed,
+            path.join(path.dirname(installed), ".staging-interrupted-install")
+        );
+
+        expect(hasManagedBunRuntime(identity, runtimeRoot)).toBe(false);
+        expect(await installManagedBunRuntime(source, identity, { runtimeRoot })).toBe(
+            installed
+        );
+        expect(hasManagedBunRuntime(identity, runtimeRoot)).toBe(true);
+        expect(readdirSync(path.dirname(installed))).toEqual(["bun"]);
+    });
+
+    it("prunes only runtimes unreferenced by retained releases", async () => {
+        const root = temporaryRoot("mira-managed-bun-prune");
+        const runtimeRoot = path.join(root, "runtimes");
+        const retainedSource = path.join(root, "bun-retained");
+        const removedSource = path.join(root, "bun-removed");
+        const retainedIdentity = "1.4.0-canary.1+feedface";
+        const removedIdentity = "2.0.0+deadbeef";
+        writeFakeBun(retainedSource, "1.4.0-canary.1", retainedIdentity);
+        writeFakeBun(removedSource, "2.0.0", removedIdentity);
+        await installManagedBunRuntime(retainedSource, retainedIdentity, {
+            runtimeRoot,
+        });
+        await installManagedBunRuntime(removedSource, removedIdentity, {
+            runtimeRoot,
+        });
+        const interruptedRetirement = path.join(
+            runtimeRoot,
+            ".retired-00000000-0000-7000-8000-000000000000"
+        );
+        mkdirSync(interruptedRetirement);
+        writeFileSync(path.join(interruptedRetirement, "stale"), "stale");
+        writeFileSync(path.join(runtimeRoot, "README"), "operator note\n");
+
+        const result = await pruneManagedBunRuntimes([retainedIdentity], runtimeRoot);
+
+        expect(result).toEqual({
+            removed: [removedIdentity],
+            retained: [retainedIdentity],
+            warnings: ["Skipped unrecognized managed Bun runtime entry README"],
+        });
+        expect(hasManagedBunRuntime(retainedIdentity, runtimeRoot)).toBe(true);
+        expect(hasManagedBunRuntime(removedIdentity, runtimeRoot)).toBe(false);
+        expect(readdirSync(runtimeRoot).toSorted()).toEqual([retainedIdentity, "README"]);
+        expect(pruneManagedBunRuntimes([removedIdentity], runtimeRoot)).rejects.toThrow(
+            `Retained release requires unavailable managed Bun runtime ${removedIdentity}`
+        );
+    });
+
+    it("selects the host bootstrap Bun independently of the active worker", () => {
+        expect(
+            resolveDashboardReleaseBuildBunExecutable({
+                HOME: "/srv/dashboard-user",
+            })
+        ).toBe("/srv/dashboard-user/.bun/bin/bun");
+        expect(
+            resolveDashboardReleaseBuildBunExecutable({
+                HOME: "/srv/dashboard-user",
+                MIRA_DASHBOARD_DEPLOY_BUN_EXECUTABLE: "/opt/bun/candidate",
+            })
+        ).toBe("/opt/bun/candidate");
+    });
+
     it("launches the active release with its exact cached major runtime", () => {
         const projectRoot = temporaryRoot("mira-managed-bun-launcher");
         const releaseCommit = "a".repeat(40);
         const releasesRoot = path.join(projectRoot, "production", "releases");
-        const releaseRoot = path.join(releasesRoot, releaseCommit);
+        const releaseRoot = path.join(releasesRoot, "releases", releaseCommit);
         const releaseBackend = path.join(releaseRoot, "backend");
         const currentRelease = path.join(releasesRoot, "current");
         const runtime = path.join(
@@ -147,7 +223,7 @@ describe("managed Bun runtimes", () => {
             "bun"
         );
         mkdirSync(releaseBackend, { recursive: true });
-        symlinkSync(releaseCommit, currentRelease);
+        symlinkSync(path.join("releases", releaseCommit), currentRelease);
         mkdirSync(path.dirname(runtime), { recursive: true });
         writeFileSync(
             path.join(releaseRoot, "release-manifest.json"),

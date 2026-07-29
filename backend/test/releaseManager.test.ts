@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
+    chmodSync,
     closeSync,
     existsSync,
     mkdirSync,
@@ -22,6 +23,10 @@ import {
     databaseMigrationIdentities,
     type DatabaseMigrationIdentity,
 } from "../src/databaseMigrations/index.ts";
+import {
+    hasManagedBunRuntime,
+    installManagedBunRuntime,
+} from "../src/managedBunRuntime.ts";
 import { runReleaseLifecycleCommand } from "../src/releaseLifecycle.ts";
 import {
     activateDashboardRelease,
@@ -86,6 +91,7 @@ function testLiveSchemaState(
 }
 
 const SCHEMA_6_OPTIONS = {
+    hasRuntime: () => true,
     readLiveSchemaState: () => testLiveSchemaState(6),
 };
 
@@ -531,7 +537,9 @@ describe("Dashboard immutable release manager", () => {
         expect(status).not.toHaveProperty("current.manifest");
         expect(runReleaseLifecycleCommand(["prune"], root)).resolves.toEqual({
             removed: [],
+            removedRuntimes: [],
             retained: [SECOND_COMMIT, FIRST_COMMIT],
+            retainedRuntimes: [],
             warnings: [],
         });
         expect(runReleaseLifecycleCommand(["prune", "2"], root)).rejects.toThrow(
@@ -699,7 +707,10 @@ describe("Dashboard immutable release manager", () => {
             "requires unavailable managed Bun runtime 0.0.0"
         );
         expect(
-            activateDashboardRelease(FIRST_COMMIT, runtimeRoot, SCHEMA_6_OPTIONS)
+            activateDashboardRelease(FIRST_COMMIT, runtimeRoot, {
+                ...SCHEMA_6_OPTIONS,
+                hasRuntime: () => false,
+            })
         ).rejects.toThrow("requires unavailable managed Bun runtime 0.0.0");
 
         const cachedMajorRuntimeRoot = temporaryReleasesRoot();
@@ -716,21 +727,13 @@ describe("Dashboard immutable release manager", () => {
         expect(() =>
             assertDashboardReleaseRuntimeAvailable(cachedMajorRuntimeRelease, {
                 hasRuntime: (version) => version === "1.3.14",
-                isCurrentRuntime: () => false,
             })
         ).not.toThrow();
         expect(() =>
             assertDashboardReleaseRuntimeAvailable(cachedMajorRuntimeRelease, {
                 hasRuntime: () => false,
-                isCurrentRuntime: () => false,
             })
         ).toThrow("requires unavailable managed Bun runtime 1.3.14");
-        expect(() =>
-            assertDashboardReleaseRuntimeAvailable(cachedMajorRuntimeRelease, {
-                hasRuntime: () => false,
-                isCurrentRuntime: (version) => version === "1.3.14",
-            })
-        ).not.toThrow();
     });
 
     it("checks the effective live schema after a code-only rollback", async () => {
@@ -750,6 +753,7 @@ describe("Dashboard immutable release manager", () => {
 
         let liveSchemaVersion = 7;
         const options = {
+            hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
         };
         await activateDashboardRelease(FIRST_COMMIT, root, options);
@@ -779,11 +783,13 @@ describe("Dashboard immutable release manager", () => {
             schemaTarget: 8,
         });
         await activateDashboardRelease(FIRST_COMMIT, root, {
+            hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(7),
         });
 
         expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
+                hasRuntime: () => true,
                 readLiveSchemaState: () =>
                     testLiveSchemaState(8, {
                         8: {
@@ -810,6 +816,7 @@ describe("Dashboard immutable release manager", () => {
 
         let liveSchemaVersion = 7;
         const options = {
+            hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
         };
         await activateDashboardRelease(FIRST_COMMIT, root, options);
@@ -833,6 +840,7 @@ describe("Dashboard immutable release manager", () => {
         liveSchemaVersion = 8;
         expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
+                hasRuntime: () => true,
                 readLiveSchemaState: () => testLiveSchemaState(9),
             })
         ).rejects.toThrow("Activation release cannot open live SQLite schema 9");
@@ -860,6 +868,7 @@ describe("Dashboard immutable release manager", () => {
 
         let liveSchemaVersion = 7;
         const options = {
+            hasRuntime: () => true,
             readLiveSchemaState: () => testLiveSchemaState(liveSchemaVersion),
         };
         await activateDashboardRelease(FIRST_COMMIT, root, options);
@@ -1064,6 +1073,7 @@ describe("Dashboard immutable release manager", () => {
 
         expect(
             activateDashboardRelease(THIRD_COMMIT, root, {
+                hasRuntime: () => true,
                 readLiveSchemaState: () => {
                     rmSync(candidatePath, { force: true, recursive: true });
                     return testLiveSchemaState(6);
@@ -1086,6 +1096,7 @@ describe("Dashboard immutable release manager", () => {
 
         expect(
             activateDashboardRelease(SECOND_COMMIT, root, {
+                hasRuntime: () => true,
                 readLiveSchemaState: async () => {
                     rmSync(managedReleasePath(root, SECOND_COMMIT), {
                         force: true,
@@ -1148,6 +1159,28 @@ describe("Dashboard immutable release manager", () => {
 
     it("prunes old releases while preserving current and previous", async () => {
         const root = temporaryReleasesRoot();
+        const runtimeRoot = path.join(root, "runtimes");
+        const obsoleteRuntimeIdentity = "2.0.0+deadbeef";
+        const obsoleteRuntimeSource = path.join(root, "obsolete-bun");
+        writeFileSync(
+            obsoleteRuntimeSource,
+            `#!/bin/sh
+if [ "\${1:-}" = "--revision" ]; then
+    printf '%s\\n' '${obsoleteRuntimeIdentity}'
+elif [ "\${1:-}" = "--version" ]; then
+    printf '%s\\n' '2.0.0'
+else
+    exit 2
+fi
+`
+        );
+        chmodSync(obsoleteRuntimeSource, 0o700);
+        await installManagedBunRuntime(process.execPath, Bun.version, {
+            runtimeRoot,
+        });
+        await installManagedBunRuntime(obsoleteRuntimeSource, obsoleteRuntimeIdentity, {
+            runtimeRoot,
+        });
         await createManagedRelease(
             root,
             FIRST_COMMIT,
@@ -1206,13 +1239,17 @@ describe("Dashboard immutable release manager", () => {
         mkdirSync(unverifiablePath);
         writeFileSync(path.join(unverifiablePath, "invalid"), "invalid\n");
 
-        const result = await pruneDashboardReleases(3, root);
+        const result = await pruneDashboardReleases(3, root, runtimeRoot);
 
         expect(result).toEqual({
             removed: [FIRST_COMMIT],
+            removedRuntimes: [obsoleteRuntimeIdentity],
             retained: [FOURTH_COMMIT, THIRD_COMMIT, SECOND_COMMIT],
+            retainedRuntimes: [Bun.version],
             warnings: [`Skipped unverifiable release ${unverifiableCommit}`],
         });
+        expect(hasManagedBunRuntime(Bun.version, runtimeRoot)).toBe(true);
+        expect(hasManagedBunRuntime(obsoleteRuntimeIdentity, runtimeRoot)).toBe(false);
         expect(existsSync(managedReleasePath(root, FIRST_COMMIT))).toBe(false);
         expect(existsSync(managedReleasePath(root, SECOND_COMMIT))).toBe(true);
         expect(existsSync(managedReleasePath(root, THIRD_COMMIT))).toBe(true);
