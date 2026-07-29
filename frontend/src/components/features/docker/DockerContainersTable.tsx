@@ -170,6 +170,7 @@ function getStateRank(state: string): number {
 /** Provides props for Docker containers table. */
 interface DockerContainersTableProperties {
     containers: DockerContainer[];
+    isReadOnly?: boolean;
     onDetails: (containerId: string) => void;
     onLogs: (containerId: string) => void;
     onConsole: (containerId: string) => void;
@@ -183,6 +184,7 @@ interface DockerContainersTableProperties {
  */
 export function DockerContainersTable({
     containers,
+    isReadOnly = false,
     onDetails,
     onLogs,
     onConsole,
@@ -308,6 +310,7 @@ export function DockerContainersTable({
                             variant="secondary"
                             title={`Show logs for ${container.name}`}
                             aria-label={`Show logs for ${container.name}`}
+                            disabled={isReadOnly}
                             onClick={(event) => {
                                 event.stopPropagation();
                                 onLogs(container.id);
@@ -320,6 +323,7 @@ export function DockerContainersTable({
                             variant="secondary"
                             title={`Open console for ${container.name}`}
                             aria-label={`Open console for ${container.name}`}
+                            disabled={isReadOnly}
                             onClick={(event) => {
                                 event.stopPropagation();
                                 onConsole(container.id);
@@ -332,6 +336,7 @@ export function DockerContainersTable({
                             variant="secondary"
                             title={`Restart ${container.name}`}
                             aria-label={`Restart ${container.name}`}
+                            disabled={isReadOnly}
                             onClick={(event) => {
                                 event.stopPropagation();
                                 onRestart(container.id);
@@ -369,6 +374,7 @@ export function DockerContainersTable({
                     size="sm"
                     variant="secondary"
                     onClick={onRestartStack}
+                    disabled={isReadOnly}
                     className="w-full sm:w-auto"
                 >
                     <RotateCcw className="size-4" />
@@ -387,6 +393,7 @@ export function DockerContainersTable({
                             <button
                                 type="button"
                                 aria-label={`Open details for ${container.name}`}
+                                disabled={isReadOnly}
                                 className="absolute inset-0 rounded-lg hover:bg-primary-800/50 focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:outline-none"
                                 onClick={() => onDetails(container.id)}
                             />
@@ -434,6 +441,7 @@ export function DockerContainersTable({
                                         size="sm"
                                         variant="secondary"
                                         aria-label={`Show logs for ${container.name}`}
+                                        disabled={isReadOnly}
                                         onClick={() => onLogs(container.id)}
                                     >
                                         <FileText className="size-4" />
@@ -442,6 +450,7 @@ export function DockerContainersTable({
                                         size="sm"
                                         variant="secondary"
                                         aria-label={`Open console for ${container.name}`}
+                                        disabled={isReadOnly}
                                         onClick={() => onConsole(container.id)}
                                     >
                                         <SquareTerminal className="size-4" />
@@ -450,6 +459,7 @@ export function DockerContainersTable({
                                         size="sm"
                                         variant="secondary"
                                         aria-label={`Restart ${container.name}`}
+                                        disabled={isReadOnly}
                                         onClick={() => onRestart(container.id)}
                                     >
                                         <RotateCcw className="size-4" />
@@ -501,8 +511,15 @@ export function DockerContainersTable({
                         {table.getRowModel().rows.map((row) => (
                             <tr
                                 key={row.id}
-                                className="cursor-pointer border-b border-primary-700/50 hover:bg-primary-700/30"
-                                onClick={() => onDetails(row.original.id)}
+                                className={
+                                    "border-b border-primary-700/50 hover:bg-primary-700/30 " +
+                                    (isReadOnly ? "" : "cursor-pointer")
+                                }
+                                onClick={
+                                    isReadOnly
+                                        ? undefined
+                                        : () => onDetails(row.original.id)
+                                }
                             >
                                 {row.getVisibleCells().map((cell) => (
                                     <td key={cell.id} className="px-4 py-3 align-top">

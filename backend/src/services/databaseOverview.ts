@@ -1,5 +1,11 @@
 import { isIP } from "node:net";
 
+import type {
+    DatabaseOverviewResponse,
+    PgBouncerPoolSummary,
+    PgBouncerStatsSummary,
+    PostgresDeadTupleSummary,
+} from "../../../contracts/database.ts";
 import { runProcess } from "../lib/processes.ts";
 import { stringFallback } from "../lib/values.ts";
 import { getDashboardSqliteOverview } from "./sqliteOverview.ts";
@@ -90,6 +96,66 @@ interface PgBouncerStatsRow {
     avg_query_time: string;
     total_received: string;
     total_sent: string;
+}
+
+/**
+ * Projects a PostgreSQL table-health row onto the public response contract.
+ * @param row PostgreSQL table-health row.
+ * @returns Contract-safe PostgreSQL table-health row.
+ */
+function projectDeadTupleRow(row: PostgresDeadTupleSummary): PostgresDeadTupleSummary {
+    return {
+        ...(row.database === undefined ? {} : { database: row.database }),
+        dead_pct: row.dead_pct,
+        ...(row.last_autoanalyze === undefined
+            ? {}
+            : { last_autoanalyze: row.last_autoanalyze }),
+        ...(row.last_autovacuum === undefined
+            ? {}
+            : { last_autovacuum: row.last_autovacuum }),
+        n_dead_tup: row.n_dead_tup,
+        n_live_tup: row.n_live_tup,
+        relname: row.relname,
+        schemaname: row.schemaname,
+    };
+}
+
+/**
+ * Projects a dynamic PgBouncer pool row onto the fields consumed by the UI.
+ * @param row PgBouncer pool row.
+ * @returns Contract-safe PgBouncer pool row.
+ */
+function projectPgBouncerPoolRow(row: PgBouncerPoolSummary): PgBouncerPoolSummary {
+    return {
+        cl_active: row.cl_active,
+        cl_waiting: row.cl_waiting,
+        database: row.database,
+        maxwait: row.maxwait,
+        pool_mode: row.pool_mode,
+        sv_active: row.sv_active,
+        sv_idle: row.sv_idle,
+        sv_used: row.sv_used,
+        user: row.user,
+    };
+}
+
+/**
+ * Projects a dynamic PgBouncer statistics row onto the public response contract.
+ * @param row PgBouncer statistics row.
+ * @returns Contract-safe PgBouncer statistics row.
+ */
+function projectPgBouncerStatsRow(row: PgBouncerStatsSummary): PgBouncerStatsSummary {
+    return {
+        avg_query_time: row.avg_query_time,
+        avg_xact_time: row.avg_xact_time,
+        database: row.database,
+        total_query_count: row.total_query_count,
+        total_query_time: row.total_query_time,
+        total_received: row.total_received,
+        total_sent: row.total_sent,
+        total_xact_count: row.total_xact_count,
+        total_xact_time: row.total_xact_time,
+    };
 }
 
 /**
@@ -375,7 +441,7 @@ async function getTorrentCounts() {
  * Collects PostgreSQL and PgBouncer metrics used by the database overview endpoint.
  * @returns Database overview value.
  */
-export async function getDatabaseOverview() {
+export async function getDatabaseOverview(): Promise<DatabaseOverviewResponse> {
     const torrentCounts = await getTorrentCounts();
 
     const databaseRows = parseTable<PostgresDatabaseRow>(
@@ -630,11 +696,14 @@ export async function getDatabaseOverview() {
             : 0;
     const sqlite = getDashboardSqliteOverview();
 
-    let maintenanceStatus = isBloatAssessmentIncomplete ? "not_assessed" : "healthy";
+    let maintenanceStatus: "healthy" | "not_assessed" | "review" =
+        isBloatAssessmentIncomplete ? "not_assessed" : "healthy";
     if (maintenanceHintCount > 0) {
         maintenanceStatus = "review";
     }
     return {
+        checkedAt: new Date().toISOString(),
+        mode: "full",
         overview: {
             totalDatabaseSizeBytes,
             managedDatabaseCount: databaseRows.length + 1,
@@ -670,7 +739,7 @@ export async function getDatabaseOverview() {
             },
         },
         databases: databaseRows,
-        deadTuples: deadTupleRows,
+        deadTuples: deadTupleRows.map((row) => projectDeadTupleRow(row)),
         bloatEstimates: bloatEstimates
             .filter(
                 (row) =>
@@ -685,15 +754,15 @@ export async function getDatabaseOverview() {
             )
             .slice(0, 25),
         topQueries,
-        pgbouncerPools: pgBouncerPools,
-        pgbouncerStats: pgBouncerStats,
+        pgbouncerPools: pgBouncerPools.map((row) => projectPgBouncerPoolRow(row)),
+        pgbouncerStats: pgBouncerStats.map((row) => projectPgBouncerStatsRow(row)),
         sqlite,
     };
 }
 
-type DatabaseOverviewResult = Awaited<ReturnType<typeof getDatabaseOverview>>;
-type DatabaseOverviewSnapshot = DatabaseOverviewResult & {
+type DatabaseOverviewSnapshot = Omit<DatabaseOverviewResponse, "checkedAt" | "mode"> & {
     checkedAt?: string;
+    mode?: "full" | "isolated";
 };
 
 function isDatabaseOverviewSnapshot(value: unknown): value is DatabaseOverviewSnapshot {
@@ -763,12 +832,20 @@ export function getIsolatedDatabaseOverview(snapshot: unknown) {
               pgbouncerStats: [],
               sqlite,
           };
-    const { checkedAt: postgresSnapshotCheckedAt, ...previousOverview } = previous;
+    const {
+        checkedAt,
+        mode: previousMode,
+        postgresSnapshotCheckedAt: previousPostgresSnapshotCheckedAt,
+        ...previousOverview
+    } = previous;
+    const postgresSnapshotCheckedAt =
+        previousMode === "isolated" ? previousPostgresSnapshotCheckedAt : checkedAt;
     const totalDatabaseSizeBytes =
         Number(previousOverview.overview.totalDatabaseSizeBytes) || 0;
 
     return {
         ...previousOverview,
+        deadTuples: previous.deadTuples.map((row) => projectDeadTupleRow(row)),
         mode: "isolated" as const,
         ...(postgresSnapshotCheckedAt && {
             postgresSnapshotCheckedAt,
@@ -779,6 +856,12 @@ export function getIsolatedDatabaseOverview(snapshot: unknown) {
             totalDatabaseSizeBytes,
             totalManagedDatabaseSizeBytes: totalDatabaseSizeBytes + sqlite.storageBytes,
         },
+        pgbouncerPools: previous.pgbouncerPools.map((row) =>
+            projectPgBouncerPoolRow(row)
+        ),
+        pgbouncerStats: previous.pgbouncerStats.map((row) =>
+            projectPgBouncerStatsRow(row)
+        ),
         sqlite,
     };
 }

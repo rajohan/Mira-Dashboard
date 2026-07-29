@@ -21,6 +21,7 @@ const columnHelper = createColumnHelper<DockerImage>();
 /** Provides props for Docker images table. */
 interface DockerImagesTableProperties {
     images: DockerImage[];
+    isReadOnly?: boolean;
     onDelete: (imageId: string, label: string) => void;
     onPruneUnused: () => void;
     isPruning?: boolean;
@@ -32,6 +33,7 @@ interface DockerImagesTableProperties {
  */
 export function DockerImagesTable({
     images,
+    isReadOnly = false,
     onDelete,
     onPruneUnused,
     isPruning = false,
@@ -85,7 +87,7 @@ export function DockerImagesTable({
                         variant="danger"
                         title={`Delete ${label}`}
                         aria-label={`Delete ${label}`}
-                        disabled={image.inUseBy.length > 0}
+                        disabled={isReadOnly || image.inUseBy.length > 0}
                         onClick={(event) => {
                             event.stopPropagation();
                             onDelete(image.id, label);
@@ -124,7 +126,7 @@ export function DockerImagesTable({
                     size="sm"
                     variant="secondary"
                     onClick={onPruneUnused}
-                    disabled={isPruning}
+                    disabled={isReadOnly || isPruning}
                     className="w-full sm:w-auto"
                 >
                     <Trash2 className="size-4" />
@@ -167,7 +169,7 @@ export function DockerImagesTable({
                                 size="sm"
                                 variant="danger"
                                 aria-label={`Delete ${label}`}
-                                disabled={image.inUseBy.length > 0}
+                                disabled={isReadOnly || image.inUseBy.length > 0}
                                 onClick={() => onDelete(image.id, label)}
                                 className="mt-3 w-full"
                             >

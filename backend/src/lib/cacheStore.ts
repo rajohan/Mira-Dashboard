@@ -9,8 +9,8 @@ export interface CacheEntryRow {
     last_attempt_at: string;
     expires_at: string;
     status: string;
-    error_code: string;
-    error_message: string;
+    error_code: string | undefined;
+    error_message: string | undefined;
     consecutive_failures: string;
     meta: string;
 }
@@ -23,8 +23,8 @@ interface SqliteCacheEntryRow {
     last_attempt_at: string;
     expires_at: string;
     status: string;
-    error_code: string | undefined;
-    error_message: string | undefined;
+    error_code: string | null | undefined;
+    error_message: string | null | undefined;
     consecutive_failures: number;
     metadata_json: string;
 }
@@ -82,8 +82,8 @@ function mapCacheEntry(row: SqliteCacheEntryRow | undefined): CacheEntryRow | un
         last_attempt_at: row.last_attempt_at,
         expires_at: row.expires_at,
         status: isExpired ? "stale" : row.status,
-        error_code: row.error_code ?? "",
-        error_message: row.error_message ?? "",
+        error_code: row.error_code ?? undefined,
+        error_message: row.error_message ?? undefined,
         consecutive_failures: String(row.consecutive_failures),
         meta: row.metadata_json,
     };

@@ -198,6 +198,20 @@ function isPathAtOrBelow(pathname: string, prefix: string): boolean {
 }
 
 /**
+ * Returns whether the backend is running with isolated development safeguards.
+ * @param environment Environment value.
+ * @returns Whether isolated development safeguards are active.
+ */
+export function isDevelopmentSafeMode(
+    environment: Record<string, string | undefined> = process.env
+): boolean {
+    return (
+        environment.NODE_ENV !== "production" &&
+        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1"
+    );
+}
+
+/**
  * Blocks host and external-service mutations while preserving isolated dev data.
  * @returns Whether development host policy blocks the mutation.
  */
@@ -206,8 +220,7 @@ export function isDevelopmentHostMutationBlocked(
     environment: Record<string, string | undefined> = process.env
 ): boolean {
     if (
-        environment.NODE_ENV === "production" ||
-        environment.MIRA_DASHBOARD_DEV_SAFE_MODE !== "1" ||
+        !isDevelopmentSafeMode(environment) ||
         SAFE_REQUEST_METHODS.has(request.method.toUpperCase())
     ) {
         return false;
@@ -225,10 +238,7 @@ export function isDevelopmentHostMutationBlocked(
 export function isDevelopmentExternalNotificationSuppressed(
     environment: Record<string, string | undefined> = process.env
 ): boolean {
-    return (
-        environment.NODE_ENV !== "production" &&
-        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1"
-    );
+    return isDevelopmentSafeMode(environment);
 }
 
 export {
@@ -248,9 +258,7 @@ export function isDevelopmentGatewayMethodBlocked(
     environment: Record<string, string | undefined> = process.env
 ): boolean {
     return (
-        environment.NODE_ENV !== "production" &&
-        environment.MIRA_DASHBOARD_DEV_SAFE_MODE === "1" &&
-        !isDevelopmentGatewayMethodAllowed(method)
+        isDevelopmentSafeMode(environment) && !isDevelopmentGatewayMethodAllowed(method)
     );
 }
 

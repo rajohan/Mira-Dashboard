@@ -1286,8 +1286,8 @@ describe("Mira Dashboard backend integration", () => {
         expect(
             heartbeat.body.entries.find((entry) => entry.key === "moltbook.home")
         ).toMatchObject({
-            errorCode: "",
-            errorMessage: "",
+            errorCode: null,
+            errorMessage: null,
             meta: { provider: "moltbook" },
             status: "fresh",
             updatedAt: "2026-06-23T09:00:00.000Z",

@@ -1210,7 +1210,6 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     {
                         appSlug: "dashboard",
                         createdAt: "2026-06-24T08:10:00.000Z",
-                        details: {},
                         eventType: "update_available",
                         fromDigest: "sha256:old",
                         fromTag: "1.0.0",
@@ -1266,6 +1265,7 @@ function apiResponse(url: string, method: string, init?: RequestInit) {
                     status: "Up",
                 },
             ],
+            mode: "live",
         });
     }
 
@@ -4917,12 +4917,14 @@ describe("Mira Dashboard pages", () => {
                     const response = apiResponse(url, method, init);
                     const payload = (await response.json()) as {
                         containers: Array<Record<string, unknown>>;
+                        mode: "isolated" | "live";
                     };
                     return Response.json({
                         containers: payload.containers.map((container) => ({
                             ...container,
                             stats: undefined,
                         })),
+                        mode: payload.mode,
                     });
                 }
 
@@ -4956,6 +4958,53 @@ describe("Mira Dashboard pages", () => {
         });
         expect(within(detailsDialog).getByText("CPU: —")).toBeInTheDocument();
         expect(within(detailsDialog).getByText("Memory: —")).toBeInTheDocument();
+        view.unmount();
+        view.queryClient.clear();
+    });
+
+    it("renders isolated Docker inventory as an explicit read-only snapshot", async () => {
+        const fetchMock = jest.fn(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = requestUrl(input);
+                const method = init?.method ?? "GET";
+                if (url === "/api/docker/containers" && method === "GET") {
+                    const response = apiResponse(url, method, init);
+                    const payload = (await response.json()) as {
+                        containers: Array<Record<string, unknown>>;
+                    };
+                    return Response.json({
+                        containers: payload.containers,
+                        mode: "isolated",
+                    });
+                }
+                return apiResponse(url, method, init);
+            }
+        );
+        Object.defineProperty(globalThis, "fetch", {
+            configurable: true,
+            value: fetchMock,
+            writable: true,
+        });
+
+        const view = renderPage(createElement(Docker));
+        expect(await screen.findByText("Isolated Docker snapshot")).toBeInTheDocument();
+        expect(
+            screen.getByText(/Live details, logs, console, refreshes, and mutations/)
+        ).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /restart stack/i })).toBeDisabled();
+        expect(screen.getByRole("button", { name: /run updater now/i })).toBeDisabled();
+        for (const button of screen.getAllByRole("button", {
+            name: /show logs for dashboard/i,
+        })) {
+            expect(button).toBeDisabled();
+        }
+        expect(
+            fetchMock.mock.calls.some(
+                ([url, init]) =>
+                    requestUrl(url) === "/api/cache/docker.summary/refresh" &&
+                    init?.method === "POST"
+            )
+        ).toBe(false);
         view.unmount();
         view.queryClient.clear();
     });

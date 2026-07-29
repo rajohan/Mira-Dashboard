@@ -294,6 +294,51 @@ describe("API route error contracts", () => {
         expect(response.status).toBe(404);
     });
 
+    it("serves the copied Docker snapshot without host access in safe mode", async () => {
+        setEnvironment("MIRA_DASHBOARD_DEV_SAFE_MODE", "1");
+        setEnvironment("NODE_ENV", "test");
+        const { database } = await import("../src/database.ts");
+        const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
+        database.run("SAVEPOINT isolated_docker_route");
+        try {
+            writeCacheSuccess({
+                data: {
+                    checkedAt: "2026-07-29T16:00:00.000Z",
+                    containers: [],
+                    images: [],
+                    updaterEvents: [],
+                    updaterServices: [],
+                    updaterSummary: {
+                        autoPolicy: 0,
+                        enabled: 0,
+                        failed: 0,
+                        notifyPolicy: 0,
+                        total: 0,
+                        updateAvailable: 0,
+                    },
+                    volumes: [],
+                },
+                key: "docker.summary",
+                metadata: {},
+                source: "test",
+                ttl: 1,
+                ttlUnit: "hours",
+            });
+
+            const response = await dockerRoutes["/api/docker/containers"].GET(
+                new Request("https://test.local/api/docker/containers")
+            );
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({
+                containers: [],
+                mode: "isolated",
+            });
+        } finally {
+            database.run("ROLLBACK TO isolated_docker_route");
+            database.run("RELEASE isolated_docker_route");
+        }
+    });
+
     it("distinguishes TTS generation failures from request timeouts", async () => {
         setEnvironment("ELEVENLABS_API_KEY", "test-key");
         const fetchMock = jest

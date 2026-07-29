@@ -184,6 +184,7 @@ export const dockerSummaryCacheSchema = v.strictObject({
 
 export const dockerContainersResponseSchema = v.strictObject({
     containers: v.array(dockerContainerSchema),
+    mode: v.picklist(["isolated", "live"]),
 });
 export const dockerContainerLogsResponseSchema = v.strictObject({
     content: v.string(),

@@ -2622,6 +2622,8 @@ describe("backend route and service behavior", () => {
         );
         expect(stringCache.json()).resolves.toMatchObject({
             data: "raw-value",
+            errorCode: null,
+            errorMessage: null,
             key: "route.string",
             meta: {},
         });
@@ -4207,6 +4209,7 @@ describe("backend route and service behavior", () => {
                     stats: { cpu: "1.00%" },
                 },
             ],
+            mode: "live",
         });
         expect(containerEtag).toBeTruthy();
         const revalidatedContainers = await dockerRoutes["/api/docker/containers"].GET(

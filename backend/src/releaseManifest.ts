@@ -283,6 +283,27 @@ export async function listReleaseArtifactPaths(releaseRoot: string): Promise<str
     }
 
     const paths: string[] = [...RELEASE_STATIC_ARTIFACTS];
+    for (const relativePath of PRE_ROOT_WORKSPACE_RELEASE_ARTIFACTS) {
+        try {
+            const stat = await fsp.lstat(artifactPath(realReleaseRoot, relativePath));
+            if (!stat.isFile() || stat.isSymbolicLink()) {
+                throw new TypeError(
+                    `Release artifact must be a regular file: ${relativePath}`
+                );
+            }
+            paths.push(relativePath);
+        } catch (error) {
+            if (
+                error &&
+                typeof error === "object" &&
+                "code" in error &&
+                error.code === "ENOENT"
+            ) {
+                continue;
+            }
+            throw error;
+        }
+    }
     for (const directory of RELEASE_ARTIFACT_DIRECTORIES) {
         paths.push(...(await collectArtifactDirectory(realReleaseRoot, directory)));
     }

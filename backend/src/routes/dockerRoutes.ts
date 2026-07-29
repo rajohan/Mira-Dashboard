@@ -1,12 +1,15 @@
 import {
+    type DockerContainersResponse,
     parseDockerContainerActionRequest,
     parseDockerExecStartRequest,
     parseDockerPruneRequest,
     parseDockerStackActionRequest,
+    parseDockerSummaryCache,
 } from "../../../contracts/docker.ts";
 import type { ContractParser } from "../../../contracts/runtime.ts";
 import { database } from "../database.ts";
 import { json, jsonWithEtag } from "../http.ts";
+import { getCacheEntry } from "../lib/cacheStore.ts";
 import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
 import { runProcess } from "../lib/processes.ts";
 import {
@@ -16,6 +19,7 @@ import {
     objectFallback,
     stringFallback,
 } from "../lib/values.ts";
+import { isDevelopmentSafeMode } from "../requestPolicy.ts";
 import {
     readApiJsonOrError,
     routeErrorResponse,
@@ -763,12 +767,28 @@ function dockerSnapshotJson(request: Request | undefined, data: unknown): Respon
     return request ? jsonWithEtag(request, data) : json(data);
 }
 
+function getIsolatedDockerContainers() {
+    const entry = getCacheEntry("docker.summary");
+    const snapshot = parseJsonField<unknown>(entry?.data);
+    if (!entry || snapshot === undefined) {
+        throw new Error("Isolated Docker snapshot is unavailable");
+    }
+    return parseDockerSummaryCache(snapshot, "docker.summary").containers;
+}
+
 export const dockerRoutes = {
     "/api/docker/containers": {
-        GET: async (request?: Request) =>
-            dockerSnapshotJson(request, {
-                containers: await getDockerContainersSnapshot(),
-            }),
+        GET: async (request?: Request) => {
+            const mode = isDevelopmentSafeMode() ? "isolated" : "live";
+            const response = {
+                containers:
+                    mode === "isolated"
+                        ? getIsolatedDockerContainers()
+                        : await getDockerContainersSnapshot(),
+                mode,
+            } satisfies DockerContainersResponse;
+            return dockerSnapshotJson(request, response);
+        },
     },
     "/api/docker/containers/stats": {
         GET: async (request?: Request) => {

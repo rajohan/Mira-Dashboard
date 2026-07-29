@@ -4553,6 +4553,7 @@ describe("Mira Dashboard frontend behavior", () => {
                                 status: "Exited",
                             },
                         ],
+                        mode: "live",
                     });
                 }
 

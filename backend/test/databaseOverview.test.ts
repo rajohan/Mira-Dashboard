@@ -93,8 +93,9 @@ function writeFakeDocker(binaryPath: string): void {
                 "sv_used",
                 "maxwait",
                 "pool_mode",
+                "cl_active_cancel_req",
             ],
-            [["mira", "postgres", "2", "1", "1", "2", "3", "9", "transaction"]]
+            [["mira", "postgres", "2", "1", "1", "2", "3", "9", "transaction", "4"]]
         ),
         pgbouncerStats: table(
             [
@@ -107,8 +108,9 @@ function writeFakeDocker(binaryPath: string): void {
                 "avg_query_time",
                 "total_received",
                 "total_sent",
+                "total_server_assignment_count",
             ],
-            [["mira", "10", "20", "100", "200", "10", "20", "1024", "2048"]]
+            [["mira", "10", "20", "100", "200", "10", "20", "1024", "2048", "3"]]
         ),
         stats: table(
             [
@@ -208,6 +210,8 @@ describe("database overview service", () => {
             const routeResponse = await databaseRoutes["/api/database/overview"].GET();
             const routeOverview = (await routeResponse.json()) as typeof overview;
 
+            expect(overview.checkedAt).toEqual(expect.any(String));
+            expect(overview.mode).toBe("full");
             expect(overview.overview).toMatchObject({
                 totalDatabaseSizeBytes: 15_728_640,
                 managedDatabaseCount: 3,
@@ -247,9 +251,13 @@ describe("database overview service", () => {
                 overview.deadTuples.find((table) => table.relname === "small_churn_24")
             ).toMatchObject({
                 database: "mira",
-                physical_bytes: "1048576",
                 n_dead_tup: "2024",
             });
+            expect(overview.deadTuples[0]).not.toHaveProperty("physical_bytes");
+            expect(overview.pgbouncerPools[0]).not.toHaveProperty("cl_active_cancel_req");
+            expect(overview.pgbouncerStats[0]).not.toHaveProperty(
+                "total_server_assignment_count"
+            );
             expect(
                 overview.deadTuples.find((table) => table.relname === "logs")
             ).toBeUndefined();
@@ -453,6 +461,8 @@ describe("database overview service", () => {
     it("refreshes isolated SQLite metrics without replacing copied host metrics", async () => {
         const { getIsolatedDatabaseOverview } =
             await import("../src/services/databaseOverview.ts");
+        const { database } = await import("../src/database.ts");
+        const { writeCacheSuccess } = await import("../src/services/cacheEntryWriter.ts");
         const snapshot = {
             checkedAt: "2026-07-26T20:00:00.000Z",
             overview: {
@@ -484,11 +494,49 @@ describe("database overview service", () => {
         );
         expect(overview).not.toHaveProperty("checkedAt");
 
+        const refreshedOverview = getIsolatedDatabaseOverview({
+            ...overview,
+            checkedAt: "2026-07-26T21:00:00.000Z",
+        });
+        expect(refreshedOverview.postgresSnapshotCheckedAt).toBe(snapshot.checkedAt);
+
         const malformedSnapshot: Record<string, unknown> = { ...snapshot };
         delete malformedSnapshot.bloatEstimates;
         const fallback = getIsolatedDatabaseOverview(malformedSnapshot);
         expect(fallback.databases).toEqual([]);
         expect(fallback.bloatEstimates).toEqual([]);
         expect(fallback.postgresSnapshotCheckedAt).toBeUndefined();
+
+        const originalSafeMode = process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+        database.run("SAVEPOINT isolated_database_route");
+        try {
+            process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = "1";
+            writeCacheSuccess({
+                data: {
+                    ...fallback,
+                    checkedAt: snapshot.checkedAt,
+                },
+                key: "database.summary",
+                metadata: {},
+                source: "test",
+                ttl: 1,
+                ttlUnit: "hours",
+            });
+            const { databaseRoutes } = await import("../src/routes/databaseRoutes.ts");
+            const response = await databaseRoutes["/api/database/overview"].GET();
+            expect(response.status).toBe(200);
+            expect(await response.json()).toMatchObject({
+                checkedAt: expect.any(String),
+                mode: "isolated",
+            });
+        } finally {
+            if (originalSafeMode === undefined) {
+                delete process.env.MIRA_DASHBOARD_DEV_SAFE_MODE;
+            } else {
+                process.env.MIRA_DASHBOARD_DEV_SAFE_MODE = originalSafeMode;
+            }
+            database.run("ROLLBACK TO isolated_database_route");
+            database.run("RELEASE isolated_database_route");
+        }
     });
 });

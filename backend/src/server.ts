@@ -48,11 +48,13 @@ const IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATED_ASSET_CACHE_CONTROL = "no-cache";
 const HASHED_ASSET_NAME = /-[\da-z]{8}\.[\da-z]+$/iu;
 
-function dashboardSocketRequest(data: string | Buffer): DashboardSocketRequest {
+function dashboardSocketRequest(
+    data: string | Buffer
+): DashboardSocketRequest | undefined {
     try {
-        return readDashboardSocketRequest(JSON.parse(data.toString())) ?? {};
+        return readDashboardSocketRequest(JSON.parse(data.toString()));
     } catch {
-        return {};
+        return undefined;
     }
 }
 
@@ -163,6 +165,10 @@ export function createServer(
             }
             const data = typeof message === "string" ? message : Buffer.from(message);
             const socketRequest = dashboardSocketRequest(data);
+            if (!socketRequest) {
+                ws.close(1008, "Invalid Dashboard request");
+                return;
+            }
             const session = getAuthSessionFromSessionId(ws.data.sessionToken, {
                 touchActivity: socketRequest.userActivity === true,
             });

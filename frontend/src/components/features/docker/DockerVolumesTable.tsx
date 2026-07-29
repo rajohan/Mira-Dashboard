@@ -36,6 +36,7 @@ function truncateMiddle(value: string, maxLength = 48): string {
 /** Provides props for Docker volumes table. */
 interface DockerVolumesTableProperties {
     volumes: DockerVolume[];
+    isReadOnly?: boolean;
     onDelete: (volumeName: string) => void;
     onPruneUnused: () => void;
     isPruning?: boolean;
@@ -47,6 +48,7 @@ interface DockerVolumesTableProperties {
  */
 export function DockerVolumesTable({
     volumes,
+    isReadOnly = false,
     onDelete,
     onPruneUnused,
     isPruning = false,
@@ -99,7 +101,7 @@ export function DockerVolumesTable({
                         variant="danger"
                         title={`Delete ${volume.name}`}
                         aria-label={`Delete ${volume.name}`}
-                        disabled={volume.usedBy.length > 0}
+                        disabled={isReadOnly || volume.usedBy.length > 0}
                         onClick={(event) => {
                             event.stopPropagation();
                             onDelete(volume.name);
@@ -138,7 +140,7 @@ export function DockerVolumesTable({
                     size="sm"
                     variant="secondary"
                     onClick={onPruneUnused}
-                    disabled={isPruning}
+                    disabled={isReadOnly || isPruning}
                     className="w-full sm:w-auto"
                 >
                     <Trash2 className="size-4" />
@@ -182,7 +184,7 @@ export function DockerVolumesTable({
                                 size="sm"
                                 variant="danger"
                                 aria-label={`Delete ${volume.name}`}
-                                disabled={volume.usedBy.length > 0}
+                                disabled={isReadOnly || volume.usedBy.length > 0}
                                 onClick={() => onDelete(volume.name)}
                                 className="mt-3 w-full"
                             >

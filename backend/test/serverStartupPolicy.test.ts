@@ -1097,6 +1097,23 @@ describe("server start scheduler policy", () => {
                 type: "response",
             });
 
+            closeSpy.mockClear();
+            getAuthSessionSpy.mockClear();
+            messageHandler.mockClear();
+            options.websocket.message(
+                ws,
+                JSON.stringify({
+                    id: "invalid-request",
+                    method: "config.patch",
+                    type: "request",
+                    unexpected: true,
+                })
+            );
+            expect(closeSpy).toHaveBeenCalledWith(1008, "Invalid Dashboard request");
+            expect(getAuthSessionSpy).not.toHaveBeenCalled();
+            expect(messageHandler).not.toHaveBeenCalled();
+
+            closeSpy.mockClear();
             options.websocket.message(
                 ws,
                 JSON.stringify({

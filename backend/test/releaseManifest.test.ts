@@ -267,6 +267,23 @@ describe("Dashboard release manifest", () => {
         );
     });
 
+    it("verifies declared pre-root workspace package files when present", async () => {
+        const root = temporaryReleaseRoot();
+        writeFileSync(path.join(root, "backend", "package.json"), "{}\n");
+        writeFileSync(path.join(root, "backend", "bun.lock"), "backend-lock\n");
+        const manifest = await writeReleaseManifest(manifestOptions(root));
+
+        expect(manifest.artifacts.map((artifact) => artifact.path)).toContain(
+            "backend/package.json"
+        );
+        await verifyReleaseArtifacts(root, manifest);
+
+        rmSync(path.join(root, "backend", "package.json"));
+        expect(verifyReleaseArtifacts(root, manifest)).rejects.toThrow(
+            "Release artifact inventory does not match its manifest"
+        );
+    });
+
     it("rejects symlinked and malformed artifact declarations", async () => {
         const root = temporaryReleaseRoot();
         symlinkSync(

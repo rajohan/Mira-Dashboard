@@ -948,6 +948,8 @@ describe("backend service behavior", () => {
             invalidateCacheEntry(key, new Date(0));
             expect(getCacheEntry(key)).toMatchObject({
                 data: JSON.stringify({ version: 1 }),
+                error_code: undefined,
+                error_message: undefined,
                 status: "stale",
             });
             expect(() => invalidateCacheEntry(`${key}.missing`)).not.toThrow();

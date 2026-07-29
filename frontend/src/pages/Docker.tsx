@@ -87,7 +87,7 @@ export function Docker() {
     const execJobQuery = useDockerExecJob(consoleJobId);
     const updaterServicesQuery = useDockerUpdaterServices();
     const updaterEventsQuery = useDockerUpdaterEvents(25);
-    useDockerSummaryAutoRefresh();
+    useDockerSummaryAutoRefresh(containersQuery.mode === "live");
 
     const dockerAction = useDockerAction();
     const deleteImage = useDeleteDockerImage();
@@ -100,6 +100,8 @@ export function Docker() {
     const containers = containersQuery.data || [];
     const images = imagesQuery.data || [];
     const volumes = volumesQuery.data || [];
+    const isDockerIsolated = containersQuery.mode === "isolated";
+    const isDockerReadOnly = containersQuery.mode !== "live";
     const isInitialLoading =
         containersQuery.isLoading || imagesQuery.isLoading || volumesQuery.isLoading;
 
@@ -331,7 +333,9 @@ export function Docker() {
                                             label: service.serviceName,
                                         })
                                     }
-                                    disabled={dockerManualUpdate.isPending}
+                                    disabled={
+                                        isDockerReadOnly || dockerManualUpdate.isPending
+                                    }
                                     className="w-full sm:w-auto"
                                 >
                                     Update now
@@ -445,6 +449,7 @@ export function Docker() {
         containersContent = (
             <DockerContainersTable
                 containers={containers}
+                isReadOnly={isDockerReadOnly}
                 onDetails={setSelectedContainerId}
                 onLogs={setLogsContainerId}
                 onConsole={(containerId) => {
@@ -536,6 +541,21 @@ export function Docker() {
 
     return (
         <div className="space-y-4 p-3 sm:p-4 lg:space-y-6 lg:p-6">
+            {isDockerIsolated || containersQuery.isLiveUnavailable ? (
+                <output className="block rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100 sm:p-4">
+                    <div className="font-semibold">
+                        {isDockerIsolated
+                            ? "Isolated Docker snapshot"
+                            : "Cached Docker snapshot"}
+                    </div>
+                    <div className="mt-1 text-xs text-amber-200/80">
+                        {isDockerIsolated
+                            ? "PR development shows copied production inventory. Live details, logs, console, refreshes, and mutations are disabled."
+                            : "The live Docker API is unavailable. Inventory remains read-only until the connection recovers."}
+                    </div>
+                </output>
+            ) : undefined}
+
             <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
                 <Card className="p-3 sm:p-4">
                     <div className="text-sm text-primary-400">Running containers</div>
@@ -603,7 +623,7 @@ export function Docker() {
                         <Button
                             size="sm"
                             onClick={() => void handleRunDockerUpdater()}
-                            disabled={runDockerUpdater.isPending}
+                            disabled={isDockerReadOnly || runDockerUpdater.isPending}
                             className="w-full sm:w-auto"
                         >
                             {runDockerUpdater.isPending ? (
@@ -679,6 +699,7 @@ export function Docker() {
             <div className="grid gap-4 xl:grid-cols-2 xl:gap-6">
                 <DockerImagesTable
                     images={images}
+                    isReadOnly={isDockerReadOnly}
                     isPruning={pruningTarget === "images" && dockerPrune.isPending}
                     onDelete={(imageId, label) =>
                         setDangerousDelete({
@@ -694,6 +715,7 @@ export function Docker() {
 
                 <DockerVolumesTable
                     volumes={volumes}
+                    isReadOnly={isDockerReadOnly}
                     isPruning={pruningTarget === "volumes" && dockerPrune.isPending}
                     onDelete={(volumeName) =>
                         setDangerousDelete({

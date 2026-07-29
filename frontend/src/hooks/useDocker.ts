@@ -4,8 +4,8 @@ import { cacheRefreshResponseParser } from "../../../contracts/cache";
 import {
     type DockerContainerAction,
     type DockerContainerActionRequest,
-    type DockerContainer,
     type DockerContainerDetails,
+    type DockerContainersResponse,
     type DockerExecStartRequest,
     type DockerExecJob,
     type DockerPruneRequest,
@@ -70,12 +70,8 @@ async function fetchContainer(containerId: string): Promise<DockerContainerDetai
     );
 }
 
-async function fetchDockerContainers(): Promise<DockerContainer[]> {
-    const data = await apiFetchParsed(
-        "/docker/containers",
-        parseDockerContainersResponse
-    );
-    return data.containers;
+async function fetchDockerContainers(): Promise<DockerContainersResponse> {
+    return apiFetchParsed("/docker/containers", parseDockerContainersResponse);
 }
 
 /**
@@ -120,7 +116,7 @@ export function useDockerContainers() {
         staleTime: 1000,
     });
     const cachedContainers = query.data?.data.containers ?? [];
-    const containers = liveQuery.data ?? cachedContainers;
+    const containers = liveQuery.data?.containers ?? cachedContainers;
 
     return {
         ...query,
@@ -129,6 +125,8 @@ export function useDockerContainers() {
         isError: liveQuery.isError && containers.length === 0,
         isFetching: liveQuery.isFetching || query.isFetching,
         isLoading: liveQuery.isLoading && query.isLoading,
+        isLiveUnavailable: liveQuery.isError,
+        mode: liveQuery.data?.mode,
     };
 }
 
@@ -254,11 +252,13 @@ export function useRefreshDockerSummary() {
 
 /**
  * Keeps the complete Docker summary fresh while the Docker page is mounted.
+ * @param isEnabled Whether live Docker refreshes are enabled.
  * @returns Docker summary auto refresh state and actions.
  */
-export function useDockerSummaryAutoRefresh() {
+export function useDockerSummaryAutoRefresh(isEnabled: boolean) {
     const queryClient = useQueryClient();
     return useQuery({
+        enabled: isEnabled,
         queryKey: dockerKeys.summaryRefresh,
         queryFn: async () => {
             await refreshDockerSummary(queryClient);
