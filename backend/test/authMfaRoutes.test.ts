@@ -1,12 +1,14 @@
+import { afterEach, describe, expect, it } from "bun:test";
+
 import type {
     AuthenticationResponseJSON,
     PublicKeyCredentialRequestOptionsJSON,
     RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import type { Server } from "bun";
-import { afterEach, describe, expect, it, jest } from "bun:test";
 import { generate } from "otplib";
 
+import type { WebAuthnCredential } from "../../contracts/accountSecurity.ts";
 import {
     createSession,
     createUser,
@@ -26,9 +28,9 @@ import {
 import {
     confirmTotpEnrollment,
     createTotpEnrollment,
-    type WebAuthnFactorSummary,
 } from "../src/services/multiFactorAuth.ts";
 import type { WebAuthnChallengeContext } from "../src/services/webAuthn.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const USER_PREFIX = "auth-route-test-";
 const originalSecretEncryptionKey = process.env.MIRA_DASHBOARD_SECRET_ENCRYPTION_KEY;
@@ -157,7 +159,7 @@ function assertionOptions(): PublicKeyCredentialRequestOptionsJSON {
     };
 }
 
-function credentialSummary(id: string): WebAuthnFactorSummary {
+function credentialSummary(id: string): WebAuthnCredential {
     return {
         backedUp: false,
         createdAt: "2026-07-24T12:00:00.000Z",
@@ -193,7 +195,7 @@ function insertCredential(userId: number, id: string): void {
 }
 
 async function enrollTotp(userId: number, username: string) {
-    const enrollment = await createTotpEnrollment(userId, username, "Authenticator app");
+    const enrollment = createTotpEnrollment(userId, username, "Authenticator app");
     const code = await generate({
         algorithm: "sha1",
         digits: 6,
@@ -242,7 +244,7 @@ describe("MFA authentication routes", () => {
             server
         );
         expect(firstStep.status).toBe(202);
-        await expect(firstStep.json()).resolves.toMatchObject({
+        expect(firstStep.json()).resolves.toMatchObject({
             authenticated: false,
             methods: ["totp", "recovery"],
             mfaRequired: true,
@@ -286,7 +288,7 @@ describe("MFA authentication routes", () => {
             server
         );
         expect(completed.status).toBe(200);
-        await expect(completed.json()).resolves.toMatchObject({
+        expect(completed.json()).resolves.toMatchObject({
             authenticated: true,
             mfaRequired: false,
             user: { id: user.id, username: user.username },
@@ -415,15 +417,19 @@ describe("MFA authentication routes", () => {
 
         const contexts: WebAuthnChallengeContext[] = [];
         const routes = createAuthRoutes({
-            createAuthenticationOptions: async (context) => {
-                contexts.push(context);
-                return assertionOptions();
+            createAuthenticationOptions: (context) => {
+                return Promise.try(() => {
+                    contexts.push(context);
+                    return assertionOptions();
+                });
             },
-            verifyAuthentication: async (context, response) => {
-                contexts.push(context);
-                return response.id === "credential_route_login"
-                    ? credentialSummary(response.id)
-                    : undefined;
+            verifyAuthentication: (context, response) => {
+                return Promise.try(() => {
+                    contexts.push(context);
+                    return response.id === "credential_route_login"
+                        ? credentialSummary(response.id)
+                        : undefined;
+                });
             },
         });
         const firstStep = await routes["/api/auth/login"].POST(
@@ -436,7 +442,7 @@ describe("MFA authentication routes", () => {
             server
         );
         const pending = pendingCookie(firstStep);
-        await expect(firstStep.json()).resolves.toMatchObject({
+        expect(firstStep.json()).resolves.toMatchObject({
             methods: ["webauthn"],
         });
 
@@ -448,7 +454,7 @@ describe("MFA authentication routes", () => {
             server
         );
         expect(options.status).toBe(200);
-        await expect(options.json()).resolves.toEqual({
+        expect(options.json()).resolves.toEqual({
             options: assertionOptions(),
         });
 
@@ -472,8 +478,10 @@ describe("MFA authentication routes", () => {
         });
 
         const unavailableRoutes = createAuthRoutes({
-            createAuthenticationOptions: async () => {
-                throw new Error("WebAuthn unavailable");
+            createAuthenticationOptions: () => {
+                return Promise.try(() => {
+                    throw new Error("WebAuthn unavailable");
+                });
             },
             verifyAuthentication: async () => {},
         });
@@ -486,7 +494,7 @@ describe("MFA authentication routes", () => {
             }),
             server
         );
-        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         try {
             const unavailable = await unavailableRoutes[
                 "/api/auth/login/webauthn/options"
@@ -498,9 +506,19 @@ describe("MFA authentication routes", () => {
                 server
             );
             expect(unavailable.status).toBe(503);
-            expect(consoleError).toHaveBeenCalled();
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "auth",
+                    error: {
+                        message: "WebAuthn unavailable",
+                        name: "Error",
+                    },
+                    event: "auth.webauthn_login_options_failed",
+                    level: "error",
+                })
+            );
         } finally {
-            consoleError.mockRestore();
+            structuredLogs.stop();
         }
     });
 });
@@ -604,7 +622,7 @@ describe("Account security routes", () => {
             server
         );
         expect(changed.status).toBe(200);
-        await expect(changed.json()).resolves.toMatchObject({
+        expect(changed.json()).resolves.toMatchObject({
             isOk: true,
             revokedSessions: 1,
         });
@@ -631,7 +649,7 @@ describe("Account security routes", () => {
             server
         );
         expect(revoked.status).toBe(200);
-        await expect(revoked.json()).resolves.toEqual({
+        expect(revoked.json()).resolves.toEqual({
             isOk: true,
             loggedOut: false,
         });
@@ -656,25 +674,31 @@ describe("Account security routes", () => {
         let currentCookie = `mira_dashboard_session=${encodeURIComponent(staleToken)}`;
         const longCredentialId = `credential_${"a".repeat(400)}`;
         const routes = createAccountSecurityRoutes({
-            createAuthenticationOptions: async () => assertionOptions(),
-            createRegistrationOptions: async () =>
-                ({
-                    challenge: "registration-route",
-                }) as Awaited<
-                    ReturnType<
-                        NonNullable<
-                            Parameters<typeof createAccountSecurityRoutes>[0]
-                        >["createRegistrationOptions"]
-                    >
-                >,
-            verifyAuthentication: async (_context, response) =>
-                response.id === "credential_existing"
-                    ? credentialSummary(response.id)
-                    : undefined,
-            verifyRegistration: async () => ({
-                confirmation: { enabledMfa: false },
-                credential: credentialSummary(longCredentialId),
-            }),
+            createAuthenticationOptions: () => Promise.try(() => assertionOptions()),
+            createRegistrationOptions: () =>
+                Promise.try(
+                    () =>
+                        ({
+                            challenge: "registration-route",
+                        }) as Awaited<
+                            ReturnType<
+                                NonNullable<
+                                    Parameters<typeof createAccountSecurityRoutes>[0]
+                                >["createRegistrationOptions"]
+                            >
+                        >
+                ),
+            verifyAuthentication: (_context, response) =>
+                Promise.try(() =>
+                    response.id === "credential_existing"
+                        ? credentialSummary(response.id)
+                        : undefined
+                ),
+            verifyRegistration: () =>
+                Promise.try(() => ({
+                    confirmation: { enabledMfa: false },
+                    credential: credentialSummary(longCredentialId),
+                })),
         });
 
         const blockedOptions = await routes[

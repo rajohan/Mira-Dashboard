@@ -109,6 +109,12 @@ The executor fails closed unless both units use the expected project root and
 run from managed `current/backend`. A deployment never modifies the running
 release.
 
+The release parser temporarily permits the obsolete `backend/package.json` and
+`backend/bun.lock` artifacts so the single managed rollback slot created before
+the root-package consolidation remains verifiable. Neither file is produced or
+required by new releases. Remove `PRE_ROOT_WORKSPACE_RELEASE_ARTIFACTS` after
+both `current` and `previous` were built from the consolidated root package.
+
 ## Restart And Smoke Test
 
 Normal deploys schedule their own restart. For manual recovery, first confirm

@@ -1,11 +1,11 @@
 import type { Server } from "bun";
 
-import dashboard from "../index.html";
+import dashboard from "../frontend/index.html";
 import {
     addForwardedClientHeaders,
     createDevelopmentForwardedProtocolResolver,
     developmentCookieHeader,
-} from "../src/lib/developmentProxyHeaders.ts";
+} from "../frontend/src/lib/developmentProxyHeaders.ts";
 
 const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || "5173");
@@ -151,8 +151,25 @@ const server = Bun.serve<WebSocketProxyData>({
                 socket.data.pendingMessages = [];
             });
             backend.addEventListener("message", (event) => {
-                if (socket.readyState === WebSocket.OPEN) {
+                if (socket.readyState !== WebSocket.OPEN) {
+                    return;
+                }
+
+                if (typeof event.data === "string" || event.data instanceof ArrayBuffer) {
                     socket.send(event.data);
+                    return;
+                }
+
+                if (ArrayBuffer.isView(event.data)) {
+                    const bytes = new Uint8Array(event.data.byteLength);
+                    bytes.set(
+                        new Uint8Array(
+                            event.data.buffer,
+                            event.data.byteOffset,
+                            event.data.byteLength
+                        )
+                    );
+                    socket.send(bytes);
                 }
             });
             backend.addEventListener("close", () => {
@@ -165,4 +182,4 @@ const server = Bun.serve<WebSocketProxyData>({
     },
 });
 
-console.log(`Bun dev server listening on ${server.url}`);
+console.log(`Bun dev server listening on ${server.url.href}`);

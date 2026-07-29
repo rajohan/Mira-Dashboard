@@ -32,10 +32,14 @@ import {
 import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { errorMessage } from "../lib/errors.ts";
 import { runProcess } from "../lib/processes.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { hasLineBreakOrNullByte } from "../lib/values.ts";
 import {
     isPullRequestPreviewAuthorAllowed,
     resolvePullRequestPreviewAllowedAuthors,
 } from "./pullRequestPreviewPolicy.ts";
+
+const logger = createStructuredLogger("pull-request-preview-host");
 
 const PREVIEW_UNIT = "mira-dashboard-pr-preview.service";
 const PREVIEW_GATEWAY_PROXY_UNIT = "mira-dashboard-pr-preview-gateway.service";
@@ -194,7 +198,7 @@ function optionalEnvironmentValue(
 ): string | undefined {
     const configured = value?.trim();
     if (!configured) return undefined;
-    if (/[\r\n\0]/u.test(configured)) {
+    if (hasLineBreakOrNullByte(configured)) {
         throw new TypeError(`${name} must be a single environment value`);
     }
     return configured;
@@ -214,7 +218,10 @@ function defaultGatewayProxyEntrypoint(): string {
     return path.resolve(import.meta.dirname, "..", "pullRequestPreviewGatewayProxy.ts");
 }
 
-/** Resolves the single-slot managed PR preview host contract. */
+/**
+ * Resolves the single-slot managed PR preview host contract.
+ * @returns Resolved the single-slot managed PR preview host contract.
+ */
 export function resolvePullRequestPreviewConfig(
     environment: Record<string, string | undefined> = process.env
 ): PullRequestPreviewConfig {
@@ -320,7 +327,7 @@ function materializeGatewayTokenFile(
     if (
         !token ||
         Buffer.byteLength(token) > MAX_GATEWAY_TOKEN_BYTES ||
-        /[\r\n\0]/u.test(token)
+        hasLineBreakOrNullByte(token)
     ) {
         throw new Error(`${label} must be a valid single-line token`);
     }
@@ -463,13 +470,15 @@ function readPreviewRecord(
         try {
             renameSync(config.stateFile, quarantinePath);
             chmodSync(quarantinePath, 0o600);
-            console.error(
-                `[PullRequestPreview] Quarantined invalid state at ${quarantinePath}: ${errorMessage(error, "invalid state")}`
-            );
+            logger.error("preview.invalid_state_quarantined", {
+                error,
+                quarantinePath,
+            });
         } catch (quarantineError) {
-            console.error(
-                `[PullRequestPreview] Invalid state could not be quarantined: ${errorMessage(error, "invalid state")}. ${errorMessage(quarantineError, "quarantine failed")}`
-            );
+            logger.error("preview.invalid_state_quarantine_failed", {
+                error,
+                quarantineError,
+            });
         }
         return undefined;
     }
@@ -759,18 +768,16 @@ async function installPreviewDependencies(
     signal?: AbortSignal
 ): Promise<void> {
     const environment = safeInstallEnvironment(config);
-    for (const cwd of [worktreePath, path.join(worktreePath, "backend")]) {
-        await runCommand(
-            config.bunExecutable,
-            ["install", "--frozen-lockfile", "--ignore-scripts"],
-            {
-                cwd,
-                env: environment,
-                signal,
-                timeoutMs: 5 * 60 * 1000,
-            }
-        );
-    }
+    await runCommand(
+        config.bunExecutable,
+        ["install", "--frozen-lockfile", "--ignore-scripts"],
+        {
+            cwd: worktreePath,
+            env: environment,
+            signal,
+            timeoutMs: 5 * 60 * 1000,
+        }
+    );
 }
 
 function tailscaleDnsName(status: TailscaleStatus): string {
@@ -855,11 +862,12 @@ async function enableTailscaleServe(
             await disableOwnedTailscaleServe(config, true);
             onOwnershipChange(false);
         } catch (cleanupError) {
-            throw new AggregateError(
+            const activationFailure = new AggregateError(
                 [error, cleanupError],
                 "Tailscale Serve activation failed and its route could not be removed",
-                { cause: cleanupError }
+                { cause: error }
             );
+            throw activationFailure;
         }
         throw error;
     }
@@ -909,7 +917,9 @@ function removeMaterializedGatewayCredentials(config: PullRequestPreviewConfig):
         try {
             removeMaterializedGatewayTokenFile(filePath, label);
         } catch (error) {
-            errors.push(error instanceof Error ? error : new Error(String(error)));
+            errors.push(
+                error instanceof Error ? error : new Error(`${label} cleanup failed`)
+            );
         }
     }
     if (errors.length > 0) {
@@ -925,7 +935,10 @@ function managedStateRoot(config: PullRequestPreviewConfig, number: number): str
     return stateRoot;
 }
 
-/** Lists isolated PR state directories without following directory symlinks. */
+/**
+ * Lists isolated PR state directories without following directory symlinks.
+ * @returns List managed pull request preview state numbers result.
+ */
 export function listManagedPullRequestPreviewStateNumbers(
     config: PullRequestPreviewConfig = resolvePullRequestPreviewConfig()
 ): number[] {
@@ -996,11 +1009,11 @@ function previewGatewayProxyUrl(config: PullRequestPreviewConfig): string {
     return `ws://127.0.0.1:${config.gatewayProxyPort}/gateway`;
 }
 
-async function preparePreviewState(
+function preparePreviewState(
     config: PullRequestPreviewConfig,
     number: number,
     publicOrigin: string
-): Promise<string> {
+): string {
     const stateRoot = managedStateRoot(config, number);
     const environment = {
         ...safeInstallEnvironment(config),
@@ -1054,7 +1067,11 @@ function sandboxDirectories(...targets: string[]): string[] {
     return [...directories];
 }
 
-/** Builds the filesystem-isolated process used by the transient preview unit. */
+/**
+ * Builds the filesystem-isolated process used by the transient preview unit.
+ * @param input Input value to process.
+ * @returns Built the filesystem-isolated process used by the transient preview unit.
+ */
 export function buildPullRequestPreviewSandboxCommand(input: {
     config: PullRequestPreviewConfig;
     publicOrigin: string;
@@ -1270,7 +1287,11 @@ async function startPreviewGatewayProxyUnit(
     );
 }
 
-/** Parses the bounded systemctl property format used for preview status. */
+/**
+ * Parses the bounded systemctl property format used for preview status.
+ * @param output Output value.
+ * @returns Parsed the bounded systemctl property format used for preview status.
+ */
 export function parsePreviewUnitState(output: string): SystemdUnitState {
     const properties = new Map<string, string>();
     for (const line of output.split("\n")) {
@@ -1366,7 +1387,11 @@ function publicPreviewStatus(
     };
 }
 
-/** Reads the active preview and reconciles resources left by a stopped unit. */
+/**
+ * Reads the active preview and reconciles resources left by a stopped unit.
+ * @param config Config value.
+ * @returns Read the active preview and reconciles resources left by a stopped unit.
+ */
 export async function getPullRequestPreviewStatus(
     config = resolvePullRequestPreviewConfig()
 ): Promise<PullRequestPreviewStatus> {
@@ -1410,22 +1435,21 @@ export async function getPullRequestPreviewStatus(
                       subState: "dead",
                   }
                 : unitState;
-        const reconciledMessage =
-            cleanup.errors.length > 0
-                ? `Preview stopped outside the managed workflow. Cleanup: ${cleanup.errors.join(". ")}`
-                : isStaleStopping
-                  ? undefined
-                  : record.message;
+        let reconciledMessage = isStaleStopping ? undefined : record.message;
+        if (cleanup.errors.length > 0) {
+            reconciledMessage = `Preview stopped outside the managed workflow. Cleanup: ${cleanup.errors.join(". ")}`;
+        }
+        let status = isStaleStopping
+            ? "stopped"
+            : lifecycleFromUnit(reconciledUnitState, record.status);
+        if (cleanup.errors.length > 0) {
+            status = "failed";
+        }
         const reconciledRecord: PullRequestPreviewRecord = {
             ...record,
             message: reconciledMessage,
             ownsTailscaleServe: cleanup.ownsTailscaleServe,
-            status:
-                cleanup.errors.length > 0
-                    ? "failed"
-                    : isStaleStopping
-                      ? "stopped"
-                      : lifecycleFromUnit(reconciledUnitState, record.status),
+            status,
             updatedAt: new Date().toISOString(),
         };
         writePreviewRecord(config, reconciledRecord);
@@ -1581,14 +1605,17 @@ function validatePreviewPullRequest(
     if (
         !pullRequest.title.trim() ||
         pullRequest.title.length > 1024 ||
-        /[\r\n\0]/u.test(pullRequest.title)
+        hasLineBreakOrNullByte(pullRequest.title)
     ) {
         throw new TypeError("Pull request title is invalid");
     }
     return pullRequest;
 }
 
-/** Starts or updates the single managed preview slot for one validated PR. */
+/**
+ * Starts or updates the single managed preview slot for one validated PR.
+ * @returns Promise resolving to the start pull request preview result.
+ */
 export async function startPullRequestPreview(
     candidate: PullRequestPreviewCandidate,
     options: {
@@ -1671,7 +1698,7 @@ export async function startPullRequestPreview(
             signal
         );
         await installPreviewDependencies(config, preparedWorktree, signal);
-        const stateRoot = await preparePreviewState(config, number, publicOrigin);
+        const stateRoot = preparePreviewState(config, number, publicOrigin);
         writePreviewRecord(config, startingRecord);
         materializeGatewayCredentials(
             config,
@@ -1733,7 +1760,12 @@ export async function startPullRequestPreview(
     }
 }
 
-/** Stops the managed preview slot, optionally enforcing its owning PR number. */
+/**
+ * Stops the managed preview slot, optionally enforcing its owning PR number.
+ * @param number Number value.
+ * @param options Operation options.
+ * @returns Promise resolving to the stop pull request preview result.
+ */
 export async function stopPullRequestPreview(
     number: number | undefined,
     options: {
@@ -1785,7 +1817,12 @@ export async function stopPullRequestPreview(
     return publicPreviewStatus(stoppedRecord);
 }
 
-/** Removes the shared checkout and isolated state after its owning PR closes. */
+/**
+ * Removes the shared checkout and isolated state after its owning PR closes.
+ * @param number Number value.
+ * @param options Operation options.
+ * @returns Promise resolving to the cleanup closed pull request preview result.
+ */
 export async function cleanupClosedPullRequestPreview(
     number: number,
     options: { config?: PullRequestPreviewConfig } = {}

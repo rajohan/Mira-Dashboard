@@ -1,8 +1,10 @@
+import { describe, expect, it, jest } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it, jest } from "bun:test";
+import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const DATABASE_OVERVIEW_ENV_KEYS = [
     "DATABASE_HOST",
@@ -297,7 +299,7 @@ describe("database overview service", () => {
             expect(torrentCountQueries).toHaveLength(4);
 
             process.env.FAKE_DOCKER_FAIL_COMET = "1";
-            await expect(getDatabaseOverview()).rejects.toThrow(
+            expect(getDatabaseOverview()).rejects.toThrow(
                 "docker exec failed with exit code 1"
             );
         } finally {
@@ -422,25 +424,29 @@ describe("database overview service", () => {
         const overviewSpy = jest
             .spyOn(serviceModule, "getDatabaseOverview")
             .mockRejectedValue(databaseError);
-        const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         try {
             const { databaseRoutes } = await import("../src/routes/databaseRoutes.ts");
             const response = await databaseRoutes["/api/database/overview"].GET();
 
             expect(response.status).toBe(500);
-            expect(await response.json()).toEqual({
-                error: "Failed to load database overview",
-            });
-            expect(consoleSpy).toHaveBeenCalledWith(
-                "[databaseRoutes] Failed to load database overview",
-                {
-                    code: "ECONNREFUSED",
-                    name: "Error",
-                }
+            expect(await response.json()).toEqual(
+                apiErrorExpectation("Failed to load database overview", "internal_error")
+            );
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "database-route",
+                    error: {
+                        code: "ECONNREFUSED",
+                        name: "Error",
+                    },
+                    event: "database.overview_load_failed",
+                    level: "error",
+                })
             );
         } finally {
             overviewSpy.mockRestore();
-            consoleSpy.mockRestore();
+            structuredLogs.stop();
         }
     });
 

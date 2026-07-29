@@ -9,7 +9,15 @@ import type {
     PullRequestSummary,
     WorktreeCleanupResult,
 } from "../../../contracts/delivery.ts";
+import {
+    parseGitHubPullRequestState,
+    parsePublicGitHubPullRequests,
+    parsePullRequestSummary,
+} from "../../../contracts/delivery.ts";
+import type { ScheduledJob } from "../../../contracts/jobs.ts";
+import type { ContractParser } from "../../../contracts/runtime.ts";
 import { database, getMiraDatabasePath, sqlNullable } from "../database.ts";
+import { byteStreamReader } from "../lib/byteStreams.ts";
 import { resolveDashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { errorMessage } from "../lib/errors.ts";
 import {
@@ -19,6 +27,7 @@ import {
     runProcess,
     spawnProcess,
 } from "../lib/processes.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
     assertManagedDashboardUnitProperties,
@@ -43,7 +52,7 @@ import {
 import {
     enqueueJobExecution,
     JOB_WORKER_HEARTBEAT_MAX_AGE_MS,
-    type JobExecution,
+    type JobExecutionRecord,
     registerExpiredJobExecutionHandler,
     registerQueuedJobCancellationHandler,
 } from "./jobExecutionQueue.ts";
@@ -56,11 +65,37 @@ import {
     successfulJobExecutionOutput,
     waitForJobExecution,
 } from "./queuedJobExecution.ts";
+
+const logger = createStructuredLogger("pull-requests");
+
+/**
+ * Describes the outcome of merging a pull request and starting deployment.
+ *
+ * @param number - Pull request number.
+ * @param willDeploy - Whether deployment was requested.
+ * @param syncError - Production checkout synchronization error, when present.
+ * @param deployError - Deployment startup error, when present.
+ * @returns User-facing merge result message.
+ */
+function pullRequestMergeMessage(
+    number: number,
+    willDeploy: boolean,
+    syncError: string | undefined,
+    deployError: string | undefined
+): string {
+    if (syncError) {
+        return `PR #${number} merged. Production sync failed`;
+    }
+    if (deployError) {
+        return `PR #${number} merged. Deploy failed to start`;
+    }
+    return willDeploy ? `PR #${number} merged. Deploy started` : `PR #${number} merged`;
+}
+
 import {
     type OrphanedDeploymentCutover,
     registerDeploymentCutoverRecoveryHandler,
     registerScheduledJobAction,
-    type ScheduledJob,
     type ScheduledJobActionContext,
     ScheduledJobActionError,
 } from "./scheduledJobs.ts";
@@ -146,19 +181,6 @@ interface CommandResult {
     stderr: string;
 }
 
-interface PublicGitHubPullRequest {
-    base?: { ref?: unknown };
-    body?: unknown;
-    created_at?: unknown;
-    draft?: unknown;
-    head?: { ref?: unknown; sha?: unknown };
-    html_url?: unknown;
-    number?: unknown;
-    title?: unknown;
-    updated_at?: unknown;
-    user?: { login?: unknown };
-}
-
 /** Represents Git worktree. */
 interface GitWorktree {
     path: string;
@@ -239,7 +261,11 @@ function mapDeploymentJob(row: DeploymentJobRow): DeploymentJob {
     };
 }
 
-/** Reads one deployment job. */
+/**
+ * Reads one deployment job.
+ * @param jobId Job identifier.
+ * @returns Read one deployment job.
+ */
 function readDeploymentJob(jobId: string): DeploymentJob | undefined {
     const row = database
         .prepare(
@@ -262,7 +288,10 @@ function readDeploymentJob(jobId: string): DeploymentJob | undefined {
     return row ? mapDeploymentJob(row) : undefined;
 }
 
-/** Checks whether an active deployment lock is stale enough to replace. */
+/**
+ * Checks whether an active deployment lock is stale enough to replace.
+ * @returns Whether the deployment job is stale.
+ */
 function isDeploymentJobStale(job: DeploymentJob, now = Date.now()): boolean {
     const updatedAt = Date.parse(job.updatedAt || job.startedAt);
     if (!Number.isFinite(updatedAt)) {
@@ -279,7 +308,7 @@ interface DeploymentLockRow {
 interface DeploymentLockExecutionRow {
     action_key: string;
     output_json: string;
-    status: JobExecution["status"];
+    status: JobExecutionRecord["status"];
 }
 
 interface DeploymentCutoverContext {
@@ -403,7 +432,10 @@ function parseDeploymentCutoverContext(
     }
 }
 
-/** Checks whether an active deployment lock row is stale enough to replace. */
+/**
+ * Checks whether an active deployment lock row is stale enough to replace.
+ * @returns Whether the deployment lock is stale.
+ */
 function isDeploymentLockStale(lock: DeploymentLockRow, now = Date.now()): boolean {
     const updatedAt = Date.parse(lock.updated_at);
     if (!Number.isFinite(updatedAt)) {
@@ -412,7 +444,10 @@ function isDeploymentLockStale(lock: DeploymentLockRow, now = Date.now()): boole
     return now - updatedAt > DEPLOYMENT_LOCK_STALE_MS;
 }
 
-/** Reads the active deployment lock. */
+/**
+ * Reads the active deployment lock.
+ * @returns Read the active deployment lock.
+ */
 function readDeploymentLockRow(): DeploymentLockRow | undefined {
     return database
         .prepare("SELECT job_id, updated_at FROM deployment_lock WHERE id = 1")
@@ -443,7 +478,10 @@ function readDeploymentLockExecution(
         .get(lockOwner, lockOwner) as DeploymentLockExecutionRow | undefined;
 }
 
-/** Releases the active release lock if it still belongs to the given job. */
+/**
+ * Releases the active release lock if it still belongs to the given job.
+ * @param jobId Job identifier.
+ */
 function releaseDeploymentLock(jobId: string): void {
     try {
         database
@@ -455,7 +493,7 @@ function releaseDeploymentLock(jobId: string): void {
 }
 
 function cleanupTerminatedDeploymentExecution(
-    execution: JobExecution,
+    execution: JobExecutionRecord,
     timestamp: string,
     note: string
 ): void {
@@ -491,7 +529,7 @@ function cleanupTerminatedDeploymentExecution(
 }
 
 function cleanupQueuedDeploymentCancellation(
-    execution: JobExecution,
+    execution: JobExecutionRecord,
     timestamp: string
 ): void {
     cleanupTerminatedDeploymentExecution(
@@ -503,17 +541,13 @@ function cleanupQueuedDeploymentCancellation(
     );
 }
 
-function cleanupExpiredDeploymentExecution(execution: JobExecution): void {
+function cleanupExpiredDeploymentExecution(execution: JobExecutionRecord): void {
+    const action = execution.actionKey === "dashboard.rollback" ? "Rollback" : "Deploy";
+    const outcome = execution.status === "cancelled" ? "cancelled" : "failed";
     cleanupTerminatedDeploymentExecution(
         execution,
         execution.finishedAt ?? dateToISOString(new Date()),
-        execution.actionKey === "dashboard.rollback"
-            ? execution.status === "cancelled"
-                ? "Rollback cancelled after its worker lease expired"
-                : "Rollback failed after its worker lease expired"
-            : execution.status === "cancelled"
-              ? "Deploy cancelled after its worker lease expired"
-              : "Deploy failed after its worker lease expired"
+        `${action} ${outcome} after its worker lease expired`
     );
 }
 
@@ -595,7 +629,10 @@ function ensureNoActiveDeployment(): void {
     }
 }
 
-/** Acquires the active release lock for a deployment or rollback job. */
+/**
+ * Acquires the active release lock for a deployment or rollback job.
+ * @param jobId Job identifier.
+ */
 function acquireDeploymentLock(jobId: string): void {
     ensureNoActiveDeployment();
     try {
@@ -623,7 +660,10 @@ function refreshDeploymentLockOwner(jobId: string): void {
     }
 }
 
-/** Refreshes the active deploy heartbeat while long-running work continues. */
+/**
+ * Refreshes the active deploy heartbeat while long-running work continues.
+ * @returns Refresh deployment heartbeat result.
+ */
 function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
     const updatedJob = { ...job, updatedAt: dateToISOString(new Date()) };
     writeDeploymentJob(updatedJob);
@@ -633,7 +673,10 @@ function refreshDeploymentHeartbeat(job: DeploymentJob): DeploymentJob {
     return updatedJob;
 }
 
-/** Performs read deployment jobs. */
+/**
+ * Performs read deployment jobs.
+ * @returns Read deployment jobs result.
+ */
 export function readDeploymentJobs(): DeploymentJob[] {
     return (
         database
@@ -667,6 +710,9 @@ interface DeploymentRuntimeResultRow {
  * Rejects a previous slot whose latest meaningful runtime result failed
  * readiness. Build failures and cancelled jobs do not disqualify an otherwise
  * verified immutable release.
+ * @param commitSha Commit sha value.
+ * @param excludedJobId Excluded job identifier.
+ * @returns Rollback runtime ineligibility reason result.
  */
 function rollbackRuntimeIneligibilityReason(
     commitSha: string,
@@ -743,7 +789,10 @@ function dashboardReleaseSummary(
     };
 }
 
-/** Reads the managed production release slots without exposing host paths. */
+/**
+ * Reads the managed production release slots without exposing host paths.
+ * @returns Read the managed production release slots without exposing host paths.
+ */
 export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatus> {
     const state = await readDashboardReleaseState(resolveDashboardReleasesRoot());
     const current = state.current ? dashboardReleaseSummary(state.current) : undefined;
@@ -773,12 +822,20 @@ export async function getDashboardReleaseStatus(): Promise<DashboardReleaseStatu
     };
 }
 
-/** Performs trim output. */
+/**
+ * Performs trim output.
+ * @param value Value to process.
+ * @returns Trim output result.
+ */
 function trimOutput(value: string): string {
     return value.slice(-20_000);
 }
 
-/** Splits an owner/name GitHub repository identifier. */
+/**
+ * Splits an owner/name GitHub repository identifier.
+ * @param repo Repo value.
+ * @returns Parsed repo parts.
+ */
 function parseRepoParts(repo: string): { owner: string; name: string } {
     const parts = repo.split("/");
     const [owner, name] = parts;
@@ -788,7 +845,11 @@ function parseRepoParts(repo: string): { owner: string; name: string } {
     return { owner, name };
 }
 
-/** Builds GitHub command environment for one token. */
+/**
+ * Builds GitHub command environment for one token.
+ * @param githubToken Github token value.
+ * @returns Built GitHub command environment for one token.
+ */
 function buildGithubCommandEnvironment(githubToken: string): NodeJS.ProcessEnv {
     const environment = { ...process.env };
     for (const key of Object.keys(environment)) {
@@ -810,7 +871,10 @@ function buildGithubCommandEnvironment(githubToken: string): NodeJS.ProcessEnv {
     return environment;
 }
 
-/** Builds command environment. */
+/**
+ * Builds command environment.
+ * @returns Built command environment.
+ */
 function buildCommandEnvironment(): NodeJS.ProcessEnv {
     const githubToken = configuredGithubReadToken();
     const environment = buildGithubCommandEnvironment(githubToken);
@@ -834,7 +898,10 @@ function configuredGithubReadToken(): string {
     );
 }
 
-/** Builds reviewer command environment. */
+/**
+ * Builds reviewer command environment.
+ * @returns Built reviewer command environment.
+ */
 function buildReviewCommandEnvironment(): NodeJS.ProcessEnv {
     const githubToken = process.env.RAJOHAN_GITHUB_TOKEN?.trim() || "";
     if (!githubToken) {
@@ -843,7 +910,10 @@ function buildReviewCommandEnvironment(): NodeJS.ProcessEnv {
     return buildGithubCommandEnvironment(githubToken);
 }
 
-/** Returns whether the configured reviewer has approved the pull request. */
+/**
+ * Returns whether the configured reviewer has approved the pull request.
+ * @returns Whether the configured reviewer has approved the pull request.
+ */
 function hasReviewerApproval(pr: PullRequestSummary): boolean {
     const author = DEFAULT_REVIEWER_AUTHOR;
     const reviews = (
@@ -861,7 +931,10 @@ function hasReviewerApproval(pr: PullRequestSummary): boolean {
     return latestReview?.state?.toUpperCase() === "APPROVED";
 }
 
-/** Returns whether the pull request has a dashboard-accepted review approval. */
+/**
+ * Returns whether the pull request has a dashboard-accepted review approval.
+ * @returns Whether the pull request has a dashboard-accepted review approval.
+ */
 function isPullRequestReviewApproved(pr: PullRequestSummary): boolean {
     return (
         pr.reviewDecision?.toUpperCase() === "APPROVED" ||
@@ -870,7 +943,10 @@ function isPullRequestReviewApproved(pr: PullRequestSummary): boolean {
     );
 }
 
-/** Returns whether the configured reviewer can approve the pull request. */
+/**
+ * Returns whether the configured reviewer can approve the pull request.
+ * @returns Whether the configured reviewer can approve the pull request.
+ */
 function canReviewerApprove(pr: PullRequestSummary): boolean {
     return (
         pr.author?.login !== DEFAULT_REVIEWER_AUTHOR &&
@@ -879,7 +955,10 @@ function canReviewerApprove(pr: PullRequestSummary): boolean {
     );
 }
 
-/** Normalizes pull request metadata for the dashboard API. */
+/**
+ * Normalizes pull request metadata for the dashboard API.
+ * @returns Normalized pull request metadata for the dashboard API.
+ */
 function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
     const rest = { ...pr };
     delete rest.latestOpinionatedReviews;
@@ -898,36 +977,17 @@ function normalizePullRequest(pr: PullRequestSummary): PullRequestSummary {
     };
 }
 
-/** Parses the bounded public REST shape used only by credential-free dev previews. */
+/**
+ * Parses the bounded public REST shape used only by credential-free dev previews.
+ * @param value Value to process.
+ * @returns Parsed the bounded public REST shape used only by credential-free dev previews.
+ */
 export function parsePublicGithubPullRequests(value: unknown): PullRequestSummary[] {
-    if (!Array.isArray(value) || value.length > 100) {
-        throw new Error("GitHub public pull request response is invalid");
-    }
-    return value.map((entry) => {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-            throw new Error("GitHub public pull request response is invalid");
-        }
-        const pullRequest = entry as PublicGitHubPullRequest;
-        if (
-            !Number.isSafeInteger(pullRequest.number) ||
-            Number(pullRequest.number) <= 0 ||
-            typeof pullRequest.title !== "string" ||
-            typeof pullRequest.html_url !== "string" ||
-            typeof pullRequest.head?.ref !== "string" ||
-            typeof pullRequest.head.sha !== "string" ||
-            !FULL_COMMIT_SHA_PATTERN.test(pullRequest.head.sha) ||
-            typeof pullRequest.base?.ref !== "string" ||
-            typeof pullRequest.user?.login !== "string" ||
-            typeof pullRequest.created_at !== "string" ||
-            typeof pullRequest.updated_at !== "string" ||
-            typeof pullRequest.draft !== "boolean"
-        ) {
-            throw new Error("GitHub public pull request response is invalid");
-        }
+    return parsePublicGitHubPullRequests(value).map((pullRequest) => {
         return normalizePullRequest({
             author: { login: pullRequest.user.login },
             baseRefName: pullRequest.base.ref,
-            body: typeof pullRequest.body === "string" ? pullRequest.body : undefined,
+            body: pullRequest.body ?? undefined,
             createdAt: pullRequest.created_at,
             headRefName: pullRequest.head.ref,
             headRefOid: pullRequest.head.sha,
@@ -948,7 +1008,10 @@ async function readBoundedJsonResponse(
     if (!response.body) {
         throw new Error("GitHub public pull request response was empty");
     }
-    const reader = response.body.getReader();
+    const reader = byteStreamReader(response.body);
+    if (!reader) {
+        throw new Error("GitHub public pull request response was empty");
+    }
     const chunks: Uint8Array[] = [];
     let receivedBytes = 0;
     try {
@@ -1023,7 +1086,13 @@ async function listPublicDashboardPullRequests(): Promise<PullRequestSummary[]> 
     }
 }
 
-/** Performs run command. */
+/**
+ * Performs run command.
+ * @param command Command value.
+ * @param arguments_ Arguments value.
+ * @param options Operation options.
+ * @returns Run command result.
+ */
 async function runCommand(
     command: string,
     arguments_: string[],
@@ -1055,8 +1124,18 @@ async function runCommand(
     };
 }
 
-/** Runs a GitHub CLI command and parses its JSON output. */
-async function runGhJson<T>(arguments_: string[], signal?: AbortSignal): Promise<T> {
+/**
+ * Runs a GitHub CLI command and parses its JSON output.
+ * @param arguments_ Arguments value.
+ * @param parser Runtime value parser.
+ * @param signal Signal used to cancel the operation.
+ * @returns Promise resolving to the run gh json result.
+ */
+async function runGhJson<T>(
+    arguments_: string[],
+    parser: ContractParser<T>,
+    signal?: AbortSignal
+): Promise<T> {
     const { code, stderr, stdout } = await runProcess("gh", arguments_, {
         cwd: getDashboardRoot(),
         env: buildCommandEnvironment(),
@@ -1071,18 +1150,27 @@ async function runGhJson<T>(arguments_: string[], signal?: AbortSignal): Promise
             }`
         );
     }
-    return JSON.parse(String(stdout || "null")) as T;
+    const output = stdout.trim();
+    if (!output) {
+        throw new Error("GitHub CLI returned an empty JSON response");
+    }
+    return parser(JSON.parse(output));
 }
 
-/** Appends one GitHub JSON-lines output row after size and blank-line validation. */
-function parseGhJsonLine<T>(line: string, rows: T[]): void {
+/**
+ * Appends one GitHub JSON-lines output row after size and blank-line validation.
+ * @param line Line value.
+ * @param rows Rows value.
+ * @param parser Runtime value parser.
+ */
+function parseGhJsonLine<T>(line: string, rows: T[], parser: ContractParser<T>): void {
     if (!line.trim()) {
         return;
     }
     if (Buffer.byteLength(line, "utf8") > MAX_JSON_LINE_LENGTH) {
         throw new Error("GitHub CLI JSON line was too large");
     }
-    rows.push(JSON.parse(line) as T);
+    rows.push(parser(JSON.parse(line)));
 }
 
 function toGhJsonParseError(error: unknown): Error {
@@ -1104,9 +1192,16 @@ function clearForceKillTimerIfAllowed(
     return undefined;
 }
 
-/** Streams newline-delimited JSON values from a GitHub CLI command. */
+/**
+ * Streams newline-delimited JSON values from a GitHub CLI command.
+ * @param arguments_ Arguments value.
+ * @param parser Runtime value parser.
+ * @param options Operation options.
+ * @returns Promise resolving to the run gh json lines result.
+ */
 async function runGhJsonLines<T>(
     arguments_: string[],
+    parser: ContractParser<T>,
     options: { timeoutMs?: number } = {}
 ): Promise<T[]> {
     return new Promise((resolve, reject) => {
@@ -1205,7 +1300,7 @@ async function runGhJsonLines<T>(
                             );
                             return;
                         }
-                        parseGhJsonLine(line, rows);
+                        parseGhJsonLine(line, rows, parser);
                     }
                 } catch (error) {
                     terminateGhProcess("SIGTERM");
@@ -1226,11 +1321,9 @@ async function runGhJsonLines<T>(
         );
 
         void (async () => {
-            const code = await child.exited;
-            await Promise.all([stdoutDone, stderrDone]);
-            return code;
-        })()
-            .then((code) => {
+            try {
+                const code = await child.exited;
+                await Promise.all([stdoutDone, stderrDone]);
                 isPreserveForceKillTimer = false;
                 forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
                 settle(() => {
@@ -1241,22 +1334,31 @@ async function runGhJsonLines<T>(
                         return;
                     }
                     try {
-                        parseGhJsonLine(stdoutBuffer, rows);
+                        parseGhJsonLine(stdoutBuffer, rows, parser);
                         resolve(rows);
                     } catch (error) {
                         reject(toGhJsonParseError(error));
                     }
                 });
-            })
-            .catch((error: unknown) => {
+            } catch (error) {
                 isPreserveForceKillTimer = false;
                 forceKillTimer = clearForceKillTimerIfAllowed(forceKillTimer, {}, false);
-                settle(() => reject(error));
-            });
+                settle(() =>
+                    reject(
+                        error instanceof Error
+                            ? error
+                            : new Error("GitHub CLI request failed", { cause: error })
+                    )
+                );
+            }
+        })();
     });
 }
 
-/** Lists open pull requests targeting the dashboard production branch. */
+/**
+ * Lists open pull requests targeting the dashboard production branch.
+ * @returns Promise resolving to the list dashboard pull requests result.
+ */
 export async function listDashboardPullRequests(): Promise<PullRequestSummary[]> {
     if (
         process.env.NODE_ENV !== "production" &&
@@ -1266,7 +1368,7 @@ export async function listDashboardPullRequests(): Promise<PullRequestSummary[]>
         return listPublicDashboardPullRequests();
     }
     const repo = parseRepoParts(DASHBOARD_REPO);
-    const pullRequests = await runGhJsonLines<PullRequestSummary>(
+    const pullRequests = await runGhJsonLines(
         [
             "api",
             "graphql",
@@ -1331,6 +1433,7 @@ export async function listDashboardPullRequests(): Promise<PullRequestSummary[]>
                 "| .statusCheckRollup = (if .statusCheckRollup.state then [{status: .statusCheckRollup.state}] else [] end)",
             ].join(" "),
         ],
+        parsePullRequestSummary,
         { timeoutMs: PR_LIST_TIMEOUT_MS }
     );
 
@@ -1353,7 +1456,10 @@ export async function listDashboardPullRequests(): Promise<PullRequestSummary[]>
     );
 }
 
-/** Returns whether a blocked list state should be verified with fresh PR details. */
+/**
+ * Returns whether a blocked list state should be verified with fresh PR details.
+ * @returns Whether a blocked list state should be verified with fresh PR details.
+ */
 function shouldRefreshBlockedMergeState(pr: PullRequestSummary): boolean {
     const mergeable = String(pr.mergeable).toUpperCase();
     return (
@@ -1365,13 +1471,18 @@ function shouldRefreshBlockedMergeState(pr: PullRequestSummary): boolean {
     );
 }
 
-/** Returns the current GitHub metadata for one pull request. */
+/**
+ * Returns the current GitHub metadata for one pull request.
+ * @param number Number value.
+ * @param signal Signal used to cancel the operation.
+ * @returns the current GitHub metadata for one pull request.
+ */
 async function getPullRequest(
     number: number,
     signal?: AbortSignal
 ): Promise<PullRequestSummary> {
     return normalizePullRequest(
-        await runGhJson<PullRequestSummary>(
+        await runGhJson(
             [
                 "pr",
                 "view",
@@ -1401,30 +1512,35 @@ async function getPullRequest(
                     "changedFiles",
                 ].join(","),
             ],
+            parsePullRequestSummary,
             signal
         )
     );
 }
 
-/** Checks the PR lifecycle without filtering by its current base branch. */
+/**
+ * Checks the PR lifecycle without filtering by its current base branch.
+ * @param number Number value.
+ * @param signal Signal used to cancel the operation.
+ * @returns Whether the Dashboard pull request remains open.
+ */
 export async function isDashboardPullRequestOpen(
     number: number,
     signal?: AbortSignal
 ): Promise<boolean> {
-    const result = await runGhJson<{ state?: unknown }>(
+    const result = await runGhJson(
         ["pr", "view", String(number), "--repo", DASHBOARD_REPO, "--json", "state"],
+        parseGitHubPullRequestState,
         signal
     );
-    if (
-        typeof result.state !== "string" ||
-        !["CLOSED", "MERGED", "OPEN"].includes(result.state)
-    ) {
-        throw new Error("GitHub returned an invalid pull request state");
-    }
     return result.state === "OPEN";
 }
 
-/** Validates pr number. */
+/**
+ * Validates pr number.
+ * @param value Value to process.
+ * @returns Validation result for pr number.
+ */
 export function validatePrNumber(value: unknown): number {
     if (typeof value !== "string" || !/^\d+$/u.test(value)) {
         throw new Error("Invalid pull request number");
@@ -1436,7 +1552,11 @@ export function validatePrNumber(value: unknown): number {
     return number;
 }
 
-/** Parses Git worktrees. */
+/**
+ * Parses Git worktrees.
+ * @param output Output value.
+ * @returns Parsed Git worktrees.
+ */
 function parseGitWorktrees(output: string): GitWorktree[] {
     return output
         .trim()
@@ -1460,7 +1580,12 @@ function parseGitWorktrees(output: string): GitWorktree[] {
         .filter((worktree) => worktree.path);
 }
 
-/** Returns whether a path is strictly inside the configured worktree root. */
+/**
+ * Returns whether a path is strictly inside the configured worktree root.
+ * @param value Value to process.
+ * @param root Root value.
+ * @returns Whether a path is strictly inside the configured worktree root.
+ */
 function isPathInsideRoot(value: string, root: string): boolean {
     const resolvedValue = path.resolve(value);
     const resolvedRoot = path.resolve(root);
@@ -1468,7 +1593,12 @@ function isPathInsideRoot(value: string, root: string): boolean {
     return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-/** Performs find worktree for branch. */
+/**
+ * Performs find worktree for branch.
+ * @param branch Branch value.
+ * @param signal Signal used to cancel the operation.
+ * @returns Find worktree for branch result.
+ */
 async function findWorktreeForBranch(
     branch: string,
     signal?: AbortSignal
@@ -1486,7 +1616,12 @@ async function findWorktreeForBranch(
     );
 }
 
-/** Performs cleanup pull request worktree. */
+/**
+ * Performs cleanup pull request worktree.
+ * @param branch Branch value.
+ * @param signal Signal used to cancel the operation.
+ * @returns Cleanup pull request worktree result.
+ */
 async function cleanupPullRequestWorktree(
     branch: string,
     signal?: AbortSignal
@@ -1598,7 +1733,11 @@ function validateDashboardPrForReviewApproval(pr: PullRequestSummary): void {
     }
 }
 
-/** Returns whether pull request checks are conclusively passing. */
+/**
+ * Returns whether pull request checks are conclusively passing.
+ * @param checks Checks value.
+ * @returns Whether pull request checks are conclusively passing.
+ */
 function hasPullRequestChecksPassed(checks: unknown[] | undefined): boolean {
     const records = latestCheckRecords(
         (checks || []).filter(
@@ -1622,7 +1761,10 @@ function hasPullRequestChecksPassed(checks: unknown[] | undefined): boolean {
     });
 }
 
-/** Keeps only the latest check entry for each GitHub check name/context. */
+/**
+ * Keeps only the latest check entry for each GitHub check name/context.
+ * @returns Latest check records result.
+ */
 function latestCheckRecords(
     checks: Array<Record<string, unknown>>
 ): Array<Record<string, unknown>> {
@@ -1637,7 +1779,10 @@ function latestCheckRecords(
     return latestByKey.values().toArray();
 }
 
-/** Returns a stable key for a GitHub status or check run. */
+/**
+ * Returns a stable key for a GitHub status or check run.
+ * @returns a stable key for a GitHub status or check run.
+ */
 function checkKey(check: Record<string, unknown>): string {
     for (const key of ["name", "context", "workflowName"]) {
         const value = check[key];
@@ -1648,7 +1793,10 @@ function checkKey(check: Record<string, unknown>): string {
     return JSON.stringify(check);
 }
 
-/** Returns a comparable timestamp for a GitHub status or check run. */
+/**
+ * Returns a comparable timestamp for a GitHub status or check run.
+ * @returns a comparable timestamp for a GitHub status or check run.
+ */
 function checkTimestamp(check: Record<string, unknown>): number {
     for (const key of ["completedAt", "startedAt", "createdAt"]) {
         const value = check[key];
@@ -1660,12 +1808,19 @@ function checkTimestamp(check: Record<string, unknown>): number {
     return 0;
 }
 
-/** Normalizes a GitHub check status or conclusion. */
+/**
+ * Normalizes a GitHub check status or conclusion.
+ * @param value Value to process.
+ * @returns Normalized a GitHub check status or conclusion.
+ */
 function normalizedCheckValue(value: unknown): string {
     return typeof value === "string" ? value.toLowerCase() : "";
 }
 
-/** Returns production checkout status. */
+/**
+ * Returns production checkout status.
+ * @returns production checkout status.
+ */
 export async function getProductionCheckoutStatus(
     signal?: AbortSignal
 ): Promise<ProductionCheckoutStatus> {
@@ -1771,12 +1926,19 @@ async function syncMain(signal?: AbortSignal): Promise<void> {
     await ensureProductionReadyForDeploy(signal);
 }
 
-/** Performs shell quote. */
+/**
+ * Performs shell quote.
+ * @param value Value to process.
+ * @returns Shell quote result.
+ */
 function shellQuote(value: string): string {
     return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
-/** Builds a shell command that records deployment status from a detached process. */
+/**
+ * Builds a shell command that records deployment status from a detached process.
+ * @returns Built a shell command that records deployment status from a detached process.
+ */
 function deploymentJobUpdateCommand(job: DeploymentJob): string {
     const script = `
 import { Database } from "bun:sqlite";
@@ -1785,9 +1947,8 @@ const job = {
     updatedAt: new Date().toISOString(),
 };
 const database = new Database(process.env.MIRA_DEPLOYMENT_DB);
-const sqlNull = JSON.parse("null");
 function sqlNullable(value) {
-    return value === undefined ? sqlNull : value;
+    return value === undefined ? null : value;
 }
 database.run("PRAGMA foreign_keys = ON");
 database.run("PRAGMA busy_timeout = 5000");
@@ -1850,6 +2011,9 @@ try {
  * Waits until the worker has durably completed the scheduling action. The
  * cutover snapshot must not capture a running execution that an older worker
  * would later recover as failed.
+ * @param deploymentId Deployment identifier.
+ * @param databaseSnapshotId Database snapshot identifier.
+ * @returns Deployment cutover handoff command result.
  */
 function deploymentCutoverHandoffCommand(
     deploymentId: string,
@@ -2009,7 +2173,10 @@ async function assertManagedDashboardServiceContract(
     }
 }
 
-/** Schedules detached service restart, commit-bound readiness, and rollback. */
+/**
+ * Schedules detached service restart, commit-bound readiness, and rollback.
+ * @returns Promise resolving to the schedule release cutover result.
+ */
 async function scheduleReleaseCutover(
     job: DeploymentJob,
     cutover: DeploymentCutoverContext,
@@ -2200,7 +2367,10 @@ async function scheduleReleaseCutover(
     );
 }
 
-/** Schedules a detached current/previous swap with readiness-bound restoration. */
+/**
+ * Schedules a detached current/previous swap with readiness-bound restoration.
+ * @returns Promise resolving to the schedule release rollback result.
+ */
 async function scheduleReleaseRollback(
     job: DeploymentJob,
     targetCommit: string,
@@ -2326,11 +2496,11 @@ function didScheduleOrphanedReleaseCutoverRecovery(
     const willRestoreExactPreActivationSlots =
         persistedCutover !== undefined &&
         persistedCutover.candidateCommit !== persistedCutover.preActivationCommit;
-    const recoveryMode = willRestoreExactPreActivationSlots
-        ? "restore"
-        : persistedCutover || isRollbackAction
-          ? "rollback"
-          : "legacy-rollback";
+    let recoveryMode: "candidate-rollback" | "restore" | "rollback" =
+        persistedCutover || isRollbackAction ? "rollback" : "candidate-rollback";
+    if (willRestoreExactPreActivationSlots) {
+        recoveryMode = "restore";
+    }
     const rolledBackJob: DeploymentJob = {
         ...job,
         status: "failed",
@@ -2411,7 +2581,7 @@ function didScheduleOrphanedReleaseCutoverRecovery(
         "    rollback)",
         '      run_activation_lifecycle rollback "$candidate_commit" "$rollback_commit"',
         "      ;;",
-        "    legacy-rollback)",
+        "    candidate-rollback)",
         '      run_candidate_lifecycle rollback "$candidate_commit" "$rollback_commit"',
         "      ;;",
         "    *) return 1 ;;",
@@ -2523,7 +2693,10 @@ function didScheduleOrphanedReleaseCutoverRecovery(
     return true;
 }
 
-/** Runs deployment work after the API has returned a job to the caller. */
+/**
+ * Runs deployment work after the API has returned a job to the caller.
+ * @returns Promise resolving to the run deployment job result.
+ */
 async function runDeploymentJob(
     job: DeploymentJob,
     persistCutover: (cutover: DeploymentCutoverContext) => void,
@@ -2623,7 +2796,10 @@ async function runDeploymentJob(
     }
 }
 
-/** Validates and schedules a managed rollback after the API has returned its job. */
+/**
+ * Validates and schedules a managed rollback after the API has returned its job.
+ * @returns Validation result for and schedules a managed rollback after the API has returned its job.
+ */
 async function runRollbackJob(
     job: DeploymentJob,
     signal?: AbortSignal
@@ -2711,10 +2887,10 @@ function resumeWorkerClaimsWhenDeploymentRestartSettles(
                 settle();
             }
         } catch (error) {
-            console.warn(
-                "[PullRequests] Failed to inspect detached deployment restart:",
-                error
-            );
+            logger.warn("deployment.restart_inspection_failed", {
+                deploymentId,
+                error,
+            });
         }
     };
     const restartPoll = setInterval(
@@ -2723,17 +2899,18 @@ function resumeWorkerClaimsWhenDeploymentRestartSettles(
     );
     restartPoll.unref();
     const failSafe = setTimeout(() => {
-        console.warn(
-            "[PullRequests] Resuming worker claims after deployment restart pause timed out",
-            { deploymentId }
-        );
+        logger.warn("deployment.worker_claim_pause_timed_out", { deploymentId });
         settle();
     }, DEPLOYMENT_RESTART_CLAIM_PAUSE_TIMEOUT_MS);
     failSafe.unref();
     queueMicrotask(checkRestartStatus);
 }
 
-/** Persists a deployment and puts its execution behind the worker lease. */
+/**
+ * Persists a deployment and puts its execution behind the worker lease.
+ * @param lockHeldBy Lock held by value.
+ * @returns Start deploy latest result.
+ */
 export function startDeployLatest(lockHeldBy?: string): DeploymentJob {
     registerPullRequestJobLifecycleHandlers();
     const now = dateToISOString(new Date());
@@ -2781,12 +2958,19 @@ export function startDeployLatest(lockHeldBy?: string): DeploymentJob {
     }
 }
 
-/** Queues a direct deploy; production validation is owned by the worker action. */
-export async function prepareAndStartDeployLatest(): Promise<DeploymentJob> {
+/**
+ * Queues a direct deploy; production validation is owned by the worker action.
+ * @returns Prepare and start deploy latest result.
+ */
+export function prepareAndStartDeployLatest(): DeploymentJob {
     return startDeployLatest();
 }
 
-/** Validates the confirmed target against current release slots and queues rollback. */
+/**
+ * Validates the confirmed target against current release slots and queues rollback.
+ * @param expectedTargetCommit Expected target commit value.
+ * @returns Validation result for the confirmed target against current release slots and queues rollback.
+ */
 export async function prepareAndStartRollback(
     expectedTargetCommit: string
 ): Promise<DeploymentJob> {
@@ -2880,7 +3064,13 @@ interface PullRequestApprovalExecutionOptions {
     signal?: AbortSignal;
 }
 
-/** Performs approve pull request. */
+/**
+ * Performs approve pull request.
+ * @param number Number value.
+ * @param willDeploy Whether will deploy.
+ * @param options Operation options.
+ * @returns Approve pull request result.
+ */
 export async function approvePullRequest(
     number: number,
     willDeploy: boolean,
@@ -2946,13 +3136,7 @@ export async function approvePullRequest(
 
     return {
         isOk: true,
-        message: syncError
-            ? `PR #${number} merged. Production sync failed`
-            : deployError
-              ? `PR #${number} merged. Deploy failed to start`
-              : willDeploy
-                ? `PR #${number} merged. Deploy started`
-                : `PR #${number} merged`,
+        message: pullRequestMergeMessage(number, willDeploy, syncError, deployError),
         deployment,
         deployError,
         cleanup,
@@ -2961,18 +3145,23 @@ export async function approvePullRequest(
     };
 }
 
-function queuedPullRequestResult<T>(execution: JobExecution): T {
+function queuedPullRequestResult<T>(execution: JobExecutionRecord): T {
     if ("result" in execution.output) return execution.output.result as T;
     successfulJobExecutionOutput(execution);
     throw new Error("Pull request result was missing");
 }
 
-/** Runs PR merge/deploy through the shared persistent execution plane. */
+/**
+ * Runs PR merge/deploy through the shared persistent execution plane.
+ * @param number Number value.
+ * @param willDeploy Whether will deploy.
+ * @returns Promise resolving to the run pull request approval result.
+ */
 export async function runPullRequestApproval(number: number, willDeploy: boolean) {
     registerPullRequestJobLifecycleHandlers();
     const deploymentLockId = `approve-${Bun.randomUUIDv7()}`;
     acquireDeploymentLock(deploymentLockId);
-    let execution: JobExecution;
+    let execution: JobExecutionRecord;
     try {
         execution = enqueueJobExecution({
             actionKey: willDeploy ? "github.merge-deploy" : "github.merge",
@@ -2992,7 +3181,12 @@ export async function runPullRequestApproval(number: number, willDeploy: boolean
     );
 }
 
-/** Performs approve pull request review. */
+/**
+ * Performs approve pull request review.
+ * @param number Number value.
+ * @param signal Signal used to cancel the operation.
+ * @returns Approve pull request review result.
+ */
 export async function approvePullRequestReview(number: number, signal?: AbortSignal) {
     const pr = await getPullRequest(number, signal);
     validateDashboardPrForReviewApproval(pr);
@@ -3016,7 +3210,12 @@ export async function approvePullRequestReview(number: number, signal?: AbortSig
     };
 }
 
-/** Updates one pull request branch with the latest base branch. */
+/**
+ * Updates one pull request branch with the latest base branch.
+ * @param number Number value.
+ * @param signal Signal used to cancel the operation.
+ * @returns Promise resolving to the update pull request branch result.
+ */
 export async function updatePullRequestBranch(number: number, signal?: AbortSignal) {
     const pr = await getPullRequest(number, signal);
     validateDashboardPrForBranchUpdate(pr);
@@ -3040,7 +3239,13 @@ export async function updatePullRequestBranch(number: number, signal?: AbortSign
     };
 }
 
-/** Performs reject pull request. */
+/**
+ * Performs reject pull request.
+ * @param number Number value.
+ * @param comment Comment value.
+ * @param signal Signal used to cancel the operation.
+ * @returns Reject pull request result.
+ */
 export async function rejectPullRequest(
     number: number,
     comment: string,
@@ -3067,7 +3272,11 @@ export async function rejectPullRequest(
     };
 }
 
-/** Records a GitHub review approval in the shared execution plane. */
+/**
+ * Records a GitHub review approval in the shared execution plane.
+ * @param number Number value.
+ * @returns Promise resolving to the run pull request review approval result.
+ */
 export async function runPullRequestReviewApproval(number: number) {
     const execution = enqueueJobExecution({
         actionKey: "github.review-approval",
@@ -3081,7 +3290,11 @@ export async function runPullRequestReviewApproval(number: number) {
     );
 }
 
-/** Records a GitHub branch update in the shared execution plane. */
+/**
+ * Records a GitHub branch update in the shared execution plane.
+ * @param number Number value.
+ * @returns Promise resolving to the run pull request branch update result.
+ */
 export async function runPullRequestBranchUpdate(number: number) {
     const execution = enqueueJobExecution({
         actionKey: "github.update-branch",
@@ -3095,7 +3308,12 @@ export async function runPullRequestBranchUpdate(number: number) {
     );
 }
 
-/** Records a PR close and local worktree cleanup in the execution plane. */
+/**
+ * Records a PR close and local worktree cleanup in the execution plane.
+ * @param number Number value.
+ * @param comment Comment value.
+ * @returns Promise resolving to the run pull request rejection result.
+ */
 export async function runPullRequestRejection(number: number, comment: string) {
     const execution = enqueueJobExecution({
         actionKey: "github.reject",

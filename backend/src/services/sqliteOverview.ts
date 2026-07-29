@@ -43,7 +43,12 @@ function pragmaNumber(name: "freelist_count" | "page_count" | "page_size"): numb
     return Number(row[name] ?? 0);
 }
 
-/** Returns an operator advisory only when file compaction would reclaim material space. */
+/**
+ * Returns an operator advisory only when file compaction would reclaim material space.
+ * @param freeBytes Free bytes value.
+ * @param freePercent Free percent value.
+ * @returns an operator advisory only when file compaction would reclaim material space.
+ */
 export function sqliteReusableSpaceAttention(
     freeBytes: number,
     freePercent: number

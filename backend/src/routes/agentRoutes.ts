@@ -2,9 +2,15 @@ import type {
     AgentsStatusResponse,
     AgentTaskHistoryResponse,
 } from "../../../contracts/agents.ts";
-import { HttpError, json, readJson } from "../http.ts";
+import { parseAgentMetadataUpdateRequest } from "../../../contracts/agents.ts";
+import { HttpError, json } from "../http.ts";
 import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import {
+    type ParametersRequest,
+    readApiJsonOrError,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import {
     buildAgentStatuses,
     buildSingleAgentStatus,
@@ -15,17 +21,20 @@ import {
     updateAgentCurrentTask,
 } from "../services/agents.ts";
 
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
-
 function agentError(error: unknown, fallback = "Agent route failed"): Response {
-    return json(
-        { error: errorMessage(error, fallback) },
-        { status: httpStatusCode(error) }
-    );
+    return routeErrorResponse(undefined, error, {
+        code: "agent_request_failed",
+        context: "agent",
+        message: fallback,
+    });
 }
 
 function missingConfig(): Response {
-    return json({ error: "Agent configuration not found" }, { status: 404 });
+    return routeFailureResponse({
+        context: "agent",
+        message: "Agent configuration not found",
+        status: 404,
+    });
 }
 
 const agentStatusesSnapshot = new CoalescedSnapshot<AgentsStatusResponse>({
@@ -48,17 +57,25 @@ export const agentRoutes = {
         PUT: async (request: ParametersRequest<"id">) => {
             const agentId = request.params.id;
             if (!isValidAgentId(agentId)) {
-                return json({ error: "Invalid agent ID" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "agent",
+                    message: "Invalid agent ID",
+                    status: 400,
+                });
             }
             try {
-                const body = await readJson<{ currentTask?: unknown } | undefined>(
-                    request
+                const body = await readApiJsonOrError(
+                    request,
+                    parseAgentMetadataUpdateRequest,
+                    {
+                        code: "invalid_agent_metadata",
+                        context: "agent.metadata",
+                        message: "Invalid agent metadata",
+                    }
                 );
-                if (!body || typeof body !== "object" || Array.isArray(body)) {
-                    return json({ error: "Missing or invalid body" }, { status: 400 });
-                }
+                if (body instanceof Response) return body;
                 try {
-                    return json(await updateAgentCurrentTask(agentId, body?.currentTask));
+                    return json(await updateAgentCurrentTask(agentId, body.currentTask));
                 } finally {
                     agentStatusesSnapshot.invalidate();
                 }
@@ -71,7 +88,11 @@ export const agentRoutes = {
         GET: async (request: ParametersRequest<"id">) => {
             const agentId = request.params.id;
             if (!isValidAgentId(agentId)) {
-                return json({ error: "Invalid agent ID" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "agent",
+                    message: "Invalid agent ID",
+                    status: 400,
+                });
             }
             try {
                 closeStaleActiveTasks();
@@ -79,10 +100,11 @@ export const agentRoutes = {
                 if (!config) return missingConfig();
                 const status = await buildSingleAgentStatus(agentId, config);
                 if (!status) {
-                    return json(
-                        { error: `Agent '${agentId}' not found` },
-                        { status: 404 }
-                    );
+                    return routeFailureResponse({
+                        context: "agent",
+                        message: `Agent '${agentId}' not found`,
+                        status: 404,
+                    });
                 }
                 return json(status);
             } catch (error) {
@@ -114,7 +136,7 @@ export const agentRoutes = {
             try {
                 const query = new URL(request.url).searchParams;
                 const rawLimit = query.get("limit");
-                const parsedLimit = rawLimit == undefined ? NaN : Number(rawLimit);
+                const parsedLimit = rawLimit == undefined ? Number.NaN : Number(rawLimit);
                 const requestedLimit = Number.isNaN(parsedLimit) ? 8 : parsedLimit;
                 const limit = Math.max(1, Math.min(20, Math.floor(requestedLimit)));
                 closeStaleActiveTasks();

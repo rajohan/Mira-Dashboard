@@ -31,6 +31,7 @@ import { sttRoutes } from "./routes/sttRoutes.ts";
 import { taskRoutes } from "./routes/taskRoutes.ts";
 import { terminalRoutes } from "./routes/terminalRoutes.ts";
 import { ttsRoutes } from "./routes/ttsRoutes.ts";
+import { routeFailureResponse } from "./routeSupport.ts";
 function live() {
     return json(livenessSnapshot());
 }
@@ -92,7 +93,8 @@ const routeTable = {
     ...taskRoutes,
     ...terminalRoutes,
     ...ttsRoutes,
-    "/api/*": () => json({ error: "Not found" }, { status: 404 }),
+    "/api/*": () =>
+        routeFailureResponse({ context: "routing", message: "Not found", status: 404 }),
 } as const;
 
 export const routes = withRequestPolicy(routeTable);

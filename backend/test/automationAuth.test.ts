@@ -1,5 +1,6 @@
-import type { Server } from "bun";
 import { afterEach, describe, expect, it, jest } from "bun:test";
+
+import type { Server } from "bun";
 
 import {
     authenticateAutomationRequest,
@@ -9,6 +10,7 @@ import {
 } from "../src/automationAuth.ts";
 import { database } from "../src/database.ts";
 import { resetRequestPolicyForTests, withRequestPolicy } from "../src/requestPolicy.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const WRITER_VALIDATOR = "a1".repeat(32);
 const READER_VALIDATOR = "b2".repeat(32);
@@ -250,19 +252,28 @@ describe("scoped automation authentication", () => {
         const tasksHandler = jest.fn(
             (handlerRequest: Request, handlerServer: Server<unknown>) =>
                 Response.json({
-                    isOk: Boolean(handlerRequest.url && handlerServer.requestIP),
+                    isOk: Boolean(
+                        handlerRequest.url &&
+                        typeof handlerServer.requestIP === "function"
+                    ),
                 })
         );
         const execHandler = jest.fn(
             (handlerRequest: Request, handlerServer: Server<unknown>) =>
                 Response.json({
-                    isOk: Boolean(handlerRequest.url && handlerServer.requestIP),
+                    isOk: Boolean(
+                        handlerRequest.url &&
+                        typeof handlerServer.requestIP === "function"
+                    ),
                 })
         );
         const agentStatusHandler = jest.fn(
             (handlerRequest: Request, handlerServer: Server<unknown>) =>
                 Response.json({
-                    isOk: Boolean(handlerRequest.url && handlerServer.requestIP),
+                    isOk: Boolean(
+                        handlerRequest.url &&
+                        typeof handlerServer.requestIP === "function"
+                    ),
                 })
         );
         const routes = withRequestPolicy(
@@ -366,9 +377,9 @@ describe("scoped automation authentication", () => {
             server
         );
         expect(readOnlyWrite.status).toBe(403);
-        await expect(readOnlyWrite.json()).resolves.toEqual({
+        expect(readOnlyWrite.json()).resolves.toEqual({
             error: {
-                code: "forbidden",
+                code: "automation_scope_denied",
                 message: "Automation credential scope denied",
                 requestId: expect.any(String),
             },
@@ -421,7 +432,7 @@ describe("scoped automation authentication", () => {
         const serialized = credentialsJson();
         const handler = jest.fn(() => new Response("must not run"));
         const persistenceError = new Error("audit storage unavailable");
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         try {
             const routes = withRequestPolicy(
                 { "/api/exec/start": { POST: handler } },
@@ -448,20 +459,28 @@ describe("scoped automation authentication", () => {
             );
 
             expect(response.status).toBe(503);
-            await expect(response.json()).resolves.toEqual({
+            expect(response.json()).resolves.toEqual({
                 error: {
-                    code: "service_unavailable",
+                    code: "audit_unavailable",
                     message: "Audit trail unavailable",
                     requestId: expect.any(String),
                 },
             });
             expect(handler).not.toHaveBeenCalled();
-            expect(errorSpy).toHaveBeenCalledWith(
-                expect.stringContaining("denied persistence failed"),
-                persistenceError
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "http",
+                    error: {
+                        message: persistenceError.message,
+                        name: "Error",
+                    },
+                    event: "audit.request_persistence_failed",
+                    level: "error",
+                    outcome: "denied",
+                })
             );
         } finally {
-            errorSpy.mockRestore();
+            structuredLogs.stop();
         }
     });
 });

@@ -5,19 +5,25 @@ import type {
     JobExecutionsResponse,
 } from "../../../contracts/jobs.ts";
 import { json } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { httpStatusCode } from "../lib/errors.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import {
+    type ParametersRequest,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import {
     cancelJobExecution,
     getJobExecution,
     getJobExecutionSummary,
-    type JobExecution,
+    type JobExecutionRecord,
     listJobExecutions,
 } from "../services/jobExecutionQueue.ts";
 
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
+const logger = createStructuredLogger("job-execution-route");
 
 function publicExecution(
-    execution: JobExecution,
+    execution: JobExecutionRecord,
     options: { includeOutput?: boolean } = {}
 ): PublicJobExecution {
     return {
@@ -65,11 +71,12 @@ export const jobExecutionRoutes = {
                     summary: getJobExecutionSummary(),
                 } satisfies JobExecutionsResponse);
             } catch (error) {
-                console.error("[jobExecutionRoutes] Queue lookup failed", error);
-                return json(
-                    { error: "Job execution queue lookup failed" },
-                    { status: 500 }
-                );
+                logger.error("job_execution.queue_lookup_failed", { error });
+                return routeFailureResponse({
+                    context: "job-execution",
+                    message: "Job execution queue lookup failed",
+                    status: 500,
+                });
             }
         },
     },
@@ -77,7 +84,11 @@ export const jobExecutionRoutes = {
         GET: (request: ParametersRequest<"id">) => {
             const id = String(request.params.id);
             if (!isValidExecutionId(id)) {
-                return json({ error: "Invalid job execution id" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "job-execution",
+                    message: "Invalid job execution id",
+                    status: 400,
+                });
             }
             try {
                 const execution = getJobExecution(id);
@@ -87,13 +98,18 @@ export const jobExecutionRoutes = {
                               includeOutput: true,
                           }),
                       } satisfies JobExecutionResponse)
-                    : json({ error: "Job execution not found" }, { status: 404 });
+                    : routeFailureResponse({
+                          context: "job-execution",
+                          message: "Job execution not found",
+                          status: 404,
+                      });
             } catch (error) {
-                console.error("[jobExecutionRoutes] Queue detail lookup failed", error);
-                return json(
-                    { error: "Job execution queue lookup failed" },
-                    { status: 500 }
-                );
+                logger.error("job_execution.detail_lookup_failed", { error });
+                return routeFailureResponse({
+                    context: "job-execution",
+                    message: "Job execution queue lookup failed",
+                    status: 500,
+                });
             }
         },
     },
@@ -101,7 +117,11 @@ export const jobExecutionRoutes = {
         POST: (request: ParametersRequest<"id">) => {
             const id = String(request.params.id);
             if (!isValidExecutionId(id)) {
-                return json({ error: "Invalid job execution id" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "job-execution",
+                    message: "Invalid job execution id",
+                    status: 400,
+                });
             }
             try {
                 const execution = cancelJobExecution(id);
@@ -112,23 +132,13 @@ export const jobExecutionRoutes = {
             } catch (error) {
                 const status = httpStatusCode(error);
                 if (status === 500) {
-                    console.error(
-                        "[jobExecutionRoutes] Queue cancellation failed",
-                        error
-                    );
+                    logger.error("job_execution.cancel_failed", { error });
                 }
-                return json(
-                    {
-                        error:
-                            status === 500
-                                ? "Job execution cancellation failed"
-                                : errorMessage(
-                                      error,
-                                      "Job execution cancellation failed"
-                                  ),
-                    },
-                    { status }
-                );
+                return routeErrorResponse(request, error, {
+                    code: "job_execution_cancel_failed",
+                    context: "job-execution.cancel",
+                    message: "Job execution cancellation failed",
+                });
             }
         },
     },

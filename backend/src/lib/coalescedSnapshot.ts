@@ -1,4 +1,7 @@
 import type { CoalescedSnapshotMetrics } from "../../../contracts/metrics.ts";
+import { createStructuredLogger } from "./structuredLogger.ts";
+
+const logger = createStructuredLogger("coalesced-snapshot");
 
 interface CoalescedSnapshotOptions<T> {
     freshForMs: number;
@@ -149,7 +152,10 @@ export class CoalescedSnapshot<T> {
         return inFlight;
     }
 
-    /** Returns the shared snapshot for this fixed read path. */
+    /**
+     * Returns the shared snapshot for this fixed read path.
+     * @returns the shared snapshot for this fixed read path.
+     */
     async read(): Promise<T> {
         this.#metrics.requests += 1;
         const entry = this.#entry;
@@ -171,10 +177,10 @@ export class CoalescedSnapshot<T> {
             } else if ((entry.nextRetryAt ?? 0) <= now) {
                 const refresh = this.#startLoad(entry);
                 void refresh.catch((error: unknown) => {
-                    console.warn(
-                        `[PollingSnapshot:${this.#name}] Background refresh failed`,
-                        error
-                    );
+                    logger.warn("snapshot.background_refresh_failed", {
+                        error,
+                        snapshot: this.#name,
+                    });
                 });
             }
             return entry.value;
@@ -205,7 +211,10 @@ export class CoalescedSnapshot<T> {
     }
 }
 
-/** Returns process-local coalescing telemetry without cached payloads or keys. */
+/**
+ * Returns process-local coalescing telemetry without cached payloads or keys.
+ * @returns process-local coalescing telemetry without cached payloads or keys.
+ */
 export function getCoalescedSnapshotMetrics(): CoalescedSnapshotMetrics[] {
     return snapshotRegistry
         .values()

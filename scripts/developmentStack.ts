@@ -21,7 +21,10 @@ export {
 
 const repoRoot = path.resolve(import.meta.dir, "..");
 
-/** Resolves the development stack for this repository unless a test root is supplied. */
+/**
+ * Resolves the development stack for this repository unless a test root is supplied.
+ * @returns Resolved the development stack for this repository unless a test root is supplied.
+ */
 export function resolveDevelopmentStackConfig(
     environment: Record<string, string | undefined> = process.env,
     root = repoRoot

@@ -1,14 +1,19 @@
-import { constants, existsSync as fsSyncExists } from "node:fs";
+import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import type { LogRotationSummary as LogRotationContractSummary } from "../../../contracts/logRotation.ts";
 import { database } from "../database.ts";
+import { writeCliError, writeCliOutput } from "../lib/cliOutput.ts";
 import {
     resolveDashboardProjectPathsForRuntime,
     resolveDashboardRuntimePath,
 } from "../lib/dashboardPaths.ts";
+import { errorMessage } from "../lib/errors.ts";
 import { resolveBunExecutable, runProcess } from "../lib/processes.ts";
 import { resolveAbsoluteNonRootPath } from "../lib/safePath.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { getProcessReleaseRoot } from "../releaseManifest.ts";
 import { writeCacheSuccess } from "./cacheEntryWriter.ts";
 import {
     getScheduledJob,
@@ -17,6 +22,8 @@ import {
     ScheduledJobActionError,
     upsertScheduledJob,
 } from "./scheduledJobs.ts";
+
+const logger = createStructuredLogger("log-rotation");
 
 function compareStrings(left: string, right: string): number {
     return left.localeCompare(right);
@@ -53,12 +60,8 @@ async function ignoreMissingPath(
 }
 
 const STATE_CACHE_KEY = "log_rotation.state";
-const BUNDLED_CONFIG_PATH = Bun.fileURLToPath(
-    new URL("../../config/log-rotation.json", import.meta.url)
-);
-const CWD_CONFIG_PATH = path.resolve(process.cwd(), "config/log-rotation.json");
-const SOURCE_CONFIG_PATH = path.resolve(
-    process.cwd(),
+const DEFAULT_CONFIG_PATH = path.join(
+    getProcessReleaseRoot(),
     "backend/config/log-rotation.json"
 );
 const DEFAULT_APPROVED_ROOTS = ["/opt/docker/data"];
@@ -136,17 +139,7 @@ const elevatedLogRotationExecFileRunner: ExecFileRunner = async (
 const writeLogRotationCacheSuccess = writeCacheSuccess;
 
 function caughtMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
-
-function defaultConfigPath(): string {
-    if (fsSyncExists(CWD_CONFIG_PATH)) {
-        return CWD_CONFIG_PATH;
-    }
-    if (fsSyncExists(SOURCE_CONFIG_PATH)) {
-        return SOURCE_CONFIG_PATH;
-    }
-    return BUNDLED_CONFIG_PATH;
+    return errorMessage(error, "Log rotation failed");
 }
 
 function fileHandleReadableStream(
@@ -862,10 +855,9 @@ async function rotateCopyTruncate(
     } catch (error) {
         if (!isCommitted) {
             await ignoreMissingPath(fs.unlink(archivePath), (unlinkError) => {
-                console.warn(
-                    "[LogRotation] Failed to remove incomplete archive:",
-                    unlinkError
-                );
+                logger.warn("log_rotation.incomplete_archive_remove_failed", {
+                    error: unlinkError,
+                });
             });
         }
         throw error;
@@ -1245,6 +1237,41 @@ function hasRotatedInCadence(
     return Date.now() - last < windowMs;
 }
 
+/**
+ * Resolves the configured time-based rotation cadence.
+ *
+ * @param policy - Effective log rotation policy.
+ * @returns Configured cadence, or `undefined` when rotation is size-only.
+ */
+function rotationCadence(policy: LogRotationPolicy): "daily" | "weekly" | undefined {
+    if (policy.weekly) {
+        return "weekly";
+    }
+    return policy.daily ? "daily" : undefined;
+}
+
+/**
+ * Describes why a file should or should not rotate.
+ *
+ * @param isOverSize - Whether the file exceeds its size threshold.
+ * @param isCadenceDue - Whether its configured cadence elapsed.
+ * @param cadence - Configured cadence.
+ * @returns Rotation decision reason.
+ */
+function rotationReason(
+    isOverSize: boolean,
+    isCadenceDue: boolean,
+    cadence: "daily" | "weekly" | undefined
+): "daily" | "maxSize" | "notDue" | "weekly" {
+    if (isOverSize) {
+        return "maxSize";
+    }
+    if (isCadenceDue) {
+        return cadence ?? "notDue";
+    }
+    return "notDue";
+}
+
 function shouldRotate({
     stat,
     policy,
@@ -1256,11 +1283,11 @@ function shouldRotate({
 }) {
     const maxBytes = byteLimitFromMb(policy.maxSizeMb);
     const isOverSize = maxBytes !== undefined && stat.size >= maxBytes;
-    const cadence = policy.weekly ? "weekly" : policy.daily ? "daily" : undefined;
+    const cadence = rotationCadence(policy);
     const isCadenceDue = Boolean(cadence && !hasRotatedInCadence(stateEntry, cadence));
     return {
         rotate: isOverSize || isCadenceDue,
-        reason: isOverSize ? "maxSize" : isCadenceDue ? cadence : "notDue",
+        reason: rotationReason(isOverSize, isCadenceDue, cadence),
     };
 }
 
@@ -1287,7 +1314,7 @@ function readLogRotationState(): LogRotationState {
                     : {},
             ...(parsed.lastRun &&
                 typeof parsed.lastRun === "object" && {
-                    lastRun: parsed.lastRun as Record<string, unknown>,
+                    lastRun: parsed.lastRun,
                 }),
         };
     } catch {
@@ -1307,7 +1334,7 @@ function summarizeGroup(name: string) {
 }
 
 function appendRetentionWarnings(
-    summary: LogRotationSummary,
+    summary: MutableLogRotationSummary,
     warnings: string[],
     context: { filePath?: string; group?: string }
 ): void {
@@ -1320,7 +1347,7 @@ function appendRetentionWarnings(
 }
 
 function applySkippedRetention(
-    summary: LogRotationSummary,
+    summary: MutableLogRotationSummary,
     groupSummary: ReturnType<typeof summarizeGroup>,
     retained: Awaited<ReturnType<typeof applyRetention>>,
     filePath: string
@@ -1334,20 +1361,7 @@ function applySkippedRetention(
     summary.skippedFiles += 1;
 }
 
-export interface LogRotationSummary {
-    isOk: boolean;
-    isDryRun: boolean;
-    startedAt: string;
-    finishedAt: string | undefined;
-    checkedGroups: number;
-    checkedFiles: number;
-    rotatedFiles: number;
-    compressedFiles: number;
-    deletedArchives: number;
-    skippedFiles: number;
-    warnings: unknown[];
-    errors: unknown[];
-    groups: Array<ReturnType<typeof summarizeGroup>>;
+interface MutableLogRotationSummary extends LogRotationContractSummary {
     files?: unknown[];
 }
 
@@ -1360,7 +1374,7 @@ interface ProcessRotationCandidateOptions {
     filePath: string;
     seenFiles: Set<string>;
     excluded: Set<string>;
-    summary: LogRotationSummary;
+    summary: MutableLogRotationSummary;
     groupSummary: ReturnType<typeof summarizeGroup>;
     policy: LogRotationPolicy;
     approvedRoots: string[];
@@ -1639,16 +1653,16 @@ async function releaseLogRotationLock(lock: LogRotationLock | undefined) {
 
 export async function runLogRotationService(
     options: LogRotationOptions
-): Promise<LogRotationSummary> {
+): Promise<MutableLogRotationSummary> {
     const startedAt = new Date();
     const config = await loadJsonFile<LogRotationConfig>(
-        options.config || defaultConfigPath()
+        options.config || DEFAULT_CONFIG_PATH
     );
     validateConfig(config);
     const groups = config.groups
         .filter((group) => group.enabled ?? config.defaults?.enabled ?? true)
         .filter((group) => !options.group || group.name === options.group);
-    const summary: LogRotationSummary = {
+    const summary: MutableLogRotationSummary = {
         isOk: true,
         isDryRun: options.isDryRun,
         startedAt: startedAt.toISOString(),
@@ -2071,13 +2085,13 @@ export async function runLogRotationCli(): Promise<void> {
             isDryRun: process.argv.includes("--dry-run"),
         });
         if (process.argv.includes("--json")) {
-            process.stdout.write(`${JSON.stringify(summary)}\n`);
+            writeCliOutput(JSON.stringify(summary));
         }
         if (!summary.isOk) {
             process.exitCode = 1;
         }
     } catch (error) {
-        console.error(caughtMessage(error));
+        writeCliError(caughtMessage(error));
         process.exitCode = 1;
     }
 }

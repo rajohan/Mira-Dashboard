@@ -1,7 +1,6 @@
+import { Database } from "bun:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-
-import { Database } from "bun:sqlite";
 
 import { secureDirectory, sqliteBackupDirectory } from "./databaseStorage.ts";
 
@@ -89,7 +88,8 @@ function cutoverSnapshotPath(databasePath: string, snapshotId: string): string {
 
 function backupKindFromFilename(name: string): SqliteBackupKind | undefined {
     const standardKind = name.match(STANDARD_BACKUP_FILE_PATTERN)?.[1] as
-        Exclude<SqliteBackupKind, "cutover"> | undefined;
+        | Exclude<SqliteBackupKind, "cutover">
+        | undefined;
     if (standardKind) {
         return standardKind;
     }
@@ -222,6 +222,7 @@ function createVerifiedSqliteBackupAtPath(
  * Creates the exact database snapshot associated with one guarded release
  * cutover. The caller must keep every Dashboard writer stopped until this
  * function returns.
+ * @returns Created the exact database snapshot associated with one guarded release cutover. The caller must keep every Dashboard writer stopped until this function returns.
  */
 export function createVerifiedSqliteCutoverSnapshot(
     sourceDatabase: Database,
@@ -290,6 +291,10 @@ function removeSqliteSidecar(filePath: string): void {
 /**
  * Atomically replaces a stopped live SQLite database with its exact cutover
  * snapshot. The source snapshot remains available until explicitly discarded.
+ * @param databasePath Database path value.
+ * @param snapshotId Snapshot identifier.
+ * @param options Operation options.
+ * @returns Restore verified sqlite cutover snapshot result.
  */
 export function restoreVerifiedSqliteCutoverSnapshot(
     databasePath: string,
@@ -355,7 +360,13 @@ export function restoreVerifiedSqliteCutoverSnapshot(
     };
 }
 
-/** Revalidates the exact snapshot referenced by a guarded release cutover. */
+/**
+ * Revalidates the exact snapshot referenced by a guarded release cutover.
+ * @param databasePath Database path value.
+ * @param snapshotId Snapshot identifier.
+ * @param options Operation options.
+ * @returns Verify sqlite cutover snapshot result.
+ */
 export function verifySqliteCutoverSnapshot(
     databasePath: string,
     snapshotId: string,
@@ -379,7 +390,12 @@ export function verifySqliteCutoverSnapshot(
     };
 }
 
-/** Removes only the exact snapshot named by a validated cutover UUID. */
+/**
+ * Removes only the exact snapshot named by a validated cutover UUID.
+ * @param databasePath Database path value.
+ * @param snapshotId Snapshot identifier.
+ * @returns Did discard sqlite cutover snapshot result.
+ */
 export function didDiscardSqliteCutoverSnapshot(
     databasePath: string,
     snapshotId: string

@@ -1,5 +1,9 @@
 import { json } from "../http.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { routeFailureResponse } from "../routeSupport.ts";
 import { getDatabaseOverview } from "../services/databaseOverview.ts";
+
+const logger = createStructuredLogger("database-route");
 
 export const databaseRoutes = {
     "/api/database/overview": {
@@ -17,14 +21,12 @@ export const databaseRoutes = {
                               name: error.name || "Error",
                           }
                         : { code: "UNKNOWN", name: "NonErrorThrown" };
-                console.error(
-                    "[databaseRoutes] Failed to load database overview",
-                    safeError
-                );
-                return json(
-                    { error: "Failed to load database overview" },
-                    { status: 500 }
-                );
+                logger.error("database.overview_load_failed", { error: safeError });
+                return routeFailureResponse({
+                    context: "database",
+                    message: "Failed to load database overview",
+                    status: 500,
+                });
             }
         },
     },

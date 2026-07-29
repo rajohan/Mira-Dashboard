@@ -19,7 +19,7 @@ const MAX_EXECUTION_LIST_LIMIT = 200;
 export const JOB_WORKER_HEARTBEAT_MAX_AGE_MS = 30_000;
 const RELEASE_COMMIT_PATTERN = /^[\da-f]{8,40}$/u;
 
-export interface JobExecution {
+export interface JobExecutionRecord {
     id: string;
     scheduledJobId: string | undefined;
     scheduledRunId: number | undefined;
@@ -76,13 +76,20 @@ export interface EnqueueJobExecutionInput {
     triggerType?: JobExecutionTriggerType;
 }
 
-type QueuedJobCancellationHandler = (execution: JobExecution, timestamp: string) => void;
-type ExpiredJobExecutionHandler = (execution: JobExecution) => void;
+type QueuedJobCancellationHandler = (
+    execution: JobExecutionRecord,
+    timestamp: string
+) => void;
+type ExpiredJobExecutionHandler = (execution: JobExecutionRecord) => void;
 
 const queuedJobCancellationHandlers = new Map<string, QueuedJobCancellationHandler>();
 const expiredJobExecutionHandlers = new Map<string, ExpiredJobExecutionHandler>();
 
-/** Registers domain cleanup that participates in a queued cancellation transaction. */
+/**
+ * Registers domain cleanup that participates in a queued cancellation transaction.
+ * @param actionKey Action key value.
+ * @param handler Handler value.
+ */
 export function registerQueuedJobCancellationHandler(
     actionKey: string,
     handler: QueuedJobCancellationHandler
@@ -90,7 +97,11 @@ export function registerQueuedJobCancellationHandler(
     queuedJobCancellationHandlers.set(actionKey, handler);
 }
 
-/** Registers domain cleanup that participates in expired-lease recovery. */
+/**
+ * Registers domain cleanup that participates in expired-lease recovery.
+ * @param actionKey Action key value.
+ * @param handler Handler value.
+ */
 export function registerExpiredJobExecutionHandler(
     actionKey: string,
     handler: ExpiredJobExecutionHandler
@@ -143,7 +154,7 @@ function parseJsonObject(value: string): Record<string, unknown> {
     }
 }
 
-function mapExecution(row: JobExecutionRow | undefined): JobExecution | undefined {
+function mapExecution(row: JobExecutionRow | undefined): JobExecutionRecord | undefined {
     if (!row) return undefined;
     return {
         id: row.id,
@@ -211,7 +222,7 @@ function jobAuditProvenance(
  */
 function writeJobAudit(
     execution: Pick<
-        JobExecution,
+        JobExecutionRecord,
         | "actionKey"
         | "displayName"
         | "id"
@@ -244,7 +255,9 @@ function writeJobAudit(
     });
 }
 
-function insertJobExecutionInTransaction(input: InsertJobExecutionInput): JobExecution {
+function insertJobExecutionInTransaction(
+    input: InsertJobExecutionInput
+): JobExecutionRecord {
     const id = input.id ?? Bun.randomUUIDv7();
     const status = input.status ?? "queued";
     const startedAt = status === "running" ? input.queuedAt : undefined;
@@ -282,7 +295,7 @@ function insertJobExecutionInTransaction(input: InsertJobExecutionInput): JobExe
             status === "running" ? 1 : 0,
             input.timeoutMs
         );
-    const execution = getJobExecution(id) as JobExecution;
+    const execution = getJobExecution(id) as JobExecutionRecord;
     writeJobAudit(execution, "job.enqueue", "accepted", input.queuedAt);
     if (status === "running") {
         writeJobAudit(execution, "job.execute", "attempted", input.queuedAt, {
@@ -293,8 +306,11 @@ function insertJobExecutionInTransaction(input: InsertJobExecutionInput): JobExe
     return execution;
 }
 
-/** Atomically inserts queue and audit rows, reusing an existing caller transaction. */
-export function insertJobExecution(input: InsertJobExecutionInput): JobExecution {
+/**
+ * Atomically inserts queue and audit rows, reusing an existing caller transaction.
+ * @returns Insert job execution result.
+ */
+export function insertJobExecution(input: InsertJobExecutionInput): JobExecutionRecord {
     if (database.inTransaction) {
         return insertJobExecutionInTransaction(input);
     }
@@ -314,16 +330,17 @@ export function insertJobExecution(input: InsertJobExecutionInput): JobExecution
     }
 }
 
-export function getJobExecution(id: string): JobExecution | undefined {
+export function getJobExecution(id: string): JobExecutionRecord | undefined {
     return mapExecution(
         database.prepare("SELECT * FROM job_executions WHERE id = ?").get(id) as
-            JobExecutionRow | undefined
+            | JobExecutionRow
+            | undefined
     );
 }
 
 export function getLatestScheduledJobExecution(
     scheduledJobId: string
-): JobExecution | undefined {
+): JobExecutionRecord | undefined {
     return mapExecution(
         database
             .prepare(
@@ -339,7 +356,7 @@ export function getLatestScheduledJobExecution(
 export function getPreviousScheduledJobExecution(
     scheduledJobId: string,
     executionId: string
-): JobExecution | undefined {
+): JobExecutionRecord | undefined {
     return mapExecution(
         database
             .prepare(
@@ -361,11 +378,14 @@ export function getPreviousScheduledJobExecution(
     );
 }
 
-/** Adds non-scheduled work to the same persistent queue used by the scheduler. */
+/**
+ * Adds non-scheduled work to the same persistent queue used by the scheduler.
+ * @returns Enqueue job execution result.
+ */
 export function enqueueJobExecution(
     input: EnqueueJobExecutionInput,
     queuedAt = nowIso()
-): JobExecution {
+): JobExecutionRecord {
     return insertJobExecution({
         ...input,
         queuedAt,
@@ -373,7 +393,7 @@ export function enqueueJobExecution(
     });
 }
 
-export function listJobExecutions(limit = 50): JobExecution[] {
+export function listJobExecutions(limit = 50): JobExecutionRecord[] {
     const normalizedLimit =
         Number.isSafeInteger(limit) && limit > 0
             ? Math.min(limit, MAX_EXECUTION_LIST_LIMIT)
@@ -390,7 +410,7 @@ export function listJobExecutions(limit = 50): JobExecution[] {
                  LIMIT ?`
             )
             .all(normalizedLimit) as unknown as JobExecutionRow[]
-    ).map((row) => mapExecution(row) as JobExecution);
+    ).map((row) => mapExecution(row) as JobExecutionRecord);
 }
 
 export function getJobExecutionSummary(timestamp = Date.now()): JobExecutionSummary {
@@ -416,7 +436,7 @@ export function getJobExecutionSummary(timestamp = Date.now()): JobExecutionSumm
         )
         .all() as Array<{ resource_class: string }>;
     const oldestQueuedAt = fromSqlNullable(counts.oldest_queued_at);
-    const parsedOldestQueuedAt = oldestQueuedAt ? Date.parse(oldestQueuedAt) : NaN;
+    const parsedOldestQueuedAt = oldestQueuedAt ? Date.parse(oldestQueuedAt) : Number.NaN;
     const workerFreshAfter = new Date(
         timestamp - JOB_WORKER_HEARTBEAT_MAX_AGE_MS
     ).toISOString();
@@ -436,7 +456,7 @@ export function getJobExecutionSummary(timestamp = Date.now()): JobExecutionSumm
     return {
         activeResourceClasses: activeRows
             .map((row) => row.resource_class)
-            .filter(isJobResourceClass),
+            .filter((resourceClass) => isJobResourceClass(resourceClass)),
         oldestQueuedAgeMs: Number.isFinite(parsedOldestQueuedAt)
             ? Math.max(0, timestamp - parsedOldestQueuedAt)
             : undefined,
@@ -587,7 +607,7 @@ function claimExecutionRow(
     workerId: string,
     timestamp: string,
     leaseMs: number
-): JobExecution | undefined {
+): JobExecutionRecord | undefined {
     const update = database
         .prepare(
             `UPDATE job_executions
@@ -621,7 +641,7 @@ export function claimNextJobExecution(
     capacity = 1,
     timestamp = nowIso(),
     leaseMs = DEFAULT_LEASE_MS
-): JobExecution | undefined {
+): JobExecutionRecord | undefined {
     database.run("BEGIN IMMEDIATE");
     try {
         recoverExpiredJobExecutionsInTransaction(timestamp);
@@ -687,8 +707,12 @@ export function heartbeatJobExecution(
 /**
  * Atomically closes the UI cancellation window before an irreversible action.
  * Queued executions remain cancellable until the worker starts the action.
+ * @param id Resource identifier.
+ * @returns Protect running job execution from cancellation result.
  */
-export function protectRunningJobExecutionFromCancellation(id: string): JobExecution {
+export function protectRunningJobExecutionFromCancellation(
+    id: string
+): JobExecutionRecord {
     const update = database
         .prepare(
             `UPDATE job_executions
@@ -704,15 +728,21 @@ export function protectRunningJobExecutionFromCancellation(id: string): JobExecu
         }
         throw statusError("Job execution is not running", 409);
     }
-    return getJobExecution(id) as JobExecution;
+    return getJobExecution(id) as JobExecutionRecord;
 }
 
-/** Replaces the bounded progress snapshot for an execution with an active lease. */
+/**
+ * Replaces the bounded progress snapshot for an execution with an active lease.
+ * @param id Resource identifier.
+ * @param workerId Worker identifier.
+ * @param output Output value.
+ * @returns Update job execution output result.
+ */
 export function updateJobExecutionOutput(
     id: string,
     workerId: string,
     output: Record<string, unknown>
-): JobExecution {
+): JobExecutionRecord {
     const update = database
         .prepare(
             `UPDATE job_executions
@@ -723,7 +753,7 @@ export function updateJobExecutionOutput(
     if (update.changes === 0) {
         throw statusError("Job execution lease is no longer active", 409);
     }
-    return getJobExecution(id) as JobExecution;
+    return getJobExecution(id) as JobExecutionRecord;
 }
 
 export function finishJobExecution(
@@ -733,7 +763,7 @@ export function finishJobExecution(
     message: string | undefined,
     output: Record<string, unknown>,
     finishedAt = nowIso()
-): JobExecution {
+): JobExecutionRecord {
     database.run("BEGIN IMMEDIATE");
     try {
         const row = database
@@ -746,11 +776,13 @@ export function finishJobExecution(
         const wasCancellationRequested = Boolean(row.cancel_requested_at);
         const finalStatus: JobExecutionStatus =
             wasCancellationRequested || status === "cancelled" ? "cancelled" : status;
-        const finalMessage = wasCancellationRequested
-            ? "Job cancelled"
-            : finalStatus === "cancelled"
-              ? (message ?? "Job cancelled")
-              : message;
+        let finalMessage = message;
+        if (finalStatus === "cancelled") {
+            finalMessage = message ?? "Job cancelled";
+        }
+        if (wasCancellationRequested) {
+            finalMessage = "Job cancelled";
+        }
         database
             .prepare(
                 `UPDATE job_executions
@@ -781,18 +813,17 @@ export function finishJobExecution(
                     row.scheduled_run_id
                 );
         }
-        const execution = getJobExecution(id) as JobExecution;
-        writeJobAudit(
-            execution,
-            "job.execute",
-            finalStatus === "success"
-                ? "succeeded"
-                : finalStatus === "cancelled"
-                  ? "cancelled"
-                  : "failed",
-            finishedAt,
-            { attempt: execution.attempt }
-        );
+        const execution = getJobExecution(id) as JobExecutionRecord;
+        let auditOutcome: AuditOutcome = "failed";
+        if (finalStatus === "cancelled") {
+            auditOutcome = "cancelled";
+        }
+        if (finalStatus === "success") {
+            auditOutcome = "succeeded";
+        }
+        writeJobAudit(execution, "job.execute", auditOutcome, finishedAt, {
+            attempt: execution.attempt,
+        });
         database.run("COMMIT");
         return execution;
     } catch (error) {
@@ -805,7 +836,7 @@ export function finishJobExecution(
     }
 }
 
-export function cancelJobExecution(id: string, timestamp = nowIso()): JobExecution {
+export function cancelJobExecution(id: string, timestamp = nowIso()): JobExecutionRecord {
     database.run("BEGIN IMMEDIATE");
     try {
         const row = database
@@ -850,7 +881,7 @@ export function cancelJobExecution(id: string, timestamp = nowIso()): JobExecuti
         } else {
             throw statusError("Completed job executions cannot be cancelled", 409);
         }
-        const execution = getJobExecution(id) as JobExecution;
+        const execution = getJobExecution(id) as JobExecutionRecord;
         writeJobAudit(
             execution,
             "job.cancel",

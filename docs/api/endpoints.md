@@ -10,7 +10,7 @@ route files under `backend/src/routes/` for exact validation details.
 | `GET`  | `/api/health/live`        | Public web-process liveness.                           |
 | `GET`  | `/api/health/ready`       | Public activation readiness; `503` when not ready.     |
 | `GET`  | `/api/health/diagnostics` | Authenticated readiness details and dependency status. |
-| `GET`  | `/api/sessions`           | Legacy/session snapshot from Gateway.                  |
+| `GET`  | `/api/sessions`           | Normalized session snapshot from Gateway.              |
 
 ## Auth
 

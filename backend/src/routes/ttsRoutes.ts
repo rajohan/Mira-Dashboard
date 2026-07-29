@@ -1,51 +1,32 @@
-import { json, readJson, readResponseTextFallback } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { parseTextToSpeechRequest } from "../../../contracts/tts.ts";
+import { readResponseTextFallback } from "../http.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { readApiJsonOrError, routeFailureResponse } from "../routeSupport.ts";
 
 const ELEVENLABS_TTS_TIMEOUT_MS = 60_000;
 const ELEVENLABS_TTS_MODEL = "eleven_turbo_v2_5";
 const ELEVENLABS_TTS_VOICE_ID = "q7O4dHCU5KzDbUYNsckR";
-const MAX_TTS_TEXT_LENGTH = 4000;
-
-interface TtsRequestBody {
-    text?: unknown;
-}
-
-function normalizeTtsText(value: unknown): string {
-    return typeof value === "string" ? value.trim() : "";
-}
+const logger = createStructuredLogger("text-to-speech");
 
 export const ttsRoutes = {
     "/api/tts/speak": {
         POST: async (request: Request) => {
             const apiKey = process.env.ELEVENLABS_API_KEY;
             if (!apiKey) {
-                return json(
-                    { error: "ELEVENLABS_API_KEY is not configured" },
-                    { status: 500 }
-                );
+                return routeFailureResponse({
+                    context: "tts",
+                    message: "ELEVENLABS_API_KEY is not configured",
+                    status: 500,
+                });
             }
 
-            let body: TtsRequestBody | undefined;
-            try {
-                body = await readJson<TtsRequestBody | undefined>(request);
-            } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Invalid JSON") },
-                    { status: httpStatusCode(error) }
-                );
-            }
-            const text = normalizeTtsText(body?.text);
-            if (!text) {
-                return json({ error: "Missing text" }, { status: 400 });
-            }
-            if (text.length > MAX_TTS_TEXT_LENGTH) {
-                return json(
-                    {
-                        error: `Text is too long. Max is ${MAX_TTS_TEXT_LENGTH} characters.`,
-                    },
-                    { status: 400 }
-                );
-            }
+            const body = await readApiJsonOrError(request, parseTextToSpeechRequest, {
+                code: "invalid_tts_request",
+                context: "tts.request",
+                message: "Invalid TTS request",
+            });
+            if (body instanceof Response) return body;
+            const { text } = body;
 
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), ELEVENLABS_TTS_TIMEOUT_MS);
@@ -72,14 +53,15 @@ export const ttsRoutes = {
 
                 if (!elevenLabsResponse.ok) {
                     const errorText = await readResponseTextFallback(elevenLabsResponse);
-                    console.error("[TTS] ElevenLabs request failed:", {
+                    logger.error("tts.upstream_request_failed", {
                         body: errorText,
                         status: elevenLabsResponse.status,
                     });
-                    return json(
-                        { error: "TTS service temporarily unavailable" },
-                        { status: elevenLabsResponse.status }
-                    );
+                    return routeFailureResponse({
+                        context: "tts",
+                        message: "TTS service temporarily unavailable",
+                        status: elevenLabsResponse.status,
+                    });
                 }
 
                 return new Response(elevenLabsResponse.body, {
@@ -90,13 +72,18 @@ export const ttsRoutes = {
                 });
             } catch (error) {
                 if (controller.signal.aborted) {
-                    return json({ error: "TTS request timed out" }, { status: 504 });
+                    return routeFailureResponse({
+                        context: "tts",
+                        message: "TTS request timed out",
+                        status: 504,
+                    });
                 }
-                console.error(
-                    "[TTS] Speech generation failed:",
-                    error instanceof Error ? error.message : String(error)
-                );
-                return json({ error: "Failed to generate speech" }, { status: 500 });
+                logger.error("tts.generation_failed", { error });
+                return routeFailureResponse({
+                    context: "tts",
+                    message: "Failed to generate speech",
+                    status: 500,
+                });
             } finally {
                 clearTimeout(timer);
             }

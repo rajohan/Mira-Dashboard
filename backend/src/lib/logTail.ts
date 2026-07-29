@@ -40,7 +40,10 @@ function isLikelyLogFragment(line: string): boolean {
     );
 }
 
-/** Returns complete tail lines with byte-offset IDs. */
+/**
+ * Returns complete tail lines with byte-offset IDs.
+ * @returns complete tail lines with byte-offset IDs.
+ */
 export function lineEntriesFromLogRead(
     read: LogRead,
     lines: number | undefined,
@@ -72,12 +75,12 @@ export function lineEntriesFromLogRead(
             index >= firstTailIndex && line.trim() ? index : undefined
         )
         .filter((index): index is number => index !== undefined);
-    const firstSelectedIndex =
-        lines && nonEmptyLineIndexes.length > lines
-            ? nonEmptyLineIndexes[nonEmptyLineIndexes.length - lines]!
-            : options.includeBlankLines
-              ? firstTailIndex
-              : (nonEmptyLineIndexes[0] ?? firstTailIndex);
+    let firstSelectedIndex = options.includeBlankLines
+        ? firstTailIndex
+        : (nonEmptyLineIndexes[0] ?? firstTailIndex);
+    if (lines && nonEmptyLineIndexes.length > lines) {
+        firstSelectedIndex = nonEmptyLineIndexes[nonEmptyLineIndexes.length - lines]!;
+    }
 
     return rawLines
         .slice(firstSelectedIndex)

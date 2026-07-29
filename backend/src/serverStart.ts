@@ -1,6 +1,6 @@
 import { getPersistedGatewayToken } from "./auth.ts";
 import gateway from "./gateway.ts";
-import { installStructuredConsole } from "./lib/structuredLogger.ts";
+import { createStructuredLogger } from "./lib/structuredLogger.ts";
 import {
     getRuntimeReleaseIdentity,
     requireRunnableReleaseCommit,
@@ -9,6 +9,8 @@ import { createServer, resolveListenPort } from "./server.ts";
 import { shouldStartScheduledJobs } from "./serverStartPolicy.ts";
 import { startDashboardJobWorker, stopDashboardJobWorker } from "./services/jobWorker.ts";
 import { registerPullRequestJobLifecycleHandlers } from "./services/pullRequests.ts";
+
+const logger = createStructuredLogger("server");
 
 const serverStartState: {
     activeServer: ReturnType<typeof createServer> | undefined;
@@ -27,10 +29,15 @@ function rollbackBackgroundServiceStartup(
     try {
         const result = function_();
         if (result instanceof Promise) {
-            void result.catch((cleanupError) => console.error(label, cleanupError));
+            void result.catch((error) =>
+                logger.error("server.background_cleanup_failed", {
+                    error,
+                    operation: label,
+                })
+            );
         }
-    } catch (cleanupError) {
-        console.error(label, cleanupError);
+    } catch (error) {
+        logger.error("server.background_cleanup_failed", { error, operation: label });
     }
 }
 
@@ -45,7 +52,10 @@ export function resolveGatewayToken(
     );
 }
 
-/** Starts Gateway and notification monitors after the HTTP server is listening. */
+/**
+ * Starts Gateway and notification monitors after the HTTP server is listening.
+ * @param releaseCommit Release commit value.
+ */
 export function handleServerListening(releaseCommit: string): void {
     let isGatewayStarted = false;
     try {
@@ -55,16 +65,14 @@ export function handleServerListening(releaseCommit: string): void {
             gateway.init(token);
             isGatewayStarted = true;
         } else {
-            console.warn(
-                "[Backend] No gateway token configured yet; waiting for bootstrap registration"
-            );
+            logger.warn("server.gateway_token_unavailable");
         }
 
         if (shouldStartScheduledJobs()) {
             startDashboardJobWorker(releaseCommit);
         }
     } catch (error) {
-        console.error("[Backend] Failed to start background services:", error);
+        logger.error("server.background_services_start_failed", { error });
         if (isGatewayStarted) {
             rollbackBackgroundServiceStartup(
                 () => gateway.shutdown(),
@@ -76,15 +84,18 @@ export function handleServerListening(releaseCommit: string): void {
         void server
             ?.stop(true)
             .catch((cleanupError) =>
-                console.error("[Backend] Failed to close server:", cleanupError)
+                logger.error("server.http_cleanup_failed", { error: cleanupError })
             );
         throw error;
     }
 }
 
-/** Binds the HTTP server and starts runtime-only background services. */
+/**
+ * Binds the HTTP server and starts runtime-only background services.
+ * @param port Port value.
+ * @returns Start backend server result.
+ */
 export function startBackendServer(port = resolveListenPort()): Promise<void> {
-    installStructuredConsole();
     if (serverStartState.activeServer) {
         return Promise.resolve();
     }
@@ -99,10 +110,14 @@ export function startBackendServer(port = resolveListenPort()): Promise<void> {
             const releaseCommit = requireRunnableReleaseCommit(release, "Backend");
             serverStartState.activeServer = createServer(port);
             handleServerListening(releaseCommit);
+            logger.info("server.started", {
+                port,
+                releaseCommit,
+            });
             startup.resolve();
         } catch (error) {
             serverStartState.activeServer = undefined;
-            console.error("[Backend] Failed to start server:", error);
+            logger.error("server.start_failed", { error });
             process.exitCode = 1;
             startup.reject(error);
         } finally {
@@ -117,6 +132,7 @@ export function startBackendServer(port = resolveListenPort()): Promise<void> {
 export async function stopBackendServer(): Promise<void> {
     const server = serverStartState.activeServer;
     serverStartState.activeServer = undefined;
+    logger.info("server.stopping");
     try {
         await stopDashboardJobWorker();
         gateway.shutdown();
@@ -141,11 +157,14 @@ interface BackendServerEntrypointOptions {
 }
 
 function reportBackendServerFailure(error: unknown): void {
-    console.error("[Backend] Failed:", error);
+    logger.error("server.entrypoint_failed", { error });
     process.exitCode = 1;
 }
 
-/** Runs the web process until systemd or an operator requests a clean shutdown. */
+/**
+ * Runs the web process until systemd or an operator requests a clean shutdown.
+ * @param port Port value.
+ */
 export async function runBackendServer(port = resolveListenPort()): Promise<void> {
     const shutdown = Promise.withResolvers<NodeJS.Signals>();
     const stop = (signal: NodeJS.Signals) => shutdown.resolve(signal);
@@ -166,7 +185,7 @@ export async function runBackendServer(port = resolveListenPort()): Promise<void
  * modules imported by other runtimes without claiming their process signals.
  */
 export async function startBackendServerEntrypoint({
-    exitProcess = process.exit,
+    exitProcess = process.exit.bind(process),
     isDirect = isDirectEntrypoint(),
     reportFailure = reportBackendServerFailure,
     runServer = runBackendServer,

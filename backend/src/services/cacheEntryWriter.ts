@@ -4,7 +4,7 @@ function dateToISOString(date: Date): string {
     return date.toISOString();
 }
 
-type CacheTtlUnit = "hours" | "minutes";
+export type CacheTtlUnit = "hours" | "minutes";
 
 export interface CacheWriteOptions {
     key: string;
@@ -20,7 +20,13 @@ function nowIso(): string {
     return dateToISOString(new Date());
 }
 
-function ttlDate(ttl: number, unit: CacheTtlUnit): string {
+/**
+ * Computes a cache expiry timestamp from the shared TTL unit.
+ * @param ttl Time-to-live value.
+ * @param unit Time-to-live unit.
+ * @returns ISO timestamp at which the cache entry expires.
+ */
+export function cacheExpiryIso(ttl: number, unit: CacheTtlUnit): string {
     const multiplier = 60 * 1000 * (unit === "hours" ? 60 : 1);
     return dateToISOString(new Date(Date.now() + ttl * multiplier));
 }
@@ -29,7 +35,7 @@ export function writeCacheSuccess(options: CacheWriteOptions): void {
     const timestamp = nowIso();
     const dataJson = JSON.stringify(options.data);
     const metadataJson = JSON.stringify(options.metadata);
-    const expiresAt = ttlDate(options.ttl, options.ttlUnit);
+    const expiresAt = cacheExpiryIso(options.ttl, options.ttlUnit);
     if (options.preserveExistingData) {
         const result = database
             .prepare(

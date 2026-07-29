@@ -1,8 +1,12 @@
+import type {
+    DashboardAuthMethod,
+    DashboardAuthSession,
+} from "../../contracts/accountSecurity.ts";
+import type { DashboardUser } from "../../contracts/auth.ts";
 import { database, sqlNullable } from "./database.ts";
 import {
     decryptStoredSecret,
     encryptStoredSecret,
-    isEncryptedStoredSecret,
     secretEncryptionKeyBytes,
 } from "./services/mfaCrypto.ts";
 
@@ -21,8 +25,6 @@ const SESSION_HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const MAX_USER_AGENT_LENGTH = 512;
 const GATEWAY_TOKEN_ASSOCIATED_DATA = "mira-dashboard:app-config:v1:gateway-token";
 
-export type AuthMethod = "password" | "recovery" | "totp" | "webauthn";
-
 /** Represents one user row. */
 export interface UserRow {
     created_at: string;
@@ -33,18 +35,28 @@ export interface UserRow {
     username: string;
 }
 
-/** Represents an authenticated Dashboard user. */
-export interface AuthUser {
-    id: number;
-    username: string;
+function rollbackFirstUserTransaction(transactionError?: unknown): void {
+    try {
+        database.run("ROLLBACK");
+    } catch (rollbackError) {
+        if (transactionError !== undefined) {
+            const rollbackFailure = new AggregateError(
+                [transactionError, rollbackError],
+                "First-user transaction and rollback failed",
+                { cause: transactionError }
+            );
+            throw rollbackFailure;
+        }
+        throw rollbackError;
+    }
 }
 
-interface SessionRow extends AuthUser {
-    auth_method: AuthMethod | null;
+interface SessionRow extends DashboardUser {
+    auth_method: DashboardAuthMethod | null;
     authenticated_at: string | null;
     created_at: string;
     elevated_at: string | null;
-    elevated_method: AuthMethod | null;
+    elevated_method: DashboardAuthMethod | null;
     expires_at: string;
     last_seen_at: string | null;
     mfa_enabled_at: string | null;
@@ -54,12 +66,12 @@ interface SessionRow extends AuthUser {
     validator_hash: string | null;
 }
 
-export interface AuthSession extends AuthUser {
-    authMethod: AuthMethod;
+export interface AuthSession extends DashboardUser {
+    authMethod: DashboardAuthMethod;
     authenticatedAt: string;
     createdAt: string;
     elevatedAt?: string;
-    elevatedMethod?: AuthMethod;
+    elevatedMethod?: DashboardAuthMethod;
     expiresAt: string;
     lastSeenAt: string;
     mfaEnabled: boolean;
@@ -68,46 +80,48 @@ export interface AuthSession extends AuthUser {
     userAgent?: string;
 }
 
-export interface AuthSessionSummary {
-    authMethod: AuthMethod;
-    authenticatedAt: string;
-    createdAt: string;
-    elevatedAt?: string;
-    elevatedMethod?: AuthMethod;
-    expiresAt: string;
-    isCurrent: boolean;
-    lastSeenAt: string;
-    mfaVerifiedAt?: string;
-    sessionId: string;
-    userAgent?: string;
-}
-
 interface CreateSessionOptions {
-    authMethod?: AuthMethod;
+    authMethod?: DashboardAuthMethod;
     authenticatedAt?: string;
     elevatedAt?: string;
-    elevatedMethod?: AuthMethod;
+    elevatedMethod?: DashboardAuthMethod;
     mfaVerifiedAt?: string;
     now?: Date;
     userAgent?: string;
 }
 
-/** Returns the current time in the database timestamp format. */
+/**
+ * Returns the current time in the database timestamp format.
+ * @param now Now value.
+ * @returns the current time in the database timestamp format.
+ */
 function nowIso(now = new Date()): string {
     return now.toISOString();
 }
 
-/** Normalizes a Dashboard username. */
+/**
+ * Normalizes a Dashboard username.
+ * @param username Username value.
+ * @returns Normalized a Dashboard username.
+ */
 function normalizeUsername(username: string): string {
     return username.trim().toLowerCase();
 }
 
-/** Hashes a password with Bun's runtime password hashing API. */
+/**
+ * Hashes a password with Bun's runtime password hashing API.
+ * @param password Password value.
+ * @returns Promise resolving to the hash password result.
+ */
 export async function hashPassword(password: string): Promise<string> {
     return Bun.password.hash(password);
 }
 
-/** Returns cryptographically secure random bytes as lowercase hex. */
+/**
+ * Returns cryptographically secure random bytes as lowercase hex.
+ * @param byteLength Byte length value.
+ * @returns cryptographically secure random bytes as lowercase hex.
+ */
 function randomHex(byteLength: number): string {
     const bytes = new Uint8Array(byteLength);
     crypto.getRandomValues(bytes);
@@ -130,7 +144,11 @@ function parseSessionToken(
     return { selector, validatorHash: hashSessionValidator(validator) };
 }
 
-/** Returns the non-secret selector portion of a valid session token. */
+/**
+ * Returns the non-secret selector portion of a valid session token.
+ * @param sessionToken Session token value.
+ * @returns the non-secret selector portion of a valid session token.
+ */
 export function sessionSelectorFromToken(sessionToken: string): string | undefined {
     return parseSessionToken(sessionToken)?.selector;
 }
@@ -153,7 +171,11 @@ function normalizedUserAgent(userAgent?: string): string | undefined {
     return normalized ? normalized.slice(0, MAX_USER_AGENT_LENGTH) : undefined;
 }
 
-/** Resolves the idle timeout while keeping unsafe environment values fail-closed. */
+/**
+ * Resolves the idle timeout while keeping unsafe environment values fail-closed.
+ * @param configuredMinutes Configured minutes value.
+ * @returns Resolved the idle timeout while keeping unsafe environment values fail-closed.
+ */
 export function sessionIdleTtlMs(
     configuredMinutes = process.env.MIRA_DASHBOARD_SESSION_IDLE_MINUTES
 ): number {
@@ -177,7 +199,11 @@ export function sessionIdleTtlMs(
     return minutes * 60_000;
 }
 
-/** Resolves the bounded window used for privileged account-security actions. */
+/**
+ * Resolves the bounded window used for privileged account-security actions.
+ * @param configuredMinutes Configured minutes value.
+ * @returns Resolved the bounded window used for privileged account-security actions.
+ */
 export function recentAuthenticationTtlMs(
     configuredMinutes = process.env.MIRA_DASHBOARD_RECENT_AUTH_MINUTES
 ): number {
@@ -218,7 +244,10 @@ function isRecentTimestamp(
     return Number.isFinite(parsed) && age >= -60_000 && age <= ttlMs;
 }
 
-/** Returns whether the current session has a recent password verification. */
+/**
+ * Returns whether the current session has a recent password verification.
+ * @returns Whether the current session has a recent password verification.
+ */
 export function hasRecentPasswordVerification(
     session: AuthSession,
     now = new Date()
@@ -229,7 +258,10 @@ export function hasRecentPasswordVerification(
     );
 }
 
-/** Returns whether the current session has a recent second-factor verification. */
+/**
+ * Returns whether the current session has a recent second-factor verification.
+ * @returns Whether the current session has a recent second-factor verification.
+ */
 export function hasRecentMfaVerification(
     session: AuthSession,
     now = new Date()
@@ -237,7 +269,12 @@ export function hasRecentMfaVerification(
     return isRecentTimestamp(session.mfaVerifiedAt, now, recentAuthenticationTtlMs());
 }
 
-/** Verifies a password with Bun's runtime password hashing API. */
+/**
+ * Verifies a password with Bun's runtime password hashing API.
+ * @param password Password value.
+ * @param storedHash Stored hash value.
+ * @returns Promise resolving to the verify password result.
+ */
 export async function verifyPassword(
     password: string,
     storedHash: string
@@ -249,7 +286,10 @@ export async function verifyPassword(
     }
 }
 
-/** Returns the number of Dashboard users. */
+/**
+ * Returns the number of Dashboard users.
+ * @returns the number of Dashboard users.
+ */
 export function getUserCount(): number {
     const row = database.prepare("SELECT COUNT(*) AS count FROM users").get() as {
         count: number;
@@ -257,12 +297,19 @@ export function getUserCount(): number {
     return row.count;
 }
 
-/** Returns whether first-user bootstrap is still available. */
+/**
+ * Returns whether first-user bootstrap is still available.
+ * @returns Whether first-user bootstrap is still available.
+ */
 export function isBootstrapRequired(): boolean {
     return getUserCount() === 0;
 }
 
-/** Finds a user by normalized username. */
+/**
+ * Finds a user by normalized username.
+ * @param username Username value.
+ * @returns Located a user by normalized username.
+ */
 export function findUserByUsername(username: string): UserRow | undefined {
     const row = database
         .prepare(
@@ -279,7 +326,11 @@ export function findUserByUsername(username: string): UserRow | undefined {
     return row || undefined;
 }
 
-/** Finds a user by internal identifier. */
+/**
+ * Finds a user by internal identifier.
+ * @param userId User identifier.
+ * @returns Located a user by internal identifier.
+ */
 export function findUserById(userId: number): UserRow | undefined {
     return (
         (database
@@ -297,8 +348,16 @@ export function findUserById(userId: number): UserRow | undefined {
     );
 }
 
-/** Creates a Dashboard user. */
-export async function createUser(username: string, password: string): Promise<AuthUser> {
+/**
+ * Creates a Dashboard user.
+ * @param username Username value.
+ * @param password Password value.
+ * @returns Created a Dashboard user.
+ */
+export async function createUser(
+    username: string,
+    password: string
+): Promise<DashboardUser> {
     const normalizedUsername = normalizeUsername(username);
     const timestamp = nowIso();
     const passwordHash = await hashPassword(password);
@@ -316,11 +375,16 @@ export async function createUser(username: string, password: string): Promise<Au
     };
 }
 
-/** Atomically creates the first user only when no users exist. */
+/**
+ * Atomically creates the first user only when no users exist.
+ * @param username Username value.
+ * @param password Password value.
+ * @returns Promise resolving to the create first user result.
+ */
 export async function createFirstUser(
     username: string,
     password: string
-): Promise<AuthUser | undefined> {
+): Promise<DashboardUser | undefined> {
     if (getUserCount() > 0) {
         return undefined;
     }
@@ -328,20 +392,6 @@ export async function createFirstUser(
     const normalizedUsername = normalizeUsername(username);
     const timestamp = nowIso();
     const passwordHash = await hashPassword(password);
-    const rollback = (transactionError?: unknown) => {
-        try {
-            database.run("ROLLBACK");
-        } catch (rollbackError) {
-            if (transactionError) {
-                throw new AggregateError(
-                    [transactionError, rollbackError],
-                    "First-user transaction and rollback failed",
-                    { cause: rollbackError }
-                );
-            }
-            throw rollbackError;
-        }
-    };
 
     database.run("BEGIN IMMEDIATE");
     try {
@@ -353,7 +403,7 @@ export async function createFirstUser(
             )
             .run(normalizedUsername, passwordHash, timestamp, timestamp);
         if (result.changes === 0) {
-            rollback();
+            rollbackFirstUserTransaction();
             return undefined;
         }
         database.run("COMMIT");
@@ -362,12 +412,15 @@ export async function createFirstUser(
             username: normalizedUsername,
         };
     } catch (error) {
-        rollback(error);
+        rollbackFirstUserTransaction(error);
         throw error;
     }
 }
 
-/** Persists the server-side OpenClaw Gateway token. */
+/**
+ * Persists the server-side OpenClaw Gateway token.
+ * @param token Token value.
+ */
 export function persistGatewayToken(token: string): void {
     const timestamp = nowIso();
     const encryptedToken = encryptStoredSecret(token, GATEWAY_TOKEN_ASSOCIATED_DATA);
@@ -381,7 +434,10 @@ export function persistGatewayToken(token: string): void {
         .run(encryptedToken, timestamp);
 }
 
-/** Returns the persisted OpenClaw Gateway token. */
+/**
+ * Returns the persisted OpenClaw Gateway token.
+ * @returns the persisted OpenClaw Gateway token.
+ */
 export function getPersistedGatewayToken(): string | undefined {
     const row = database
         .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
@@ -389,30 +445,14 @@ export function getPersistedGatewayToken(): string | undefined {
     if (!row?.value) {
         return undefined;
     }
-    if (isEncryptedStoredSecret(row.value)) {
-        return decryptStoredSecret(row.value, GATEWAY_TOKEN_ASSOCIATED_DATA);
-    }
-
-    const encryptedToken = encryptStoredSecret(row.value, GATEWAY_TOKEN_ASSOCIATED_DATA);
-    const upgraded = database
-        .prepare(
-            `UPDATE app_config
-             SET value = ?, updated_at = ?
-             WHERE key = 'gateway_token' AND value = ?`
-        )
-        .run(encryptedToken, nowIso(), row.value);
-    if (upgraded.changes === 1) {
-        return row.value;
-    }
-    const currentRow = database
-        .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
-        .get() as undefined | { value: string };
-    return currentRow?.value
-        ? decryptStoredSecret(currentRow.value, GATEWAY_TOKEN_ASSOCIATED_DATA)
-        : undefined;
+    return decryptStoredSecret(row.value, GATEWAY_TOKEN_ASSOCIATED_DATA);
 }
 
-/** Deletes the encrypted persisted Gateway token only when its plaintext matches. */
+/**
+ * Deletes the encrypted persisted Gateway token only when its plaintext matches.
+ * @param token Token value.
+ * @returns Did delete persisted gateway token if matches result.
+ */
 export function didDeletePersistedGatewayTokenIfMatches(token: string): boolean {
     const row = database
         .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
@@ -420,9 +460,7 @@ export function didDeletePersistedGatewayTokenIfMatches(token: string): boolean 
     if (!row?.value) {
         return false;
     }
-    const currentToken = isEncryptedStoredSecret(row.value)
-        ? decryptStoredSecret(row.value, GATEWAY_TOKEN_ASSOCIATED_DATA)
-        : row.value;
+    const currentToken = decryptStoredSecret(row.value, GATEWAY_TOKEN_ASSOCIATED_DATA);
     const currentBytes = new TextEncoder().encode(currentToken);
     const expectedBytes = new TextEncoder().encode(token);
     const isMatch =
@@ -439,7 +477,7 @@ export function didDeletePersistedGatewayTokenIfMatches(token: string): boolean 
     );
 }
 
-/** Requires the external key and upgrades any legacy plaintext Gateway token. */
+/** Requires the external key and validates any persisted encrypted Gateway token. */
 export function validateStoredSecretConfig(): void {
     secretEncryptionKeyBytes();
     getPersistedGatewayToken();
@@ -492,7 +530,12 @@ function insertSession(userId: number, options: CreateSessionOptions = {}): stri
     return `${selector}.${validator}`;
 }
 
-/** Creates a durable session with a hashed validator. */
+/**
+ * Creates a durable session with a hashed validator.
+ * @param userId User identifier.
+ * @param options Operation options.
+ * @returns Created a durable session with a hashed validator.
+ */
 export function createSession(
     userId: number,
     options: CreateSessionOptions = {}
@@ -500,7 +543,10 @@ export function createSession(
     return insertSession(userId, options);
 }
 
-/** Deletes exactly the session addressed by a selector/validator token. */
+/**
+ * Deletes exactly the session addressed by a selector/validator token.
+ * @param sessionToken Session token value.
+ */
 export function deleteSession(sessionToken: string): void {
     const parsedToken = parseSessionToken(sessionToken);
     if (!parsedToken) {
@@ -514,7 +560,10 @@ export function deleteSession(sessionToken: string): void {
         .run(parsedToken.selector, parsedToken.validatorHash);
 }
 
-/** Removes expired, idle, and pre-MFA legacy sessions. */
+/**
+ * Removes expired, idle, and structurally incomplete sessions.
+ * @param now Now value.
+ */
 export function cleanupExpiredSessions(now = new Date()): void {
     const idleCutoff = new Date(now.getTime() - sessionIdleTtlMs()).toISOString();
     database
@@ -575,7 +624,11 @@ function sessionFromRow(row: SessionRow): AuthSession | undefined {
     };
 }
 
-/** Resolves and optionally activity-touches one authenticated session. */
+/**
+ * Resolves and optionally activity-touches one authenticated session.
+ * @param sessionToken Session token value.
+ * @returns Resolved and optionally activity-touches one authenticated session.
+ */
 export function getAuthSessionFromSessionId(
     sessionToken: string,
     {
@@ -628,20 +681,30 @@ export function getAuthSessionFromSessionId(
     return session;
 }
 
-/** Resolves the authenticated user represented by a session token. */
+/**
+ * Resolves the authenticated user represented by a session token.
+ * @param sessionToken Session token value.
+ * @param options Operation options.
+ * @returns Resolved the authenticated user represented by a session token.
+ */
 export function getAuthUserFromSessionId(
     sessionToken: string,
     options: { now?: Date; touchActivity?: boolean } = {}
-): AuthUser | undefined {
+): DashboardUser | undefined {
     const session = getAuthSessionFromSessionId(sessionToken, options);
     return session ? { id: session.id, username: session.username } : undefined;
 }
 
-/** Rotates a session selector/validator and optionally records fresh elevation. */
+/**
+ * Rotates a session selector/validator and optionally records fresh elevation.
+ * @param sessionToken Session token value.
+ * @param options Operation options.
+ * @returns Rotate session result.
+ */
 export function rotateSession(
     sessionToken: string,
     options: Omit<CreateSessionOptions, "authenticatedAt"> & {
-        authMethod?: AuthMethod;
+        authMethod?: DashboardAuthMethod;
         authenticatedAt?: string;
     } = {}
 ): string | undefined {
@@ -680,11 +743,12 @@ export function rotateSession(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "Session rotation and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
@@ -698,6 +762,10 @@ export interface PasswordChangeResult {
 /**
  * Replaces a password, rotates the current session, and revokes every other
  * browser session and pending authentication ceremony atomically.
+ * @param sessionToken Session token value.
+ * @param userId User identifier.
+ * @param newPassword New password value.
+ * @returns Promise resolving to the change password and rotate session result.
  */
 export async function changePasswordAndRotateSession(
     sessionToken: string,
@@ -761,21 +829,27 @@ export async function changePasswordAndRotateSession(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "Password change and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
 }
 
-/** Lists the user's durable sessions without exposing validators. */
+/**
+ * Lists the user's durable sessions without exposing validators.
+ * @param userId User identifier.
+ * @param currentSessionId Current session identifier.
+ * @returns List user sessions result.
+ */
 export function listUserSessions(
     userId: number,
     currentSessionId?: string
-): AuthSessionSummary[] {
+): DashboardAuthSession[] {
     cleanupExpiredSessions();
     const rows = database
         .prepare(
@@ -796,11 +870,11 @@ export function listUserSessions(
              ORDER BY last_seen_at DESC, created_at DESC, id DESC`
         )
         .all(userId) as Array<{
-        auth_method: AuthMethod;
+        auth_method: DashboardAuthMethod;
         authenticated_at: string;
         created_at: string;
         elevated_at: string | null;
-        elevated_method: AuthMethod | null;
+        elevated_method: DashboardAuthMethod | null;
         expires_at: string;
         id: string;
         last_seen_at: string | null;
@@ -822,7 +896,12 @@ export function listUserSessions(
     }));
 }
 
-/** Revokes one session only when it belongs to the authenticated user. */
+/**
+ * Revokes one session only when it belongs to the authenticated user.
+ * @param userId User identifier.
+ * @param sessionId Session identifier.
+ * @returns Did revoke user session result.
+ */
 export function didRevokeUserSession(userId: number, sessionId: string): boolean {
     return (
         database
@@ -831,7 +910,12 @@ export function didRevokeUserSession(userId: number, sessionId: string): boolean
     );
 }
 
-/** Revokes every session for a user, optionally preserving one selector. */
+/**
+ * Revokes every session for a user, optionally preserving one selector.
+ * @param userId User identifier.
+ * @param exceptSessionId Except session identifier.
+ * @returns Revoke user sessions result.
+ */
 export function revokeUserSessions(userId: number, exceptSessionId?: string): number {
     const result = exceptSessionId
         ? database

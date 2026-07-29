@@ -10,6 +10,7 @@ import {
     validateDatabaseMigrationHistory,
 } from "./databaseMigrationRunner.ts";
 import { secureSqliteFilePermissions } from "./databaseStorage.ts";
+import { writeCliOutput } from "./lib/cliOutput.ts";
 import { createVerifiedSqliteBackup, pruneSqliteBackups } from "./sqliteBackup.ts";
 
 export async function runDatabasePreflight() {
@@ -76,5 +77,5 @@ export async function runDatabasePreflight() {
 }
 
 if (import.meta.main) {
-    console.log(JSON.stringify(await runDatabasePreflight()));
+    writeCliOutput(JSON.stringify(await runDatabasePreflight()));
 }

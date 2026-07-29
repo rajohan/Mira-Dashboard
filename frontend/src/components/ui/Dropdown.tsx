@@ -1,0 +1,108 @@
+import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
+import { ChevronDown } from "lucide-react";
+
+import { cn } from "../../utils/cn";
+
+/** Represents dropdown item. */
+export interface DropdownItem {
+    label: string;
+    onClick?: () => void;
+    icon?: React.ReactNode;
+    variant?: "default" | "danger";
+    disabled?: boolean;
+}
+
+/** Provides props for dropdown. */
+interface DropdownProperties {
+    label?: string;
+    ariaLabel?: string;
+    icon?: React.ReactNode;
+    items?: DropdownItem[];
+    content?: React.ReactNode;
+    align?: "left" | "right";
+    variant?: "primary" | "secondary" | "ghost";
+    size?: "sm" | "md";
+    triggerClassName?: string;
+}
+
+/**
+ * Renders the dropdown UI.
+ * @returns Rendered the dropdown UI.
+ */
+export function Dropdown({
+    label,
+    ariaLabel,
+    icon,
+    items = [],
+    content,
+    align = "right",
+    variant = "secondary",
+    size = "sm",
+    triggerClassName,
+}: DropdownProperties) {
+    const variantStyles = {
+        primary: "bg-accent-500 text-white hover:bg-accent-600",
+        secondary:
+            "border border-primary-600 bg-primary-700 text-primary-100 hover:bg-primary-600",
+        ghost: "text-primary-300 hover:bg-primary-700",
+    };
+
+    const sizeStyles = {
+        sm: "px-2 py-1 text-sm",
+        md: "px-4 py-2 text-sm",
+    };
+
+    return (
+        <Menu as="div">
+            <MenuButton
+                aria-label={ariaLabel}
+                className={cn(
+                    "inline-flex items-center justify-center gap-1 rounded-lg font-medium outline-none",
+                    "focus:outline-none data-focus:outline-none",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    variantStyles[variant],
+                    sizeStyles[size],
+                    triggerClassName
+                )}
+            >
+                {icon}
+                {label}
+                {label && (
+                    <ChevronDown className="size-4 transition-transform data-open:rotate-180" />
+                )}
+            </MenuButton>
+
+            <MenuItems
+                anchor={align === "right" ? "bottom end" : "bottom start"}
+                className="z-50 mt-1 min-w-40 origin-top-right rounded-lg border border-primary-600 bg-primary-800 p-1 shadow-lg outline-none"
+            >
+                {content ||
+                    items.map((item) => (
+                        <MenuItem
+                            key={`${item.label}:${item.variant ?? "default"}`}
+                            disabled={item.disabled}
+                        >
+                            <button
+                                type="button"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    item.onClick?.();
+                                }}
+                                className={cn(
+                                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
+                                    "outline-none hover:bg-primary-700 hover:text-primary-100 data-focus:bg-primary-700 data-focus:text-primary-100",
+                                    "data-disabled:cursor-not-allowed data-disabled:opacity-50",
+                                    item.variant === "danger"
+                                        ? "text-red-400 hover:bg-red-500/20 data-focus:bg-red-500/20"
+                                        : "text-primary-300"
+                                )}
+                            >
+                                {item.icon}
+                                {item.label}
+                            </button>
+                        </MenuItem>
+                    ))}
+            </MenuItems>
+        </Menu>
+    );
+}

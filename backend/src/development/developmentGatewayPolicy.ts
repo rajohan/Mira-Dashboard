@@ -46,22 +46,38 @@ const DEVELOPMENT_GATEWAY_PROXY_EVENTS = new Set([
     "update.available",
 ]);
 
-/** Preserves the production Gateway methods that do not require recent MFA. */
+/**
+ * Preserves the production Gateway methods that do not require recent MFA.
+ * @param method Method value.
+ * @returns Whether the Gateway method is exempt from recent-MFA verification.
+ */
 export function isGatewayMethodRecentMfaExempt(method: string): boolean {
     return RECENT_MFA_EXEMPT_GATEWAY_METHODS.has(method);
 }
 
-/** Allows only browser Gateway calls required by production-like Dashboard dev. */
+/**
+ * Allows only browser Gateway calls required by production-like Dashboard dev.
+ * @param method Method value.
+ * @returns Whether the Gateway method is allowed in development.
+ */
 export function isDevelopmentGatewayMethodAllowed(method: string): boolean {
     return DEVELOPMENT_ALLOWED_GATEWAY_METHODS.has(method);
 }
 
-/** Adds the dev backend's read subscription to the browser-safe Gateway methods. */
+/**
+ * Adds the dev backend's read subscription to the browser-safe Gateway methods.
+ * @param method Method value.
+ * @returns Whether the Gateway proxy method is allowed in development.
+ */
 export function isDevelopmentGatewayProxyMethodAllowed(method: string): boolean {
     return DEVELOPMENT_GATEWAY_PROXY_METHODS.has(method);
 }
 
-/** Limits proxy broadcasts to events required by Dashboard status and chat flows. */
+/**
+ * Limits proxy broadcasts to events required by Dashboard status and chat flows.
+ * @param event Event to handle.
+ * @returns Whether the Gateway proxy event is allowed in development.
+ */
 export function isDevelopmentGatewayProxyEventAllowed(event: string): boolean {
     return (
         DEVELOPMENT_GATEWAY_PROXY_EVENTS.has(event) ||

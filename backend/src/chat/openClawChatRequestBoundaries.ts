@@ -45,6 +45,10 @@ function mergeRequestBoundaryMetadata(
     const acknowledgedRequestIds = [...acknowledged].filter((requestId) =>
         pending.has(requestId)
     );
+    let requestBoundary = left.requestBoundary ?? right.requestBoundary;
+    if (left.requestBoundary !== undefined && right.requestBoundary !== undefined) {
+        requestBoundary = Math.max(left.requestBoundary, right.requestBoundary);
+    }
     return {
         ...(acknowledgedRequestIds.length > 0 && {
             acknowledgedRequestIds,
@@ -52,12 +56,7 @@ function mergeRequestBoundaryMetadata(
         ...(pending.size > 0 && {
             pendingRequestBoundaries: Object.fromEntries(pending),
         }),
-        requestBoundary:
-            left.requestBoundary === undefined
-                ? right.requestBoundary
-                : right.requestBoundary === undefined
-                  ? left.requestBoundary
-                  : Math.max(left.requestBoundary, right.requestBoundary),
+        requestBoundary,
     };
 }
 
@@ -80,11 +79,16 @@ function requestBoundaryStateMetadata(
 
 export class OpenClawChatRequestBoundaries {
     readonly #states = new Map<string, RequestBoundaryState>();
+    private readonly isSameSessionKey: (left: string, right: string) => boolean;
+    private readonly normalizeSessionKey: (sessionKey: string) => string;
 
     constructor(
-        private readonly normalizeSessionKey: (sessionKey: string) => string,
-        private readonly isSameSessionKey: (left: string, right: string) => boolean
-    ) {}
+        normalizeSessionKey: (sessionKey: string) => string,
+        isSameSessionKey: (left: string, right: string) => boolean
+    ) {
+        this.normalizeSessionKey = normalizeSessionKey;
+        this.isSameSessionKey = isSameSessionKey;
+    }
 
     clear(): void {
         this.#states.clear();
@@ -280,12 +284,12 @@ export class OpenClawChatRequestBoundaries {
             if (!this.isSameSessionKey(candidateSessionKey, sessionKey)) {
                 continue;
             }
-            const acknowledgedRequestId =
-                requestId && state.pending.has(requestId)
-                    ? requestId
-                    : requestId
-                      ? undefined
-                      : fallbackPendingEntry(state.pending, requestBoundary)?.[0];
+            let acknowledgedRequestId = requestId
+                ? undefined
+                : fallbackPendingEntry(state.pending, requestBoundary)?.[0];
+            if (requestId && state.pending.has(requestId)) {
+                acknowledgedRequestId = requestId;
+            }
             if (!acknowledgedRequestId || state.acknowledged.has(acknowledgedRequestId)) {
                 continue;
             }

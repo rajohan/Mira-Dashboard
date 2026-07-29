@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type {
+    ExecJobStatus,
     ExecJobResponse,
     ExecRequest,
     ExecResponse,
@@ -17,17 +18,21 @@ import {
     pipeProcessOutput,
     spawnProcess,
 } from "../lib/processes.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { hasLineBreakOrNullByte } from "../lib/values.ts";
 import {
     cancelJobExecution,
     enqueueJobExecution,
     getJobExecution,
-    type JobExecution,
+    type JobExecutionRecord,
 } from "./jobExecutionQueue.ts";
 import {
     successfulJobExecutionOutput,
     waitForJobExecution,
 } from "./queuedJobExecution.ts";
 import { registerScheduledJobAction, ScheduledJobActionError } from "./scheduledJobs.ts";
+
+const logger = createStructuredLogger("exec-jobs");
 
 const OPS_SHELL_COMMANDS = new Set([
     "__mira_dashboard_shell_smoke_test__",
@@ -49,7 +54,6 @@ class ExecValidationError extends ApiRouteError {
 }
 
 const MAX_COMMAND_LENGTH = 4096;
-const SHELL_METACHARACTERS_RE = /[\n\r\0]/u;
 const EXECUTABLE_RE = /^(?:[\w./-]+)$/u;
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_JOBS = 100;
@@ -58,6 +62,23 @@ const ALLOWED_DIRECT_EXECUTABLES = new Set<string>(["bash"]);
 const BASH_LOGIN_COMMAND_ARGUMENTS = 2;
 const TRACKED_EXEC_TIMEOUT_MS = 7 * 60 * 60 * 1000;
 const STREAM_UPDATE_INTERVAL_MS = 250;
+
+/**
+ * Maps a queued execution to the exec-job API status vocabulary.
+ *
+ * @param execution - Persisted job execution.
+ * @param isTerminal - Whether the execution reached a terminal state.
+ * @returns Exec-job status exposed through the API contract.
+ */
+function execJobStatus(
+    execution: JobExecutionRecord,
+    isTerminal: boolean
+): ExecJobStatus {
+    if (isTerminal) {
+        return "done";
+    }
+    return execution.cancelRequestedAt ? "signaled" : "running";
+}
 
 function trimOutput(text: string): string {
     return text.length <= MAX_OUTPUT_CHARS ? text : text.slice(-MAX_OUTPUT_CHARS);
@@ -77,7 +98,7 @@ function validateBashArguments(arguments_: string[]): void {
             `command exceeds maximum length of ${MAX_COMMAND_LENGTH}`
         );
     }
-    if (SHELL_METACHARACTERS_RE.test(arguments_[1])) {
+    if (hasLineBreakOrNullByte(arguments_[1])) {
         throw new ExecValidationError("command contains disallowed control characters");
     }
 }
@@ -96,7 +117,7 @@ function validateExecRequest(payload: unknown, mode: ExecRequestMode): ExecReque
             `command exceeds maximum length of ${MAX_COMMAND_LENGTH}`
         );
     }
-    if (SHELL_METACHARACTERS_RE.test(command)) {
+    if (hasLineBreakOrNullByte(command)) {
         throw new ExecValidationError("command contains disallowed control characters");
     }
     if (shell !== undefined && typeof shell !== "boolean") {
@@ -184,13 +205,15 @@ function getApprovedShellCommand(command: string): string {
 
 export function execErrorResponse(error: unknown): MappedApiError {
     const status = httpStatusCode(error);
+    let code = "exec_request_failed";
+    if (status === 400 || status === 413) {
+        code = "exec_invalid_request";
+    }
+    if (status === 500) {
+        code = "exec_internal_error";
+    }
     return mapApiError(error, {
-        code:
-            status === 500
-                ? "exec_internal_error"
-                : status === 400 || status === 413
-                  ? "exec_invalid_request"
-                  : "exec_request_failed",
+        code,
         message: status === 500 ? "internal server error" : "request failed",
     });
 }
@@ -228,7 +251,10 @@ function runExecCommand(
         let stderr = "";
         const recordKillError = (signal: NodeJS.Signals, error: unknown) => {
             const message = errorMessage(error, `Failed to send ${signal}`);
-            console.error("[Exec] Process group kill failed:", message);
+            logger.error("exec.process_group_kill_failed", {
+                error,
+                signal,
+            });
             stderr = trimOutput(`${stderr}\n${message}`.trim());
             onUpdate?.({ stderr, stdout });
         };
@@ -277,11 +303,9 @@ function runExecCommand(
             }
         );
         void (async () => {
-            const code = await child.exited;
-            await Promise.all([stdoutDone, stderrDone]);
-            return code;
-        })()
-            .then((code) => {
+            try {
+                const code = await child.exited;
+                await Promise.all([stdoutDone, stderrDone]);
                 signal?.removeEventListener("abort", abortFromSignal);
                 if (timeout) clearTimeout(timeout);
                 if (forceKillTimeout) clearTimeout(forceKillTimeout);
@@ -290,13 +314,17 @@ function runExecCommand(
                     stderr,
                     stdout,
                 });
-            })
-            .catch((error: unknown) => {
+            } catch (error) {
                 signal?.removeEventListener("abort", abortFromSignal);
                 if (timeout) clearTimeout(timeout);
                 if (forceKillTimeout) clearTimeout(forceKillTimeout);
-                reject(error);
-            });
+                reject(
+                    error instanceof Error
+                        ? error
+                        : new Error("Exec process failed", { cause: error })
+                );
+            }
+        })();
     });
 }
 
@@ -310,7 +338,7 @@ function outputNumber(output: Record<string, unknown>, key: string): number | un
         : undefined;
 }
 
-function execResponseFromExecution(execution: JobExecution): ExecResponse {
+function execResponseFromExecution(execution: JobExecutionRecord): ExecResponse {
     const output = execution.output;
     if (typeof output.stdout !== "string" || typeof output.stderr !== "string") {
         successfulJobExecutionOutput(execution);
@@ -412,7 +440,7 @@ export function registerExecExecutionActions(): void {
     );
 }
 
-export async function runExecOnce(payload: unknown): Promise<ExecResponse> {
+export async function runExecOnce(payload?: unknown): Promise<ExecResponse> {
     const request = validateExecRequest(payload, "once");
     const execution = enqueueJobExecution({
         actionKey: "exec.once",
@@ -457,7 +485,7 @@ export function startExecJob(payload: unknown): ExecStartResponse {
     return { jobId: execution.id };
 }
 
-function trackedExecExecution(jobId: string): JobExecution {
+function trackedExecExecution(jobId: string): JobExecutionRecord {
     const execution = getJobExecution(jobId);
     if (!execution || execution.actionKey !== "exec.tracked") {
         throw new ApiRouteError("exec_job_not_found", "Exec job not found", 404);
@@ -488,11 +516,7 @@ export function getExecJob(jobId: string): ExecJobResponse {
         startedAt:
             outputNumber(output, "startedAt") ??
             Date.parse(execution.startedAt ?? execution.queuedAt),
-        status: isTerminal
-            ? "done"
-            : execution.cancelRequestedAt
-              ? "signaled"
-              : "running",
+        status: execJobStatus(execution, isTerminal),
         stderr: outputString(output, "stderr"),
         stdout: outputString(output, "stdout"),
     };

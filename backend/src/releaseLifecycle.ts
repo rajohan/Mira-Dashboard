@@ -5,6 +5,7 @@ import {
     getMiraDatabasePath,
 } from "./database.ts";
 import { validateDatabaseMigrationHistory } from "./databaseMigrationRunner.ts";
+import { writeCliError, writeCliOutput } from "./lib/cliOutput.ts";
 import type {
     DashboardReleaseManagerOptions,
     DashboardReleaseState,
@@ -27,19 +28,21 @@ import {
 const COORDINATED_SCHEMA_CUTOVER_FLAG = "--coordinated-schema-cutover";
 const RELEASE_TRANSITION_LOCK_WAIT_MS = 30_000;
 
+function summarizeDashboardRelease(release: DashboardReleaseState["current"]) {
+    return release
+        ? {
+              commitSha: release.commitSha,
+              commitTitle: release.manifest.commitTitle,
+              path: release.path,
+              schema: release.manifest.schema,
+          }
+        : undefined;
+}
+
 function releaseSummary(state: DashboardReleaseState) {
-    const summarize = (release: DashboardReleaseState["current"]) =>
-        release
-            ? {
-                  commitSha: release.commitSha,
-                  commitTitle: release.manifest.commitTitle,
-                  path: release.path,
-                  schema: release.manifest.schema,
-              }
-            : undefined;
     return {
-        current: summarize(state.current),
-        previous: summarize(state.previous),
+        current: summarizeDashboardRelease(state.current),
+        previous: summarizeDashboardRelease(state.previous),
         root: state.root,
     };
 }
@@ -245,9 +248,9 @@ export async function runReleaseLifecycleCommand(
 if (import.meta.main) {
     try {
         const result = await runReleaseLifecycleCommand(Bun.argv.slice(2));
-        console.log(JSON.stringify(result));
+        writeCliOutput(JSON.stringify(result));
     } catch (error) {
-        console.error(
+        writeCliError(
             error instanceof Error ? error.message : "Release lifecycle failed"
         );
         process.exitCode = 1;

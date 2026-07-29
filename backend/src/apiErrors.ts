@@ -2,6 +2,7 @@ import type { ApiErrorBody, ApiErrorResponse } from "../../contracts/apiErrors.t
 import { ContractValidationError } from "../../contracts/runtime.ts";
 import { HttpError, json } from "./http.ts";
 import { errorMessage, httpStatusCode } from "./lib/errors.ts";
+import { currentLogContext } from "./lib/logContext.ts";
 import { logError } from "./lib/structuredLogger.ts";
 import { requestIdFor } from "./requestSecurity.ts";
 
@@ -20,23 +21,12 @@ const DEFAULT_ERROR_CODES = new Map<number, string>([
     [413, "payload_too_large"],
     [429, "rate_limited"],
     [500, "internal_error"],
+    [502, "bad_gateway"],
     [503, "service_unavailable"],
     [504, "gateway_timeout"],
 ]);
 
-function record(value: unknown): Record<string, unknown> | undefined {
-    return value !== null && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : undefined;
-}
-
-function nonEmptyString(value: unknown): string | undefined {
-    if (typeof value !== "string") return undefined;
-    const trimmed = value.trim();
-    return trimmed || undefined;
-}
-
-function defaultErrorCode(status: number): string {
+export function apiErrorCodeForStatus(status: number): string {
     return DEFAULT_ERROR_CODES.get(status) ?? "request_failed";
 }
 
@@ -68,7 +58,12 @@ export class ApiRouteError extends HttpError {
     }
 }
 
-/** Maps a caught route error to a bounded public contract. */
+/**
+ * Maps a caught route error to a bounded public contract.
+ * @param error Error to inspect.
+ * @param fallback Fallback value.
+ * @returns Mapped a caught route error to a bounded public contract.
+ */
 export function mapApiError(
     error: unknown,
     fallback: Pick<MappedApiError, "message"> & { code?: string }
@@ -110,14 +105,14 @@ export function mapApiError(
                 error.statusCode === 400 &&
                 error.message === "Invalid JSON"
                     ? "invalid_json"
-                    : (fallback.code ?? defaultErrorCode(status)),
+                    : (fallback.code ?? apiErrorCodeForStatus(status)),
             message: errorMessage(error, fallback.message),
             status,
         };
     }
 
     return {
-        code: fallback.code ?? defaultErrorCode(status),
+        code: fallback.code ?? apiErrorCodeForStatus(status),
         message: fallback.message,
         status,
     };
@@ -126,13 +121,20 @@ export function mapApiError(
 /**
  * Emits the shared error body, correlation header, and optional retry metadata.
  * Internal logs deliberately exclude request bodies, error details, and messages.
+ * @param request Request to process.
+ * @param error Error to inspect.
+ * @param context Operation context.
+ * @returns Api error response result.
  */
 export function apiErrorResponse(
-    request: Request,
+    request: Request | undefined,
     error: MappedApiError,
     context: string
 ): Response {
-    const requestId = requestIdFor(request);
+    const requestId =
+        (request && requestIdFor(request)) ??
+        currentLogContext()?.requestId ??
+        Bun.randomUUIDv7();
     const headers = new Headers({ "X-Request-ID": requestId });
     if (error.retryAfterSeconds !== undefined) {
         headers.set("Retry-After", String(error.retryAfterSeconds));
@@ -141,8 +143,10 @@ export function apiErrorResponse(
         logError("api.error", {
             code: error.code,
             context,
-            method: request.method.toUpperCase(),
-            path: new URL(request.url).pathname,
+            ...(request && {
+                method: request.method.toUpperCase(),
+                path: new URL(request.url).pathname,
+            }),
             requestId,
             status: error.status,
         });
@@ -157,61 +161,5 @@ export function apiErrorResponse(
     return json({ error: body } satisfies ApiErrorResponse, {
         headers,
         status: error.status,
-    });
-}
-
-/**
- * Converts every failed JSON API response to the single public error contract.
- * Route implementations can migrate to ApiRouteError incrementally without
- * exposing multiple wire formats.
- */
-export async function normalizeApiErrorResponse(
-    request: Request,
-    response: Response
-): Promise<Response> {
-    const path = new URL(request.url).pathname;
-    if (
-        path === "/api/health/ready" ||
-        response.status < 400 ||
-        !path.startsWith("/api/")
-    ) {
-        return response;
-    }
-
-    let payload: Record<string, unknown> | undefined;
-    try {
-        payload = record(await response.clone().json());
-    } catch {
-        payload = undefined;
-    }
-    const nestedError = record(payload?.error);
-    const code =
-        nonEmptyString(nestedError?.code) ??
-        nonEmptyString(payload?.code) ??
-        defaultErrorCode(response.status);
-    const message =
-        (nonEmptyString(nestedError?.message) ??
-            nonEmptyString(payload?.error) ??
-            nonEmptyString(payload?.message) ??
-            response.statusText.trim()) ||
-        "Request failed";
-    const details = Object.hasOwn(nestedError ?? {}, "details")
-        ? nestedError?.details
-        : payload && Object.hasOwn(payload, "details")
-          ? payload.details
-          : undefined;
-    const requestId = requestIdFor(request);
-    const error: ApiErrorBody = {
-        code,
-        ...(details !== undefined && { details }),
-        message,
-        requestId,
-    };
-    const headers = new Headers(response.headers);
-    headers.set("X-Request-ID", requestId);
-    return json({ error } satisfies ApiErrorResponse, {
-        headers,
-        status: response.status,
-        statusText: response.statusText,
     });
 }

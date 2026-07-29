@@ -4,9 +4,11 @@ import Path from "node:path";
 
 import type {
     Agent as AgentStatus,
+    AgentMetadata,
     AgentsConfig,
     AgentTaskHistoryItem,
 } from "../../../contracts/agents.ts";
+import { isPlainRecord } from "../../../contracts/runtime.ts";
 import { database } from "../database.ts";
 import gateway from "../gateway.ts";
 import { CoalescedSnapshot } from "../lib/coalescedSnapshot.ts";
@@ -19,6 +21,10 @@ import {
     writeTextNoFollowGuarded,
 } from "../lib/guardedOps.ts";
 import { prepareSafeWriteTargetWithinRoot, safePathWithinRoot } from "../lib/safePath.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { unknownArray } from "../lib/values.ts";
+
+const logger = createStructuredLogger("agents");
 
 function defaultOpenclawRoot(): string {
     return Path.join(process.cwd(), "data", "openclaw");
@@ -171,7 +177,11 @@ function assertOpenedDirectoryMatches(parentFd: number, realDirectory: string): 
 /** Matches agent ids that are safe to use as path segments. */
 const SAFE_AGENT_ID_RE = /^[a-zA-Z0-9._-]+$/u;
 
-/** Returns whether an agent id is safe for filesystem-backed agent metadata paths. */
+/**
+ * Returns whether an agent id is safe for filesystem-backed agent metadata paths.
+ * @param id Resource identifier.
+ * @returns Whether an agent id is safe for filesystem-backed agent metadata paths.
+ */
 export function isValidAgentId(id: string): boolean {
     return isValidChildDirectoryName(id);
 }
@@ -202,7 +212,11 @@ function ensureRealAgentsDirectory(): string | undefined {
     return getRealAgentsDirectory();
 }
 
-/** Returns the canonical sessions directory for a validated agent id. */
+/**
+ * Returns the canonical sessions directory for a validated agent id.
+ * @param agentId Agent identifier.
+ * @returns the canonical sessions directory for a validated agent id.
+ */
 function getSafeAgentSessionsDirectory(agentId: string): string | undefined {
     if (!isValidAgentId(agentId)) {
         return undefined;
@@ -239,7 +253,11 @@ function getSafeAgentSessionsDirectory(agentId: string): string | undefined {
     }
 }
 
-/** Returns activity log roots for an agent, including Codex-native rollout logs. */
+/**
+ * Returns activity log roots for an agent, including Codex-native rollout logs.
+ * @param agentId Agent identifier.
+ * @returns activity log roots for an agent, including Codex-native rollout logs.
+ */
 function getSafeAgentActivityRoots(agentId: string): ActivityLogRoot[] {
     if (!isValidAgentId(agentId)) {
         return [];
@@ -281,12 +299,6 @@ const THINKING_THRESHOLD = 60_000; // 20s-60s = thinking, 60s+ = idle
 const STALE_THRESHOLD = 5 * 60_000; // 5 minutes - ignore data older than this
 const TASK_IDLE_TIMEOUT_MS = 30 * 60_000;
 
-/** Defines per-agent dashboard metadata such as current task and task history. */
-interface AgentMetadata {
-    currentTask?: string;
-    updatedAt?: string;
-}
-
 /** Captures lightweight session file metadata used to infer agent activity. */
 interface SessionInfo {
     key?: string;
@@ -327,7 +339,11 @@ interface GatewaySessionSummary {
     running?: boolean | undefined;
 }
 
-/** Performs to display model name. */
+/**
+ * Performs to display model name.
+ * @param model Model value.
+ * @returns To display model name result.
+ */
 function toDisplayModelName(model: string): string {
     if (!model) {
         return "unknown";
@@ -337,7 +353,12 @@ function toDisplayModelName(model: string): string {
     return slashIndex === -1 ? model : model.slice(slashIndex + 1);
 }
 
-/** Performs resolve configured model name. */
+/**
+ * Performs resolve configured model name.
+ * @param configuredModel Configured model value.
+ * @param config Config value.
+ * @returns Resolve configured model name result.
+ */
 function resolveConfiguredModelName(
     configuredModel: string | undefined,
     config: AgentsConfig
@@ -362,7 +383,10 @@ function resolveConfiguredModelName(
     return toDisplayModelName(configured);
 }
 
-/** Returns Gateway sessions for agent keys, preferring live Gateway data and falling back to cached files on failure. */
+/**
+ * Returns Gateway sessions for agent keys, preferring live Gateway data and falling back to cached files on failure.
+ * @returns Gateway sessions for agent keys, preferring live Gateway data and falling back to cached files on failure.
+ */
 async function loadGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     const cached: GatewaySessionSummary[] = (() => {
         try {
@@ -448,7 +472,11 @@ function getGatewaySessionsForAgents(): Promise<GatewaySessionSummary[]> {
     return gatewayAgentSessionsSnapshot.read();
 }
 
-/** Returns a millisecond timestamp for Gateway values that may already be numeric or ISO strings. */
+/**
+ * Returns a millisecond timestamp for Gateway values that may already be numeric or ISO strings.
+ * @param value Value to process.
+ * @returns a millisecond timestamp for Gateway values that may already be numeric or ISO strings.
+ */
 function toTimestamp(value: unknown): number | undefined {
     if (typeof value === "number" && Number.isFinite(value)) {
         return value;
@@ -460,7 +488,10 @@ function toTimestamp(value: unknown): number | undefined {
     return undefined;
 }
 
-/** Performs now iso. */
+/**
+ * Performs now iso.
+ * @returns Now iso result.
+ */
 function nowIso(): string {
     const now = new Date();
     return now.toISOString();
@@ -499,19 +530,20 @@ async function updateAgentMetadataFromVerifiedDirectory({
             );
             let parsedMetadata: unknown;
             try {
-                parsedMetadata = Bun.JSON5.parse(metadataText) as unknown;
+                parsedMetadata = Bun.JSON5.parse(metadataText);
             } catch (parseError) {
-                console.warn(
-                    `[Agents] Ignoring malformed metadata for ${agentId} at ${Path.join(realMetadataDirectory, "metadata.json")}:`,
-                    (parseError as Error).message
-                );
+                logger.warn("agents.metadata_invalid", {
+                    agentId,
+                    error: parseError,
+                    path: Path.join(realMetadataDirectory, "metadata.json"),
+                });
                 parsedMetadata = {};
             }
             metadata =
                 parsedMetadata &&
                 typeof parsedMetadata === "object" &&
                 !Array.isArray(parsedMetadata)
-                    ? (parsedMetadata as AgentMetadata)
+                    ? parsedMetadata
                     : {};
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -551,7 +583,11 @@ export function closeStaleActiveTasks(): void {
         .run(nowIso(), nowIso(), cutoff);
 }
 
-/** Finds the most recent non-finished task in agent history for active-task inference. */
+/**
+ * Finds the most recent non-finished task in agent history for active-task inference.
+ * @param agentId Agent identifier.
+ * @returns Located the most recent non-finished task in agent history for active-task inference.
+ */
 function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | undefined {
     const row = database
         .prepare(
@@ -588,7 +624,11 @@ function getActiveHistoryTask(agentId: string): AgentTaskHistoryItem | undefined
     };
 }
 
-/** Returns recently completed task-history entries for dashboard display. */
+/**
+ * Returns recently completed task-history entries for dashboard display.
+ * @param limit Limit value.
+ * @returns recently completed task-history entries for dashboard display.
+ */
 export function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
     const safeLimit = Number.isFinite(limit)
         ? Math.max(1, Math.min(100, Math.floor(limit)))
@@ -622,7 +662,10 @@ export function getLatestCompletedTasks(limit = 8): AgentTaskHistoryItem[] {
     }));
 }
 
-/** Parses agents.yml into dashboard agent records while tolerating empty or malformed input. */
+/**
+ * Parses agents.yml into dashboard agent records while tolerating empty or malformed input.
+ * @returns Parsed agents.yml into dashboard agent records while tolerating empty or malformed input.
+ */
 export function parseAgentsConfig(): AgentsConfig | undefined {
     const configPath = Path.join(getOpenclawRoot(), "openclaw.json");
 
@@ -658,16 +701,20 @@ export function parseAgentsConfig(): AgentsConfig | undefined {
         }
         return undefined;
     } catch (error) {
-        console.error(
-            `[Agents] Failed to parse OpenClaw config ${configPath}:`,
-            (error as Error).message
-        );
+        logger.error("agents.openclaw_config_parse_failed", {
+            error,
+            path: configPath,
+        });
         return undefined;
     }
 }
 
 // Read agent metadata file for current task
-/** Reads metadata.json for an agent using validated file access. */
+/**
+ * Reads metadata.json for an agent using validated file access.
+ * @param agentId Agent identifier.
+ * @returns Read metadata.json for an agent using validated file access.
+ */
 async function getAgentMetadata(agentId: string): Promise<AgentMetadata | undefined> {
     const sessionsDirectory = getSafeAgentSessionsDirectory(agentId);
     if (!sessionsDirectory) {
@@ -685,7 +732,11 @@ async function getAgentMetadata(agentId: string): Promise<AgentMetadata | undefi
 }
 
 // Get sessions from agent's sessions.json file
-/** Loads cached session summaries from the agent sessions directory. */
+/**
+ * Loads cached session summaries from the agent sessions directory.
+ * @param agentId Agent identifier.
+ * @returns Loaded cached session summaries from the agent sessions directory.
+ */
 async function getAgentSessionsFromFiles(agentId: string): Promise<SessionInfo[]> {
     const sessionsDirectory = getSafeAgentSessionsDirectory(agentId);
     if (!sessionsDirectory) {
@@ -697,15 +748,14 @@ async function getAgentSessionsFromFiles(agentId: string): Promise<SessionInfo[]
             guardedPath(Path.join(sessionsDirectory, "sessions.json"))
         );
         const sessions = Bun.JSON5.parse(content);
-        return Array.isArray(sessions) ? sessions.filter(isSessionInfo) : [];
+        return Array.isArray(sessions)
+            ? sessions.filter((session) => isSessionInfo(session))
+            : [];
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             return [];
         }
-        console.error(
-            "[Agents] Failed to read agent sessions.json:",
-            (error as Error).message
-        );
+        logger.error("agents.sessions_read_failed", { error });
         return [];
     }
 }
@@ -732,7 +782,10 @@ interface ActivityLogFile {
     group: string;
 }
 
-/** Builds file metadata for one JSONL log, returning undefined when it cannot be statted. */
+/**
+ * Builds file metadata for one JSONL log, returning undefined when it cannot be statted.
+ * @returns Built file metadata for one JSONL log, returning undefined when it cannot be statted.
+ */
 function toActivityLogFile(
     root: ActivityLogRoot,
     relativePath: string,
@@ -751,7 +804,10 @@ function toActivityLogFile(
     }
 }
 
-/** Lists JSONL activity files in a root while preserving paired file grouping. */
+/**
+ * Lists JSONL activity files in a root while preserving paired file grouping.
+ * @returns List activity log files result.
+ */
 function listActivityLogFiles(root: ActivityLogRoot): ActivityLogFile[] {
     const files: ActivityLogFile[] = [];
     const pending = [{ directory: root.directory, relativeDirectory: "", depth: 0 }];
@@ -795,7 +851,11 @@ function listActivityLogFiles(root: ActivityLogRoot): ActivityLogFile[] {
     return files;
 }
 
-/** Cleans raw prompts/transcript text for dashboard task display. */
+/**
+ * Cleans raw prompts/transcript text for dashboard task display.
+ * @param text Text value.
+ * @returns Clean task text result.
+ */
 function cleanTaskText(text: string): string {
     return text
         .replaceAll(/[`]{3}json[\s\S]*?[`]{3}/g, "")
@@ -810,37 +870,51 @@ function cleanTaskText(text: string): string {
 }
 
 /** Performs summarize tool activity. */
+/**
+ * Normalizes raw tool activity data into an object.
+ *
+ * @param raw - Raw activity payload.
+ * @returns Parsed activity record.
+ */
+function toolActivityRecord(raw: unknown): Record<string, unknown> {
+    if (typeof raw === "string") {
+        try {
+            return JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+            return { raw };
+        }
+    }
+    return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+}
+
+/**
+ * Normalizes the optional nested tool argument payload.
+ *
+ * @param rawArguments - Raw `arguments` field.
+ * @returns Parsed argument record, when valid.
+ */
+function toolActivityArguments(
+    rawArguments: unknown
+): Record<string, unknown> | undefined {
+    if (typeof rawArguments === "string") {
+        try {
+            const value = JSON.parse(rawArguments) as unknown;
+            return value && typeof value === "object" && !Array.isArray(value)
+                ? (value as Record<string, unknown>)
+                : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+    return rawArguments && typeof rawArguments === "object"
+        ? (rawArguments as Record<string, unknown>)
+        : undefined;
+}
+
 function summarizeToolActivity(toolName: string, raw: unknown): string {
     const normalizedTool = normalizeToolName(toolName);
-
-    const parsed =
-        typeof raw === "string"
-            ? (() => {
-                  try {
-                      return JSON.parse(raw) as Record<string, unknown>;
-                  } catch {
-                      return { raw } as Record<string, unknown>;
-                  }
-              })()
-            : raw && typeof raw === "object"
-              ? (raw as Record<string, unknown>)
-              : {};
-
-    const parsedArguments =
-        typeof parsed.arguments === "string"
-            ? (() => {
-                  try {
-                      const value = JSON.parse(parsed.arguments) as unknown;
-                      return value && typeof value === "object" && !Array.isArray(value)
-                          ? (value as Record<string, unknown>)
-                          : undefined;
-                  } catch {
-                      return;
-                  }
-              })()
-            : parsed.arguments && typeof parsed.arguments === "object"
-              ? (parsed.arguments as Record<string, unknown>)
-              : undefined;
+    const parsed = toolActivityRecord(raw);
+    const parsedArguments = toolActivityArguments(parsed.arguments);
     const arguments_ = parsedArguments ?? parsed;
 
     const nested =
@@ -859,7 +933,8 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
         nested.file_path ||
         nested.filePath ||
         (Array.isArray(nested.paths) ? nested.paths[0] : undefined)) as
-        string | undefined;
+        | string
+        | undefined;
     const command = (arguments_.command ||
         arguments_.cmd ||
         nested.command ||
@@ -881,7 +956,8 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
                 pj.file_path ||
                 pj.filePath ||
                 (Array.isArray(pj.paths) ? pj.paths[0] : undefined)) as
-                string | undefined;
+                | string
+                | undefined;
         } catch {
             const match = parsed.partialJson.match(
                 /"(?:path|file_path|filePath)"\s*:\s*"([^"]+)"/
@@ -927,14 +1003,45 @@ function summarizeToolActivity(toolName: string, raw: unknown): string {
     return normalizedTool;
 }
 
-/** Returns a canonical un-namespaced tool name for activity filtering and labels. */
+function getActivityEntryTurnId(entry: unknown): string | undefined {
+    if (!entry || typeof entry !== "object") {
+        return undefined;
+    }
+    const raw = entry as {
+        __openclaw?: { mirrorIdentity?: unknown };
+        data?: { turnId?: unknown };
+        message?: { __openclaw?: { mirrorIdentity?: unknown } };
+    };
+    if (typeof raw.data?.turnId === "string") {
+        return raw.data.turnId;
+    }
+
+    let mirrorIdentity: string | undefined;
+    if (typeof raw.message?.__openclaw?.mirrorIdentity === "string") {
+        mirrorIdentity = raw.message.__openclaw.mirrorIdentity;
+    }
+    if (typeof raw.__openclaw?.mirrorIdentity === "string") {
+        mirrorIdentity = raw.__openclaw.mirrorIdentity;
+    }
+    return mirrorIdentity ? mirrorIdentity.split(":", 1)[0] || undefined : undefined;
+}
+
+/**
+ * Returns a canonical un-namespaced tool name for activity filtering and labels.
+ * @param toolName Tool name value.
+ * @returns a canonical un-namespaced tool name for activity filtering and labels.
+ */
 function normalizeToolName(toolName: string): string {
     const parts = toolName.split(".");
     const unscoped = toolName.includes(".") ? (parts.at(-1) ?? toolName) : toolName;
     return unscoped.replace(/^mcp__.+?__/, "").toLowerCase();
 }
 
-/** Returns whether a tool should be shown as user-facing current activity. */
+/**
+ * Returns whether a tool should be shown as user-facing current activity.
+ * @param toolName Tool name value.
+ * @returns Whether a tool should be shown as user-facing current activity.
+ */
 function isVisibleActivityTool(toolName: string): boolean {
     const normalizedToolName = normalizeToolName(toolName);
     return normalizedToolName !== "message";
@@ -944,7 +1051,11 @@ function getTrajectoryToolArguments(data: Record<string, unknown>): unknown {
     return data.arguments ?? data.args ?? data.input ?? data.parameters ?? data;
 }
 
-/** Extracts nested tool activity from Codex response-item session logs. */
+/**
+ * Extracts nested tool activity from Codex response-item session logs.
+ * @param entry Entry value.
+ * @returns Codex response item activity value.
+ */
 function getCodexResponseItemActivity(entry: unknown): string | undefined {
     if (!entry || typeof entry !== "object") {
         return undefined;
@@ -995,7 +1106,11 @@ function getCodexResponseItemActivity(entry: unknown): string | undefined {
     return summarizeToolActivity(record.payload.name, { raw: input });
 }
 
-/** Extracts activity details from OpenClaw v4 trajectory events. */
+/**
+ * Extracts activity details from OpenClaw v4 trajectory events.
+ * @param entry Entry value.
+ * @returns Trajectory activity value.
+ */
 function getTrajectoryActivity(entry: unknown): {
     task?: string | undefined;
     activity?: string | undefined;
@@ -1027,7 +1142,7 @@ function getTrajectoryActivity(entry: unknown): {
     ) {
         return {
             activity: summarizeToolActivity(data.name, {
-                arguments: getTrajectoryToolArguments(data as Record<string, unknown>),
+                arguments: getTrajectoryToolArguments(data),
             }),
         };
     }
@@ -1039,7 +1154,7 @@ function getTrajectoryActivity(entry: unknown): {
     ) {
         return {
             activity: summarizeToolActivity(data.name, {
-                arguments: getTrajectoryToolArguments(data as Record<string, unknown>),
+                arguments: getTrajectoryToolArguments(data),
             }),
         };
     }
@@ -1047,7 +1162,11 @@ function getTrajectoryActivity(entry: unknown): {
     return {};
 }
 
-/** Reads the newest activity marker from agent session files when live Gateway data is unavailable. */
+/**
+ * Reads the newest activity marker from agent session files when live Gateway data is unavailable.
+ * @param agentId Agent identifier.
+ * @returns Read the newest activity marker from agent session files when live Gateway data is unavailable.
+ */
 async function getLatestActivityFromFile(
     agentId: string
 ): Promise<ActivityInfo | undefined> {
@@ -1100,26 +1219,6 @@ async function getLatestActivityFromFile(
             };
         }
 
-        const getEntryTurnId = (entry: unknown): string | undefined => {
-            if (!entry || typeof entry !== "object") return undefined;
-            const raw = entry as {
-                __openclaw?: { mirrorIdentity?: unknown };
-                message?: { __openclaw?: { mirrorIdentity?: unknown } };
-                data?: { turnId?: unknown };
-            };
-            if (typeof raw.data?.turnId === "string") return raw.data.turnId;
-
-            const mirrorIdentity =
-                typeof raw.__openclaw?.mirrorIdentity === "string"
-                    ? raw.__openclaw.mirrorIdentity
-                    : typeof raw.message?.__openclaw?.mirrorIdentity === "string"
-                      ? raw.message.__openclaw.mirrorIdentity
-                      : undefined;
-            return mirrorIdentity
-                ? mirrorIdentity.split(":", 1)[0] || undefined
-                : undefined;
-        };
-
         let pendingTask: string | undefined;
         let pendingTaskTurnId: string | undefined;
         let selectedActivity: string | undefined;
@@ -1160,8 +1259,8 @@ async function getLatestActivityFromFile(
                 try {
                     const line = lines[index];
                     if (line === undefined) continue;
-                    const entry = JSON.parse(line);
-                    const record = entry as { runId?: unknown; type?: string };
+                    const entry: unknown = JSON.parse(line);
+                    const record = isPlainRecord(entry) ? entry : {};
                     const entryRunId =
                         typeof record.runId === "string" ? record.runId : undefined;
                     if (!fileRunId && entryRunId) {
@@ -1181,7 +1280,7 @@ async function getLatestActivityFromFile(
                         break;
                     }
 
-                    const entryTurnId = getEntryTurnId(entry);
+                    const entryTurnId = getActivityEntryTurnId(entry);
                     const trajectoryActivity = getTrajectoryActivity(entry);
                     if (!fileTask && trajectoryActivity.task) {
                         fileTask = cleanTaskText(trajectoryActivity.task);
@@ -1196,24 +1295,25 @@ async function getLatestActivityFromFile(
                         fileActivity = codexActivity;
                     }
 
-                    const message = entry.message || entry;
+                    const messageValue = record.message ?? entry;
+                    const message = isPlainRecord(messageValue) ? messageValue : {};
 
                     // First user message from end = current task
                     if (!fileTask && message.role === "user" && message.content) {
-                        const text =
-                            typeof message.content === "string"
-                                ? message.content
-                                : Array.isArray(message.content)
-                                  ? message.content
-                                        .filter(
-                                            (c: { type?: string }) => c.type === "text"
-                                        )
-                                        .map((c: { text?: string }) => c.text)
-                                        .join(" ")
-                                  : String(message.content);
+                        const text = unknownArray(message.content)
+                            .filter(
+                                (candidate): candidate is Record<string, unknown> =>
+                                    isPlainRecord(candidate) && candidate.type === "text"
+                            )
+                            .map((candidate) =>
+                                typeof candidate.text === "string" ? candidate.text : ""
+                            )
+                            .join(" ");
+                        const taskText =
+                            typeof message.content === "string" ? message.content : text;
 
                         // Clean metadata and extract actual message
-                        fileTask = cleanTaskText(text) || undefined;
+                        fileTask = cleanTaskText(taskText) || undefined;
                         fileTaskTurnId = entryTurnId;
                     }
 
@@ -1223,25 +1323,21 @@ async function getLatestActivityFromFile(
                         message.role === "assistant" &&
                         Array.isArray(message.content)
                     ) {
-                        const toolCall = message.content.find(
-                            (c: { type?: string; name?: string }) =>
-                                c.type === "toolCall" &&
-                                typeof c.name === "string" &&
-                                isVisibleActivityTool(c.name)
-                        ) as
-                            | undefined
-                            | {
-                                  name?: string;
-                                  arguments?: unknown;
-                                  partialJson?: string;
-                                  [key: string]: unknown;
-                              };
+                        const toolCall = unknownArray(message.content)
+                            .filter((candidate) => isPlainRecord(candidate))
+                            .find(
+                                (candidate) =>
+                                    candidate.type === "toolCall" &&
+                                    typeof candidate.name === "string" &&
+                                    isVisibleActivityTool(candidate.name)
+                            );
                         const expectedTurnId =
                             fileTaskTurnId || groupTaskTurnId || pendingTaskTurnId;
                         const canUseToolCall =
                             !expectedTurnId || entryTurnId === expectedTurnId;
-                        if (canUseToolCall && toolCall?.name) {
-                            fileActivity = summarizeToolActivity(toolCall.name, toolCall);
+                        const toolName = toolCall?.name;
+                        if (canUseToolCall && typeof toolName === "string") {
+                            fileActivity = summarizeToolActivity(toolName, toolCall);
                         }
                     }
 
@@ -1331,7 +1427,11 @@ async function getLatestActivityFromFile(
     }
 }
 
-/** Returns the modification time for a session file, or undefined when it cannot be read. */
+/**
+ * Returns the modification time for a session file, or undefined when it cannot be read.
+ * @param agentId Agent identifier.
+ * @returns the modification time for a session file, or undefined when it cannot be read.
+ */
 function getSessionFileModificationTime(agentId: string): number | undefined {
     const roots = getSafeAgentActivityRoots(agentId);
     if (roots.length === 0) {
@@ -1351,7 +1451,11 @@ function getSessionFileModificationTime(agentId: string): number | undefined {
     }
 }
 
-/** Infers the source channel encoded in an OpenClaw session key. */
+/**
+ * Infers the source channel encoded in an OpenClaw session key.
+ * @param sessionKey Session key value.
+ * @returns Channel from session key value.
+ */
 function getChannelFromSessionKey(sessionKey: string): string | undefined {
     const parts = sessionKey.split(":");
     if (parts[0] === "agent") {
@@ -1363,7 +1467,11 @@ function getChannelFromSessionKey(sessionKey: string): string | undefined {
     return undefined;
 }
 
-/** Performs determine status. */
+/**
+ * Performs determine status.
+ * @param lastModificationTime Last modification time value.
+ * @returns Determine status result.
+ */
 function determineStatus(
     lastModificationTime: number | undefined
 ): "active" | "thinking" | "idle" {
@@ -1381,7 +1489,12 @@ function determineStatus(
     return "idle";
 }
 
-/** Performs find best session for agent. */
+/**
+ * Performs find best session for agent.
+ * @param agentId Agent identifier.
+ * @param sessions Sessions value.
+ * @returns Find best session for agent result.
+ */
 function findBestSessionForAgent(
     agentId: string,
     sessions: GatewaySessionSummary[]
@@ -1425,7 +1538,12 @@ function findBestSessionForAgent(
     })[0];
 }
 
-/** Finds a Gateway session by key using OpenClaw's case-insensitive session-key semantics. */
+/**
+ * Finds a Gateway session by key using OpenClaw's case-insensitive session-key semantics.
+ * @param sessions Sessions value.
+ * @param sessionKey Session key value.
+ * @returns Located a Gateway session by key using OpenClaw's case-insensitive session-key semantics.
+ */
 function findSessionByKey(
     sessions: GatewaySessionSummary[],
     sessionKey: string
@@ -1434,7 +1552,11 @@ function findSessionByKey(
     return sessions.find((session) => session.key.toLowerCase() === normalizedKey);
 }
 
-/** Returns whether Gateway reports a session as currently running. */
+/**
+ * Returns whether Gateway reports a session as currently running.
+ * @param session Session to process.
+ * @returns Whether Gateway reports a session as currently running.
+ */
 function isGatewaySessionRunning(session: GatewaySessionSummary | undefined): boolean {
     if (!session || toTimestamp(session.endedAt)) {
         return false;
@@ -1472,7 +1594,11 @@ function applyGatewaySessionStatus(
     }
 }
 
-/** Builds one dashboard agent status by combining config, metadata, sessions, and activity hints. */
+/**
+ * Builds one dashboard agent status by combining config, metadata, sessions, and activity hints.
+ * @param agentId Agent identifier.
+ * @returns Built one dashboard agent status by combining config, metadata, sessions, and activity hints.
+ */
 async function getAgentStatus(agentId: string): Promise<AgentStatus> {
     // Current task priority: active history task -> metadata -> inferred activity
     const activeTask = getActiveHistoryTask(agentId);
@@ -1523,7 +1649,10 @@ async function getAgentStatus(agentId: string): Promise<AgentStatus> {
     };
 }
 
-/** Builds all dashboard agent statuses for a parsed agent config. */
+/**
+ * Builds all dashboard agent statuses for a parsed agent config.
+ * @returns Built all dashboard agent statuses for a parsed agent config.
+ */
 export async function buildAgentStatuses(config: AgentsConfig): Promise<AgentStatus[]> {
     const defaultModel = config.defaults?.model?.primary || "unknown";
     const sessions = await getGatewaySessionsForAgents();
@@ -1557,7 +1686,12 @@ export async function buildAgentStatuses(config: AgentsConfig): Promise<AgentSta
     );
 }
 
-/** Builds one dashboard agent status when the id exists in config. */
+/**
+ * Builds one dashboard agent status when the id exists in config.
+ * @param agentId Agent identifier.
+ * @param config Config value.
+ * @returns Built one dashboard agent status when the id exists in config.
+ */
 export async function buildSingleAgentStatus(
     agentId: string,
     config: AgentsConfig
@@ -1616,7 +1750,7 @@ export async function updateAgentCurrentTask(
     if (!metadataPath) {
         throw Object.assign(new Error("Invalid agent ID"), { statusCode: 400 });
     }
-    const metadataDirectory = Path.dirname(metadataPath as string);
+    const metadataDirectory = Path.dirname(metadataPath);
     const realAgentsDirectory = ensureRealAgentsDirectory();
     if (!realAgentsDirectory) {
         throw Object.assign(new Error("Invalid agent metadata path"), {
@@ -1738,9 +1872,11 @@ export async function updateAgentCurrentTask(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            console.error("[Agents] Task history sync rollback failed:", rollbackError);
+            logger.error("agents.task_history_sync_rollback_failed", {
+                error: rollbackError,
+            });
         }
-        console.error("[Agents] Task history sync failed:", error);
+        logger.error("agents.task_history_sync_failed", { error });
     }
 
     return metadata;

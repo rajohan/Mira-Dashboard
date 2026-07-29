@@ -1,6 +1,9 @@
+import type { OpenClawVersionSummary } from "../../../contracts/system.ts";
 import { database, sqlNullable } from "../database.ts";
-import type { CachedOpenClawVersion } from "../lib/systemCache.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { pruneReadNotifications } from "./notificationMaintenance.ts";
+
+const logger = createStructuredLogger("openclaw-notifications");
 
 function dateToISOString(date: Date): string {
     return date.toISOString();
@@ -12,7 +15,10 @@ interface AlertState {
     last_latest: string | undefined;
 }
 
-/** Returns state. */
+/**
+ * Returns state.
+ * @returns state.
+ */
 function getState(): AlertState {
     const row = database
         .prepare("SELECT is_armed, last_latest FROM openclaw_alert_state WHERE id = 1")
@@ -38,7 +44,11 @@ function setState(state: AlertState): void {
         .run(state.is_armed, sqlNullable(state.last_latest), dateToISOString(new Date()));
 }
 
-/** Performs insert update available notification. */
+/**
+ * Performs insert update available notification.
+ * @param current Current value.
+ * @param latest Latest value.
+ */
 function insertUpdateAvailableNotification(current: string, latest: string): void {
     const now = dateToISOString(new Date());
     const dedupeKey = `openclaw:update:${latest}`;
@@ -68,9 +78,12 @@ function insertUpdateAvailableNotification(current: string, latest: string): voi
     pruneReadNotifications();
 }
 
-/** Evaluates OpenClaw version state after a successful system refresh. */
+/**
+ * Evaluates OpenClaw version state after a successful system refresh.
+ * @param systemHost System host value.
+ */
 export function evaluateOpenClawNotifications(systemHost: {
-    version?: CachedOpenClawVersion;
+    version?: OpenClawVersionSummary;
 }): void {
     try {
         const version = systemHost.version;
@@ -97,6 +110,6 @@ export function evaluateOpenClawNotifications(systemHost: {
             });
         }
     } catch (error) {
-        console.error("[OpenClawNotifications] check failed", error);
+        logger.error("openclaw_notifications.check_failed", { error });
     }
 }

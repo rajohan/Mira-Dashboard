@@ -9,7 +9,10 @@ export interface RequestAuditContext {
 
 const requestAuditStorage = new AsyncLocalStorage<RequestAuditContext>();
 
-/** Runs request-owned work with provenance available to queued service calls. */
+/**
+ * Runs request-owned work with provenance available to queued service calls.
+ * @returns Run with request audit context result.
+ */
 export function runWithRequestAuditContext<T>(
     context: RequestAuditContext,
     operation: () => T

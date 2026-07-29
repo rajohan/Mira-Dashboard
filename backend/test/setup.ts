@@ -1,8 +1,7 @@
+import { afterAll, afterEach, jest } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
-import { afterAll, afterEach, jest } from "bun:test";
 
 import { resetCoalescedSnapshotsForTests } from "../src/lib/coalescedSnapshot.ts";
 

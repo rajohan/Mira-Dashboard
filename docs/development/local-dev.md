@@ -10,8 +10,18 @@ From the repository or PR worktree:
 
 ```bash
 bun install --frozen-lockfile
-bun --cwd backend install --frozen-lockfile
 ```
+
+`.bun-version` selects Bun Canary. The root Bun config deliberately does not
+auto-install peer dependencies: required library peers are direct dependencies,
+while the `bun-plugin-tailwind` Bun peer is supplied by the selected runtime.
+This prevents a stable npm Bun executable from shadowing Canary in repository
+scripts.
+
+When Bun 1.4 is stable, re-test installs with peer auto-installation enabled.
+Remove `[install] peer = false` once `bun-plugin-tailwind` no longer installs a
+second Bun executable into `node_modules`; keep all required library peers as
+explicit dependencies.
 
 ## Start
 
@@ -212,15 +222,14 @@ Managed PR dev paths are always derived from `MIRA_DASHBOARD_PROJECT_ROOT`.
 Run commands from the repository root:
 
 ```bash
-bun run lint:frontend
-bun run lint:backend
+bun run lint
+bun run format:check
 bun run build:frontend
 bun run build:backend
 bun run test:frontend
 bun run test:backend
 bun run test:frontend:coverage
 bun run test:backend:coverage
-bun run format:check
 ```
 
 During development, `bun run test:changed` runs only frontend and backend tests

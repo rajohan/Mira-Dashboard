@@ -1,66 +1,74 @@
 import { json } from "../http.ts";
-import { errorMessage } from "../lib/errors.ts";
 import {
     fetchCachedMoltbookFeed,
     fetchCachedMoltbookHome,
     fetchCachedMoltbookMyContent,
     fetchCachedMoltbookProfile,
 } from "../lib/moltbookCache.ts";
+import { routeFailureResponse } from "../routeSupport.ts";
 
 export const moltbookRoutes = {
     "/api/moltbook/home": {
-        GET: async () => {
+        GET: () => {
             try {
-                const home = await fetchCachedMoltbookHome();
-                return json(home.data);
-            } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Moltbook cache unavailable") },
-                    { status: 503 }
-                );
+                const home = fetchCachedMoltbookHome();
+                return json(home);
+            } catch {
+                return routeFailureResponse({
+                    code: "moltbook_cache_unavailable",
+                    context: "moltbook",
+                    message: "Moltbook cache unavailable",
+                    status: 503,
+                });
             }
         },
     },
     "/api/moltbook/feed": {
-        GET: async (request: Request) => {
+        GET: (request: Request) => {
             try {
                 const sort =
                     new URL(request.url).searchParams.get("sort") === "new"
                         ? "new"
                         : "hot";
-                const feed = await fetchCachedMoltbookFeed(sort);
-                return json(feed.data);
-            } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Moltbook feed cache unavailable") },
-                    { status: 503 }
-                );
+                const feed = fetchCachedMoltbookFeed(sort);
+                return json(feed);
+            } catch {
+                return routeFailureResponse({
+                    code: "moltbook_feed_unavailable",
+                    context: "moltbook",
+                    message: "Moltbook feed cache unavailable",
+                    status: 503,
+                });
             }
         },
     },
     "/api/moltbook/profile": {
-        GET: async () => {
+        GET: () => {
             try {
-                const profile = await fetchCachedMoltbookProfile();
-                return json(profile.data);
-            } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Moltbook profile cache unavailable") },
-                    { status: 503 }
-                );
+                const profile = fetchCachedMoltbookProfile();
+                return json(profile);
+            } catch {
+                return routeFailureResponse({
+                    code: "moltbook_profile_unavailable",
+                    context: "moltbook",
+                    message: "Moltbook profile cache unavailable",
+                    status: 503,
+                });
             }
         },
     },
     "/api/moltbook/my-posts": {
-        GET: async () => {
+        GET: () => {
             try {
-                const content = await fetchCachedMoltbookMyContent();
-                return json(content.data);
-            } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Moltbook content cache unavailable") },
-                    { status: 503 }
-                );
+                const content = fetchCachedMoltbookMyContent();
+                return json(content);
+            } catch {
+                return routeFailureResponse({
+                    code: "moltbook_content_unavailable",
+                    context: "moltbook",
+                    message: "Moltbook content cache unavailable",
+                    status: 503,
+                });
             }
         },
     },

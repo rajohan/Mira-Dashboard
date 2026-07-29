@@ -2,12 +2,17 @@ import { createHash } from "node:crypto";
 
 import type { Server } from "bun";
 
-import { type AuthSession, type AuthUser, getAuthSessionFromSessionId } from "./auth.ts";
+import type { DashboardUser } from "../../contracts/auth.ts";
+import { type AuthSession, getAuthSessionFromSessionId } from "./auth.ts";
+import { byteStreamReader } from "./lib/byteStreams.ts";
 
 const DEFAULT_COOKIE_NAMESPACE = "mira_dashboard";
 const COOKIE_NAMESPACE_PATTERN = /^[a-z0-9_]{1,48}$/u;
 
-/** Resolves stable cookie names so dev and production sessions can share a host safely. */
+/**
+ * Resolves stable cookie names so dev and production sessions can share a host safely.
+ * @returns Resolved stable cookie names so dev and production sessions can share a host safely.
+ */
 export function resolveDashboardCookieNames(
     environment: Record<string, string | undefined> = process.env
 ): { pendingLogin: string; session: string } {
@@ -71,6 +76,7 @@ function hasMatchingEtag(request: Request, etag: string): boolean {
 /**
  * Serves private JSON with a strong validator so repeated polling can reuse the
  * browser's response body even when it still revalidates with the backend.
+ * @returns Json with etag result.
  */
 export function jsonWithEtag(
     request: Request,
@@ -102,20 +108,12 @@ export function text(
     return new Response(body, { ...init, headers });
 }
 
-export function notFound(message = "Not found"): Response {
-    return text(message, { status: 404 });
-}
-
-export function methodNotAllowed(): Response {
-    return json({ error: "Method not allowed" }, { status: 405 });
-}
-
 export class HttpError extends Error {
-    constructor(
-        message: string,
-        readonly statusCode: number
-    ) {
+    readonly statusCode: number;
+
+    constructor(message: string, statusCode: number) {
         super(message);
+        this.statusCode = statusCode;
     }
 }
 
@@ -131,7 +129,7 @@ export async function readRequestBytes(
         }
     }
 
-    const reader = request.body?.getReader();
+    const reader = byteStreamReader(request.body);
     if (!reader) return Buffer.alloc(0);
 
     const chunks: Uint8Array[] = [];
@@ -180,11 +178,11 @@ export function requestIp(request: Request, server: Server<unknown>): string | u
     return server.requestIP(request)?.address;
 }
 
-export function isLoopbackAddress(address?: string | undefined): boolean {
+export function isLoopbackAddress(address?: string): boolean {
     return Boolean(address && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address));
 }
 
-export function isTrustedProxyAddress(address?: string | undefined): boolean {
+export function isTrustedProxyAddress(address?: string): boolean {
     return (
         isLoopbackAddress(address) || Boolean(address && TRUSTED_PROXY_IPS.has(address))
     );
@@ -231,7 +229,10 @@ export function pendingLoginFromCookie(request: Request): string | undefined {
     return cookieValue(request, PENDING_LOGIN_COOKIE);
 }
 
-/** Resolves the full browser session and only touches idle activity on explicit UI activity. */
+/**
+ * Resolves the full browser session and only touches idle activity on explicit UI activity.
+ * @returns Resolved the full browser session and only touches idle activity on explicit UI activity.
+ */
 export function authSession(request: Request): AuthSession | undefined {
     const sessionId = sessionIdFromCookie(request);
     return sessionId
@@ -241,7 +242,7 @@ export function authSession(request: Request): AuthSession | undefined {
         : undefined;
 }
 
-export function authUser(request: Request): AuthUser | undefined {
+export function authUser(request: Request): DashboardUser | undefined {
     const session = authSession(request);
     return session ? { id: session.id, username: session.username } : undefined;
 }

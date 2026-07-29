@@ -7,6 +7,7 @@ const FULL_COMMIT_SHA_PATTERN = /^[\da-f]{40}$/u;
  *
  * Source-mode development and tests intentionally use a non-release identity.
  * Production readiness requires a bundled full SHA that matches the manifest.
+ * @returns the commit embedded by the backend bundler. Source-mode development and tests intentionally use a non-release identity. Production readiness requires a bundled full SHA that matches the manifest.
  */
 export function getBackendBuildCommit(): string {
     if (

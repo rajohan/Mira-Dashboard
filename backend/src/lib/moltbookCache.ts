@@ -1,104 +1,64 @@
+import {
+    type MoltbookContent,
+    type MoltbookFeed,
+    type MoltbookHome,
+    type MoltbookProfileCache,
+    parseMoltbookContent,
+    parseMoltbookFeed,
+    parseMoltbookHome,
+    parseMoltbookProfileCache,
+} from "../../../contracts/moltbook.ts";
+import type { ContractParser } from "../../../contracts/runtime.ts";
 import { getCacheEntry, parseJsonField } from "./cacheStore.ts";
 
-/** Represents moltbook announcement. */
-export interface MoltbookAnnouncement {
-    postId: string | undefined;
-    title: string | undefined;
-    authorName: string | undefined;
-    createdAt: string | undefined;
-    previewText: string | undefined;
-}
-
-/** Represents moltbook home cache. */
-export interface MoltbookHomeCache {
-    pendingRequestCount: number;
-    unreadMessageCount: number;
-    activityOnYourPostsCount: number;
-    activityOnYourPosts: unknown[];
-    latestAnnouncement: MoltbookAnnouncement | undefined;
-    postsFromAccountsYouFollowCount: number | undefined;
-    exploreCount: number | undefined;
-    nextActions: string[];
-    fetchedAt: string;
-}
-
-/** Represents moltbook profile cache. */
-export interface MoltbookProfileCache {
-    agent: Record<string, unknown> | undefined;
-}
-
-/** Represents moltbook my content cache. */
-export interface MoltbookMyContentCache {
-    posts: unknown[];
-    comments: unknown[];
-}
-
-/** Represents moltbook feed cache. */
-export interface MoltbookFeedCache {
-    posts: unknown[];
-    feedType: string | undefined;
-    feedFilter: string | undefined;
-    hasMore: boolean;
-    tip: string | undefined;
-}
-
-/** Represents the moltbook cache API response. */
-export interface MoltbookCacheResponse<T> {
-    source: string;
-    status: string;
-    updatedAt: string | undefined;
-    lastAttemptAt: string | undefined;
-    expiresAt: string | undefined;
-    errorCode: string | undefined;
-    errorMessage: string | undefined;
-    consecutiveFailures: number;
-    data: T;
-    meta: Record<string, unknown>;
-}
-
-/** Fetches cached moltbook entry. */
-async function fetchCachedMoltbookEntry<T>(
-    key: string
-): Promise<MoltbookCacheResponse<T>> {
-    const row = await getCacheEntry(key);
+/**
+ * Fetches cached moltbook entry.
+ * @param key Lookup key.
+ * @param parser Runtime value parser.
+ * @returns Fetch cached moltbook entry result.
+ */
+function fetchCachedMoltbookEntry<T>(key: string, parser: ContractParser<T>): T {
+    const row = getCacheEntry(key);
     if (!row || row.status !== "fresh") {
         throw new Error(`Moltbook cache entry not found or not fresh: ${key}`);
     }
 
-    const parsedData = parseJsonField<T>(row.data);
+    const parsedData = parseJsonField<unknown>(row.data);
     if (parsedData === undefined) {
         throw new Error(`Moltbook cache payload is invalid: ${key}`);
     }
-    return {
-        source: row.source,
-        status: row.status,
-        updatedAt: row.updated_at || undefined,
-        lastAttemptAt: row.last_attempt_at || undefined,
-        expiresAt: row.expires_at || undefined,
-        errorCode: row.error_code || undefined,
-        errorMessage: row.error_message || undefined,
-        consecutiveFailures: Number(row.consecutive_failures),
-        data: parsedData,
-        meta: parseJsonField<Record<string, unknown>>(row.meta) ?? {},
-    };
+    return parser(parsedData);
 }
 
-/** Fetches cached moltbook home. */
-export async function fetchCachedMoltbookHome() {
-    return fetchCachedMoltbookEntry<MoltbookHomeCache>("moltbook.home");
+/**
+ * Fetches cached moltbook home.
+ * @returns Fetch cached moltbook home result.
+ */
+export function fetchCachedMoltbookHome(): MoltbookHome {
+    return fetchCachedMoltbookEntry("moltbook.home", parseMoltbookHome);
 }
 
-/** Fetches cached moltbook profile. */
-export async function fetchCachedMoltbookProfile() {
-    return fetchCachedMoltbookEntry<MoltbookProfileCache>("moltbook.profile");
+/**
+ * Fetches cached moltbook profile.
+ * @returns Fetch cached moltbook profile result.
+ */
+export function fetchCachedMoltbookProfile(): MoltbookProfileCache {
+    return fetchCachedMoltbookEntry("moltbook.profile", parseMoltbookProfileCache);
 }
 
-/** Fetches cached moltbook my content. */
-export async function fetchCachedMoltbookMyContent() {
-    return fetchCachedMoltbookEntry<MoltbookMyContentCache>("moltbook.my-content");
+/**
+ * Fetches cached moltbook my content.
+ * @returns Fetch cached moltbook my content result.
+ */
+export function fetchCachedMoltbookMyContent(): MoltbookContent {
+    return fetchCachedMoltbookEntry("moltbook.my-content", parseMoltbookContent);
 }
 
-/** Fetches cached moltbook feed. */
-export async function fetchCachedMoltbookFeed(sort: "hot" | "new") {
-    return fetchCachedMoltbookEntry<MoltbookFeedCache>(`moltbook.feed.${sort}`);
+/**
+ * Fetches cached moltbook feed.
+ * @param sort Sort value.
+ * @returns Fetch cached moltbook feed result.
+ */
+export function fetchCachedMoltbookFeed(sort: "hot" | "new"): MoltbookFeed {
+    return fetchCachedMoltbookEntry(`moltbook.feed.${sort}`, parseMoltbookFeed);
 }

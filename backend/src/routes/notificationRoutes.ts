@@ -1,11 +1,23 @@
+import {
+    type NotificationItem,
+    type NotificationType,
+    parseClearReadNotificationsRequest,
+    parseCreateNotificationInput,
+} from "../../../contracts/notifications.ts";
+import { isPlainRecord } from "../../../contracts/runtime.ts";
 import { database, sqlNullable } from "../database.ts";
-import { json, readJson, readRequestBytes } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
-import { nullableString, objectFallback, stringFallback } from "../lib/values.ts";
+import { json } from "../http.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import {
+    type ParametersRequest,
+    readApiJson,
+    readApiJsonOrError,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import { pruneReadNotifications } from "../services/notificationMaintenance.ts";
 
-type NotificationType = "error" | "info" | "success" | "warning";
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
+const logger = createStructuredLogger("notifications");
 
 interface NotificationRow {
     id: number;
@@ -36,14 +48,11 @@ function listNotifications(limit: number): NotificationRow[] {
         .all(limit) as NotificationRow[];
 }
 
-function toResponse(row: NotificationRow) {
+function toResponse(row: NotificationRow): NotificationItem {
     let metadata: Record<string, unknown>;
     try {
-        const parsed = row.metadata_json ? JSON.parse(row.metadata_json) : {};
-        metadata =
-            parsed && typeof parsed === "object" && !Array.isArray(parsed)
-                ? (parsed as Record<string, unknown>)
-                : {};
+        const parsed: unknown = row.metadata_json ? JSON.parse(row.metadata_json) : {};
+        metadata = isPlainRecord(parsed) ? parsed : {};
     } catch {
         metadata = {};
     }
@@ -62,32 +71,17 @@ function toResponse(row: NotificationRow) {
     };
 }
 
-function optionalStringField(
-    field: string,
-    value: unknown
-): { error?: Response; value?: string } {
-    if (value === undefined || value === null) {
-        return {};
-    }
-    return typeof value === "string"
-        ? { value }
-        : { error: json({ error: `${field} must be a string` }, { status: 400 }) };
-}
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function validId(value: string | undefined): number | undefined {
     const id = Number(value);
     return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
 function notificationRouteError(error: unknown, fallback: string): Response {
-    return json(
-        { error: errorMessage(error, fallback) },
-        { status: httpStatusCode(error) }
-    );
+    return routeErrorResponse(undefined, error, {
+        code: "notification_request_failed",
+        context: "notification",
+        message: fallback,
+    });
 }
 
 export const notificationRoutes = {
@@ -127,49 +121,25 @@ export const notificationRoutes = {
         },
 
         POST: async (request: Request) => {
-            let body: Record<string, unknown>;
+            let body;
             try {
-                body = await readJson<Record<string, unknown>>(request);
+                body = await readApiJson(request, parseCreateNotificationInput);
             } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Invalid JSON") },
-                    { status: httpStatusCode(error) }
-                );
+                return routeErrorResponse(request, error, {
+                    code: "invalid_notification_request",
+                    context: "notification.create",
+                    message: "Invalid notification request",
+                });
             }
-            if (!isJsonObject(body)) {
-                return json({ error: "Request body must be an object" }, { status: 400 });
-            }
-            const titleField = optionalStringField("title", body.title);
-            if (titleField.error) return titleField.error;
-            const descriptionField = optionalStringField("description", body.description);
-            if (descriptionField.error) return descriptionField.error;
-            const sourceField = optionalStringField("source", body.source);
-            if (sourceField.error) return sourceField.error;
-            const dedupeKeyField = optionalStringField("dedupeKey", body.dedupeKey);
-            if (dedupeKeyField.error) return dedupeKeyField.error;
-            const typeField = optionalStringField("type", body.type);
-            if (typeField.error) {
-                return json({ error: "invalid notification type" }, { status: 400 });
-            }
-            const title = nullableString((titleField.value ?? "").trim());
-            const description = stringFallback(descriptionField.value).trim();
-            const source = nullableString((sourceField.value ?? "").trim());
-            const dedupeKey = nullableString((dedupeKeyField.value ?? "").trim());
-            const type = typeField.value ?? "info";
-            const metadata =
-                body.metadata &&
-                typeof body.metadata === "object" &&
-                !Array.isArray(body.metadata)
-                    ? objectFallback(body.metadata)
-                    : {};
-            const occurredAt = body.occurredAt === undefined ? nowIso() : body.occurredAt;
-            if (typeof occurredAt !== "string" || Number.isNaN(Date.parse(occurredAt))) {
-                return json({ error: "invalid occurredAt" }, { status: 400 });
-            }
-            if (!title) return json({ error: "title is required" }, { status: 400 });
-            if (!["info", "warning", "error", "success"].includes(type)) {
-                return json({ error: "invalid notification type" }, { status: 400 });
-            }
+            const {
+                dedupeKey,
+                description = "",
+                metadata = {},
+                occurredAt = nowIso(),
+                source,
+                title,
+                type = "info",
+            } = body;
             const now = nowIso();
             const row = database
                 .prepare(
@@ -198,18 +168,16 @@ export const notificationRoutes = {
                     occurredAt
                 ) as { id?: unknown } | undefined;
             if (typeof row?.id !== "number") {
-                return json(
-                    { error: "Failed to create notification", isOk: false },
-                    { status: 500 }
-                );
+                return routeFailureResponse({
+                    context: "notification",
+                    message: "Failed to create notification",
+                    status: 500,
+                });
             }
             try {
                 pruneReadNotifications();
             } catch (error) {
-                console.error(
-                    "[Notifications] Failed to prune read notifications:",
-                    error
-                );
+                logger.error("notifications.prune_read_failed", { error });
             }
             return json({ id: row.id, isOk: true });
         },
@@ -232,39 +200,19 @@ export const notificationRoutes = {
 
     "/api/notifications/clear-read": {
         POST: async (request: Request) => {
-            const querySource =
-                new URL(request.url).searchParams.get("source") ?? undefined;
-            let body: { source?: unknown };
-            let rawBody: Buffer;
-            try {
-                rawBody = await readRequestBytes(request, 1024);
-            } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Invalid JSON") },
-                    { status: httpStatusCode(error) }
-                );
-            }
-            if (rawBody.length === 0) {
-                body = {};
-            } else {
-                try {
-                    const parsed = JSON.parse(rawBody.toString("utf8")) as unknown;
-                    if (!isJsonObject(parsed)) {
-                        return json(
-                            { error: "Request body must be an object" },
-                            { status: 400 }
-                        );
-                    }
-                    body = parsed;
-                } catch {
-                    return json({ error: "Invalid JSON" }, { status: 400 });
+            const body = await readApiJsonOrError(
+                request,
+                parseClearReadNotificationsRequest,
+                {
+                    code: "invalid_notification_request",
+                    context: "notification.clear-read",
+                    message: "Invalid notification request",
+                    maxBytes: 1024,
                 }
-            }
-            const rawSource = "source" in body ? body.source : querySource;
-            if (rawSource !== undefined && typeof rawSource !== "string") {
-                return json({ error: "source must be a string" }, { status: 400 });
-            }
-            const source = nullableString(stringFallback(rawSource).trim());
+            );
+            if (body instanceof Response) return body;
+
+            const source = body.source;
             try {
                 const result = source
                     ? database
@@ -287,7 +235,11 @@ export const notificationRoutes = {
             try {
                 const id = validId(request.params.id);
                 if (id === undefined)
-                    return json({ error: "invalid id" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "notification",
+                        message: "invalid id",
+                        status: 400,
+                    });
                 database
                     .prepare(
                         "UPDATE notifications SET is_read = 1, updated_at = ? WHERE id = ?"
@@ -305,7 +257,11 @@ export const notificationRoutes = {
             try {
                 const id = validId(request.params.id);
                 if (id === undefined)
-                    return json({ error: "invalid id" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "notification",
+                        message: "invalid id",
+                        status: 400,
+                    });
                 const result = database
                     .prepare("DELETE FROM notifications WHERE id = ?")
                     .run(id);

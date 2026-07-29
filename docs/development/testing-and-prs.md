@@ -5,15 +5,14 @@
 Root/frontend:
 
 ```bash
-bun run lint:frontend
-bun run lint:backend
+bun run lint
+bun run format:check
 bun run build:frontend
 bun run build:backend
 bun run test:frontend
 bun run test:backend
 bun run test:frontend:coverage
 bun run test:backend:coverage
-bun run format:check
 ```
 
 `bun run build`, `bun run test`, and `bun run test:coverage` remain aggregate
@@ -21,11 +20,28 @@ shortcuts when both applications are in scope. The explicit names make
 single-surface verification unambiguous and can be run from every worktree
 without changing directories.
 
+Application and test source is type-checked strictly. `skipLibCheck` remains
+enabled only because current upstream declarations from Bun Canary, DnD Kit,
+TanStack devtools, and the React Compiler/Babel stack do not all pass
+TypeScript 7 declaration checking. Re-run both project builds with
+`--skipLibCheck false` after those packages update, and remove the setting once
+the upstream declaration errors are gone; do not add library-wide declaration
+shims to hide them.
+
+`test/bunCanaryMatchers.d.ts` is a separate, deliberately narrow compatibility
+declaration for Bun Canary's current `AsymmetricMatcher = any` type. It narrows
+only Bun's test matcher boundary to `unknown`, so the strict unsafe-value lint
+rules still protect application and test code without changing matcher runtime
+behavior. Both TypeScript projects include it. When Bun 1.4 is stable, check
+the released `bun-types` declaration and remove this file once asymmetric
+matchers no longer return `any`; keep the unrelated DOM matcher declarations
+in `test/domMatchers.d.ts`.
+
 Every documentation change, whether docs-only or accompanying code, must run
 the Markdown formatter check and validate local Markdown links:
 
 ```bash
-bunx prettier --check "docs/**/*.md"
+bunx oxfmt --check "docs/**/*.md"
 
 python3 - <<'PY'
 from pathlib import Path

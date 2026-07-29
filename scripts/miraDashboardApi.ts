@@ -70,7 +70,7 @@ async function readCredential(profile: DashboardAutomationProfile): Promise<stri
 
 export function resolveDashboardOrigin(portValue = process.env.PORT): string {
     const trimmed = portValue?.trim() ?? "";
-    const parsedPort = /^\d+$/u.test(trimmed) ? Number(trimmed) : NaN;
+    const parsedPort = /^\d+$/u.test(trimmed) ? Number(trimmed) : Number.NaN;
     const port =
         Number.isSafeInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65_535
             ? parsedPort

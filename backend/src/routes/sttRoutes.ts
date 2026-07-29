@@ -1,10 +1,14 @@
+import type { SpeechTranscriptionResponse } from "../../../contracts/stt.ts";
 import { HttpError, json, readRequestBytes, readResponseTextFallback } from "../http.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { stringFallback } from "../lib/values.ts";
+import { routeFailureResponse } from "../routeSupport.ts";
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const ELEVENLABS_TIMEOUT_MS = 60_000;
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 const ELEVENLABS_STT_MODEL = "scribe_v2";
+const logger = createStructuredLogger("speech-to-text");
 
 const sttRouteState: { activeTranscriptionToken?: string } = {};
 
@@ -95,24 +99,30 @@ export const sttRoutes = {
     "/api/stt/transcribe": {
         POST: async (request: Request) => {
             if (sttRouteState.activeTranscriptionToken) {
-                return json(
-                    { error: "Another transcription is already running" },
-                    { status: 429 }
-                );
+                return routeFailureResponse({
+                    context: "stt",
+                    message: "Another transcription is already running",
+                    status: 429,
+                });
             }
 
             let transcriptionToken: string | undefined;
             try {
                 const audioBuffer = await readRequestBytes(request, MAX_AUDIO_BYTES);
                 if (audioBuffer.length === 0) {
-                    return json({ error: "Missing audio payload" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "stt",
+                        message: "Missing audio payload",
+                        status: 400,
+                    });
                 }
 
                 if (sttRouteState.activeTranscriptionToken) {
-                    return json(
-                        { error: "Another transcription is already running" },
-                        { status: 429 }
-                    );
+                    return routeFailureResponse({
+                        context: "stt",
+                        message: "Another transcription is already running",
+                        status: 429,
+                    });
                 }
                 transcriptionToken = Bun.randomUUIDv7();
                 sttRouteState.activeTranscriptionToken = transcriptionToken;
@@ -120,16 +130,24 @@ export const sttRoutes = {
                     audioBuffer,
                     request.headers.get("content-type") || undefined
                 );
-                return json({ provider: "elevenlabs", text });
+                return json({
+                    provider: "elevenlabs",
+                    text,
+                } satisfies SpeechTranscriptionResponse);
             } catch (error) {
                 if (error instanceof HttpError) {
-                    return json({ error: error.message }, { status: error.statusCode });
+                    return routeFailureResponse({
+                        context: "stt",
+                        message: error.message,
+                        status: error.statusCode,
+                    });
                 }
-                console.error(
-                    "[STT] Transcription failed:",
-                    error instanceof Error ? error.message : String(error)
-                );
-                return json({ error: "Failed to transcribe audio" }, { status: 500 });
+                logger.error("stt.transcription_failed", { error });
+                return routeFailureResponse({
+                    context: "stt",
+                    message: "Failed to transcribe audio",
+                    status: 500,
+                });
             } finally {
                 if (
                     transcriptionToken &&

@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-/** Resolves symlinks through the deepest existing ancestor of a path. */
+/**
+ * Resolves symlinks through the deepest existing ancestor of a path.
+ * @param targetPath Target path value.
+ * @returns Resolved symlinks through the deepest existing ancestor of a path.
+ */
 function canonicalizePotentialPath(targetPath: string): string {
     let existingAncestor = targetPath;
     const missingParts: string[] = [];
@@ -38,7 +42,12 @@ function isFilesystemRoot(rootPath: string): boolean {
     return path.parse(rootPath).root === rootPath;
 }
 
-/** Resolves an absolute path while rejecting empty, null-byte, relative, and root paths. */
+/**
+ * Resolves an absolute path while rejecting empty, null-byte, relative, and root paths.
+ * @param value Value to process.
+ * @param label Label value.
+ * @returns Resolved an absolute path while rejecting empty, null-byte, relative, and root paths.
+ */
 export function resolveAbsoluteNonRootPath(value: string, label: string): string {
     const trimmed = value.trim();
     if (!trimmed || trimmed.includes("\0") || !path.isAbsolute(trimmed)) {
@@ -140,6 +149,9 @@ function createChildDirectoryFromVerifiedParent(
  * CodeQL (js/path-injection) as a path sanitizer.
  *
  * Returns the resolved absolute path if safe, or undefined if the path escapes root.
+ * @param userPath User path value.
+ * @param rootDirectory Root directory value.
+ * @returns Safe path within root result.
  */
 export function safePathWithinRoot(
     userPath: string,
@@ -181,6 +193,9 @@ export function safePathWithinRoot(
  * Directory creation starts from the deepest existing canonical ancestor instead of
  * calling `mkdir -p` on the lexical target path. That prevents a concurrently swapped
  * symlinked ancestor from causing directory creation outside the allowed root.
+ * @param fullPath Full path value.
+ * @param rootDirectory Root directory value.
+ * @returns Created any missing parent directories for a previously root-validated write target. Directory creation starts from the deepest existing canonical ancestor instead of calling `mkdir -p` on the lexical target path. That prevents a concurrently swapped symlinked ancestor from causing directory creation outside the allowed root.
  */
 export function prepareSafeWriteTargetWithinRoot(
     fullPath: string,
@@ -335,6 +350,8 @@ export function prepareSafeWriteTargetWithinRoot(
 /**
  * Sanitize a filename to prevent directory traversal components.
  * Strips path separators and parent directory references.
+ * @param name Name value.
+ * @returns Sanitize filename result.
  */
 export function sanitizeFilename(name: string): string {
     const base = path.basename(name);

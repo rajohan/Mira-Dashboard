@@ -2,10 +2,22 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import {
+    parseOpenClawConfigUpdateRequest,
+    parseOpenClawSkillUpdateRequest,
+    type OpenClawMutationResponse,
+    type OpenClawSkill,
+    type OpenClawSkillSource,
+} from "../../../contracts/openClawConfig.ts";
 import gateway from "../gateway.ts";
-import { json, readJson } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { json } from "../http.ts";
 import { objectFallback, stringFallback } from "../lib/values.ts";
+import {
+    type ParametersRequest,
+    readApiJsonOrError,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import {
     hasConfigRedactionSentinel,
     redactConfigSecrets,
@@ -17,21 +29,9 @@ import {
     successfulJobExecutionOutput,
 } from "../services/queuedJobExecution.ts";
 
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
-
 interface ConfigGetResponse {
     hash?: string;
     parsed?: Record<string, unknown>;
-}
-
-type SkillSource = "workspace" | "builtin" | "extra";
-
-interface SkillInfo {
-    description?: string;
-    enabled: boolean;
-    name: string;
-    path: string;
-    source: SkillSource;
 }
 
 function dateToISOString(date: Date): string {
@@ -153,13 +153,13 @@ function getConfiguredSkillEntries(config?: Record<string, unknown>) {
 
 async function getSkills(
     config: Record<string, unknown> | undefined
-): Promise<SkillInfo[]> {
+): Promise<OpenClawSkill[]> {
     const entries = getConfiguredSkillEntries(config);
-    const skillsByName = new Map<string, SkillInfo>();
+    const skillsByName = new Map<string, OpenClawSkill>();
     const openClawHome = resolveOpenClawHome();
     const openClawPackageRoot = resolveSafeAbsolutePath(getOpenClawPackageRoot());
 
-    const addSkill = async (skillPath: string, source: SkillSource) => {
+    const addSkill = async (skillPath: string, source: OpenClawSkillSource) => {
         const name = path.basename(skillPath);
         const entry = objectFallback(entries[name] as object | undefined) as {
             description?: string;
@@ -249,26 +249,27 @@ export const openclawConfigRoutes = {
                     __masked: true,
                 });
             } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Failed to load config") },
-                    { status: 500 }
-                );
+                return routeErrorResponse(undefined, error, {
+                    code: "openclaw_config_load_failed",
+                    context: "openclaw-config.load",
+                    message: "Failed to load config",
+                });
             }
         },
         PUT: async (request: Request) => {
             try {
-                const body = await readJson<unknown>(request);
-                if (!body || typeof body !== "object" || Array.isArray(body)) {
-                    return json(
-                        { error: "Invalid config: expected JSON object" },
-                        { status: 400 }
-                    );
-                }
-                const baseHash = (body as Record<string, unknown>).__hash;
-                if (typeof baseHash !== "string" || !baseHash.trim()) {
-                    return json({ error: "Config hash is required" }, { status: 400 });
-                }
-                const configBody = { ...(body as Record<string, unknown>) };
+                const body = await readApiJsonOrError(
+                    request,
+                    parseOpenClawConfigUpdateRequest,
+                    {
+                        code: "invalid_openclaw_config",
+                        context: "openclaw-config.update",
+                        message: "Invalid OpenClaw config",
+                    }
+                );
+                if (body instanceof Response) return body;
+                const baseHash = body.__hash;
+                const configBody: Record<string, unknown> = { ...body };
                 delete configBody.__hash;
                 delete configBody.__masked;
                 const snapshot = await getConfigSnapshot();
@@ -277,26 +278,27 @@ export const openclawConfigRoutes = {
                     snapshot.parsed ?? {}
                 );
                 if (hasConfigRedactionSentinel(restoredConfigBody)) {
-                    return json(
-                        {
-                            error: "Masked secret placeholder has no corresponding stored value",
-                        },
-                        { status: 400 }
-                    );
+                    return routeFailureResponse({
+                        context: "openclaw-config",
+                        message:
+                            "Masked secret placeholder has no corresponding stored value",
+                        status: 400,
+                    });
                 }
                 const result = await patchConfigRaw(
                     JSON.stringify(restoredConfigBody),
-                    baseHash.trim()
+                    baseHash
                 );
                 return json({
                     isOk: true,
                     result: redactConfigSecrets(result),
                 });
             } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Failed to update config") },
-                    { status: httpStatusCode(error) }
-                );
+                return routeErrorResponse(request, error, {
+                    code: "openclaw_config_update_failed",
+                    context: "openclaw-config.update",
+                    message: "Failed to update config",
+                });
             }
         },
     },
@@ -307,10 +309,11 @@ export const openclawConfigRoutes = {
                 const snapshot = await getConfigSnapshot();
                 return json({ skills: await getSkills(snapshot.parsed) });
             } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Failed to load skills") },
-                    { status: 500 }
-                );
+                return routeErrorResponse(undefined, error, {
+                    code: "openclaw_skills_load_failed",
+                    context: "openclaw-config.skills",
+                    message: "Failed to load skills",
+                });
             }
         },
     },
@@ -325,16 +328,17 @@ export const openclawConfigRoutes = {
                     hash: snapshot.hash,
                 });
             } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Failed to create backup") },
-                    { status: 500 }
-                );
+                return routeErrorResponse(undefined, error, {
+                    code: "openclaw_backup_failed",
+                    context: "openclaw-config.backup",
+                    message: "Failed to create backup",
+                });
             }
         },
     },
 
     "/api/restart": {
-        POST: async () => {
+        POST: async (request: Request) => {
             try {
                 const execution = await enqueueAndWaitForJobExecution({
                     actionKey: OPENCLAW_GATEWAY_RESTART_ACTION,
@@ -343,12 +347,13 @@ export const openclawConfigRoutes = {
                     timeoutMs: 60_000,
                 });
                 successfulJobExecutionOutput(execution);
-                return json({ isOk: true });
+                return json({ isOk: true } satisfies OpenClawMutationResponse);
             } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Failed to restart gateway") },
-                    { status: httpStatusCode(error) }
-                );
+                return routeErrorResponse(request, error, {
+                    code: "openclaw_restart_failed",
+                    context: "openclaw-config.restart",
+                    message: "Failed to restart gateway",
+                });
             }
         },
     },
@@ -358,38 +363,36 @@ export const openclawConfigRoutes = {
             try {
                 const name = stringFallback(request.params.name).trim();
                 if (!isValidSkillName(name)) {
-                    return json({ error: "Invalid skill name" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "openclaw-config",
+                        message: "Invalid skill name",
+                        status: 400,
+                    });
                 }
-                const body = await readJson<
-                    | {
-                          __hash?: unknown;
-                          enabled?: unknown;
-                      }
-                    | undefined
-                >(request);
-                const enabled =
-                    body && typeof body === "object" ? body.enabled : undefined;
-                if (typeof enabled !== "boolean") {
-                    return json({ error: "Invalid enabled value" }, { status: 400 });
-                }
-                const baseHash =
-                    body && typeof body === "object" ? body.__hash : undefined;
-                if (typeof baseHash !== "string" || !baseHash.trim()) {
-                    return json({ error: "Config hash is required" }, { status: 400 });
-                }
+                const body = await readApiJsonOrError(
+                    request,
+                    parseOpenClawSkillUpdateRequest,
+                    {
+                        code: "invalid_openclaw_skill_update",
+                        context: "openclaw-config.skill",
+                        message: "Invalid OpenClaw skill update",
+                    }
+                );
+                if (body instanceof Response) return body;
 
                 await patchConfigRaw(
                     JSON.stringify({
-                        skills: { entries: { [name]: { enabled } } },
+                        skills: { entries: { [name]: { enabled: body.enabled } } },
                     }),
-                    baseHash.trim()
+                    body.__hash
                 );
-                return json({ isOk: true });
+                return json({ isOk: true } satisfies OpenClawMutationResponse);
             } catch (error) {
-                return json(
-                    { error: errorMessage(error, "Failed to update skill") },
-                    { status: httpStatusCode(error) }
-                );
+                return routeErrorResponse(request, error, {
+                    code: "openclaw_skill_update_failed",
+                    context: "openclaw-config.skill",
+                    message: "Failed to update skill",
+                });
             }
         },
     },

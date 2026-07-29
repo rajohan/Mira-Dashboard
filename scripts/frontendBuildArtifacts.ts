@@ -13,8 +13,8 @@ const COMPRESSIBLE_EXTENSIONS = new Set([
     ".xml",
 ]);
 const MINIMUM_COMPRESSION_BYTES = 512;
-const FRONTEND_APP_INPUT = "src/main.tsx";
-const SCRIPT_TAG_PATTERN = /<script\b[^>]*>[\s\S]*?<\/script(?:\s+[^>]*)?>/giu;
+const FRONTEND_APP_INPUT = "frontend/src/main.tsx";
+const SCRIPT_TAG_PATTERN = /<script\b[^>]*>[\s\S]*?<\/script(?:\s[^>]*)?>/giu;
 const SCRIPT_SOURCE_ATTRIBUTE_PATTERN = /\bsrc=(["'])([^"']+)\1/iu;
 const MODULE_SCRIPT_TYPE_PATTERN = /\btype=(["'])module\1/iu;
 
@@ -87,7 +87,10 @@ function isFrontendAppInput(inputKey: string): boolean {
     );
 }
 
-/** Resolves the single JavaScript output that owns the application bootstrap. */
+/**
+ * Resolves the single JavaScript output that owns the application bootstrap.
+ * @returns Resolved the single JavaScript output that owns the application bootstrap.
+ */
 export function frontendAppOutputKey(metafile: Bun.BuildMetafile): string {
     const candidates = Object.entries(metafile.outputs)
         .filter(
@@ -109,6 +112,7 @@ export function frontendAppOutputKey(metafile: Bun.BuildMetafile): string {
 /**
  * Works around Bun selecting an unrelated split chunk for the generated HTML
  * module script when metafile output is enabled.
+ * @returns Promise resolving to the write frontend html app entrypoint result.
  */
 export async function writeFrontendHtmlAppEntrypoint(
     metafile: Bun.BuildMetafile,
@@ -154,6 +158,7 @@ export async function writeFrontendHtmlAppEntrypoint(
 /**
  * Resolves the static startup graph while excluding route and feature
  * `dynamic-import` edges.
+ * @returns Resolved the static startup graph while excluding route and feature `dynamic-import` edges.
  */
 export function initialFrontendOutputKeys(metafile: Bun.BuildMetafile): Set<string> {
     const outputs = metafile.outputs;
@@ -202,7 +207,10 @@ function sumOutputs(
     return total;
 }
 
-/** Measures the complete and initial production JavaScript/CSS graphs. */
+/**
+ * Measures the complete and initial production JavaScript/CSS graphs.
+ * @returns Promise resolving to the measure frontend bundle result.
+ */
 export async function measureFrontendBundle(
     metafile: Bun.BuildMetafile,
     outdir: string
@@ -280,7 +288,10 @@ export function assertFrontendBundleBudgets(
     );
 }
 
-/** Writes deterministic Brotli and gzip sidecars for compressible build outputs. */
+/**
+ * Writes deterministic Brotli and gzip sidecars for compressible build outputs.
+ * @returns Promise resolving to the write precompressed frontend assets result.
+ */
 export async function writePrecompressedFrontendAssets(
     outputPaths: Iterable<string>
 ): Promise<number> {

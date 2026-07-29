@@ -1,13 +1,23 @@
+import { describe, expect, it, jest } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Server } from "bun";
-import { describe, expect, it, jest } from "bun:test";
 
 import * as releaseManifestModule from "../src/releaseManifest.ts";
+import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const TEST_RELEASE_COMMIT = "a".repeat(40);
+
+async function observeServerShutdownTimeout() {
+    await Bun.sleep(1500);
+    return {
+        didExit: false as const,
+        exitCode: undefined,
+    };
+}
 
 describe("server start scheduler policy", () => {
     it("starts scheduled jobs only in the combined non-production server", async () => {
@@ -112,7 +122,7 @@ describe("server start scheduler policy", () => {
 
     it("reports direct backend entrypoint failures", async () => {
         const originalExitCode = process.exitCode ?? 0;
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         const exitProcess = jest.fn(() => {});
         const startupError = new Error("direct startup failed");
         const { startBackendServerEntrypoint } = await import("../src/serverStart.ts");
@@ -121,15 +131,27 @@ describe("server start scheduler policy", () => {
             await startBackendServerEntrypoint({
                 exitProcess,
                 isDirect: true,
-                runServer: async () => {
-                    throw startupError;
+                runServer: () => {
+                    return Promise.try(() => {
+                        throw startupError;
+                    });
                 },
             });
-            expect(errorSpy).toHaveBeenCalledWith("[Backend] Failed:", startupError);
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "server",
+                    error: {
+                        message: "direct startup failed",
+                        name: "Error",
+                    },
+                    event: "server.entrypoint_failed",
+                    level: "error",
+                })
+            );
             expect(exitProcess).toHaveBeenCalledWith(1);
             expect(process.exitCode).toBe(1);
         } finally {
-            errorSpy.mockRestore();
+            structuredLogs.stop();
             process.exitCode = originalExitCode;
         }
     });
@@ -174,7 +196,7 @@ describe("server start scheduler policy", () => {
             .mockImplementation(async () => {});
 
         try {
-            await expect(workerStart.runDashboardWorker()).rejects.toThrow(
+            expect(workerStart.runDashboardWorker()).rejects.toThrow(
                 "worker startup failed"
             );
             expect(startSpy).toHaveBeenCalledWith(
@@ -335,13 +357,15 @@ describe("server start scheduler policy", () => {
         const stopExecutorSpy = jest
             .spyOn(scheduledJobs, "stopScheduledJobExecutor")
             .mockImplementation(async () => {});
-        stopExecutorSpy.mockImplementationOnce(async () => {
-            throw new Error("executor cleanup failed");
+        stopExecutorSpy.mockImplementationOnce(() => {
+            return Promise.try(() => {
+                throw new Error("executor cleanup failed");
+            });
         });
         const stopSchedulerSpy = jest
             .spyOn(scheduledJobs, "stopScheduledJobScheduler")
             .mockImplementation(() => {});
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
 
         try {
             expect(() => worker.startDashboardJobWorker()).toThrow(
@@ -358,9 +382,16 @@ describe("server start scheduler policy", () => {
                 enqueueDatabaseSummaryRefresh: expect.any(Function),
             });
             await Bun.sleep(0);
-            expect(errorSpy).toHaveBeenCalledWith(
-                "[JobWorker] Failed to roll back executor startup:",
-                expect.objectContaining({ message: "executor cleanup failed" })
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "job-worker",
+                    error: {
+                        message: "executor cleanup failed",
+                        name: "Error",
+                    },
+                    event: "job_worker.executor_startup_rollback_failed",
+                    level: "error",
+                })
             );
 
             worker.startDashboardJobWorker();
@@ -388,7 +419,7 @@ describe("server start scheduler policy", () => {
             startSchedulerSpy.mockRestore();
             stopExecutorSpy.mockRestore();
             stopSchedulerSpy.mockRestore();
-            errorSpy.mockRestore();
+            structuredLogs.stop();
         }
     });
 
@@ -407,8 +438,6 @@ describe("server start scheduler policy", () => {
         const initSpy = jest
             .spyOn(gatewayModule.default, "init")
             .mockImplementation(() => {});
-        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         try {
             process.env.OPENCLAW_GATEWAY_TOKEN = " test-token ";
             serverStartModule.handleServerListening(TEST_RELEASE_COMMIT);
@@ -416,8 +445,6 @@ describe("server start scheduler policy", () => {
             await new Promise((resolve) => setTimeout(resolve, 20));
         } finally {
             initSpy.mockRestore();
-            warnSpy.mockRestore();
-            errorSpy.mockRestore();
             if (originalGatewayToken === undefined) {
                 delete process.env.OPENCLAW_GATEWAY_TOKEN;
             } else {
@@ -487,19 +514,21 @@ describe("server start scheduler policy", () => {
         const initSpy = jest
             .spyOn(gatewayModule.default, "init")
             .mockImplementation(() => {});
-        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         try {
             serverStartModule.handleServerListening(TEST_RELEASE_COMMIT);
             expect(initSpy).not.toHaveBeenCalled();
-            expect(warnSpy).toHaveBeenCalledWith(
-                "[Backend] No gateway token configured yet; waiting for bootstrap registration"
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "server",
+                    event: "server.gateway_token_unavailable",
+                    level: "warn",
+                })
             );
             await new Promise((resolve) => setTimeout(resolve, 20));
         } finally {
             initSpy.mockRestore();
-            warnSpy.mockRestore();
-            errorSpy.mockRestore();
+            structuredLogs.stop();
             if (originalGatewayToken === undefined) {
                 delete process.env.OPENCLAW_GATEWAY_TOKEN;
             } else {
@@ -542,21 +571,28 @@ describe("server start scheduler policy", () => {
         const shutdownSpy = jest
             .spyOn(gatewayModule.default, "shutdown")
             .mockImplementation(() => {});
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
 
         try {
             expect(() =>
                 serverStartModule.handleServerListening(TEST_RELEASE_COMMIT)
             ).toThrow("gateway boot failed");
             expect(shutdownSpy).not.toHaveBeenCalled();
-            expect(errorSpy).toHaveBeenCalledWith(
-                "[Backend] Failed to start background services:",
-                expect.any(Error)
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    component: "server",
+                    error: {
+                        message: "gateway boot failed",
+                        name: "Error",
+                    },
+                    event: "server.background_services_start_failed",
+                    level: "error",
+                })
             );
         } finally {
             initSpy.mockRestore();
             shutdownSpy.mockRestore();
-            errorSpy.mockRestore();
+            structuredLogs.stop();
             if (originalGatewayToken === undefined) {
                 delete process.env.OPENCLAW_GATEWAY_TOKEN;
             } else {
@@ -581,7 +617,6 @@ describe("server start scheduler policy", () => {
         const releaseSpy = jest
             .spyOn(releaseManifestModule, "getRuntimeReleaseIdentity")
             .mockReturnValue(release.promise);
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
         const originalExitCode = process.exitCode;
         const { startBackendServer, stopBackendServer } =
             await import("../src/serverStart.ts");
@@ -594,16 +629,15 @@ describe("server start scheduler policy", () => {
             expect(concurrentStartup).toBe(firstStartup);
 
             release.reject(startupFailure);
-            await expect(firstStartup).rejects.toBe(startupFailure);
-            await expect(concurrentStartup).rejects.toBe(startupFailure);
+            expect(firstStartup).rejects.toBe(startupFailure);
+            expect(concurrentStartup).rejects.toBe(startupFailure);
 
             const retry = startBackendServer(0);
             expect(retry).not.toBe(firstStartup);
-            await expect(retry).rejects.toBe(startupFailure);
+            expect(retry).rejects.toBe(startupFailure);
         } finally {
             await stopBackendServer();
             releaseSpy.mockRestore();
-            errorSpy.mockRestore();
             process.exitCode = originalExitCode;
         }
     });
@@ -632,8 +666,6 @@ describe("server start scheduler policy", () => {
         process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
         process.env.NODE_ENV = "test";
         process.env.OPENCLAW_HOME = openclawRoot;
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
         try {
             const { runBackendServer, startBackendServer, stopBackendServer } =
                 await import("../src/serverStart.ts");
@@ -664,7 +696,8 @@ describe("server start scheduler policy", () => {
                         ),
                 };
                 const shutdownListener = addedListeners[signal][0] as
-                    NodeJS.SignalsListener | undefined;
+                    | NodeJS.SignalsListener
+                    | undefined;
                 if (!shutdownListener) {
                     const cleanupListener = (addedListeners.SIGINT[0] ??
                         addedListeners.SIGTERM[0]) as NodeJS.SignalsListener | undefined;
@@ -683,8 +716,6 @@ describe("server start scheduler policy", () => {
                 expect(process.listeners("SIGTERM")).toEqual(existingListeners.SIGTERM);
             }
         } finally {
-            errorSpy.mockRestore();
-            warnSpy.mockRestore();
             for (const key of environmentKeys) {
                 const originalValue = originalEnvironment[key];
                 if (originalValue === undefined) {
@@ -782,14 +813,10 @@ describe("server start scheduler policy", () => {
                 didExit: true as const,
                 exitCode: await child.exited,
             });
-            const waitForTimeout = async () => {
-                await Bun.sleep(1500);
-                return {
-                    didExit: false as const,
-                    exitCode: undefined,
-                };
-            };
-            const result = await Promise.race([waitForExit(), waitForTimeout()]);
+            const result = await Promise.race([
+                waitForExit(),
+                observeServerShutdownTimeout(),
+            ]);
             if (!result.didExit) {
                 child.kill("SIGKILL");
                 await child.exited;
@@ -828,17 +855,18 @@ describe("server start scheduler policy", () => {
         process.env.MIRA_DASHBOARD_FRONTEND_PATH = frontendRoot;
 
         const serveSpy = jest.spyOn(Bun, "serve").mockImplementation(
-            ((options: unknown) =>
+            (options: unknown) =>
                 ({
                     port: 0,
                     requestIP: () => ({ address: "127.0.0.1", family: "IPv4", port: 1 }),
                     stop: async () => {},
                     [Symbol.for("mira.test.options")]: options,
-                }) as unknown as Server<unknown>) as typeof Bun.serve
+                }) as unknown as Server<unknown>
         );
         let handleDashboardClientSpy: { mockRestore: () => void } | undefined;
         let getAuthSessionSpy:
-            { mockClear: () => void; mockRestore: () => void } | undefined;
+            | { mockClear: () => void; mockRestore: () => void }
+            | undefined;
         let deploymentCutoverSpy: { mockRestore: () => void } | undefined;
         let isDeploymentCutoverActive = false;
         try {
@@ -922,7 +950,7 @@ describe("server start scheduler policy", () => {
                 server
             );
             expect(apiFallback.status).toBe(404);
-            await expect(apiFallback.json()).resolves.toEqual({ error: "Not found" });
+            expect(apiFallback.json()).resolves.toEqual(apiErrorExpectation("Not found"));
 
             const badPath = await options.fetch(
                 new Request("https://test.local/%E0%A4%A"),

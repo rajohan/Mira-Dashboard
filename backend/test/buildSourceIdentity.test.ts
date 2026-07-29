@@ -1,13 +1,12 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "bun:test";
-
 import {
     isReleaseBuildCommit,
     resolveBuildSourceIdentity,
-} from "../scripts/buildSourceIdentity.ts";
+} from "../../scripts/buildSourceIdentity.ts";
 
 const temporaryRoots: string[] = [];
 

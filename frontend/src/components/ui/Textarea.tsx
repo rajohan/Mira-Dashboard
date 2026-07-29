@@ -1,0 +1,67 @@
+import {
+    Description,
+    Field,
+    Label,
+    Textarea as HeadlessTextarea,
+} from "@headlessui/react";
+import type { Ref, TextareaHTMLAttributes } from "react";
+
+import { cn } from "../../utils/cn";
+
+/** Provides props for textarea. */
+interface TextareaProperties extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+    ref?: Ref<HTMLTextAreaElement>;
+    label?: string;
+    description?: string;
+    error?: string;
+    variant?: "default" | "code";
+}
+
+/**
+ * Renders the textarea UI.
+ * @returns Rendered the textarea UI.
+ */
+export function Textarea({
+    className,
+    label,
+    description,
+    error,
+    variant = "default",
+    ref,
+    ...properties
+}: TextareaProperties) {
+    return (
+        <Field className={cn(variant === "code" && "h-full")}>
+            {label && (
+                <Label className="mb-1.5 block text-sm font-medium text-primary-300">
+                    {label}
+                </Label>
+            )}
+            {description && (
+                <Description className="mb-1 text-xs text-primary-400">
+                    {description}
+                </Description>
+            )}
+            <HeadlessTextarea
+                ref={ref}
+                className={cn(
+                    variant === "default" && [
+                        "w-full rounded-lg border border-primary-600 bg-primary-700 px-3 py-2",
+                        "text-primary-100 placeholder-primary-500",
+                        "focus:border-accent-500 focus:outline-none",
+                        "hover:border-primary-500",
+                    ],
+                    variant === "code" && [
+                        "size-full resize-none bg-transparent p-4 font-mono text-sm",
+                        "focus:outline-none",
+                    ],
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    error && "border-red-500",
+                    className
+                )}
+                {...properties}
+            />
+            {error && <p className="mt-1 text-sm text-red-400">{error}</p>}
+        </Field>
+    );
+}

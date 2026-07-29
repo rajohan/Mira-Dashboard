@@ -1,0 +1,93 @@
+import type { CronJob } from "../../../../../contracts/cron";
+import {
+    formatCronTimestamp,
+    getCronJobId,
+    getCronJobName,
+    getCronStateValue,
+} from "../../../utils/cronUtilities";
+import { Badge } from "../../ui/Badge";
+import { Button } from "../../ui/Button";
+import { Card } from "../../ui/Card";
+
+/** Provides props for cron job list. */
+interface CronJobListProperties {
+    jobs: CronJob[];
+    selectedId: string;
+    currentJobId: string;
+    onSelect: (id: string) => void;
+}
+
+/**
+ * Renders the cron job list UI.
+ * @returns Rendered the cron job list UI.
+ */
+export function CronJobList({
+    jobs,
+    selectedId,
+    currentJobId,
+    onSelect,
+}: CronJobListProperties) {
+    return (
+        <Card
+            variant="bordered"
+            className="flex min-w-0 flex-col p-0 xl:max-h-[calc(100vh-10rem)]"
+        >
+            <div className="border-b border-primary-700 px-3 py-2 text-sm font-semibold text-primary-200 sm:px-4 sm:py-3">
+                Cron jobs
+            </div>
+            <div className="min-h-0 flex-1 overflow-visible p-2 xl:overflow-auto">
+                {jobs.map((job) => {
+                    const id = getCronJobId(job);
+                    const isSelected =
+                        id === selectedId || (!selectedId && id === currentJobId);
+
+                    return (
+                        <Button
+                            key={id}
+                            type="button"
+                            variant="ghost"
+                            onClick={() => onSelect(id)}
+                            className={[
+                                "mb-2 w-full min-w-0 flex-col items-stretch justify-start rounded-lg border px-3 py-2 text-left transition",
+                                isSelected
+                                    ? "border-accent-500 bg-accent-500/10"
+                                    : "border-primary-700 bg-primary-800/40 hover:border-primary-500",
+                            ].join(" ")}
+                        >
+                            <div className="flex w-full min-w-0 items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1 truncate text-sm font-medium text-primary-100">
+                                    {getCronJobName(job)}
+                                </div>
+                                <Badge
+                                    className="shrink-0"
+                                    variant={
+                                        job.enabled === false ? "warning" : "success"
+                                    }
+                                >
+                                    {job.enabled === false ? "Disabled" : "Enabled"}
+                                </Badge>
+                            </div>
+                            <div className="mt-1 w-full truncate text-xs text-primary-400">
+                                {id}
+                            </div>
+                            <div className="mt-2 grid w-full grid-cols-1 gap-x-2 gap-y-1 text-[11px] text-primary-400 sm:grid-cols-2">
+                                <span>
+                                    Last:{" "}
+                                    {formatCronTimestamp(
+                                        getCronStateValue(job, "lastRunAtMs")
+                                    )}
+                                </span>
+                                <span>
+                                    Next:{" "}
+                                    {formatCronTimestamp(
+                                        getCronStateValue(job, "nextRunAtMs")
+                                    )}
+                                </span>
+                            </div>
+                        </Button>
+                    );
+                })}
+            </div>
+        </Card>
+    );
+}

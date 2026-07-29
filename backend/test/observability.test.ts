@@ -7,7 +7,12 @@ import {
 } from "../src/lib/databaseMetrics.ts";
 import { hashedLogCorrelation, runWithLogContext } from "../src/lib/logContext.ts";
 import { getRuntimeMetrics } from "../src/lib/runtimeMetrics.ts";
-import { redactLogFields, structuredLog } from "../src/lib/structuredLogger.ts";
+import {
+    enableStructuredLogOutputForTests,
+    redactLogFields,
+    structuredLog,
+    subscribeToStructuredLogs,
+} from "../src/lib/structuredLogger.ts";
 
 afterEach(() => {
     resetDatabaseOperationMetricsForTests();
@@ -57,37 +62,68 @@ describe("application observability", () => {
     });
 
     it("emits correlated newline-safe JSON events", () => {
-        const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const warn = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+        const disableOutput = enableStructuredLogOutputForTests();
 
-        runWithLogContext(
-            {
+        try {
+            runWithLogContext(
+                {
+                    jobId: "job-7",
+                    requestId: "request-8",
+                    sessionId: "session-hash",
+                },
+                () => {
+                    structuredLog("warn", "observability.test", {
+                        apiToken: "secret-token",
+                        message: "one\nline",
+                    });
+                }
+            );
+
+            expect(warn).toHaveBeenCalledTimes(1);
+            const [line] = warn.mock.calls[0] ?? [];
+            expect(typeof line).toBe("string");
+            const event = JSON.parse(String(line).trimEnd()) as Record<string, unknown>;
+            expect(event).toMatchObject({
+                apiToken: "[REDACTED]",
+                event: "observability.test",
                 jobId: "job-7",
+                level: "warn",
+                message: "one\nline",
                 requestId: "request-8",
+                service: "mira-dashboard",
                 sessionId: "session-hash",
-            },
-            () => {
-                structuredLog("warn", "observability.test", {
-                    apiToken: "secret-token",
-                    message: "one\nline",
-                });
-            }
-        );
+            });
+            expect(String(line).split("\n")).toHaveLength(2);
+            expect(String(line)).toEndWith("\n");
+        } finally {
+            disableOutput();
+        }
+    });
 
-        expect(warn).toHaveBeenCalledTimes(1);
-        const [line] = warn.mock.calls[0] ?? [];
-        expect(typeof line).toBe("string");
-        const event = JSON.parse(String(line)) as Record<string, unknown>;
-        expect(event).toMatchObject({
-            apiToken: "[REDACTED]",
-            event: "observability.test",
-            jobId: "job-7",
-            level: "warn",
-            message: "one\nline",
-            requestId: "request-8",
-            service: "mira-dashboard",
-            sessionId: "session-hash",
+    it("publishes complete structured lines without letting listeners affect output", () => {
+        const warn = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+        const disableOutput = enableStructuredLogOutputForTests();
+        const received: string[] = [];
+        const unsubscribe = subscribeToStructuredLogs((line) => {
+            received.push(line);
         });
-        expect(String(line).split("\n")).toHaveLength(1);
+
+        try {
+            structuredLog("warn", "observability.live");
+            unsubscribe();
+            structuredLog("warn", "observability.after_unsubscribe");
+
+            expect(warn).toHaveBeenCalledTimes(2);
+            expect(received).toHaveLength(1);
+            expect(JSON.parse(received[0]!)).toMatchObject({
+                event: "observability.live",
+                level: "warn",
+            });
+        } finally {
+            unsubscribe();
+            disableOutput();
+        }
     });
 
     it("uses stable non-reversible session correlation values", () => {
@@ -107,7 +143,7 @@ describe("application observability", () => {
     it("aggregates database latency and SQLite lock errors", () => {
         recordDatabaseOperation(4);
         recordDatabaseOperation(8, { code: "SQLITE_BUSY_TIMEOUT" });
-        recordDatabaseOperation(NaN, { code: "OTHER_ERROR" });
+        recordDatabaseOperation(Number.NaN, { code: "OTHER_ERROR" });
 
         expect(getDatabaseOperationMetrics()).toEqual({
             averageDurationMs: 4,

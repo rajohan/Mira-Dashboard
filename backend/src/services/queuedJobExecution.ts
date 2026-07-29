@@ -4,7 +4,7 @@ import {
     enqueueJobExecution,
     type EnqueueJobExecutionInput,
     getJobExecution,
-    type JobExecution,
+    type JobExecutionRecord,
 } from "./jobExecutionQueue.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 100;
@@ -35,15 +35,20 @@ function waitForDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
     });
 }
 
-export function isTerminalJobExecution(execution: JobExecution): boolean {
+export function isTerminalJobExecution(execution: JobExecutionRecord): boolean {
     return ["success", "failed", "cancelled"].includes(execution.status);
 }
 
-/** Observes a persisted result. Observer aborts do not cancel the execution. */
+/**
+ * Observes a persisted result. Observer aborts do not cancel the execution.
+ * @param id Resource identifier.
+ * @param options Operation options.
+ * @returns Promise resolving to the wait for job execution result.
+ */
 export async function waitForJobExecution(
     id: string,
     options: WaitForJobExecutionOptions = {}
-): Promise<JobExecution> {
+): Promise<JobExecutionRecord> {
     const startedAt = Date.now();
     const timeoutMs = options.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
     const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -83,17 +88,24 @@ export async function waitForJobExecution(
 export async function enqueueAndWaitForJobExecution(
     input: EnqueueJobExecutionInput,
     options: WaitForJobExecutionOptions = {}
-): Promise<JobExecution> {
+): Promise<JobExecutionRecord> {
     const execution = enqueueJobExecution(input);
     return await waitForJobExecution(execution.id, options);
 }
 
-/** Returns a successful result or rethrows the worker's persisted failure. */
+/**
+ * Returns a successful result or rethrows the worker's persisted failure.
+ * @returns a successful result or rethrows the worker's persisted failure.
+ */
 export function successfulJobExecutionOutput(
-    execution: JobExecution
+    execution: JobExecutionRecord
 ): Record<string, unknown> {
     if (execution.status === "success") return execution.output;
     const statusCode = Number(execution.output.statusCode);
+    let failureStatusCode = execution.status === "cancelled" ? 409 : 500;
+    if (Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600) {
+        failureStatusCode = statusCode;
+    }
     throw Object.assign(
         new Error(
             execution.message ||
@@ -103,12 +115,7 @@ export function successfulJobExecutionOutput(
         ),
         {
             executionId: execution.id,
-            statusCode:
-                Number.isSafeInteger(statusCode) && statusCode >= 400 && statusCode < 600
-                    ? statusCode
-                    : execution.status === "cancelled"
-                      ? 409
-                      : 500,
+            statusCode: failureStatusCode,
         }
     );
 }

@@ -5,7 +5,11 @@ import { JSON5 } from "bun";
 
 export type GuardedPath = string & { readonly __guardedPath: unique symbol };
 
-/** Marks a previously validated path so filesystem helpers only accept reviewed path values. */
+/**
+ * Marks a previously validated path so filesystem helpers only accept reviewed path values.
+ * @param path File or resource path.
+ * @returns Guarded path result.
+ */
 export function guardedPath(path: string): GuardedPath {
     return path as GuardedPath;
 }
@@ -41,7 +45,10 @@ const fsPromiseOps = Fs.promises as unknown as {
     stat: typeof Fs.promises.stat;
 };
 
-/** Converts a guarded path to a Buffer to avoid direct string path sinks in wrappers. */
+/**
+ * Converts a guarded path to a Buffer to avoid direct string path sinks in wrappers.
+ * @returns Converted a guarded path to a Buffer to avoid direct string path sinks in wrappers.
+ */
 function guardedPathBuffer(path: GuardedPath): Buffer {
     return Buffer.from(path);
 }
@@ -98,7 +105,7 @@ async function openDirectoryNoFollow(path: Buffer): Promise<Fs.promises.FileHand
     return Reflect.apply(fsPromiseOps.open, Fs.promises, [
         path,
         Fs.constants.O_RDONLY | Fs.constants.O_DIRECTORY | Fs.constants.O_NOFOLLOW,
-    ]) as Promise<Fs.promises.FileHandle>;
+    ]);
 }
 
 async function openAnchoredParentDirectory(
@@ -140,12 +147,18 @@ export function mkdirGuarded(path: GuardedPath, options: { recursive: true }): v
     fsOps.mkdirSync(guardedPathBuffer(path), options);
 }
 
-/** Reads a JSON5 text file from a validated path. */
+/**
+ * Reads a JSON5 text file from a validated path.
+ * @returns Read a JSON5 text file from a validated path.
+ */
 export function readJson5Guarded(path: GuardedPath): unknown {
     return JSON5.parse(fsOps.readFileSync(guardedPathBuffer(path), "utf8"));
 }
 
-/** Lists directory entries from a validated path. */
+/**
+ * Lists directory entries from a validated path.
+ * @returns Readdir guarded result.
+ */
 export function readdirGuarded(
     path: GuardedPath,
     options: { withFileTypes: true }
@@ -153,12 +166,18 @@ export function readdirGuarded(
     return fsOps.readdirSync(guardedPathBuffer(path), options);
 }
 
-/** Reads a UTF-8 text file from a validated path. */
+/**
+ * Reads a UTF-8 text file from a validated path.
+ * @returns Read a UTF-8 text file from a validated path.
+ */
 export function readTextGuarded(path: GuardedPath): string {
     return fsOps.readFileSync(guardedPathBuffer(path), "utf8");
 }
 
-/** Lists directory entries from a validated path without blocking the request thread. */
+/**
+ * Lists directory entries from a validated path without blocking the request thread.
+ * @returns Promise resolving to the readdir guarded async result.
+ */
 export async function readdirGuardedAsync(
     path: GuardedPath,
     options: { withFileTypes: true }
@@ -169,14 +188,20 @@ export async function readdirGuardedAsync(
     ]) as Promise<Fs.Dirent[]>;
 }
 
-/** Stats a validated path without blocking the request thread. */
+/**
+ * Stats a validated path without blocking the request thread.
+ * @returns Promise resolving to the stat guarded async result.
+ */
 export async function statGuardedAsync(path: GuardedPath): Promise<Fs.Stats> {
     return Reflect.apply(fsPromiseOps.stat, Fs.promises, [
         guardedPathBuffer(path),
     ]) as Promise<Fs.Stats>;
 }
 
-/** Reads UTF-8 text while atomically refusing a symlink at the final path. */
+/**
+ * Reads UTF-8 text while atomically refusing a symlink at the final path.
+ * @returns Read UTF-8 text while atomically refusing a symlink at the final path.
+ */
 export async function readTextNoFollowGuarded(path: GuardedPath): Promise<string> {
     const file = await openReadNoFollowGuarded(path);
     try {
@@ -186,7 +211,12 @@ export async function readTextNoFollowGuarded(path: GuardedPath): Promise<string
     }
 }
 
-/** Reads bytes from an already-open descriptor so validation and use stay on the same file object. */
+/**
+ * Reads bytes from an already-open descriptor so validation and use stay on the same file object.
+ * @param fd Fd value.
+ * @param byteLength Byte length value.
+ * @returns Read bytes from an already-open descriptor so validation and use stay on the same file object.
+ */
 export function readFromOpenFile(fd: number, byteLength: number): Buffer {
     const buffer = Buffer.alloc(byteLength);
     let offset = 0;
@@ -324,24 +354,30 @@ export async function copyNoFollowGuarded(
     }
 }
 
-/** Opens a validated path for reading while refusing a final-component symlink. */
+/**
+ * Opens a validated path for reading while refusing a final-component symlink.
+ * @returns Promise resolving to the open read no follow guarded result.
+ */
 export async function openReadNoFollowGuarded(
     path: GuardedPath
 ): Promise<Fs.promises.FileHandle> {
     return Reflect.apply(fsPromiseOps.open, Fs.promises, [
         guardedPathBuffer(path),
         Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW,
-    ]) as Promise<Fs.promises.FileHandle>;
+    ]);
 }
 
-/** Opens a validated path for reading without blocking on special files. */
+/**
+ * Opens a validated path for reading without blocking on special files.
+ * @returns Promise resolving to the open read no follow nonblocking guarded result.
+ */
 export async function openReadNoFollowNonblockingGuarded(
     path: GuardedPath
 ): Promise<Fs.promises.FileHandle> {
     return Reflect.apply(fsPromiseOps.open, Fs.promises, [
         guardedPathBuffer(path),
         Fs.constants.O_RDONLY | Fs.constants.O_NOFOLLOW | Fs.constants.O_NONBLOCK,
-    ]) as Promise<Fs.promises.FileHandle>;
+    ]);
 }
 
 /** Writes UTF-8 text to a validated path. */
@@ -452,8 +488,8 @@ export async function writeTextNoFollowAnchoredGuarded(
     if (options.createParents) {
         mkdirGuarded(root, { recursive: true });
     }
-    const destinationPath = Path.join(root as string, relativePath);
-    assertNoSymlinkAncestors(root as string, destinationPath);
+    const destinationPath = Path.join(root, relativePath);
+    assertNoSymlinkAncestors(root, destinationPath);
     if (process.platform !== "linux") {
         validateRelativePath(relativePath);
         if (options.createParents) {
@@ -588,12 +624,18 @@ export async function writeTextNoFollowExclusiveGuarded(
     }
 }
 
-/** Stats a validated path. */
+/**
+ * Stats a validated path.
+ * @returns Stat guarded result.
+ */
 export function statGuarded(path: GuardedPath): Fs.Stats {
     return statSync(guardedPathBuffer(path));
 }
 
-/** Stats a validated path without following the final component. */
+/**
+ * Stats a validated path without following the final component.
+ * @returns Lstat guarded result.
+ */
 export function lstatGuarded(path: GuardedPath): Fs.Stats {
     return lstatSync(guardedPathBuffer(path));
 }

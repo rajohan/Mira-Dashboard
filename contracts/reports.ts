@@ -1,238 +1,132 @@
+import * as v from "valibot";
+
 import {
-    assertContractKeys,
-    contractEnum,
-    contractFiniteNumber,
-    contractPositiveInteger,
-    contractRecord,
-    contractString,
-    invalidContract,
-    optionalContractBoolean,
-    optionalContractString,
+    jsonObjectSchema,
+    nonNegativeIntegerSchema,
+    parseContract,
+    positiveIntegerSchema,
+    strictJsonObjectSchema,
+    successLiteralSchema,
 } from "./runtime";
 
-export type ReportType = "daily_brief" | "daily_summary" | "heartbeat" | "custom";
-export type ReportStatus = "ok" | "warning" | "error";
+export const REPORT_TYPES = [
+    "daily_brief",
+    "daily_summary",
+    "heartbeat",
+    "custom",
+] as const;
+export const REPORT_STATUSES = ["ok", "warning", "error"] as const;
 
-export interface Report {
-    bodyMd: string;
-    createdAt: string;
-    dedupeKey?: string;
-    id: number;
-    metadata: Record<string, unknown>;
-    occurredAt: string;
-    source?: string;
-    sourceJobId?: string;
-    status: ReportStatus;
-    summary: string;
-    title: string;
-    type: ReportType;
-    updatedAt: string;
-}
+export const reportTypeSchema = v.picklist(REPORT_TYPES);
+export const reportStatusSchema = v.picklist(REPORT_STATUSES);
 
-export interface CreateReportInput {
-    bodyMd: string;
-    dedupeKey?: string;
-    metadata?: Record<string, unknown>;
-    notify?: boolean;
-    occurredAt?: string;
-    source?: string;
-    sourceJobId?: string;
-    status?: ReportStatus;
-    summary?: string;
-    title: string;
-    type: ReportType;
-}
+const trimmedNonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
+const nonBlankStringSchema = v.pipe(
+    v.string(),
+    v.check((value) => value.trim().length > 0, "must not be blank")
+);
+const normalizedTimestampSchema = v.pipe(
+    v.string(),
+    v.check((value) => !Number.isNaN(Date.parse(value)), "must be a valid timestamp"),
+    v.transform((value) => new Date(value).toISOString())
+);
 
-export interface ReportsFilters {
-    status?: ReportStatus;
-    type?: ReportType;
-}
+export const reportSchema = v.strictObject({
+    bodyMd: v.string(),
+    createdAt: nonBlankStringSchema,
+    dedupeKey: v.optional(v.string()),
+    id: positiveIntegerSchema,
+    metadata: jsonObjectSchema,
+    occurredAt: nonBlankStringSchema,
+    source: v.optional(v.string()),
+    sourceJobId: v.optional(v.string()),
+    status: reportStatusSchema,
+    summary: v.string(),
+    title: v.string(),
+    type: reportTypeSchema,
+    updatedAt: nonBlankStringSchema,
+});
 
-export interface ReportsResponse {
-    items: Report[];
-}
+const reportCreateRequestSchema = strictJsonObjectSchema({
+    bodyMd: nonBlankStringSchema,
+    dedupeKey: v.optional(trimmedNonEmptyStringSchema),
+    metadata: v.optional(jsonObjectSchema),
+    notify: v.optional(v.boolean()),
+    occurredAt: v.optional(normalizedTimestampSchema),
+    source: v.optional(trimmedNonEmptyStringSchema),
+    sourceJobId: v.optional(trimmedNonEmptyStringSchema),
+    status: v.optional(reportStatusSchema),
+    summary: v.optional(trimmedNonEmptyStringSchema),
+    title: trimmedNonEmptyStringSchema,
+    type: reportTypeSchema,
+});
 
-export interface ReportResponse {
-    report: Report;
-}
+export const reportCreateInputSchema = v.pipe(
+    reportCreateRequestSchema,
+    v.transform((input) => ({
+        ...input,
+        status: input.status ?? ("ok" as const),
+    }))
+);
 
-export interface CreateReportResponse extends ReportResponse {
-    isOk: true;
-}
+export const reportsFiltersSchema = v.strictObject({
+    status: v.optional(reportStatusSchema),
+    type: v.optional(reportTypeSchema),
+});
 
-export interface DeleteReportResponse {
-    deleted: number;
-    isOk: true;
-}
+export const reportsResponseSchema = v.strictObject({
+    items: v.array(reportSchema),
+});
 
-const REPORT_TYPES = ["daily_brief", "daily_summary", "heartbeat", "custom"] as const;
-const REPORT_STATUSES = ["ok", "warning", "error"] as const;
+export const reportResponseSchema = v.strictObject({
+    report: reportSchema,
+});
 
-function optionalTrimmedString(value: unknown, path: string): string | undefined {
-    if (value === undefined) return undefined;
-    const parsed = contractString(value, path, {
-        allowEmpty: true,
-        trim: true,
-    });
-    return parsed || undefined;
-}
+export const reportCreateResponseSchema = v.strictObject({
+    isOk: successLiteralSchema,
+    report: reportSchema,
+});
 
-/** Parses report creation for both automation and browser callers. */
+export const reportDeleteResponseSchema = v.strictObject({
+    deleted: nonNegativeIntegerSchema,
+    isOk: successLiteralSchema,
+});
+
+export type ReportType = v.InferOutput<typeof reportTypeSchema>;
+export type ReportStatus = v.InferOutput<typeof reportStatusSchema>;
+export type Report = v.InferOutput<typeof reportSchema>;
+export type CreateReportInput = v.InferOutput<typeof reportCreateInputSchema>;
+export type ReportsFilters = v.InferOutput<typeof reportsFiltersSchema>;
+export type ReportsResponse = v.InferOutput<typeof reportsResponseSchema>;
+export type ReportResponse = v.InferOutput<typeof reportResponseSchema>;
+export type CreateReportResponse = v.InferOutput<typeof reportCreateResponseSchema>;
+export type DeleteReportResponse = v.InferOutput<typeof reportDeleteResponseSchema>;
+
+/**
+ * Parses report creation for both automation and browser callers.
+ * @param value Value to process.
+ * @returns Parsed report creation for both automation and browser callers.
+ */
 export function parseCreateReportInput(value: unknown): CreateReportInput {
-    const input = contractRecord(value);
-    assertContractKeys(
-        input,
-        [
-            "bodyMd",
-            "dedupeKey",
-            "metadata",
-            "notify",
-            "occurredAt",
-            "source",
-            "sourceJobId",
-            "status",
-            "summary",
-            "title",
-            "type",
-        ],
-        "body"
-    );
-    const metadata =
-        input.metadata === undefined
-            ? undefined
-            : contractRecord(input.metadata, "body.metadata");
-    const notify = optionalContractBoolean(input.notify, "body.notify");
-    const occurredAt = optionalContractString(input.occurredAt, "body.occurredAt");
-    if (occurredAt !== undefined && Number.isNaN(Date.parse(occurredAt))) {
-        return invalidContract("body.occurredAt", "must be a valid timestamp");
-    }
-    const status =
-        input.status === undefined || input.status === ""
-            ? "ok"
-            : contractEnum(input.status, REPORT_STATUSES, "body.status");
-    const optionalStrings = {
-        dedupeKey: optionalTrimmedString(input.dedupeKey, "body.dedupeKey"),
-        source: optionalTrimmedString(input.source, "body.source"),
-        sourceJobId: optionalTrimmedString(input.sourceJobId, "body.sourceJobId"),
-        summary: optionalTrimmedString(input.summary, "body.summary"),
-    };
-    return {
-        bodyMd: contractString(input.bodyMd, "body.bodyMd", { trim: false }),
-        status,
-        title: contractString(input.title, "body.title"),
-        type: contractEnum(input.type, REPORT_TYPES, "body.type"),
-        ...(optionalStrings.dedupeKey !== undefined && {
-            dedupeKey: optionalStrings.dedupeKey,
-        }),
-        ...(metadata !== undefined && { metadata }),
-        ...(notify !== undefined && { notify }),
-        ...(occurredAt !== undefined && {
-            occurredAt: new Date(occurredAt).toISOString(),
-        }),
-        ...(optionalStrings.source !== undefined && {
-            source: optionalStrings.source,
-        }),
-        ...(optionalStrings.sourceJobId !== undefined && {
-            sourceJobId: optionalStrings.sourceJobId,
-        }),
-        ...(optionalStrings.summary !== undefined && {
-            summary: optionalStrings.summary,
-        }),
-    };
+    return parseContract(reportCreateInputSchema, value);
 }
 
 export function parseReportResponseValue(value: unknown, path = "response"): Report {
-    const input = contractRecord(value, path);
-    const metadata = contractRecord(input.metadata, `${path}.metadata`);
-    const optionalStrings = {
-        dedupeKey: optionalContractString(input.dedupeKey, `${path}.dedupeKey`, {
-            allowEmpty: true,
-            trim: false,
-        }),
-        source: optionalContractString(input.source, `${path}.source`, {
-            allowEmpty: true,
-            trim: false,
-        }),
-        sourceJobId: optionalContractString(input.sourceJobId, `${path}.sourceJobId`, {
-            allowEmpty: true,
-            trim: false,
-        }),
-    };
-    return {
-        bodyMd: contractString(input.bodyMd, `${path}.bodyMd`, {
-            allowEmpty: true,
-            trim: false,
-        }),
-        createdAt: contractString(input.createdAt, `${path}.createdAt`, {
-            trim: false,
-        }),
-        id: contractPositiveInteger(input.id, `${path}.id`),
-        metadata,
-        occurredAt: contractString(input.occurredAt, `${path}.occurredAt`, {
-            trim: false,
-        }),
-        status: contractEnum(input.status, REPORT_STATUSES, `${path}.status`),
-        summary: contractString(input.summary, `${path}.summary`, {
-            allowEmpty: true,
-            trim: false,
-        }),
-        title: contractString(input.title, `${path}.title`, {
-            allowEmpty: true,
-            trim: false,
-        }),
-        type: contractEnum(input.type, REPORT_TYPES, `${path}.type`),
-        updatedAt: contractString(input.updatedAt, `${path}.updatedAt`, {
-            trim: false,
-        }),
-        ...(optionalStrings.dedupeKey !== undefined && {
-            dedupeKey: optionalStrings.dedupeKey,
-        }),
-        ...(optionalStrings.source !== undefined && {
-            source: optionalStrings.source,
-        }),
-        ...(optionalStrings.sourceJobId !== undefined && {
-            sourceJobId: optionalStrings.sourceJobId,
-        }),
-    };
+    return parseContract(reportSchema, value, path);
 }
 
 export function parseReportsResponse(value: unknown): ReportsResponse {
-    const input = contractRecord(value, "response");
-    if (!Array.isArray(input.items)) {
-        return invalidContract("response.items", "must be an array");
-    }
-    return {
-        items: input.items.map((report, index) =>
-            parseReportResponseValue(report, `response.items[${index}]`)
-        ),
-    };
+    return parseContract(reportsResponseSchema, value, "response");
 }
 
 export function parseReportResponse(value: unknown): ReportResponse {
-    const input = contractRecord(value, "response");
-    return {
-        report: parseReportResponseValue(input.report, "response.report"),
-    };
+    return parseContract(reportResponseSchema, value, "response");
 }
 
 export function parseCreateReportResponse(value: unknown): CreateReportResponse {
-    const input = contractRecord(value, "response");
-    return {
-        isOk:
-            input.isOk === true ? true : invalidContract("response.isOk", "must be true"),
-        report: parseReportResponseValue(input.report, "response.report"),
-    };
+    return parseContract(reportCreateResponseSchema, value, "response");
 }
 
 export function parseDeleteReportResponse(value: unknown): DeleteReportResponse {
-    const input = contractRecord(value, "response");
-    const deleted = contractFiniteNumber(input.deleted, "response.deleted");
-    if (!Number.isSafeInteger(deleted) || deleted < 0) {
-        return invalidContract("response.deleted", "must be a non-negative integer");
-    }
-    return {
-        deleted,
-        isOk:
-            input.isOk === true ? true : invalidContract("response.isOk", "must be true"),
-    };
+    return parseContract(reportDeleteResponseSchema, value, "response");
 }

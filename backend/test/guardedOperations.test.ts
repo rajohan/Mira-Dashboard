@@ -1,8 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
 import {
     copyGuarded,
@@ -64,17 +63,15 @@ describe("guarded writes", () => {
         await fs.writeFile(target, "old");
         await fs.symlink(target, symlink);
 
-        await expect(
-            writeTextNoFollowGuarded(guardedPath(symlink), "new")
-        ).rejects.toThrow();
-        await expect(
+        expect(writeTextNoFollowGuarded(guardedPath(symlink), "new")).rejects.toThrow();
+        expect(
             writeTextNoFollowAnchoredGuarded(
                 guardedPath(testState.temporaryRoot),
                 "link.txt",
                 "new"
             )
         ).rejects.toThrow();
-        await expect(fs.readFile(target, "utf8")).resolves.toBe("old");
+        expect(fs.readFile(target, "utf8")).resolves.toBe("old");
     });
 
     it("rejects symlink root directories for anchored writes", async () => {
@@ -83,31 +80,28 @@ describe("guarded writes", () => {
         await fs.mkdir(realRoot);
         await fs.symlink(realRoot, rootLink);
 
-        await expect(
+        expect(
             writeTextNoFollowAnchoredGuarded(guardedPath(rootLink), "file.txt", "new")
         ).rejects.toMatchObject({ code: "ELOOP" });
     });
 
-    it.skipIf(process.platform === "win32")(
-        "rejects special-file destinations",
-        async () => {
-            const directFifo = path.join(testState.temporaryRoot, "direct.fifo");
-            const anchoredFifo = path.join(testState.temporaryRoot, "anchored.fifo");
-            makeFifo(directFifo);
-            makeFifo(anchoredFifo);
+    it("rejects special-file destinations", () => {
+        const directFifo = path.join(testState.temporaryRoot, "direct.fifo");
+        const anchoredFifo = path.join(testState.temporaryRoot, "anchored.fifo");
+        makeFifo(directFifo);
+        makeFifo(anchoredFifo);
 
-            await expect(
-                writeTextNoFollowGuarded(guardedPath(directFifo), "new")
-            ).rejects.toThrow();
-            await expect(
-                writeTextNoFollowAnchoredGuarded(
-                    guardedPath(testState.temporaryRoot),
-                    "anchored.fifo",
-                    "new"
-                )
-            ).rejects.toThrow();
-        }
-    );
+        expect(
+            writeTextNoFollowGuarded(guardedPath(directFifo), "new")
+        ).rejects.toThrow();
+        expect(
+            writeTextNoFollowAnchoredGuarded(
+                guardedPath(testState.temporaryRoot),
+                "anchored.fifo",
+                "new"
+            )
+        ).rejects.toThrow();
+    });
 
     it("preserves existing destination modes", async () => {
         const directFile = path.join(testState.temporaryRoot, "direct.txt");
@@ -124,8 +118,8 @@ describe("guarded writes", () => {
             "new"
         );
 
-        await expect(fs.readFile(directFile, "utf8")).resolves.toBe("new");
-        await expect(fs.readFile(anchoredFile, "utf8")).resolves.toBe("new");
+        expect(fs.readFile(directFile, "utf8")).resolves.toBe("new");
+        expect(fs.readFile(anchoredFile, "utf8")).resolves.toBe("new");
         expect(await modeOf(directFile)).toBe(0o640);
         expect(await modeOf(anchoredFile)).toBe(0o600);
     });
@@ -159,16 +153,16 @@ describe("guarded writes", () => {
         expect(asyncEntries.map((entry) => entry.name)).toContain("config.json5");
         expect(statGuarded(guardedPath(source)).isFile()).toBe(true);
         expect(lstatGuarded(guardedPath(source)).isFile()).toBe(true);
-        await expect(statGuardedAsync(guardedPath(source))).resolves.toMatchObject({
+        expect(statGuardedAsync(guardedPath(source))).resolves.toMatchObject({
             size: "hello guarded ops".length,
         });
-        await expect(readTextNoFollowGuarded(guardedPath(source))).resolves.toBe(
+        expect(readTextNoFollowGuarded(guardedPath(source))).resolves.toBe(
             "hello guarded ops"
         );
 
         const file = await openReadNoFollowNonblockingGuarded(guardedPath(source));
         try {
-            await expect(file.readFile("utf8")).resolves.toBe("hello guarded ops");
+            expect(file.readFile("utf8")).resolves.toBe("hello guarded ops");
         } finally {
             await file.close();
         }
@@ -177,25 +171,23 @@ describe("guarded writes", () => {
         expect(readTextGuarded(guardedPath(copied))).toBe("hello guarded ops");
 
         await copyNoFollowGuarded(guardedPath(source), guardedPath(copiedNoFollow));
-        await expect(fs.readFile(copiedNoFollow, "utf8")).resolves.toBe(
-            "hello guarded ops"
-        );
+        expect(fs.readFile(copiedNoFollow, "utf8")).resolves.toBe("hello guarded ops");
         expect(await modeOf(copiedNoFollow)).toBe(0o640);
-        await expect(
+        expect(
             copyNoFollowGuarded(guardedPath(source), guardedPath(source))
         ).rejects.toMatchObject({ code: "EINVAL" });
 
         await writeTextGuarded(guardedPath(copied), "rewritten");
-        await expect(fs.readFile(copied, "utf8")).resolves.toBe("rewritten");
+        expect(fs.readFile(copied, "utf8")).resolves.toBe("rewritten");
 
         await writeTextNoFollowExclusiveGuarded(
             guardedPath(exclusive),
             "exclusive",
             0o600
         );
-        await expect(fs.readFile(exclusive, "utf8")).resolves.toBe("exclusive");
+        expect(fs.readFile(exclusive, "utf8")).resolves.toBe("exclusive");
         expect(await modeOf(exclusive)).toBe(0o600);
-        await expect(
+        expect(
             writeTextNoFollowExclusiveGuarded(guardedPath(exclusive), "again")
         ).rejects.toMatchObject({ code: "EEXIST" });
     });

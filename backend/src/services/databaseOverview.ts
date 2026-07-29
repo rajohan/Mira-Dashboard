@@ -92,7 +92,11 @@ interface PgBouncerStatsRow {
     total_sent: string;
 }
 
-/** Parses tab-delimited psql --no-align output into typed row objects; blank/header-only output returns an empty array. */
+/**
+ * Parses tab-delimited psql --no-align output into typed row objects; blank/header-only output returns an empty array.
+ * @param output Output value.
+ * @returns Parsed tab-delimited psql --no-align output into typed row objects; blank/header-only output returns an empty array.
+ */
 function parseTable<T extends object>(output: string): T[] {
     const trimmed = output.trim();
     if (!trimmed) {
@@ -117,17 +121,32 @@ function parseTable<T extends object>(output: string): T[] {
     });
 }
 
-/** Returns a string value or a fallback using the route's existing falsy-value behavior. */
+/**
+ * Returns a string value or a fallback using the route's existing falsy-value behavior.
+ * @param value Value to process.
+ * @param fallback Fallback value.
+ * @returns a string value or a fallback using the route's existing falsy-value behavior.
+ */
 function stringWithDefault(value: string | undefined, fallback: string): string {
     return value || fallback;
 }
 
-/** Converts psql numeric text to a number, preserving the existing falsy-to-zero behavior. */
+/**
+ * Converts psql numeric text to a number, preserving the existing falsy-to-zero behavior.
+ * @param value Value to process.
+ * @returns Converted psql numeric text to a number, preserving the existing falsy-to-zero behavior.
+ */
 function numberFrom(value: string | undefined): number {
     return Number(value || 0);
 }
 
-/** Runs a command inside a Docker container and returns raw stdout. */
+/**
+ * Runs a command inside a Docker container and returns raw stdout.
+ * @param container Container value.
+ * @param command Command value.
+ * @param environment Environment value.
+ * @returns Promise resolving to the run docker exec result.
+ */
 async function runDockerExec(
     container: string,
     command: string[],
@@ -153,18 +172,32 @@ async function runDockerExec(
     return stdout;
 }
 
-/** Returns trimmed environment overrides while treating whitespace-only values as missing. */
+/**
+ * Returns trimmed environment overrides while treating whitespace-only values as missing.
+ * @param value Value to process.
+ * @returns trimmed environment overrides while treating whitespace-only values as missing.
+ */
 function trimmedEnvironmentValue(value: string | undefined): string | undefined {
     const trimmed = value?.trim() ?? "";
     return trimmed === "" ? undefined : trimmed;
 }
 
-/** Returns a fallback only when the value is absent, preserving intentional blanks. */
+/**
+ * Returns a fallback only when the value is absent, preserving intentional blanks.
+ * @param value Value to process.
+ * @param fallback Fallback value.
+ * @returns a fallback only when the value is absent, preserving intentional blanks.
+ */
 function environmentValueOrDefault(value: string | undefined, fallback: string): string {
     return value === undefined ? fallback : value;
 }
 
-/** Returns a safe PostgreSQL hostname for URI construction. */
+/**
+ * Returns a safe PostgreSQL hostname for URI construction.
+ * @param value Value to process.
+ * @param fallback Fallback value.
+ * @returns a safe PostgreSQL hostname for URI construction.
+ */
 function normalizePostgresHost(value: string | undefined, fallback: string): string {
     const host = trimmedEnvironmentValue(value) ?? fallback;
     const isValidIpv4 =
@@ -188,7 +221,11 @@ function normalizePostgresHost(value: string | undefined, fallback: string): str
     return isRawIpv6 ? `[${host}]` : host;
 }
 
-/** Returns a safe PostgreSQL port for URI construction. */
+/**
+ * Returns a safe PostgreSQL port for URI construction.
+ * @param value Value to process.
+ * @returns a safe PostgreSQL port for URI construction.
+ */
 function normalizePostgresPort(value: string | undefined): string {
     const port = trimmedEnvironmentValue(value) ?? "5432";
     if (!/^\d+$/u.test(port)) {
@@ -206,7 +243,11 @@ interface PostgresConnection {
     uri: string;
 }
 
-/** Builds PostgreSQL connection details from environment defaults for the requested database. */
+/**
+ * Builds PostgreSQL connection details from environment defaults for the requested database.
+ * @param database Database value.
+ * @returns Built PostgreSQL connection details from environment defaults for the requested database.
+ */
 function buildPostgresConnection(database = "postgres"): PostgresConnection {
     const username = encodeURIComponent(
         environmentValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
@@ -218,7 +259,11 @@ function buildPostgresConnection(database = "postgres"): PostgresConnection {
     return { password, uri: `postgresql://${username}@${host}:${port}/${database_}` };
 }
 
-/** Builds PgBouncer admin connection details from environment defaults. */
+/**
+ * Builds PgBouncer admin connection details from environment defaults.
+ * @param database Database value.
+ * @returns Built PgBouncer admin connection details from environment defaults.
+ */
 function buildPgBouncerConnection(database = "pgbouncer"): PostgresConnection {
     const username = encodeURIComponent(
         environmentValueOrDefault(process.env.DATABASE_USERNAME, "postgres")
@@ -230,7 +275,12 @@ function buildPgBouncerConnection(database = "pgbouncer"): PostgresConnection {
     return { password, uri: `postgresql://${username}@${host}:${port}/${database_}` };
 }
 
-/** Executes SQL against Postgres through the postgres container and returns tab-delimited stdout. */
+/**
+ * Executes SQL against Postgres through the postgres container and returns tab-delimited stdout.
+ * @param sql Sql value.
+ * @param database Database value.
+ * @returns Promise resolving to the query postgres result.
+ */
 async function queryPostgres(sql: string, database = "postgres") {
     const connection = buildPostgresConnection(database);
     return runDockerExec(
@@ -242,7 +292,11 @@ async function queryPostgres(sql: string, database = "postgres") {
     );
 }
 
-/** Executes SQL against the PgBouncer admin database and returns tab-delimited stdout. */
+/**
+ * Executes SQL against the PgBouncer admin database and returns tab-delimited stdout.
+ * @param sql Sql value.
+ * @returns Promise resolving to the query pg bouncer result.
+ */
 async function queryPgBouncer(sql: string) {
     const connection = buildPgBouncerConnection();
     return runDockerExec(
@@ -254,7 +308,12 @@ async function queryPgBouncer(sql: string) {
     );
 }
 
-/** Sums numeric values selected from a row collection. */
+/**
+ * Sums numeric values selected from a row collection.
+ * @param rows Rows value.
+ * @param selector Selector value.
+ * @returns Sum by result.
+ */
 function sumBy<T>(rows: T[], selector: (row: T) => number): number {
     let total = 0;
     for (const row of rows) {
@@ -263,7 +322,11 @@ function sumBy<T>(rows: T[], selector: (row: T) => number): number {
     return total;
 }
 
-/** Runs a SQL query against every connectable non-template database and concatenates parsed rows. */
+/**
+ * Runs a SQL query against every connectable non-template database and concatenates parsed rows.
+ * @param sql Sql value.
+ * @returns Promise resolving to the query all user databases result.
+ */
 async function queryAllUserDatabases<T extends object>(
     sql: string
 ): Promise<Array<T & { database: string }>> {
@@ -287,7 +350,10 @@ async function queryAllUserDatabases<T extends object>(
     return results;
 }
 
-/** Returns current torrent counts for Comet and Bitmagnet. */
+/**
+ * Returns current torrent counts for Comet and Bitmagnet.
+ * @returns current torrent counts for Comet and Bitmagnet.
+ */
 async function getTorrentCounts() {
     const [cometOutput, bitmagnetOutput] = await Promise.all([
         queryPostgres("SELECT count(*)::text AS count FROM torrents;", "comet"),
@@ -305,7 +371,10 @@ async function getTorrentCounts() {
     return { comet: numberFrom(cometCount), bitmagnet: numberFrom(bitmagnetCount) };
 }
 
-/** Collects PostgreSQL and PgBouncer metrics used by the database overview endpoint. */
+/**
+ * Collects PostgreSQL and PgBouncer metrics used by the database overview endpoint.
+ * @returns Database overview value.
+ */
 export async function getDatabaseOverview() {
     const torrentCounts = await getTorrentCounts();
 
@@ -331,7 +400,7 @@ export async function getDatabaseOverview() {
               AND datname NOT IN ('template0', 'template1', 'postgres')
             ORDER BY pg_database_size(datname) DESC;
         `)
-    ) as PostgresDatabaseRow[];
+    );
 
     const connectionRows = parseTable<ConnectionCountsRow>(
         await queryPostgres(`
@@ -341,7 +410,7 @@ export async function getDatabaseOverview() {
             GROUP BY COALESCE(state, 'unknown')
             ORDER BY COUNT(*) DESC;
         `)
-    ) as ConnectionCountsRow[];
+    );
 
     const allDeadTupleRows = await queryAllUserDatabases<DeadTupleRow>(`
         WITH table_estimates AS (
@@ -485,7 +554,7 @@ export async function getDatabaseOverview() {
     `);
     const pgStatStatementsEnabled = pgStatStatementsResult.includes("pg_stat_statements");
     const topQueries = pgStatStatementsEnabled
-        ? (parseTable<TopQueryRow>(
+        ? parseTable<TopQueryRow>(
               await queryPostgres(String.raw`
                 SELECT
                     regexp_replace(query, '\s+', ' ', 'g') AS query,
@@ -499,7 +568,7 @@ export async function getDatabaseOverview() {
                 ORDER BY total_exec_time DESC
                 LIMIT 20;
             `)
-          ) as TopQueryRow[])
+          )
         : [];
     const slowQueryCount = topQueries.filter(
         (query) => numberFrom(query.mean_exec_time) >= SLOW_QUERY_MEAN_MS
@@ -561,6 +630,10 @@ export async function getDatabaseOverview() {
             : 0;
     const sqlite = getDashboardSqliteOverview();
 
+    let maintenanceStatus = isBloatAssessmentIncomplete ? "not_assessed" : "healthy";
+    if (maintenanceHintCount > 0) {
+        maintenanceStatus = "review";
+    }
     return {
         overview: {
             totalDatabaseSizeBytes,
@@ -580,12 +653,7 @@ export async function getDatabaseOverview() {
                 avgTransactionTime,
             },
             maintenance: {
-                status:
-                    maintenanceHintCount > 0
-                        ? "review"
-                        : isBloatAssessmentIncomplete
-                          ? "not_assessed"
-                          : "healthy",
+                status: maintenanceStatus,
                 hintCount: maintenanceHintCount,
                 requiresBloatReview,
                 isBloatAssessmentIncomplete,
@@ -643,7 +711,11 @@ function isDatabaseOverviewSnapshot(value: unknown): value is DatabaseOverviewSn
     );
 }
 
-/** Refreshes only the isolated Dashboard SQLite metrics while retaining copied host data. */
+/**
+ * Refreshes only the isolated Dashboard SQLite metrics while retaining copied host data.
+ * @param snapshot Snapshot value.
+ * @returns Isolated database overview value.
+ */
 export function getIsolatedDatabaseOverview(snapshot: unknown) {
     const sqlite = getDashboardSqliteOverview();
     const previous: DatabaseOverviewSnapshot = isDatabaseOverviewSnapshot(snapshot)

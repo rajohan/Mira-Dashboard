@@ -6,7 +6,10 @@ const READ_RETENTION_DAYS = 14;
 const MAX_READ_ITEMS = 300;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
-/** Performs prune read notifications. */
+/**
+ * Performs prune read notifications.
+ * @returns Prune read notifications result.
+ */
 export function pruneReadNotifications(
     databaseConnection: Database = database,
     now = new Date()

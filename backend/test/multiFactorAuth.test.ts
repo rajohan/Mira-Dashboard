@@ -1,5 +1,6 @@
-import type { Server } from "bun";
 import { afterEach, describe, expect, it } from "bun:test";
+
+import type { Server } from "bun";
 import { generate } from "otplib";
 
 import {
@@ -81,6 +82,23 @@ function accountSecurityRequest(
     });
 }
 
+function successfulPolicyHandler(request: Request, server: Server<unknown>): Response {
+    void request;
+    void server;
+    return Response.json({ isOk: true });
+}
+
+function privilegedBrowserRequest(sessionToken: string): Request {
+    return new Request("https://dashboard.example/api/restart", {
+        headers: {
+            cookie: `mira_dashboard_session=${encodeURIComponent(sessionToken)}`,
+            origin: "https://dashboard.example",
+            "sec-fetch-site": "same-origin",
+        },
+        method: "POST",
+    });
+}
+
 afterEach(() => {
     resetRequestPolicyForTests();
     database.prepare("DELETE FROM auth_rate_limit_buckets").run();
@@ -148,7 +166,7 @@ describe("Dashboard multi-factor authentication", () => {
     it("encrypts TOTP seeds, hashes recovery codes, and rejects replay", async () => {
         configureMfaEncryption();
         const user = await createUser(`${USER_PREFIX}totp`, "initial-password");
-        const enrollment = await createTotpEnrollment(
+        const enrollment = createTotpEnrollment(
             user.id,
             user.username,
             "Authenticator app"
@@ -439,7 +457,7 @@ describe("Dashboard multi-factor authentication", () => {
             accountSecurityRequest("/api/account/security", cookie),
             server
         );
-        await expect(summary.json()).resolves.toMatchObject({
+        expect(summary.json()).resolves.toMatchObject({
             factors: {
                 recoveryCodesRemaining: 10,
                 totpFactors: [
@@ -516,31 +534,17 @@ describe("Dashboard multi-factor authentication", () => {
                 port: 31_000,
             }),
         } as unknown as Server<unknown>;
-        const handler = (request: Request, server: Server<unknown>) => {
-            void request;
-            void server;
-            return Response.json({ isOk: true });
-        };
         const routes = withRequestPolicy({
-            "/api/restart": { POST: handler },
+            "/api/restart": { POST: successfulPolicyHandler },
         });
-        const request = (sessionToken: string) =>
-            new Request("https://dashboard.example/api/restart", {
-                headers: {
-                    cookie: `mira_dashboard_session=${encodeURIComponent(sessionToken)}`,
-                    origin: "https://dashboard.example",
-                    "sec-fetch-site": "same-origin",
-                },
-                method: "POST",
-            });
 
         const passwordSession = createSession(user.id);
         const enrollmentRequired = await routes["/api/restart"].POST(
-            request(passwordSession),
+            privilegedBrowserRequest(passwordSession),
             server
         );
         expect(enrollmentRequired.status).toBe(403);
-        await expect(enrollmentRequired.json()).resolves.toMatchObject({
+        expect(enrollmentRequired.json()).resolves.toMatchObject({
             error: {
                 code: "mfa_enrollment_required",
                 message: "Multi-factor authentication must be enabled",
@@ -560,9 +564,12 @@ describe("Dashboard multi-factor authentication", () => {
             authMethod: "webauthn",
             mfaVerifiedAt: new Date(Date.now() - 11 * 60_000).toISOString(),
         });
-        const stale = await routes["/api/restart"].POST(request(staleSession), server);
+        const stale = await routes["/api/restart"].POST(
+            privilegedBrowserRequest(staleSession),
+            server
+        );
         expect(stale.status).toBe(403);
-        await expect(stale.json()).resolves.toMatchObject({
+        expect(stale.json()).resolves.toMatchObject({
             error: {
                 code: "step_up_required",
                 message: "Recent MFA verification is required",
@@ -575,7 +582,7 @@ describe("Dashboard multi-factor authentication", () => {
             mfaVerifiedAt: timestamp,
         });
         const accepted = await routes["/api/restart"].POST(
-            request(verifiedSession),
+            privilegedBrowserRequest(verifiedSession),
             server
         );
         expect(accepted.status).toBe(200);
@@ -763,7 +770,7 @@ describe("Dashboard multi-factor authentication", () => {
                 { id: "duplicate", token: CONFIG_REDACTION_SENTINEL },
                 { id: "duplicate", token: CONFIG_REDACTION_SENTINEL },
                 { id: "", token: CONFIG_REDACTION_SENTINEL },
-                { id: NaN, token: CONFIG_REDACTION_SENTINEL },
+                { id: Number.NaN, token: CONFIG_REDACTION_SENTINEL },
                 { label: "position-only", token: CONFIG_REDACTION_SENTINEL },
                 [CONFIG_REDACTION_SENTINEL],
                 undefined,

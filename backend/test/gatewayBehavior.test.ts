@@ -1,8 +1,7 @@
+import { afterEach, describe, expect, it, jest } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
-import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { OpenClawChatBridge } from "../src/chat/openClawChatBridge.ts";
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
@@ -11,6 +10,8 @@ import type {
     OpenClawGatewayClientOptions,
     OpenClawGatewayRequestOptions,
 } from "../src/lib/openclawGatewayClient.ts";
+import { structuredLog } from "../src/lib/structuredLogger.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const cleanupCallbacks: Array<() => void> = [];
 const fakeClients: FakeOpenClawGatewayClient[] = [];
@@ -34,6 +35,7 @@ function createTemporaryRoot(prefix: string): string {
 
 function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<void> {
     const deadline = Date.now() + timeoutMilliseconds;
+    const timeoutError = new Error("Timed out waiting for gateway test condition");
     return new Promise((resolve, reject) => {
         const tick = () => {
             try {
@@ -42,11 +44,15 @@ function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<vo
                     return;
                 }
             } catch (error) {
-                reject(error);
+                reject(
+                    error instanceof Error
+                        ? error
+                        : new Error("Gateway test condition failed", { cause: error })
+                );
                 return;
             }
             if (Date.now() > deadline) {
-                reject(new Error("Timed out waiting for gateway test condition"));
+                reject(timeoutError);
                 return;
             }
             setTimeout(tick, 10);
@@ -64,8 +70,10 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
     isStarted = false;
     isStopped = false;
     closeOnStop = false;
+    readonly options: OpenClawGatewayClientOptions;
 
-    constructor(readonly options: OpenClawGatewayClientOptions) {
+    constructor(options: OpenClawGatewayClientOptions) {
+        this.options = options;
         fakeClients.push(this);
     }
 
@@ -80,123 +88,125 @@ class FakeOpenClawGatewayClient implements OpenClawGatewayClientInstance {
         }
     }
 
-    async request(
+    request(
         method: string,
         parameters?: unknown,
         options?: OpenClawGatewayRequestOptions
     ): Promise<unknown> {
-        const requestParameters =
-            parameters && typeof parameters === "object"
-                ? (parameters as Record<string, unknown>)
-                : {};
-        this.requests.push({ method, options, parameters: requestParameters });
-        if (method === "sessions.list") {
-            return {
-                defaults: {
-                    contextTokens: 32_000,
-                    model: "openai/gpt-test",
-                    modelProvider: "openai",
-                    fastMode: true,
-                    thinkingDefault: "minimal",
-                    thinkingLevels: [
-                        { id: "minimal", label: "minimal" },
-                        { id: "high", label: "high" },
-                    ],
-                    thinkingOptions: ["minimal", "high"],
-                },
-                sessions: [
-                    {
-                        activeRunId: "run-1",
-                        hasActiveRun: true,
-                        channel: "main",
-                        contextTokens: 20_000,
-                        displayName: "Main",
-                        key: "agent:main:main",
-                        kind: "chat",
-                        label: "",
+        return Promise.try(() => {
+            const requestParameters =
+                parameters && typeof parameters === "object"
+                    ? (parameters as Record<string, unknown>)
+                    : {};
+            this.requests.push({ method, options, parameters: requestParameters });
+            if (method === "sessions.list") {
+                return {
+                    defaults: {
+                        contextTokens: 32_000,
                         model: "openai/gpt-test",
                         modelProvider: "openai",
-                        sessionId: "sess1",
-                        status: "running",
-                        thinkingDefault: "low",
-                        thinkingLevel: "medium",
+                        fastMode: true,
+                        thinkingDefault: "minimal",
                         thinkingLevels: [
-                            { id: "low", label: "low" },
-                            { id: "medium", label: "medium" },
+                            { id: "minimal", label: "minimal" },
+                            { id: "high", label: "high" },
                         ],
-                        thinkingOptions: ["low", "medium"],
-                        fastMode: "auto",
-                        effectiveFastMode: true,
-                        totalTokens: 42,
-                        totalTokensFresh: false,
-                        updatedAt: "2026-06-25T00:00:00.000Z",
+                        thinkingOptions: ["minimal", "high"],
                     },
-                    {
-                        key: "agent:researcher:subagent:abc",
-                        label: "",
-                        model: "anthropic/claude-test",
-                        sessionId: "sess2",
-                        updatedAt: 1_782_345_600_000,
-                    },
-                    {
-                        key: "agent:other:subagent:same-model",
-                        label: "",
-                        model: "openai/gpt-test",
-                        modelProvider: "openrouter",
-                        sessionId: "sess-provider-mismatch",
-                        updatedAt: 1_782_345_550_000,
-                    },
-                    {
-                        key: "agent:legacy:subagent:options-only",
-                        label: "",
-                        model: "openai/gpt-test",
-                        modelProvider: "openai",
-                        sessionId: "sess-options-only",
-                        thinkingOptions: ["off", "on"],
-                        updatedAt: 1_782_345_525_000,
-                    },
-                    {
-                        key: "agent:main:hook:deploy",
-                        model: "",
-                        modelProvider: "",
-                        sessionId: "sess3",
-                        thinkingLevels: [],
-                        thinkingOptions: [],
-                        updatedAt: 1_782_345_500_000,
-                    },
-                    { key: "", sessionId: "", updatedAt: "invalid" },
-                ],
-            };
-        }
-        if (method === "sessions.subscribe") {
-            return { isOk: true };
-        }
-        if (method === "chat.send") {
-            if (requestParameters.message === "fail chat") {
-                throw new Error("chat send rejected");
+                    sessions: [
+                        {
+                            activeRunId: "run-1",
+                            hasActiveRun: true,
+                            channel: "main",
+                            contextTokens: 20_000,
+                            displayName: "Main",
+                            key: "agent:main:main",
+                            kind: "chat",
+                            label: "",
+                            model: "openai/gpt-test",
+                            modelProvider: "openai",
+                            sessionId: "sess1",
+                            status: "running",
+                            thinkingDefault: "low",
+                            thinkingLevel: "medium",
+                            thinkingLevels: [
+                                { id: "low", label: "low" },
+                                { id: "medium", label: "medium" },
+                            ],
+                            thinkingOptions: ["low", "medium"],
+                            fastMode: "auto",
+                            effectiveFastMode: true,
+                            totalTokens: 42,
+                            totalTokensFresh: false,
+                            updatedAt: "2026-06-25T00:00:00.000Z",
+                        },
+                        {
+                            key: "agent:researcher:subagent:abc",
+                            label: "",
+                            model: "anthropic/claude-test",
+                            sessionId: "sess2",
+                            updatedAt: 1_782_345_600_000,
+                        },
+                        {
+                            key: "agent:other:subagent:same-model",
+                            label: "",
+                            model: "openai/gpt-test",
+                            modelProvider: "openrouter",
+                            sessionId: "sess-provider-mismatch",
+                            updatedAt: 1_782_345_550_000,
+                        },
+                        {
+                            key: "agent:legacy:subagent:options-only",
+                            label: "",
+                            model: "openai/gpt-test",
+                            modelProvider: "openai",
+                            sessionId: "sess-options-only",
+                            thinkingOptions: ["off", "on"],
+                            updatedAt: 1_782_345_525_000,
+                        },
+                        {
+                            key: "agent:main:hook:deploy",
+                            model: "",
+                            modelProvider: "",
+                            sessionId: "sess3",
+                            thinkingLevels: [],
+                            thinkingOptions: [],
+                            updatedAt: 1_782_345_500_000,
+                        },
+                        { key: "", sessionId: "", updatedAt: "invalid" },
+                    ],
+                };
             }
-            return { runId: "acknowledged-run" };
-        }
-        if (method === "chat.history") {
-            return {
-                messages: [
-                    {
-                        content: [
-                            { text: "see image", type: "text" },
-                            { source: { omitted: true }, type: "image" },
-                        ],
-                        role: "assistant",
-                        timestamp: 1_782_345_600_000,
-                    },
-                ],
-                sessionId: "sess1",
-                sessionKey: "agent:main:main",
-            };
-        }
-        if (method === "demo.fail") {
-            throw new Error("gateway rejected");
-        }
-        return { echoed: { method, parameters: requestParameters } };
+            if (method === "sessions.subscribe") {
+                return { isOk: true };
+            }
+            if (method === "chat.send") {
+                if (requestParameters.message === "fail chat") {
+                    throw new Error("chat send rejected");
+                }
+                return { runId: "acknowledged-run" };
+            }
+            if (method === "chat.history") {
+                return {
+                    messages: [
+                        {
+                            content: [
+                                { text: "see image", type: "text" },
+                                { source: { omitted: true }, type: "image" },
+                            ],
+                            role: "assistant",
+                            timestamp: 1_782_345_600_000,
+                        },
+                    ],
+                    sessionId: "sess1",
+                    sessionKey: "agent:main:main",
+                };
+            }
+            if (method === "demo.fail") {
+                throw new Error("gateway rejected");
+            }
+            return { echoed: { method, parameters: requestParameters } };
+        });
     }
 }
 
@@ -309,7 +319,7 @@ describe("gateway behavior", () => {
         client?.options.onConnectError?.(new Error("gateway websocket error"));
         client?.options.onHelloOk?.({ type: "hello-ok" });
 
-        await expect(initPromise).resolves.toBeUndefined();
+        expect(initPromise).resolves.toBeUndefined();
         expect(gateway.isConnected()).toBe(true);
     });
 
@@ -345,7 +355,7 @@ describe("gateway behavior", () => {
             new Error("unauthorized: gateway token mismatch")
         );
 
-        await expect(initPromise).rejects.toThrow("gateway token mismatch");
+        expect(initPromise).rejects.toThrow("gateway token mismatch");
         expect(gateway.isConnected()).toBe(false);
     });
 
@@ -390,7 +400,7 @@ describe("gateway behavior", () => {
         client?.options.onHelloOk?.({ type: "hello-ok" });
         await waitFor(() => gateway.isConnected());
 
-        await expect(
+        expect(
             gateway.request("models.list", { sessionKey: "agent:main:main" })
         ).resolves.toBeDefined();
 
@@ -424,7 +434,7 @@ describe("gateway behavior", () => {
             message: "capture fails before forwarding",
             sessionKey: "agent:main:main",
         };
-        await expect(gateway.request("chat.send", uncapturedParameters)).rejects.toThrow(
+        expect(gateway.request("chat.send", uncapturedParameters)).rejects.toThrow(
             "unexpected replay boundary capture"
         );
         expect(failBoundary).not.toHaveBeenCalled();
@@ -451,7 +461,7 @@ describe("gateway behavior", () => {
                 type: "event",
             });
         cleanupCallbacks.push(() => handleSuccessfulRequest.mockRestore());
-        await expect(
+        expect(
             gateway.request("chat.send", {
                 message: "hello",
                 sessionKey: "agent:main:main",
@@ -468,7 +478,7 @@ describe("gateway behavior", () => {
             message: "fail chat",
             sessionKey: "agent:main:main",
         };
-        await expect(gateway.request("chat.send", failedParameters)).rejects.toThrow(
+        expect(gateway.request("chat.send", failedParameters)).rejects.toThrow(
             "chat send rejected"
         );
         expect(failBoundary).toHaveBeenCalledWith("chat.send", failedParameters, 0);
@@ -1245,10 +1255,10 @@ describe("gateway behavior", () => {
         });
 
         const { sessionRoutes } = await import("../src/routes/sessionRoutes.ts");
-        const filteredSessions = await sessionRoutes["/api/sessions/list"].GET(
+        const filteredSessions = sessionRoutes["/api/sessions/list"].GET(
             new Request("https://test.local/api/sessions/list?type=MAIN&model=gpt-test")
         );
-        await expect(filteredSessions.json()).resolves.toEqual({
+        expect(filteredSessions.json()).resolves.toEqual({
             sessions: [
                 expect.objectContaining({
                     key: "agent:main:main",
@@ -1258,8 +1268,8 @@ describe("gateway behavior", () => {
             ],
         });
 
-        const stats = await sessionRoutes["/api/sessions/stats"].GET();
-        await expect(stats.json()).resolves.toMatchObject({
+        const stats = sessionRoutes["/api/sessions/stats"].GET();
+        expect(stats.json()).resolves.toMatchObject({
             byModel: {
                 "anthropic/claude-test": 1,
                 "openai/gpt-test": 4,
@@ -1276,7 +1286,7 @@ describe("gateway behavior", () => {
         const compact = await sessionRoutes["/api/sessions/:id/action"].POST(
             sessionActionRequest("compact")
         );
-        await expect(compact.json()).resolves.toEqual({
+        expect(compact.json()).resolves.toEqual({
             action: "compact",
             isSuccess: true,
         });
@@ -1348,7 +1358,7 @@ describe("gateway behavior", () => {
         });
         const deleted =
             await sessionRoutes["/api/sessions/:id"].DELETE(sessionDeleteRequest());
-        await expect(deleted.json()).resolves.toMatchObject({
+        expect(deleted.json()).resolves.toMatchObject({
             isSuccess: true,
             result: { echoed: { method: "sessions.delete" } },
         });
@@ -1486,6 +1496,46 @@ describe("gateway behavior", () => {
                 .map((raw) => JSON.parse(raw) as { id?: string; isOk?: boolean })
                 .find((message) => message.id === "logs-unsubscribe")
         ).toMatchObject({ isOk: true });
+
+        const stderr = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+        socket.emitMessage({
+            id: "dashboard-logs-subscribe",
+            method: "subscribe",
+            params: { channel: "dashboard-logs" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"dashboard-logs-subscribe"'))
+        );
+        structuredLog("warn", "gateway.dashboard_log_stream_test");
+        await waitFor(() =>
+            socket.sent.some((raw) => {
+                const message = JSON.parse(raw) as {
+                    line?: string;
+                    type?: string;
+                };
+                if (message.type !== "dashboard_log" || !message.line) return false;
+                const event = JSON.parse(message.line) as { event?: string };
+                return event.event === "gateway.dashboard_log_stream_test";
+            })
+        );
+        socket.emitMessage({
+            id: "dashboard-logs-unsubscribe",
+            method: "unsubscribe",
+            params: { channel: "dashboard-logs" },
+            type: "request",
+        });
+        await waitFor(() =>
+            socket.sent.some((raw) => raw.includes('"id":"dashboard-logs-unsubscribe"'))
+        );
+        const streamedCount = socket.sent.filter((raw) =>
+            raw.includes('"type":"dashboard_log"')
+        ).length;
+        structuredLog("warn", "gateway.dashboard_log_stream_after_unsubscribe");
+        expect(
+            socket.sent.filter((raw) => raw.includes('"type":"dashboard_log"'))
+        ).toHaveLength(streamedCount);
+        stderr.mockRestore();
 
         socket.emitMessage({
             id: "fail-1",
@@ -1695,8 +1745,7 @@ describe("gateway behavior", () => {
             ],
         });
 
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
         try {
             client?.options.onConnectError?.(new Error("connect refused"));
             client?.options.onEvent?.({
@@ -1706,8 +1755,8 @@ describe("gateway behavior", () => {
             socket.emitRawMessage("{");
             socket.emitError(new Error("client socket exploded"));
             await waitFor(() =>
-                errorSpy.mock.calls.some((call) =>
-                    String(call[0]).includes("[Gateway] Client message error:")
+                structuredLogs.entries.some(
+                    (entry) => entry.event === "gateway.client_message_failed"
                 )
             );
             client?.options.onClose?.(1006, "lost");
@@ -1752,8 +1801,7 @@ describe("gateway behavior", () => {
                 ],
             });
         } finally {
-            errorSpy.mockRestore();
-            warnSpy.mockRestore();
+            structuredLogs.stop();
         }
 
         socket.close();

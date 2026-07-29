@@ -1,25 +1,25 @@
+import type { BackupType } from "../../../contracts/backups.ts";
 import { json } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { routeErrorResponse } from "../routeSupport.ts";
 import {
     clearPersistedBackupAttention,
     getPersistedBackupJob,
     queueManualBackup,
 } from "../services/backups.ts";
 
-type BackupType = "kopia" | "walg";
-
 function backupResponseError(error: unknown, fallback: string): Response {
-    return json(
-        { error: errorMessage(error, fallback) },
-        { status: httpStatusCode(error) }
-    );
+    return routeErrorResponse(undefined, error, {
+        code: "backup_request_failed",
+        context: "backup",
+        message: fallback,
+    });
 }
 
 function backupStatus(type: BackupType): Response {
     return json({ job: getPersistedBackupJob(type) });
 }
 
-async function runBackup(type: BackupType, fallback: string): Promise<Response> {
+function runBackup(type: BackupType, fallback: string): Response {
     try {
         return json({ isOk: true, job: queueManualBackup(type) });
     } catch (error) {

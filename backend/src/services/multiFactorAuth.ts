@@ -1,6 +1,12 @@
 import { generateSecret, generateURI, verify } from "otplib";
 
-import type { AuthMethod } from "../auth.ts";
+import type {
+    AccountSecuritySummary,
+    DashboardMfaMethod as MfaLoginMethod,
+    FactorConfirmation,
+    TotpEnrollment,
+    TotpFactor as TotpFactorSummary,
+} from "../../../contracts/accountSecurity.ts";
 import { database, sqlNullable } from "../database.ts";
 import {
     areTimingSafeHashesEqual,
@@ -24,8 +30,6 @@ const TOTP_TOKEN_PATTERN = /^\d{6}$/u;
 const FACTOR_ID_PATTERN = /^[0-9a-f-]{36}$/u;
 const MAX_FACTOR_LABEL_LENGTH = 64;
 const MAX_USER_AGENT_LENGTH = 512;
-
-export type MfaLoginMethod = Exclude<AuthMethod, "password">;
 
 interface PendingLoginRow {
     attempt_count: number;
@@ -69,41 +73,7 @@ export interface PendingLogin {
     username: string;
 }
 
-export interface TotpFactorSummary {
-    confirmedAt: string;
-    createdAt: string;
-    id: string;
-    label: string;
-}
-
-export interface WebAuthnFactorSummary {
-    backedUp: boolean;
-    createdAt: string;
-    deviceType: "multiDevice" | "singleDevice";
-    id: string;
-    label: string;
-    lastUsedAt?: string;
-}
-
-export interface MultiFactorSummary {
-    enabledAt?: string;
-    methods: MfaLoginMethod[];
-    recoveryCodesRemaining: number;
-    totpFactors: TotpFactorSummary[];
-    webAuthnCredentials: WebAuthnFactorSummary[];
-}
-
-export interface TotpEnrollment {
-    factorId: string;
-    label: string;
-    otpauthUri: string;
-    secret: string;
-}
-
-export interface FactorConfirmation {
-    enabledMfa: boolean;
-    recoveryCodes?: string[];
-}
+type MultiFactorSummary = AccountSecuritySummary["factors"];
 
 function nowIso(now = new Date()): string {
     return now.toISOString();
@@ -114,7 +84,12 @@ function normalizeUserAgent(userAgent?: string): string | undefined {
     return normalized ? normalized.slice(0, MAX_USER_AGENT_LENGTH) : undefined;
 }
 
-/** Validates and normalizes a user-visible factor label. */
+/**
+ * Validates and normalizes a user-visible factor label.
+ * @param value Value to process.
+ * @param fallback Fallback value.
+ * @returns Validation result for and normalizes a user-visible factor label.
+ */
 export function normalizeFactorLabel(value: unknown, fallback: string): string {
     if (value === undefined) {
         return fallback;
@@ -131,7 +106,11 @@ export function normalizeFactorLabel(value: unknown, fallback: string): string {
     return normalized;
 }
 
-/** Validates an opaque factor identifier before using it in a query. */
+/**
+ * Validates an opaque factor identifier before using it in a query.
+ * @param value Value to process.
+ * @returns Validation result for an opaque factor identifier before using it in a query.
+ */
 export function normalizeFactorId(value: unknown): string {
     if (typeof value !== "string" || !FACTOR_ID_PATTERN.test(value)) {
         throw new TypeError("Invalid factor identifier");
@@ -150,7 +129,10 @@ function pendingTokenParts(
         : undefined;
 }
 
-/** Removes expired pending logins, WebAuthn challenges, and abandoned TOTP setups. */
+/**
+ * Removes expired pending logins, WebAuthn challenges, and abandoned TOTP setups.
+ * @param now Now value.
+ */
 export function cleanupExpiredMultiFactorState(now = new Date()): void {
     const timestamp = nowIso(now);
     const abandonedEnrollmentCutoff = new Date(
@@ -175,17 +157,22 @@ export function cleanupExpiredMultiFactorState(now = new Date()): void {
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "MFA cleanup and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
 }
 
-/** Returns the usable second-factor methods configured for one user. */
+/**
+ * Returns the usable second-factor methods configured for one user.
+ * @param userId User identifier.
+ * @returns the usable second-factor methods configured for one user.
+ */
 export function mfaMethodsForUser(userId: number): MfaLoginMethod[] {
     const counts = database
         .prepare(
@@ -218,7 +205,14 @@ export function mfaMethodsForUser(userId: number): MfaLoginMethod[] {
     ];
 }
 
-/** Creates one short-lived password-verified login transaction. */
+/**
+ * Creates one short-lived password-verified login transaction.
+ * @param userId User identifier.
+ * @param methods Methods value.
+ * @param userAgent User agent value.
+ * @param now Now value.
+ * @returns Created one short-lived password-verified login transaction.
+ */
 export function createPendingLogin(
     userId: number,
     methods: MfaLoginMethod[],
@@ -262,18 +256,24 @@ export function createPendingLogin(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "Pending login creation and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
     return `${selector}.${validator}`;
 }
 
-/** Resolves a pending-login token without exposing its validator. */
+/**
+ * Resolves a pending-login token without exposing its validator.
+ * @param pendingToken Pending token value.
+ * @param now Now value.
+ * @returns Resolved a pending-login token without exposing its validator.
+ */
 export function getPendingLogin(
     pendingToken: string,
     now = new Date()
@@ -333,7 +333,10 @@ export function getPendingLogin(
     };
 }
 
-/** Records a failed second-factor attempt and consumes exhausted login state. */
+/**
+ * Records a failed second-factor attempt and consumes exhausted login state.
+ * @param pendingLoginId Pending login identifier.
+ */
 export function recordPendingLoginFailure(pendingLoginId: string): void {
     database.run("BEGIN IMMEDIATE");
     try {
@@ -355,17 +358,22 @@ export function recordPendingLoginFailure(pendingLoginId: string): void {
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "Pending login failure update and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
 }
 
-/** Atomically consumes a pending login after successful factor verification. */
+/**
+ * Atomically consumes a pending login after successful factor verification.
+ * @param pendingToken Pending token value.
+ * @returns Consume pending login result.
+ */
 export function consumePendingLogin(pendingToken: string): PendingLogin | undefined {
     const pending = getPendingLogin(pendingToken);
     const parsed = pendingTokenParts(pendingToken);
@@ -385,13 +393,20 @@ function totpAssociatedData(userId: number, factorId: string): string {
     return `mira-dashboard:totp:v1:user:${userId}:factor:${factorId}`;
 }
 
-/** Creates an encrypted, inactive TOTP enrollment. */
-export async function createTotpEnrollment(
+/**
+ * Creates an encrypted, inactive TOTP enrollment.
+ * @param userId User identifier.
+ * @param username Username value.
+ * @param label Label value.
+ * @param now Now value.
+ * @returns Created an encrypted, inactive TOTP enrollment.
+ */
+export function createTotpEnrollment(
     userId: number,
     username: string,
     label: string,
     now = new Date()
-): Promise<TotpEnrollment> {
+): TotpEnrollment {
     const factorId = Bun.randomUUIDv7();
     const secret = generateSecret({ length: 20 });
     const encryptedSecret = encryptStoredSecret(
@@ -423,11 +438,12 @@ export async function createTotpEnrollment(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "TOTP enrollment creation and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
@@ -487,7 +503,10 @@ export interface GeneratedRecoveryCode {
     validatorHash: string;
 }
 
-/** Prepares one recovery-code set without persisting plaintext code material. */
+/**
+ * Prepares one recovery-code set without persisting plaintext code material.
+ * @returns Promise resolving to the generate recovery code set result.
+ */
 export async function generateRecoveryCodeSet(): Promise<GeneratedRecoveryCode[]> {
     return Promise.all(
         Array.from({ length: RECOVERY_CODE_COUNT }, async () => {
@@ -523,6 +542,10 @@ function insertRecoveryCodeSet(
  * This must run inside the same immediate transaction that activates the first
  * factor. The conditional user update ensures concurrent enrollments cannot
  * both replace the recovery-code set or reveal an unusable set.
+ * @param userId User identifier.
+ * @param generatedRecoveryCodes Generated recovery codes value.
+ * @param timestamp Timestamp value.
+ * @returns Enable multi factor in transaction result.
  */
 export function enableMultiFactorInTransaction(
     userId: number,
@@ -547,7 +570,14 @@ export function enableMultiFactorInTransaction(
     };
 }
 
-/** Confirms an encrypted TOTP enrollment and prevents time-step replay. */
+/**
+ * Confirms an encrypted TOTP enrollment and prevents time-step replay.
+ * @param userId User identifier.
+ * @param factorId Factor identifier.
+ * @param token Token value.
+ * @param now Now value.
+ * @returns Promise resolving to the confirm totp enrollment result.
+ */
 export async function confirmTotpEnrollment(
     userId: number,
     factorId: string,
@@ -605,17 +635,23 @@ export async function confirmTotpEnrollment(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "TOTP confirmation and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
 }
 
-/** Verifies one confirmed authenticator-app code and atomically records its time step. */
+/**
+ * Verifies one confirmed authenticator-app code and atomically records its time step.
+ * @param userId User identifier.
+ * @param token Token value.
+ * @returns Promise resolving to the verify totp for user result.
+ */
 export async function verifyTotpForUser(
     userId: number,
     token: string
@@ -661,7 +697,11 @@ export async function verifyTotpForUser(
     return undefined;
 }
 
-/** Returns the number of active TOTP and WebAuthn factors for one user. */
+/**
+ * Returns the number of active TOTP and WebAuthn factors for one user.
+ * @param userId User identifier.
+ * @returns the number of active TOTP and WebAuthn factors for one user.
+ */
 export function totalConfirmedFactorCount(userId: number): number {
     const row = database
         .prepare(
@@ -680,7 +720,12 @@ export function totalConfirmedFactorCount(userId: number): number {
     return row.count;
 }
 
-/** Removes a TOTP factor without allowing deletion of the final second factor. */
+/**
+ * Removes a TOTP factor without allowing deletion of the final second factor.
+ * @param userId User identifier.
+ * @param factorId Factor identifier.
+ * @returns Did remove totp factor result.
+ */
 export function didRemoveTotpFactor(userId: number, factorId: string): boolean {
     database.run("BEGIN IMMEDIATE");
     try {
@@ -700,17 +745,23 @@ export function didRemoveTotpFactor(userId: number, factorId: string): boolean {
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "TOTP removal and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
 }
 
-/** Generates and replaces the user's one-time recovery codes. */
+/**
+ * Generates and replaces the user's one-time recovery codes.
+ * @param userId User identifier.
+ * @param now Now value.
+ * @returns Promise resolving to the rotate recovery codes result.
+ */
 export async function rotateRecoveryCodes(
     userId: number,
     now = new Date()
@@ -726,18 +777,25 @@ export async function rotateRecoveryCodes(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "Recovery-code rotation and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
     return generated.map((code) => code.code);
 }
 
-/** Consumes one high-entropy recovery code after password-hash verification. */
+/**
+ * Consumes one high-entropy recovery code after password-hash verification.
+ * @param userId User identifier.
+ * @param code Status or verification code.
+ * @param now Now value.
+ * @returns Promise resolving to the verify recovery code for user result.
+ */
 export async function verifyRecoveryCodeForUser(
     userId: number,
     code: string,
@@ -779,7 +837,11 @@ export async function verifyRecoveryCodeForUser(
     );
 }
 
-/** Returns factor and recovery status without exposing secrets or hashes. */
+/**
+ * Returns factor and recovery status without exposing secrets or hashes.
+ * @param userId User identifier.
+ * @returns factor and recovery status without exposing secrets or hashes.
+ */
 export function getMultiFactorSummary(userId: number): MultiFactorSummary {
     const user = database
         .prepare("SELECT mfa_enabled_at FROM users WHERE id = ?")
@@ -840,7 +902,11 @@ export function getMultiFactorSummary(userId: number): MultiFactorSummary {
     };
 }
 
-/** Removes all user-held factors and recovery codes after an explicit disable flow. */
+/**
+ * Removes all user-held factors and recovery codes after an explicit disable flow.
+ * @param userId User identifier.
+ * @param now Now value.
+ */
 export function disableMultiFactor(userId: number, now = new Date()): void {
     const timestamp = nowIso(now);
     database.run("BEGIN IMMEDIATE");
@@ -866,11 +932,12 @@ export function disableMultiFactor(userId: number, now = new Date()): void {
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "MFA disable and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }

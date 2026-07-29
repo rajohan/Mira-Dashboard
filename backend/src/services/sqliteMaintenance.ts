@@ -4,6 +4,7 @@ import { sessionIdleTtlMs } from "../auth.ts";
 import { database, getMiraDatabasePath } from "../database.ts";
 import { validateDatabaseMigrationHistory } from "../databaseMigrationRunner.ts";
 import { errorMessage } from "../lib/errors.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import {
     readDashboardReleaseState,
     resolveDashboardReleasesRoot,
@@ -22,6 +23,7 @@ import {
 } from "./scheduledJobs.ts";
 
 export const SQLITE_MAINTENANCE_JOB_ID = "database.maintenance";
+const logger = createStructuredLogger("sqlite-maintenance");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const SQLITE_MAINTENANCE_TIMEOUT_MS = 15 * 60 * 1000;
@@ -60,7 +62,8 @@ function protectedDeploymentRuntimeJobIds(
     );
     return commits.flatMap((commit) => {
         const row = query.get(commit, ...DEPLOYMENT_RUNTIME_FAILURE_NOTE_PATTERNS) as
-            { id: string } | undefined;
+            | { id: string }
+            | undefined;
         return row ? [row.id] : [];
     });
 }
@@ -425,10 +428,7 @@ async function protectedDeploymentCommitsForMaintenance(): Promise<string[] | un
             (commit): commit is string => commit !== undefined
         );
     } catch (error) {
-        console.warn(
-            "[SQLiteMaintenance] Managed release status unavailable; preserving deployment job history:",
-            errorMessage(error, "Managed release status unavailable")
-        );
+        logger.warn("sqlite_maintenance.release_status_unavailable", { error });
         return undefined;
     }
 }
@@ -487,10 +487,9 @@ export function registerSqliteMaintenanceScheduledJob(
                     error,
                     "Database summary cache refresh enqueue failed"
                 );
-                console.warn(
-                    "[SQLiteMaintenance] Database summary cache refresh enqueue failed:",
-                    message
-                );
+                logger.warn("sqlite_maintenance.summary_refresh_enqueue_failed", {
+                    error,
+                });
                 return {
                     ...result,
                     cacheRefresh: {

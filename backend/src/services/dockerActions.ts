@@ -6,12 +6,15 @@ import {
     runProcess,
     spawnProcess,
 } from "../lib/processes.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { nonEmptyEnvironmentFallback } from "../lib/values.ts";
 import {
     registerScheduledJobAction,
     type ScheduledJobActionContext,
     ScheduledJobActionError,
 } from "./scheduledJobs.ts";
+
+const logger = createStructuredLogger("docker-actions");
 
 const MAX_OUTPUT_CHARS = 100_000;
 const MAX_EXEC_COMMAND_CHARS = 16_384;
@@ -117,11 +120,10 @@ async function terminateContainerProcess(
                 String(containerPid),
             ]);
         } catch (processError) {
-            console.warn(
-                "[Docker] In-container cancellation failed:",
-                errorMessage(groupError, "process group kill failed"),
-                errorMessage(processError, "process kill failed")
-            );
+            logger.warn("docker.container_cancellation_failed", {
+                processError,
+                processGroupError: groupError,
+            });
         }
     }
 }

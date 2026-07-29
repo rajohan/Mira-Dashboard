@@ -1,116 +1,60 @@
-import {
-    assertContractKeys,
-    contractRecord,
-    contractString,
-    invalidContract,
-    optionalContractString,
-    requiresContractBoolean,
-} from "./runtime";
+import * as v from "valibot";
 
-export interface TerminalCompletionRequest {
-    cwd?: string;
-    partial: string;
-}
+import { parseContract, strictJsonObjectSchema } from "./runtime";
 
-export interface TerminalCompletionItem {
-    completion: string;
-    display: string;
-    type: "directory" | "executable" | "file";
-}
+const trimmedNonEmptyStringSchema = v.pipe(v.string(), v.trim(), v.nonEmpty());
 
-export interface TerminalCompletionResponse {
-    commonPrefix: string;
-    completions: TerminalCompletionItem[];
-}
+export const terminalCompletionRequestSchema = strictJsonObjectSchema({
+    cwd: v.optional(trimmedNonEmptyStringSchema),
+    partial: v.string(),
+});
 
-export interface TerminalCdRequest {
-    cwd: string;
-    path: string;
-}
+export const terminalCompletionItemSchema = v.strictObject({
+    completion: v.string(),
+    display: v.string(),
+    type: v.picklist(["directory", "executable", "file"]),
+});
 
-export interface TerminalCdResponse {
-    error?: string;
-    isSuccess: boolean;
-    newCwd: string;
-}
+export const terminalCompletionResponseSchema = v.strictObject({
+    commonPrefix: v.string(),
+    completions: v.array(terminalCompletionItemSchema),
+});
+
+export const terminalCdRequestSchema = strictJsonObjectSchema({
+    cwd: trimmedNonEmptyStringSchema,
+    path: v.string(),
+});
+
+export const terminalCdResponseSchema = v.strictObject({
+    newCwd: v.string(),
+});
+
+export type TerminalCompletionRequest = v.InferOutput<
+    typeof terminalCompletionRequestSchema
+>;
+export type TerminalCompletionItem = v.InferOutput<typeof terminalCompletionItemSchema>;
+export type TerminalCompletionResponse = v.InferOutput<
+    typeof terminalCompletionResponseSchema
+>;
+export type TerminalCdRequest = v.InferOutput<typeof terminalCdRequestSchema>;
+export type TerminalCdResponse = v.InferOutput<typeof terminalCdResponseSchema>;
 
 export function parseTerminalCompletionRequest(
     value: unknown
 ): TerminalCompletionRequest {
-    const input = contractRecord(value);
-    assertContractKeys(input, ["cwd", "partial"], "body");
-    const cwd = optionalContractString(input.cwd, "body.cwd");
-    return {
-        partial: contractString(input.partial, "body.partial", {
-            allowEmpty: true,
-            trim: false,
-        }),
-        ...(cwd !== undefined && { cwd }),
-    };
+    return parseContract(terminalCompletionRequestSchema, value);
 }
 
 export function parseTerminalCdRequest(value: unknown): TerminalCdRequest {
-    const input = contractRecord(value);
-    assertContractKeys(input, ["cwd", "path"], "body");
-    return {
-        cwd: contractString(input.cwd, "body.cwd"),
-        path: contractString(input.path, "body.path", {
-            allowEmpty: true,
-            trim: false,
-        }),
-    };
+    return parseContract(terminalCdRequestSchema, value);
 }
 
 export function parseTerminalCompletionResponse(
     value: unknown
 ): TerminalCompletionResponse {
-    const input = contractRecord(value, "response");
-    if (!Array.isArray(input.completions)) {
-        return invalidContract("response.completions", "must be an array");
-    }
-    return {
-        commonPrefix: contractString(input.commonPrefix, "response.commonPrefix", {
-            allowEmpty: true,
-            trim: false,
-        }),
-        completions: input.completions.map((completion, index) => {
-            const entry = contractRecord(completion, `response.completions[${index}]`);
-            const type = entry.type;
-            if (type !== "directory" && type !== "executable" && type !== "file") {
-                return invalidContract(
-                    `response.completions[${index}].type`,
-                    "must be one of: directory, executable, file"
-                );
-            }
-            return {
-                completion: contractString(
-                    entry.completion,
-                    `response.completions[${index}].completion`,
-                    { allowEmpty: true, trim: false }
-                ),
-                display: contractString(
-                    entry.display,
-                    `response.completions[${index}].display`,
-                    { allowEmpty: true, trim: false }
-                ),
-                type,
-            };
-        }),
-    };
+    return parseContract(terminalCompletionResponseSchema, value, "response");
 }
 
 export function parseTerminalCdResponse(value: unknown): TerminalCdResponse {
-    const input = contractRecord(value, "response");
-    const error = optionalContractString(input.error, "response.error", {
-        allowEmpty: true,
-        trim: false,
-    });
-    return {
-        isSuccess: requiresContractBoolean(input.isSuccess, "response.isSuccess"),
-        newCwd: contractString(input.newCwd, "response.newCwd", {
-            allowEmpty: true,
-            trim: false,
-        }),
-        ...(error !== undefined && { error }),
-    };
+    return parseContract(terminalCdResponseSchema, value, "response");
 }

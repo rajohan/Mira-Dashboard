@@ -1,9 +1,11 @@
+import * as v from "valibot";
+
 export interface ContractValidationIssue {
     message: string;
     path: string;
 }
 
-/** Represents a dependency-free runtime contract failure at a trust boundary. */
+/** Represents a runtime contract failure at a trust boundary. */
 export class ContractValidationError extends Error {
     readonly issues: ContractValidationIssue[];
 
@@ -16,131 +18,96 @@ export class ContractValidationError extends Error {
 
 export type ContractParser<T> = (value: unknown) => T;
 
-/** Fails one contract field with a stable path suitable for API error details. */
-export function invalidContract(path: string, message: string): never {
-    throw new ContractValidationError([{ message, path }]);
-}
+export const finiteNumberSchema = v.pipe(v.number(), v.finite());
+export const nonNegativeIntegerSchema = v.pipe(
+    finiteNumberSchema,
+    v.safeInteger(),
+    v.minValue(0)
+);
+export const positiveIntegerSchema = v.pipe(
+    finiteNumberSchema,
+    v.safeInteger(),
+    v.minValue(1)
+);
+export const jsonObjectSchema = v.pipe(
+    v.unknown(),
+    v.check(isPlainRecord, "must be an object"),
+    v.record(v.string(), v.unknown())
+);
+export const successLiteralSchema = v.literal(true);
 
-/** Parses a JSON array while leaving item validation to the caller. */
-export function contractArray(value: unknown, path: string): unknown[] {
-    return Array.isArray(value) ? value : invalidContract(path, "must be an array");
-}
-
-/** Parses a non-array JSON object. */
-export function contractRecord(value: unknown, path = "body"): Record<string, unknown> {
+/**
+ * Determines whether an unknown value is a plain JSON-style record.
+ *
+ * @param value - Candidate record.
+ * @returns Whether the value has an object or null prototype and is not an array.
+ */
+export function isPlainRecord(value: unknown): value is Record<string, unknown> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
-        return invalidContract(path, "must be an object");
+        return false;
     }
-    return value as Record<string, unknown>;
+    const prototype: unknown = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
 }
 
-/** Rejects unexpected object fields instead of silently accepting misspellings. */
-export function assertContractKeys(
-    value: Record<string, unknown>,
-    keys: readonly string[],
-    path = "body"
-): void {
-    const allowed = new Set(keys);
-    const unexpected = Object.keys(value).find((key) => !allowed.has(key));
-    if (unexpected) {
-        invalidContract(`${path}.${unexpected}`, "is not allowed");
-    }
-}
-
-export function contractString(
-    value: unknown,
-    path: string,
-    options: {
-        allowEmpty?: boolean;
-        maximumLength?: number;
-        trim?: boolean;
-    } = {}
-): string {
-    if (typeof value !== "string") {
-        return invalidContract(path, "must be a string");
-    }
-    const normalized = options.trim === false ? value : value.trim();
-    if (!options.allowEmpty && !value.trim()) {
-        return invalidContract(path, "is required");
-    }
-    if (
-        options.maximumLength !== undefined &&
-        normalized.length > options.maximumLength
-    ) {
-        return invalidContract(
-            path,
-            `must be at most ${options.maximumLength} characters`
-        );
-    }
-    return normalized;
-}
-
-export function optionalContractString(
-    value: unknown,
-    path: string,
-    options: {
-        allowEmpty?: boolean;
-        maximumLength?: number;
-        trim?: boolean;
-    } = {}
-): string | undefined {
-    return value === undefined ? undefined : contractString(value, path, options);
-}
-
-/** Requires a boolean contract field and returns its validated value. */
-export function requiresContractBoolean(value: unknown, path: string): boolean {
-    return typeof value === "boolean"
-        ? value
-        : invalidContract(path, "must be a boolean");
-}
-
-export function optionalContractBoolean(
-    value: unknown,
-    path: string
-): boolean | undefined {
-    return value === undefined ? undefined : requiresContractBoolean(value, path);
-}
-
-export function contractFiniteNumber(value: unknown, path: string): number {
-    return typeof value === "number" && Number.isFinite(value)
-        ? value
-        : invalidContract(path, "must be a finite number");
-}
-
-export function contractPositiveInteger(value: unknown, path: string): number {
-    const number = contractFiniteNumber(value, path);
-    return Number.isSafeInteger(number) && number > 0
-        ? number
-        : invalidContract(path, "must be a positive integer");
-}
-
-export function optionalContractStringArray(
-    value: unknown,
-    path: string
-): string[] | undefined {
-    if (value === undefined) return undefined;
-    if (!Array.isArray(value)) {
-        return invalidContract(path, "must be an array of strings");
-    }
-    return value.map((item, index) =>
-        contractString(item, `${path}[${index}]`, { allowEmpty: true, trim: false })
+/**
+ * Builds a strict object schema that rejects arrays before Valibot projects
+ * object entries.
+ *
+ * @param entries - Typed object entries.
+ * @returns A plain JSON-object schema with no unknown keys.
+ */
+export function strictJsonObjectSchema<const TEntries extends v.ObjectEntries>(
+    entries: TEntries
+) {
+    return v.pipe(
+        v.unknown(),
+        v.check(isPlainRecord, "must be an object"),
+        v.strictObject(entries)
     );
 }
 
-export function contractEnum<const T extends string>(
-    value: unknown,
-    values: readonly T[],
-    path: string
-): T {
-    return typeof value === "string" && values.includes(value as T)
-        ? (value as T)
-        : invalidContract(path, `must be one of: ${values.join(", ")}`);
+/**
+ * Builds a loose object schema that rejects arrays before retaining provider
+ * extension fields.
+ *
+ * @param entries - Typed object entries.
+ * @returns A plain JSON-object schema that preserves unknown keys.
+ */
+export function looseJsonObjectSchema<const TEntries extends v.ObjectEntries>(
+    entries: TEntries
+) {
+    return v.pipe(
+        v.unknown(),
+        v.check(isPlainRecord, "must be an object"),
+        v.looseObject(entries)
+    );
 }
 
-export function optionalContractEnum<const T extends string>(
-    value: unknown,
-    values: readonly T[],
-    path: string
-): T | undefined {
-    return value === undefined ? undefined : contractEnum(value, values, path);
+function qualifiedContractPath(root: string, issue: v.BaseIssue<unknown>): string {
+    const issuePath = v.getDotPath(issue);
+    const normalizedPath = issuePath?.replaceAll(/\.(\d+)(?=\.|$)/gu, "[$1]");
+    return normalizedPath ? `${root}.${normalizedPath}` : root;
+}
+
+/**
+ * Parses a Valibot schema and maps its issues to the shared API contract error.
+ * @returns Parsed a Valibot schema and maps its issues to the shared API contract error.
+ */
+export function parseContract<
+    const TSchema extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>,
+>(schema: TSchema, value: unknown, path = "body"): v.InferOutput<TSchema> {
+    try {
+        return v.parse(schema, value);
+    } catch (error) {
+        if (!v.isValiError(error)) {
+            throw error;
+        }
+        throw new ContractValidationError(
+            error.issues.map((issue) => ({
+                message: issue.message,
+                path: qualifiedContractPath(path, issue),
+            }))
+        );
+    }
 }

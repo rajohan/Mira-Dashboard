@@ -40,7 +40,11 @@ function canonicalKey(key: string): string {
     return key.replaceAll(/[^a-z0-9]/giu, "").toLowerCase();
 }
 
-/** Returns whether a config key conventionally carries reusable secret material. */
+/**
+ * Returns whether a config key conventionally carries reusable secret material.
+ * @param key Lookup key.
+ * @returns Whether a config key conventionally carries reusable secret material.
+ */
 export function isSensitiveConfigKey(key: string): boolean {
     const canonical = canonicalKey(key);
     return (
@@ -49,7 +53,11 @@ export function isSensitiveConfigKey(key: string): boolean {
     );
 }
 
-/** Deeply clones JSON-like config while replacing secret values with one sentinel. */
+/**
+ * Deeply clones JSON-like config while replacing secret values with one sentinel.
+ * @param value Value to process.
+ * @returns Redact config secrets result.
+ */
 export function redactConfigSecrets(value: unknown): unknown {
     if (Array.isArray(value)) {
         return value.map((entry) => redactConfigSecrets(entry));
@@ -66,7 +74,11 @@ export function redactConfigSecrets(value: unknown): unknown {
     return redacted;
 }
 
-/** Detects an attempted write-back of a masked placeholder. */
+/**
+ * Detects an attempted write-back of a masked placeholder.
+ * @param value Value to process.
+ * @returns Whether the value contains the config-redaction sentinel.
+ */
 export function hasConfigRedactionSentinel(value: unknown): boolean {
     if (value === CONFIG_REDACTION_SENTINEL) {
         return true;
@@ -104,10 +116,13 @@ function stableArrayEntryIdentity(value: unknown): string | undefined {
  * corresponding server-side values. Missing originals remain sentinels and
  * are rejected by the caller. Array entries containing sentinels are matched
  * only by a unique stable identity, never by their submitted position.
+ * @param submitted Submitted value.
+ * @param current Current value.
+ * @returns Restore config redaction sentinels result.
  */
 export function restoreConfigRedactionSentinels(
     submitted: unknown,
-    current: unknown
+    current?: unknown
 ): unknown {
     if (submitted === CONFIG_REDACTION_SENTINEL) {
         return current === undefined ? CONFIG_REDACTION_SENTINEL : current;
@@ -125,11 +140,11 @@ export function restoreConfigRedactionSentinels(
         }
         return submitted.map((entry, index) => {
             if (!hasConfigRedactionSentinel(entry)) {
-                return restoreConfigRedactionSentinels(entry, undefined);
+                return restoreConfigRedactionSentinels(entry);
             }
             const identity = submittedIdentities[index];
             if (!identity || identityCounts.get(identity) !== 1) {
-                return restoreConfigRedactionSentinels(entry, undefined);
+                return restoreConfigRedactionSentinels(entry);
             }
             const matches = currentEntries.filter(
                 (candidate) => stableArrayEntryIdentity(candidate) === identity
@@ -155,7 +170,11 @@ export function restoreConfigRedactionSentinels(
     );
 }
 
-/** Parses and masks JSON config text; invalid JSON is never returned as a secret-safe view. */
+/**
+ * Parses and masks JSON config text; invalid JSON is never returned as a secret-safe view.
+ * @param content Content value.
+ * @returns Parsed and masks JSON config text; invalid JSON is never returned as a secret-safe view.
+ */
 export function redactConfigJsonText(content: string): string | undefined {
     let parsed: unknown;
     try {

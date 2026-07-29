@@ -1,0 +1,384 @@
+import { Pencil, Play, Save, Trash2, X } from "lucide-react";
+import { useId, type ReactNode } from "react";
+
+import type { CronJob } from "../../../../../contracts/cron";
+import {
+    formatCronLastStatus,
+    formatCronTimestamp,
+    getCronJobId,
+    getCronJobName,
+    getCronStateValue,
+    getCronStatusVariant,
+} from "../../../utils/cronUtilities";
+import { Badge } from "../../ui/Badge";
+import { Button } from "../../ui/Button";
+import { Card, CardTitle } from "../../ui/Card";
+import { Input } from "../../ui/Input";
+import { Switch } from "../../ui/Switch";
+import { Textarea } from "../../ui/Textarea";
+import { JobDisableIntentStatus } from "../jobs/JobDisableIntentStatus";
+
+/** Represents JSON valIDation state. */
+interface JsonValidationState {
+    valid: boolean;
+    error: string | undefined;
+}
+
+/** Provides props for cron job details. */
+interface CronJobDetailsProperties {
+    job: CronJob;
+    lastTriggeredAt?: number;
+    togglePending: boolean;
+    runPending: boolean;
+    updatePending: boolean;
+    deletePending: boolean;
+    onToggle: (job: CronJob, isEnabled: boolean) => void;
+    onConfigureDisable: (job: CronJob) => void;
+    onRunNow: (job: CronJob) => void;
+    onDelete: (job: CronJob) => void;
+    isEditMode: boolean;
+    onEditModeChange: (isEnabled: boolean) => void;
+    nameDraft: string;
+    onNameDraftChange: (value: string) => void;
+    scheduleDraft: string;
+    onScheduleDraftChange: (value: string) => void;
+    payloadDraft: string;
+    onPayloadDraftChange: (value: string) => void;
+    deliveryDraft: string;
+    onDeliveryDraftChange: (value: string) => void;
+    scheduleValidation: JsonValidationState;
+    payloadValidation: JsonValidationState;
+    deliveryValidation: JsonValidationState;
+    hasInvalidJson: boolean;
+    editError: string | undefined;
+    onSave: (job: CronJob) => void;
+    formatDate: (value: number) => string;
+}
+
+/**
+ * Renders the cron job details UI.
+ * @returns Rendered the cron job details UI.
+ */
+export function CronJobDetails({
+    job,
+    lastTriggeredAt,
+    togglePending,
+    runPending,
+    updatePending,
+    deletePending,
+    onToggle,
+    onConfigureDisable,
+    onRunNow,
+    onDelete,
+    isEditMode,
+    onEditModeChange,
+    nameDraft,
+    onNameDraftChange,
+    scheduleDraft,
+    onScheduleDraftChange,
+    payloadDraft,
+    onPayloadDraftChange,
+    deliveryDraft,
+    onDeliveryDraftChange,
+    scheduleValidation,
+    payloadValidation,
+    deliveryValidation,
+    hasInvalidJson,
+    editError,
+    onSave,
+    formatDate,
+}: CronJobDetailsProperties) {
+    const fieldId = useId();
+    const nameInputId = `${fieldId}-name`;
+    const scheduleTextareaId = `${fieldId}-schedule`;
+    const payloadTextareaId = `${fieldId}-payload`;
+    const deliveryTextareaId = `${fieldId}-delivery`;
+    let triggerStatus: ReactNode;
+    if (runPending) {
+        triggerStatus = <span className="text-xs text-primary-400">Running job...</span>;
+    } else if (lastTriggeredAt) {
+        triggerStatus = (
+            <span className="text-xs text-primary-400">
+                Triggered {formatDate(lastTriggeredAt)}
+            </span>
+        );
+    }
+
+    return (
+        <Card variant="bordered" className="min-w-0 space-y-3 p-3 sm:space-y-4 sm:p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                    <CardTitle className="text-base">{getCronJobName(job)}</CardTitle>
+                    <p className="mt-1 text-xs break-all text-primary-400">
+                        {getCronJobId(job)}
+                    </p>
+                </div>
+                <Badge
+                    className="shrink-0"
+                    variant={job.enabled === false ? "warning" : "success"}
+                >
+                    {job.enabled === false ? "Disabled" : "Enabled"}
+                </Badge>
+            </div>
+
+            <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
+                <div className="mb-2 text-xs font-semibold tracking-wide text-primary-300 uppercase">
+                    Controls
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                    <Switch
+                        isChecked={job.enabled !== false}
+                        onChange={(isEnabled) => onToggle(job, isEnabled)}
+                        label="Enabled"
+                        disabled={togglePending}
+                        className="rounded-lg border border-primary-700 bg-primary-800/60 px-3 py-2 sm:border-0 sm:bg-transparent sm:p-0"
+                    />
+                    {job.enabled === false ? (
+                        <JobDisableIntentStatus
+                            disableIntent={job.disableIntent}
+                            disabled={togglePending}
+                            onConfigureDisable={() => onConfigureDisable(job)}
+                            taskLinks={job.taskLinks}
+                        />
+                    ) : undefined}
+                    <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={runPending || deletePending}
+                        onClick={() => onRunNow(job)}
+                        className="w-full sm:w-auto"
+                    >
+                        <Play
+                            className={[
+                                "h-4 w-4",
+                                runPending ? "animate-pulse" : "",
+                            ].join(" ")}
+                        />
+                        {runPending ? "Triggering..." : "Trigger now"}
+                    </Button>
+                    <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={deletePending}
+                        onClick={() => onDelete(job)}
+                        className="w-full sm:w-auto"
+                    >
+                        <Trash2 className="size-4" />
+                        {deletePending ? "Deleting..." : "Delete"}
+                    </Button>
+                    {triggerStatus}
+                </div>
+            </div>
+
+            <div className="rounded-lg border border-primary-700 bg-primary-900/40 p-3">
+                <div className="mb-2 text-xs font-semibold tracking-wide text-primary-300 uppercase">
+                    Last / next run
+                </div>
+                <div className="grid grid-cols-1 gap-3 text-sm text-primary-200 sm:grid-cols-3">
+                    <div>
+                        <div className="text-xs text-primary-400">Last run</div>
+                        <div>
+                            {formatCronTimestamp(getCronStateValue(job, "lastRunAtMs"))}
+                        </div>
+                    </div>
+                    <div>
+                        <div className="text-xs text-primary-400">Next run</div>
+                        <div>
+                            {formatCronTimestamp(getCronStateValue(job, "nextRunAtMs"))}
+                        </div>
+                    </div>
+                    <div>
+                        <div className="text-xs text-primary-400">Last status</div>
+                        <div className="mt-1">
+                            <Badge
+                                variant={getCronStatusVariant(
+                                    formatCronLastStatus(
+                                        getCronStateValue(job, "lastRunStatus")
+                                    )
+                                )}
+                            >
+                                {formatCronLastStatus(
+                                    getCronStateValue(job, "lastRunStatus")
+                                )}
+                            </Badge>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="space-y-3 rounded-lg border border-primary-700 bg-primary-900/40 p-3">
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold tracking-wide text-primary-300 uppercase">
+                        Job config
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {isEditMode ? (
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => onEditModeChange(false)}
+                                className="px-3"
+                            >
+                                <X size={14} />
+                                Cancel
+                            </Button>
+                        ) : undefined}
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={updatePending || (isEditMode && hasInvalidJson)}
+                            className="px-3"
+                            onClick={() => {
+                                if (isEditMode) {
+                                    onSave(job);
+                                    return;
+                                }
+
+                                onEditModeChange(true);
+                            }}
+                        >
+                            {isEditMode ? <Save size={14} /> : <Pencil size={14} />}
+                            {isEditMode ? "Save edits" : "Edit"}
+                        </Button>
+                    </div>
+                </div>
+
+                {editError ? (
+                    <p className="text-xs text-red-400">{editError}</p>
+                ) : undefined}
+
+                {isEditMode ? (
+                    <>
+                        <div>
+                            <label
+                                className="mb-1 block text-xs text-primary-300"
+                                htmlFor={nameInputId}
+                            >
+                                Name
+                            </label>
+                            <Input
+                                id={nameInputId}
+                                value={nameDraft}
+                                onChange={(event) =>
+                                    onNameDraftChange(event.target.value)
+                                }
+                                placeholder="Job name"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+                            <div>
+                                <label
+                                    className="mb-1 block text-xs text-primary-300"
+                                    htmlFor={scheduleTextareaId}
+                                >
+                                    Schedule (JSON)
+                                </label>
+                                <Textarea
+                                    id={scheduleTextareaId}
+                                    className="h-40 font-mono text-xs sm:h-48"
+                                    value={scheduleDraft}
+                                    onChange={(event) =>
+                                        onScheduleDraftChange(event.target.value)
+                                    }
+                                />
+                                <p
+                                    className={
+                                        scheduleValidation.valid
+                                            ? "mt-1 text-xs text-green-400"
+                                            : "mt-1 text-xs text-red-400"
+                                    }
+                                >
+                                    {scheduleValidation.valid
+                                        ? "Valid JSON"
+                                        : `Invalid JSON: ${scheduleValidation.error || "parse error"}`}
+                                </p>
+                            </div>
+                            <div>
+                                <label
+                                    className="mb-1 block text-xs text-primary-300"
+                                    htmlFor={payloadTextareaId}
+                                >
+                                    Payload (JSON)
+                                </label>
+                                <Textarea
+                                    id={payloadTextareaId}
+                                    className="h-40 font-mono text-xs sm:h-48"
+                                    value={payloadDraft}
+                                    onChange={(event) =>
+                                        onPayloadDraftChange(event.target.value)
+                                    }
+                                />
+                                <p
+                                    className={
+                                        payloadValidation.valid
+                                            ? "mt-1 text-xs text-green-400"
+                                            : "mt-1 text-xs text-red-400"
+                                    }
+                                >
+                                    {payloadValidation.valid
+                                        ? "Valid JSON"
+                                        : `Invalid JSON: ${payloadValidation.error || "parse error"}`}
+                                </p>
+                            </div>
+                            <div>
+                                <label
+                                    className="mb-1 block text-xs text-primary-300"
+                                    htmlFor={deliveryTextareaId}
+                                >
+                                    Delivery (JSON)
+                                </label>
+                                <Textarea
+                                    id={deliveryTextareaId}
+                                    className="h-40 font-mono text-xs sm:h-48"
+                                    value={deliveryDraft}
+                                    onChange={(event) =>
+                                        onDeliveryDraftChange(event.target.value)
+                                    }
+                                />
+                                <p
+                                    className={
+                                        deliveryValidation.valid
+                                            ? "mt-1 text-xs text-green-400"
+                                            : "mt-1 text-xs text-red-400"
+                                    }
+                                >
+                                    {deliveryValidation.valid
+                                        ? "Valid JSON"
+                                        : `Invalid JSON: ${deliveryValidation.error || "parse error"}`}
+                                </p>
+                            </div>
+                        </div>
+                    </>
+                ) : (
+                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+                        <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
+                            <div className="mb-1 text-xs font-semibold tracking-wide text-primary-300 uppercase">
+                                Schedule
+                            </div>
+                            <pre className="text-xs wrap-break-word whitespace-pre-wrap text-primary-200">
+                                {JSON.stringify(job.schedule || {}, undefined, 2)}
+                            </pre>
+                        </Card>
+                        <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
+                            <div className="mb-1 text-xs font-semibold tracking-wide text-primary-300 uppercase">
+                                Payload
+                            </div>
+                            <pre className="text-xs wrap-break-word whitespace-pre-wrap text-primary-200">
+                                {JSON.stringify(job.payload || {}, undefined, 2)}
+                            </pre>
+                        </Card>
+                        <Card className="min-w-0 bg-primary-900/40 p-3 sm:p-4">
+                            <div className="mb-1 text-xs font-semibold tracking-wide text-primary-300 uppercase">
+                                Delivery
+                            </div>
+                            <pre className="text-xs wrap-break-word whitespace-pre-wrap text-primary-200">
+                                {JSON.stringify(job.delivery || {}, undefined, 2)}
+                            </pre>
+                        </Card>
+                    </div>
+                )}
+            </div>
+        </Card>
+    );
+}

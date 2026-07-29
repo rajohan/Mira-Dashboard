@@ -1,0 +1,37 @@
+import JSON5 from "json5";
+
+import { messageFromError } from "../lib/errorMessage";
+
+/** Represents the result of JSON or JSON5 validation. */
+export interface JsonValidation {
+    valid: boolean;
+    error: string | undefined;
+}
+
+/**
+ * Validates a JSON or JSON5 string.
+ * @param value - The string to validate.
+ * @param mode - The parser mode to use.
+ * @returns Validation status and the parse error when invalid.
+ */
+export function validateJsonString(
+    value: string,
+    mode: "json" | "json5" = "json"
+): JsonValidation {
+    try {
+        if (mode === "json5") {
+            JSON5.parse(value);
+        } else {
+            JSON.parse(value);
+        }
+        return { valid: true, error: undefined };
+    } catch (error) {
+        return {
+            valid: false,
+            error: messageFromError(
+                error,
+                mode === "json5" ? "Invalid JSON5" : "Invalid JSON"
+            ),
+        };
+    }
+}

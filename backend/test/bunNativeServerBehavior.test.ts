@@ -1,9 +1,8 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 const AUTOMATION_VALIDATOR = "ab".repeat(32);
 const AUTOMATION_CREDENTIALS = JSON.stringify([
@@ -37,13 +36,15 @@ async function api<T>(
     endpoint: string,
     options: RequestInit = {}
 ): Promise<{ body: T; status: number }> {
+    const headers = new Headers(options.headers);
+    headers.set("Content-Type", "application/json");
+    headers.set(
+        "Cookie",
+        `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`
+    );
     const response = await fetch(`${state.baseUrl}${endpoint}`, {
         ...options,
-        headers: {
-            "Content-Type": "application/json",
-            Cookie: `mira_dashboard_session=${encodeURIComponent(state.sessionToken)}`,
-            ...options.headers,
-        },
+        headers,
     });
     const text = await response.text();
     return {
@@ -245,14 +246,15 @@ describe("Bun-native dashboard backend", () => {
                 return { code, done: true as const };
             })();
             let startupTimer: Timer | undefined;
-            const startupTimeout = new Promise<never>((_, reject) => {
+            const startupTimeout = new Promise<never>((_resolve, reject) => {
                 startupTimer = setTimeout(
                     () => reject(new Error("Native server startup timed out")),
                     startupTimeoutMs
                 );
             });
             let next:
-                Awaited<ReturnType<typeof reader.read>> | { code: number; done: true };
+                | Awaited<ReturnType<typeof reader.read>>
+                | { code: number; done: true };
             try {
                 next = await Promise.race([reader.read(), exited, startupTimeout]);
             } finally {
@@ -388,9 +390,9 @@ describe("Bun-native dashboard backend", () => {
             method: "POST",
         });
         expect(denied.status).toBe(403);
-        await expect(denied.json()).resolves.toEqual({
+        expect(denied.json()).resolves.toEqual({
             error: {
-                code: "forbidden",
+                code: "automation_scope_denied",
                 message: "Automation credential scope denied",
                 requestId: expect.any(String),
             },
@@ -403,9 +405,9 @@ describe("Bun-native dashboard backend", () => {
             },
         });
         expect(invalid.status).toBe(401);
-        await expect(invalid.json()).resolves.toEqual({
+        expect(invalid.json()).resolves.toEqual({
             error: {
-                code: "unauthorized",
+                code: "invalid_automation_credential",
                 message: "Invalid automation credential",
                 requestId: expect.any(String),
             },
@@ -579,8 +581,7 @@ describe("Bun-native dashboard backend", () => {
             method: "POST",
         });
         expect(changedDirectory.status).toBe(200);
-        await expect(changedDirectory.json()).resolves.toEqual({
-            isSuccess: true,
+        expect(changedDirectory.json()).resolves.toEqual({
             newCwd: "/tmp",
         });
 
@@ -670,9 +671,9 @@ describe("Bun-native dashboard backend", () => {
             method: "POST",
         });
         expect(rejected.status).toBe(403);
-        await expect(rejected.json()).resolves.toEqual({
+        expect(rejected.json()).resolves.toEqual({
             error: {
-                code: "forbidden",
+                code: "forbidden_origin",
                 message: "Forbidden request origin",
                 requestId: expect.any(String),
             },
@@ -769,6 +770,9 @@ describe("Bun-native dashboard backend", () => {
             json("POST", { action: "restart", service: "--profile" })
         );
         expect(result.status).toBe(400);
-        expect(result.body.error.message).toBe("Invalid service name");
+        expect(result.body.error).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("body.service"),
+        });
     });
 });

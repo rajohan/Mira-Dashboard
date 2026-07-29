@@ -18,9 +18,15 @@ import {
 import { database, sqlNullable } from "../database.ts";
 import gateway from "../gateway.ts";
 import { json } from "../http.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
 import { objectFallback } from "../lib/values.ts";
 import { isDevelopmentExternalNotificationSuppressed } from "../requestPolicy.ts";
-import { readApiJson, routeErrorResponse } from "../routeSupport.ts";
+import {
+    type ParametersRequest,
+    readApiJson,
+    routeErrorResponse,
+    routeFailureResponse,
+} from "../routeSupport.ts";
 import {
     getOpenClawCronListSnapshot,
     normalizeOpenClawCronJobs,
@@ -28,7 +34,7 @@ import {
 
 type Status = ColumnId;
 type Assignee = TaskAssigneeId;
-type ParametersRequest<T extends string> = Request & { params: Record<T, string> };
+const logger = createStructuredLogger("tasks");
 
 interface DatabaseTaskUpdate {
     id: number;
@@ -69,12 +75,17 @@ function nowIso(): string {
     return new Date().toISOString();
 }
 
-function normalizeStatus(columnLabel?: string): Status | undefined {
-    if (columnLabel === "done") return "done";
-    if (columnLabel === "blocked") return "blocked";
-    if (columnLabel === "in-progress") return "in-progress";
-    if (columnLabel === "todo") return "todo";
-    return undefined;
+/**
+ * Derives the task column from its status labels.
+ *
+ * @param labels - Task labels in precedence order.
+ * @returns Canonical task status.
+ */
+function deriveStatus(labels: string[]): Status {
+    if (labels.includes("done")) return "done";
+    if (labels.includes("blocked")) return "blocked";
+    if (labels.includes("in-progress")) return "in-progress";
+    return "todo";
 }
 
 function derivePriority(labels: string[]): "low" | "medium" | "high" {
@@ -163,7 +174,9 @@ function formatScheduleSummary(schedule: Record<string, unknown> | undefined) {
             return `Every ${Math.round(everyMs / 60_000)}m`;
         }
     } else if (schedule.kind === "at") return stringFromRecord(schedule, "at");
-    return String(schedule.kind || "Scheduled");
+    return typeof schedule.kind === "string" && schedule.kind
+        ? schedule.kind
+        : "Scheduled";
 }
 
 function cronJobId(job: CronJob): string {
@@ -267,7 +280,11 @@ function recordEvent(taskId: number, eventType: string, payload: unknown) {
 }
 
 type MiraTaskNotificationEvent =
-    "assigned" | "created" | "deleted" | "progress" | "updated";
+    | "assigned"
+    | "created"
+    | "deleted"
+    | "progress"
+    | "updated";
 
 function miraTaskNotificationMessage(
     eventType: MiraTaskNotificationEvent,
@@ -296,7 +313,7 @@ async function notifyMira(
             miraTaskNotificationMessage(eventType, task)
         );
     } catch (error) {
-        console.error("[Tasks] Failed to notify Mira:", error);
+        logger.error("tasks.mira_notification_failed", { error });
     }
 }
 
@@ -352,16 +369,7 @@ export const taskRoutes = {
                 const now = nowIso();
                 const labels = body.labels ?? [];
                 const taskBody = body.body ?? "";
-                const status =
-                    normalizeStatus(
-                        labels.includes("done")
-                            ? "done"
-                            : labels.includes("blocked")
-                              ? "blocked"
-                              : labels.includes("in-progress")
-                                ? "in-progress"
-                                : "todo"
-                    ) ?? "todo";
+                const status = deriveStatus(labels);
                 const priority = derivePriority(labels);
                 const id = database.transaction(() => {
                     const result = database
@@ -410,9 +418,18 @@ export const taskRoutes = {
             try {
                 const id = safeId(request.params.id);
                 if (id === undefined)
-                    return json({ error: "Invalid id" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Invalid id",
+                        status: 400,
+                    });
                 const row = taskById(id);
-                if (!row) return json({ error: "Task not found" }, { status: 404 });
+                if (!row)
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Task not found",
+                        status: 404,
+                    });
                 return json(toFrontendTask(row, await fetchCronJobsById()));
             } catch (error) {
                 return routeErrorResponse(request, error, {
@@ -425,22 +442,23 @@ export const taskRoutes = {
 
         PATCH: async (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
+            if (id === undefined)
+                return routeFailureResponse({
+                    context: "task",
+                    message: "Invalid id",
+                    status: 400,
+                });
             const existing = taskById(id);
-            if (!existing) return json({ error: "Task not found" }, { status: 404 });
+            if (!existing)
+                return routeFailureResponse({
+                    context: "task",
+                    message: "Task not found",
+                    status: 404,
+                });
             try {
                 const body = await readApiJson(request, parseUpdateTaskRequest);
                 const labels = body.labels ?? labelsFromTask(existing);
-                const status =
-                    normalizeStatus(
-                        labels.includes("done")
-                            ? "done"
-                            : labels.includes("blocked")
-                              ? "blocked"
-                              : labels.includes("in-progress")
-                                ? "in-progress"
-                                : "todo"
-                    ) ?? "todo";
+                const status = deriveStatus(labels);
                 const priority = derivePriority(labels);
                 const title = body.title ?? existing.title;
                 const taskBody = body.body ?? existing.body;
@@ -487,13 +505,23 @@ export const taskRoutes = {
 
         DELETE: (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
+            if (id === undefined)
+                return routeFailureResponse({
+                    context: "task",
+                    message: "Invalid id",
+                    status: 400,
+                });
             const existing = database
                 .prepare("SELECT id, title, assignee FROM tasks WHERE id = ?")
                 .get(id) as
                 | undefined
                 | { assignee: Assignee | null | undefined; id: number; title: string };
-            if (!existing) return json({ error: "Task not found" }, { status: 404 });
+            if (!existing)
+                return routeFailureResponse({
+                    context: "task",
+                    message: "Task not found",
+                    status: 404,
+                });
             const existingAssignee = existing.assignee ?? undefined;
             try {
                 database.transaction(() => {
@@ -523,10 +551,19 @@ export const taskRoutes = {
             try {
                 const body = await readApiJson(request, parseAssignTaskRequest);
                 if (id === undefined)
-                    return json({ error: "Invalid id" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Invalid id",
+                        status: 400,
+                    });
                 const assignee = body.assignee ?? undefined;
                 const existing = taskById(id);
-                if (!existing) return json({ error: "Task not found" }, { status: 404 });
+                if (!existing)
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Task not found",
+                        status: 404,
+                    });
                 database.transaction(() => {
                     database
                         .prepare(
@@ -555,10 +592,19 @@ export const taskRoutes = {
             try {
                 const body = await readApiJson(request, parseMoveTaskRequest);
                 if (id === undefined) {
-                    return json({ error: "Invalid request" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Invalid request",
+                        status: 400,
+                    });
                 }
                 const existing = taskById(id);
-                if (!existing) return json({ error: "Task not found" }, { status: 404 });
+                if (!existing)
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Task not found",
+                        status: 404,
+                    });
                 const status = body.columnLabel;
                 const labels = [
                     ...labelsFromTask(existing).filter(
@@ -589,7 +635,12 @@ export const taskRoutes = {
     "/api/tasks/:id/updates": {
         GET: (request: ParametersRequest<"id">) => {
             const id = safeId(request.params.id);
-            if (id === undefined) return json({ error: "Invalid id" }, { status: 400 });
+            if (id === undefined)
+                return routeFailureResponse({
+                    context: "task",
+                    message: "Invalid id",
+                    status: 400,
+                });
             try {
                 const rows = database
                     .prepare(
@@ -614,10 +665,18 @@ export const taskRoutes = {
             try {
                 const body = await readApiJson(request, parseCreateTaskUpdateRequest);
                 if (id === undefined) {
-                    return json({ error: "Invalid update payload" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Invalid update payload",
+                        status: 400,
+                    });
                 }
                 if (!database.prepare("SELECT id FROM tasks WHERE id = ?").get(id)) {
-                    return json({ error: "Task not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Task not found",
+                        status: 404,
+                    });
                 }
                 const messageMd = body.messageMd.trim();
                 const author = body.author;
@@ -663,13 +722,21 @@ export const taskRoutes = {
             try {
                 const body = await readApiJson(request, parseUpdateTaskUpdateRequest);
                 if (id === undefined || updateId === undefined) {
-                    return json({ error: "Invalid update payload" }, { status: 400 });
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Invalid update payload",
+                        status: 400,
+                    });
                 }
                 const existing = database
                     .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
                     .get(updateId, id);
                 if (!existing)
-                    return json({ error: "Update not found" }, { status: 404 });
+                    return routeFailureResponse({
+                        context: "task",
+                        message: "Update not found",
+                        status: 404,
+                    });
                 const messageMd = body.messageMd.trim();
                 database.transaction(() => {
                     database
@@ -700,12 +767,21 @@ export const taskRoutes = {
             const id = safeId(request.params.id);
             const updateId = safeId(request.params.updateId);
             if (id === undefined || updateId === undefined) {
-                return json({ error: "Invalid id" }, { status: 400 });
+                return routeFailureResponse({
+                    context: "task",
+                    message: "Invalid id",
+                    status: 400,
+                });
             }
             const existing = database
                 .prepare("SELECT id FROM task_updates WHERE id = ? AND task_id = ?")
                 .get(updateId, id);
-            if (!existing) return json({ error: "Update not found" }, { status: 404 });
+            if (!existing)
+                return routeFailureResponse({
+                    context: "task",
+                    message: "Update not found",
+                    status: 404,
+                });
             try {
                 database.transaction(() => {
                     database

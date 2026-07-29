@@ -22,7 +22,11 @@ import {
     type OpenClawGatewayClientInstance,
     type OpenClawGatewayClientOptions,
 } from "./lib/openclawGatewayClient.ts";
+import { createStructuredLogger } from "./lib/structuredLogger.ts";
+import { hasLineBreakOrNullByte } from "./lib/values.ts";
 import { redactConfigSecrets } from "./services/configRedaction.ts";
+
+const logger = createStructuredLogger("preview-gateway-proxy");
 
 const AUTHENTICATION_TIMEOUT_MS = 10_000;
 export const MAX_CLIENT_PENDING_REQUESTS = 128;
@@ -78,7 +82,7 @@ function normalizedToken(value: string, label: string): string {
     if (
         !token ||
         Buffer.byteLength(token) > MAX_GATEWAY_TOKEN_BYTES ||
-        /[\r\n\0]/u.test(token)
+        hasLineBreakOrNullByte(token)
     ) {
         throw new TypeError(`${label} must be a valid single-line token`);
     }
@@ -289,7 +293,10 @@ function isClientAuthenticated(
     return true;
 }
 
-/** Starts the loopback-only capability proxy used by one managed PR dev slot. */
+/**
+ * Starts the loopback-only capability proxy used by one managed PR dev slot.
+ * @returns Start pull request preview gateway proxy result.
+ */
 export function startPullRequestPreviewGatewayProxy(
     options: PullRequestPreviewGatewayProxyOptions
 ): PullRequestPreviewGatewayProxy {
@@ -354,9 +361,7 @@ export function startPullRequestPreviewGatewayProxy(
         },
         onConnectError(error) {
             if (!isStopping) {
-                console.error(
-                    `[PreviewGatewayProxy] Upstream connection failed: ${error.message}`
-                );
+                logger.error("preview_gateway.upstream_connection_failed", { error });
             }
         },
         onEvent: broadcastGatewayEvent,
@@ -488,30 +493,22 @@ export function startPullRequestPreviewGatewayProxy(
         upstreamClient.start();
     } catch (error) {
         upstreamClient.stop();
-        void server.stop(true);
+        void server.stop(true).catch((stopError) => {
+            logger.error("preview_gateway.server_shutdown_failed", {
+                error: stopError,
+            });
+        });
         throw error;
     }
 
     return {
         isUpstreamConnected: () => isUpstreamConnected,
         port: server.port ?? options.port,
-        stop() {
+        async stop() {
             isStopping = true;
             upstreamClient.stop();
             closeClients("Gateway proxy stopped");
-            const stopping = server.stop(true);
-            // Bun 1.3.14 on arm64 can leave this promise pending after a
-            // WebSocket has closed. The unit owns the process lifetime, so
-            // unref the stopped server instead of blocking signal shutdown.
-            server.unref();
-            void stopping.catch((error) => {
-                console.error(
-                    `[PreviewGatewayProxy] Server shutdown failed: ${
-                        error instanceof Error ? error.message : "Unknown error"
-                    }`
-                );
-            });
-            return Promise.resolve();
+            await server.stop(true);
         },
     };
 }
@@ -556,11 +553,7 @@ if (import.meta.main) {
         process.removeListener("SIGTERM", stop);
         await proxy.stop();
     } catch (error) {
-        console.error(
-            `[PreviewGatewayProxy] Failed: ${
-                error instanceof Error ? error.message : "Unknown error"
-            }`
-        );
+        logger.error("preview_gateway.entrypoint_failed", { error });
         process.exitCode = 1;
     }
 }

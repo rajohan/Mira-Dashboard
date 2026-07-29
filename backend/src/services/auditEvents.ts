@@ -2,7 +2,12 @@ import { database, sqlNullable } from "../database.ts";
 
 export type AuditActorType = "anonymous" | "automation" | "loopback" | "system" | "user";
 export type AuditOutcome =
-    "attempted" | "accepted" | "succeeded" | "failed" | "denied" | "cancelled";
+    | "attempted"
+    | "accepted"
+    | "succeeded"
+    | "failed"
+    | "denied"
+    | "cancelled";
 
 export interface AuditActor {
     id: string;
@@ -188,7 +193,10 @@ function requestId(value: string | undefined): string | undefined {
     return value;
 }
 
-/** Writes one immutable, explicitly redacted audit event. */
+/**
+ * Writes one immutable, explicitly redacted audit event.
+ * @returns Write audit event result.
+ */
 export function writeAuditEvent(input: WriteAuditEventInput): AuditEvent {
     const id = Bun.randomUUIDv7();
     const actorType = input.actor.type;
@@ -232,7 +240,8 @@ export function writeAuditEvent(input: WriteAuditEventInput): AuditEvent {
 
 export function getAuditEvent(id: string): AuditEvent | undefined {
     const row = database.prepare("SELECT * FROM audit_events WHERE id = ?").get(id) as
-        AuditEventRow | undefined;
+        | AuditEventRow
+        | undefined;
     return row ? mapAuditEvent(row) : undefined;
 }
 
@@ -306,7 +315,13 @@ export function listAuditEvents(limit = 50, beforeCursor?: string): AuditEventPa
     };
 }
 
-/** Returns original request provenance for later asynchronous lifecycle events. */
+/**
+ * Returns original request provenance for later asynchronous lifecycle events.
+ * @param action Action value.
+ * @param targetType Target type value.
+ * @param targetId Target identifier.
+ * @returns original request provenance for later asynchronous lifecycle events.
+ */
 export function auditProvenanceForTarget(
     action: string,
     targetType: string,

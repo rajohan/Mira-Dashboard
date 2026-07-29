@@ -1,12 +1,16 @@
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 
-import { json } from "../http.ts";
+import { routeFailureResponse } from "../routeSupport.ts";
 import {
     type AuthenticationThrottleKind,
     authenticationThrottleStatus,
 } from "./authenticationThrottle.ts";
 
-/** Normalizes a Dashboard login username. */
+/**
+ * Normalizes a Dashboard login username.
+ * @param username Username value.
+ * @returns Normalized a Dashboard login username.
+ */
 export function normalizeLoginUsername(username: unknown): string | undefined {
     if (typeof username !== "string") {
         return undefined;
@@ -15,14 +19,22 @@ export function normalizeLoginUsername(username: unknown): string | undefined {
     return /^[a-z0-9._-]{3,32}$/u.test(normalized) ? normalized : undefined;
 }
 
-/** Applies the shared Dashboard password input policy. */
+/**
+ * Applies the shared Dashboard password input policy.
+ * @param password Password value.
+ * @returns Normalize login password result.
+ */
 export function normalizeLoginPassword(password: unknown): string | undefined {
     return typeof password === "string" && password.length >= 8 && password.length <= 256
         ? password
         : undefined;
 }
 
-/** Normalizes a bounded TOTP or recovery-code input. */
+/**
+ * Normalizes a bounded TOTP or recovery-code input.
+ * @param code Status or verification code.
+ * @returns Normalized a bounded TOTP or recovery-code input.
+ */
 export function normalizeSecondFactorCode(code: unknown): string | undefined {
     if (typeof code !== "string") {
         return undefined;
@@ -31,7 +43,11 @@ export function normalizeSecondFactorCode(code: unknown): string | undefined {
     return normalized.length > 0 && normalized.length <= 128 ? normalized : undefined;
 }
 
-/** Parses the minimum browser WebAuthn assertion response shape. */
+/**
+ * Parses the minimum browser WebAuthn assertion response shape.
+ * @param value Value to process.
+ * @returns Parsed the minimum browser WebAuthn assertion response shape.
+ */
 export function parseAuthenticationResponse(
     value: unknown
 ): AuthenticationResponseJSON | undefined {
@@ -48,23 +64,26 @@ export function parseAuthenticationResponse(
         : undefined;
 }
 
-/** Returns a consistent retry response when a persisted auth bucket is blocked. */
+/**
+ * Returns a consistent retry response when a persisted auth bucket is blocked.
+ * @returns a consistent retry response when a persisted auth bucket is blocked.
+ */
 export function authenticationThrottleResponse(
+    request: Request,
     kind: AuthenticationThrottleKind,
     subject: number | string
 ): Response | undefined {
     const status = authenticationThrottleStatus(kind, subject);
     return status.allowed
         ? undefined
-        : json(
+        : routeFailureResponse(
               {
-                  error: "Too many authentication attempts, please try again later",
-              },
-              {
-                  headers: {
-                      "Retry-After": String(status.retryAfterSeconds ?? 1),
-                  },
+                  code: "rate_limited",
+                  context: "authentication.throttle",
+                  message: "Too many authentication attempts, please try again later",
+                  retryAfterSeconds: status.retryAfterSeconds ?? 1,
                   status: 429,
-              }
+              },
+              request
           );
 }

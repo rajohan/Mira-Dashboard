@@ -7,9 +7,40 @@ import {
 import fs from "node:fs";
 import Path from "node:path";
 
+import { errorMessage } from "./errors.ts";
+import { createStructuredLogger } from "./structuredLogger.ts";
+
+const logger = createStructuredLogger("openclaw-gateway-client");
+
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * Resolves the timeout for one Gateway request.
+ *
+ * @param configuredTimeoutMs - Client default timeout.
+ * @param requestedTimeoutMs - Per-request timeout override.
+ * @param shouldWaitIndefinitely - Whether the request disables its timer.
+ * @returns Effective timeout, or `undefined` for an indefinite request.
+ */
+function effectiveGatewayRequestTimeout(
+    configuredTimeoutMs: number,
+    requestedTimeoutMs: number | undefined,
+    shouldWaitIndefinitely: boolean | undefined
+): number | undefined {
+    if (shouldWaitIndefinitely === true) {
+        return undefined;
+    }
+    if (
+        typeof requestedTimeoutMs === "number" &&
+        Number.isFinite(requestedTimeoutMs) &&
+        requestedTimeoutMs > 0
+    ) {
+        return Math.min(Math.max(Math.trunc(requestedTimeoutMs), 1), MAX_TIMER_DELAY_MS);
+    }
+    return configuredTimeoutMs;
+}
 const DEFAULT_TICK_INTERVAL_MS = 30_000;
 const MIN_TICK_INTERVAL_MS = 1000;
 const MAX_TICK_INTERVAL_MS = 5 * 60_000;
@@ -114,13 +145,21 @@ export type OpenClawGatewayClientInstance = {
     ) => Promise<unknown>;
 };
 
-/** Performs base64 URL encode. */
+/**
+ * Performs base64 URL encode.
+ * @returns Base64 URL encode result.
+ */
 function base64UrlEncode(buffer: Buffer): string {
     const bytes = buffer as unknown as Uint8Array & { toBase64: () => string };
     return bytes.toBase64().replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
-/** Clamps timer durations from Gateway policy before they reach setInterval/setTimeout. */
+/**
+ * Clamps timer durations from Gateway policy before they reach setInterval/setTimeout.
+ * @param value Value to process.
+ * @param fallback Fallback value.
+ * @returns Clamped timer durations from Gateway policy before they reach setInterval/setTimeout.
+ */
 function sanitizeTimerDurationMs(value: unknown, fallback: number): number {
     if (typeof value !== "number" || !Number.isFinite(value)) {
         return fallback;
@@ -132,7 +171,11 @@ function sanitizeTimerDurationMs(value: unknown, fallback: number): number {
     );
 }
 
-/** Performs derive public key raw. */
+/**
+ * Performs derive public key raw.
+ * @param publicKeyPem Public key pem value.
+ * @returns Derive public key raw result.
+ */
 function derivePublicKeyRaw(publicKeyPem: string): Buffer {
     const spki = createPublicKey(publicKeyPem).export({
         type: "spki",
@@ -148,30 +191,52 @@ function derivePublicKeyRaw(publicKeyPem: string): Buffer {
     return spki;
 }
 
-/** Performs fingerprint public key. */
+/**
+ * Performs fingerprint public key.
+ * @param publicKeyPem Public key pem value.
+ * @returns Fingerprint public key result.
+ */
 function fingerprintPublicKey(publicKeyPem: string): string {
     return new Bun.CryptoHasher("sha256")
         .update(derivePublicKeyRaw(publicKeyPem))
-        .digest("hex") as string;
+        .digest("hex");
 }
 
-/** Performs public key raw base64 URL from pem. */
+/**
+ * Performs public key raw base64 URL from pem.
+ * @param publicKeyPem Public key pem value.
+ * @returns Public key raw base64 URL from pem result.
+ */
 function publicKeyRawBase64UrlFromPem(publicKeyPem: string): string {
     return base64UrlEncode(derivePublicKeyRaw(publicKeyPem));
 }
 
-/** Returns a normalized error instance for callback surfaces. */
+/**
+ * Returns a normalized error instance for callback surfaces.
+ * @param error Error to inspect.
+ * @returns a normalized error instance for callback surfaces.
+ */
 function asError(error: unknown): Error {
-    return error instanceof Error ? error : new Error(String(error));
+    return error instanceof Error
+        ? error
+        : new Error(errorMessage(error, "OpenClaw Gateway request failed"));
 }
 
-/** Performs sign device payload. */
+/**
+ * Performs sign device payload.
+ * @param privateKeyPem Private key pem value.
+ * @param payload Request or event payload.
+ * @returns Sign device payload result.
+ */
 function signDevicePayload(privateKeyPem: string, payload: string): string {
     const key = createPrivateKey(privateKeyPem);
     return base64UrlEncode(sign(undefined, Buffer.from(payload, "utf8"), key));
 }
 
-/** Performs generate IDentity. */
+/**
+ * Performs generate IDentity.
+ * @returns Generate IDentity result.
+ */
 function generateIdentity(): DeviceIdentity {
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");
     const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
@@ -184,7 +249,11 @@ function generateIdentity(): DeviceIdentity {
     };
 }
 
-/** Performs load or create device IDentity. */
+/**
+ * Performs load or create device IDentity.
+ * @param filePath File path value.
+ * @returns Load or create device IDentity result.
+ */
 export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
     fs.mkdirSync(Path.dirname(filePath), { recursive: true });
 
@@ -234,7 +303,11 @@ export function loadOrCreateDeviceIdentity(filePath: string): DeviceIdentity {
     return identity;
 }
 
-/** Normalizes device metadata for auth. */
+/**
+ * Normalizes device metadata for auth.
+ * @param value Value to process.
+ * @returns Normalized device metadata for auth.
+ */
 function normalizeDeviceMetadataForAuth(value?: string): string {
     if (typeof value !== "string") {
         return "";
@@ -244,7 +317,11 @@ function normalizeDeviceMetadataForAuth(value?: string): string {
     return trimmed ? trimmed.replaceAll(/[A-Z]/gu, (char) => char.toLowerCase()) : "";
 }
 
-/** Builds device auth payload v3. */
+/**
+ * Builds device auth payload v3.
+ * @param parameters Parameters value.
+ * @returns Built device auth payload v3.
+ */
 function buildDeviceAuthPayloadV3(parameters: {
     deviceId: string;
     clientId: string;
@@ -376,7 +453,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
         try {
             parsed = JSON.parse(raw);
         } catch (error) {
-            console.error("[Gateway] Failed to parse message:", error);
+            logger.error("openclaw_gateway.message_parse_failed", { error });
             return;
         }
 
@@ -447,7 +524,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
                     DEFAULT_TICK_INTERVAL_MS
                 );
                 this.startTickWatch();
-                this.opts.onHelloOk?.(payload as GatewayHelloOk);
+                this.opts.onHelloOk?.(payload);
             }
             pending.resolve(payload);
             return;
@@ -471,7 +548,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
     }
 
     private handleSendConnectError(error: unknown): void {
-        console.error("[Gateway] Failed to send connect response:", error);
+        logger.error("openclaw_gateway.connect_response_send_failed", { error });
         const normalizedError = asError(error);
         this.opts.onConnectError?.(normalizedError);
         this.ws?.close(1008, normalizedError.message);
@@ -544,14 +621,16 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 device,
             });
         } catch (error) {
-            this.opts.onConnectError?.(
-                error instanceof Error ? error : new Error(String(error))
-            );
-            this.ws?.close(1008, error instanceof Error ? error.message : String(error));
+            const normalizedError = asError(error);
+            this.opts.onConnectError?.(normalizedError);
+            this.ws?.close(1008, normalizedError.message);
         }
     }
 
-    /** Returns only the count; request methods and payloads remain private. */
+    /**
+     * Returns only the count; request methods and payloads remain private.
+     * @returns only the count; request methods and payloads remain private.
+     */
     pendingRequestCount(): number {
         return this.pending.size;
     }
@@ -584,18 +663,22 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
             this.armConnectChallengeTimeout();
         });
 
-        ws.addEventListener("message", async (event) => {
-            try {
-                this.handleMessage(await websocketMessageToString(event.data));
-            } catch (error) {
-                const normalizedError =
-                    error instanceof Error
-                        ? error
-                        : new Error(`gateway message error: ${String(error)}`);
-                this.opts.onConnectError?.(normalizedError);
-                this.rejectAllPending(normalizedError);
-                ws.close(1011, "gateway message error");
-            }
+        ws.addEventListener("message", (event) => {
+            void (async () => {
+                try {
+                    this.handleMessage(await websocketMessageToString(event.data));
+                } catch (error) {
+                    const normalizedError =
+                        error instanceof Error
+                            ? error
+                            : new Error("Gateway message handling failed", {
+                                  cause: error,
+                              });
+                    this.opts.onConnectError?.(normalizedError);
+                    this.rejectAllPending(normalizedError);
+                    ws.close(1011, "gateway message error");
+                }
+            })();
         });
 
         ws.addEventListener("close", (event) => {
@@ -661,17 +744,11 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
 
         const configuredTimeoutMs = this.opts.requestTimeoutMs as number;
         const requestedTimeoutMs = options.timeoutMs;
-        const timeoutMs =
-            options.shouldWaitIndefinitely === true
-                ? undefined
-                : typeof requestedTimeoutMs === "number" &&
-                    Number.isFinite(requestedTimeoutMs) &&
-                    requestedTimeoutMs > 0
-                  ? Math.min(
-                        Math.max(Math.trunc(requestedTimeoutMs), 1),
-                        MAX_TIMER_DELAY_MS
-                    )
-                  : configuredTimeoutMs;
+        const timeoutMs = effectiveGatewayRequestTimeout(
+            configuredTimeoutMs,
+            requestedTimeoutMs,
+            options.shouldWaitIndefinitely
+        );
 
         return new Promise((resolve, reject) => {
             const timeout =
@@ -690,7 +767,7 @@ export class OpenClawGatewayClient implements OpenClawGatewayClientInstance {
                 if (timeout !== undefined) {
                     clearTimeout(timeout);
                 }
-                reject(error);
+                reject(asError(error));
             }
         });
     }

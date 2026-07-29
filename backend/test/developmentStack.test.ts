@@ -1,3 +1,5 @@
+import { Database } from "bun:sqlite";
+import { describe, expect, it, jest } from "bun:test";
 import {
     existsSync,
     mkdirSync,
@@ -12,9 +14,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { Database } from "bun:sqlite";
-import { describe, expect, it, jest } from "bun:test";
-
 import { prepareDevelopmentOpenClawSnapshot } from "../src/development/developmentOpenClaw.ts";
 import {
     developmentBackendEnvironment,
@@ -23,11 +22,11 @@ import {
     resolveDevelopmentStackConfig,
     runDevelopmentStack,
 } from "../src/development/developmentStack.ts";
+import { enableStructuredLogOutputForTests } from "../src/lib/structuredLogger.ts";
+import { httpOrigin } from "./support/httpUrls.ts";
 
 const CURRENT_COMMIT = "a".repeat(40);
 const PREVIOUS_COMMIT = "b".repeat(40);
-const SQL_NULL = JSON.parse("null") as null;
-const RUNNING_PROCESS_EXIT_CODE = JSON.parse("null") as null;
 
 function temporaryRoot(label: string): string {
     return mkdtempSync(path.join(tmpdir(), label));
@@ -35,9 +34,9 @@ function temporaryRoot(label: string): string {
 
 function controllableDevelopmentChild() {
     const { promise, resolve } = Promise.withResolvers<number>();
-    let exitCode: number | null = RUNNING_PROCESS_EXIT_CODE;
+    let exitCode: number | null = null;
     const kill = jest.fn(() => {
-        if (exitCode !== RUNNING_PROCESS_EXIT_CODE) return;
+        if (exitCode !== null) return;
         exitCode = 0;
         resolve(0);
     });
@@ -271,8 +270,9 @@ describe("development stack", () => {
                 },
                 {
                     HOME: root,
-                    // eslint-disable-next-line unicorn/prefer-https -- Verifies that remote plain HTTP is rejected.
-                    MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: "http://dashboard.example",
+                    MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: httpOrigin(
+                        "https://dashboard.example"
+                    ),
                 },
                 {
                     HOME: root,
@@ -339,21 +339,24 @@ describe("development stack", () => {
                 gateway: { auth: { token: "must-not-copy" } },
             })
         );
-        const config = resolveDevelopmentStackConfig(
-            {
-                HOME: root,
-                MIRA_DASHBOARD_DEV_DB_SOURCE: sourceDatabase,
-                MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE: gatewayTokenFile,
-                MIRA_DASHBOARD_DEV_GATEWAY_URL: "ws://127.0.0.1:18789",
-                MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE: openClawConfigSource,
-                MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: "https://dashboard.example:5173",
-                MIRA_DASHBOARD_DEV_RELEASES_SOURCE: releaseSource,
-                MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
-                MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE: workspaceSource,
-                MIRA_DASHBOARD_WEBAUTHN_RP_ID: "dashboard.example",
-            },
-            root
-        );
+        const config = {
+            ...resolveDevelopmentStackConfig(
+                {
+                    HOME: root,
+                    MIRA_DASHBOARD_DEV_DB_SOURCE: sourceDatabase,
+                    MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE: gatewayTokenFile,
+                    MIRA_DASHBOARD_DEV_GATEWAY_URL: "ws://127.0.0.1:18789",
+                    MIRA_DASHBOARD_DEV_OPENCLAW_CONFIG_SOURCE: openClawConfigSource,
+                    MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN: "https://dashboard.example:5173",
+                    MIRA_DASHBOARD_DEV_RELEASES_SOURCE: releaseSource,
+                    MIRA_DASHBOARD_DEV_STATE_ROOT: stateRoot,
+                    MIRA_DASHBOARD_DEV_WORKSPACE_SOURCE: workspaceSource,
+                    MIRA_DASHBOARD_WEBAUTHN_RP_ID: "dashboard.example",
+                },
+                root
+            ),
+            openClawLogMode: "synthetic" as const,
+        };
         const originalGitHubToken = process.env.MIRA_GITHUB_TOKEN;
         process.env.MIRA_GITHUB_TOKEN = "must-not-leak";
         try {
@@ -423,7 +426,7 @@ describe("development stack", () => {
                     action_key: "backup.run",
                     enabled: 0,
                     id: "backup",
-                    next_run_at: SQL_NULL,
+                    next_run_at: null,
                 },
                 {
                     action_key: "cache.refresh",
@@ -435,7 +438,7 @@ describe("development stack", () => {
                     action_key: "database.maintenance",
                     enabled: 0,
                     id: "database",
-                    next_run_at: SQL_NULL,
+                    next_run_at: null,
                 },
             ]);
             snapshot.close();
@@ -489,11 +492,16 @@ describe("development stack", () => {
 
             const environment = developmentBackendEnvironment(config);
             expect(environment).toMatchObject({
+                MIRA_DASHBOARD_APPLICATION_LOG_PATH: path.join(
+                    stateRoot,
+                    "logs",
+                    "dashboard.ndjson"
+                ),
                 MIRA_DASHBOARD_DB_PATH: config.databasePath,
                 MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: "mira_dashboard_dev_5173",
                 MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
                 MIRA_DASHBOARD_FRONTEND_PATH: root,
-                MIRA_DASHBOARD_LOGS_ROOT: path.join(stateRoot, "logs"),
+                MIRA_DASHBOARD_LOGS_ROOT: path.join(stateRoot, "logs", "openclaw"),
                 OPENCLAW_GATEWAY_TOKEN: "development-gateway-token",
                 OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789/",
             });
@@ -501,45 +509,27 @@ describe("development stack", () => {
             expect(environment).not.toHaveProperty(
                 "MIRA_DASHBOARD_AUTOMATION_CREDENTIALS"
             );
-            const legacySnapshot = new Database(config.databasePath);
-            legacySnapshot.run("DELETE FROM deployment_jobs");
-            legacySnapshot.run(`
-                INSERT INTO deployment_jobs (
-                    id,
-                    status,
-                    started_at,
-                    updated_at
-                )
-                VALUES (
-                    'legacy-active-deployment',
-                    'verifying',
-                    '2026-01-03T00:00:00.000Z',
-                    '2026-01-03T00:01:00.000Z'
-                )
-            `);
-            legacySnapshot.run(
-                "INSERT INTO deployment_lock (id, job_id) VALUES (1, 'legacy-active-deployment')"
-            );
-            legacySnapshot.close();
+            const mutableSnapshot = new Database(config.databasePath);
+            mutableSnapshot
+                .prepare("INSERT INTO app_config (key, value) VALUES (?, ?)")
+                .run("development-marker", "preserved");
+            mutableSnapshot.close();
             expect(prepareDevelopmentState(config)).toEqual({
                 database: "reused",
                 releases: "reused",
                 workspace: "reused",
             });
-            const backfilledSnapshot = new Database(config.databasePath, {
+            const reusedSnapshot = new Database(config.databasePath, {
                 readonly: true,
             });
             expect(
-                backfilledSnapshot
-                    .query("SELECT id, status FROM deployment_jobs ORDER BY id")
-                    .all()
-            ).toEqual([{ id: "deployment", status: "isOk" }]);
-            expect(
-                backfilledSnapshot
-                    .query("SELECT id, job_id FROM deployment_lock ORDER BY id")
-                    .all()
-            ).toEqual([]);
-            backfilledSnapshot.close();
+                reusedSnapshot
+                    .query(
+                        "SELECT value FROM app_config WHERE key = 'development-marker'"
+                    )
+                    .get()
+            ).toEqual({ value: "preserved" });
+            reusedSnapshot.close();
             rmSync(sourceDatabase);
             expect(prepareDevelopmentState(config)).toEqual({
                 database: "reused",
@@ -605,7 +595,7 @@ describe("development stack", () => {
                         .all()
                 ).toEqual([
                     { id: 1, mfa_enabled_at: "now" },
-                    { id: 2, mfa_enabled_at: SQL_NULL },
+                    { id: 2, mfa_enabled_at: null },
                 ]);
                 expect(
                     remoteSnapshot
@@ -626,8 +616,8 @@ describe("development stack", () => {
                         .query("SELECT id, mfa_enabled_at FROM users ORDER BY id")
                         .all()
                 ).toEqual([
-                    { id: 1, mfa_enabled_at: SQL_NULL },
-                    { id: 2, mfa_enabled_at: SQL_NULL },
+                    { id: 1, mfa_enabled_at: null },
+                    { id: 2, mfa_enabled_at: null },
                 ]);
                 expect(
                     localSnapshot
@@ -757,29 +747,34 @@ describe("development stack", () => {
             path.join(root, "projects", "mira-dashboard", "production", "releases"),
             { recursive: true }
         );
-        const config = resolveDevelopmentStackConfig(
-            {
-                HOME: root,
-                MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE: gatewayTokenFile,
-                MIRA_DASHBOARD_DEV_HOT_RELOAD: "0",
-                MIRA_DASHBOARD_DEV_STATE_ROOT: path.join(root, "state"),
-            },
-            root
-        );
+        const config = {
+            ...resolveDevelopmentStackConfig(
+                {
+                    HOME: root,
+                    MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE: gatewayTokenFile,
+                    MIRA_DASHBOARD_DEV_HOT_RELOAD: "0",
+                    MIRA_DASHBOARD_DEV_STATE_ROOT: path.join(root, "state"),
+                },
+                root
+            ),
+            openClawLogMode: "synthetic" as const,
+        };
         const backend = controllableDevelopmentChild();
         const frontend = controllableDevelopmentChild();
         const spawnSpy = jest
             .spyOn(Bun, "spawn")
             .mockImplementationOnce(() => backend.child)
             .mockImplementationOnce(() => frontend.child);
-        const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        const errorSpy = jest
+            .spyOn(process.stderr, "write")
+            .mockImplementation(() => true);
+        const disableStructuredLogOutput = enableStructuredLogOutputForTests();
 
         try {
             const running = runDevelopmentStack(config);
             await Bun.sleep(0);
             backend.complete(7);
-            await expect(running).resolves.toBe(7);
+            expect(running).resolves.toBe(7);
             expect(spawnSpy).toHaveBeenCalledTimes(2);
             expect(spawnSpy.mock.calls[0]?.[0]).toEqual([
                 expect.any(String),
@@ -806,22 +801,35 @@ describe("development stack", () => {
             });
             expect(frontend.kill).toHaveBeenCalledWith("SIGTERM");
             expect(backend.kill).not.toHaveBeenCalled();
-            const logFiles = readdirSync(path.join(config.stateRoot, "logs"));
-            expect(logFiles).toHaveLength(1);
+            const developmentOpenClawLogs = path.join(
+                config.stateRoot,
+                "logs",
+                "openclaw"
+            );
+            const logFiles = readdirSync(developmentOpenClawLogs);
+            expect(logFiles).toHaveLength(2);
             expect(
-                readFileSync(path.join(config.stateRoot, "logs", logFiles[0]!), "utf8")
-                    .trim()
-                    .split("\n")
-            ).toHaveLength(25);
-            expect(logSpy).toHaveBeenCalledWith(
-                expect.stringContaining("Isolated scheduler/worker enabled.")
+                logFiles
+                    .map(
+                        (logFile) =>
+                            readFileSync(
+                                path.join(developmentOpenClawLogs, logFile),
+                                "utf8"
+                            )
+                                .trim()
+                                .split("\n").length
+                    )
+                    .toSorted((a, b) => a - b)
+            ).toEqual([24, 25]);
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.stringContaining('"event":"development.process_exited"')
             );
             expect(errorSpy).toHaveBeenCalledWith(
-                "Development backend exited with code 7"
+                expect.stringContaining('"exitCode":7')
             );
         } finally {
+            disableStructuredLogOutput();
             spawnSpy.mockRestore();
-            logSpy.mockRestore();
             errorSpy.mockRestore();
             rmSync(root, { force: true, recursive: true });
         }

@@ -6,7 +6,7 @@ import tailwindPlugin from "bun-plugin-tailwind";
 import {
     isReleaseBuildCommit,
     resolveBuildSourceIdentity,
-} from "../backend/scripts/buildSourceIdentity.ts";
+} from "./buildSourceIdentity.ts";
 import {
     assertFrontendBundleBudgets,
     measureFrontendBundle,
@@ -58,7 +58,7 @@ export async function buildFrontend({
             "process.env.PUBLIC_DASHBOARD_WS_PORT": "undefined",
             "process.env.NODE_ENV": JSON.stringify(mode),
         },
-        entrypoints: ["./index.html"],
+        entrypoints: ["./frontend/index.html"],
         env: "PUBLIC_*",
         minify: isProduction,
         metafile: true,

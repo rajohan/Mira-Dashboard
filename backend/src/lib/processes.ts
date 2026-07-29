@@ -32,7 +32,10 @@ const childProcessMetrics: ChildProcessMetrics = {
     totalDurationMs: 0,
 };
 
-/** Returns the absolute Bun executable already running the Dashboard process. */
+/**
+ * Returns the absolute Bun executable already running the Dashboard process.
+ * @returns the absolute Bun executable already running the Dashboard process.
+ */
 export function resolveBunExecutable(): string {
     return process.execPath;
 }
@@ -87,18 +90,17 @@ export function spawnProcess(
     });
     childProcessMetrics.active += 1;
     childProcessMetrics.started += 1;
-    void process.exited
-        .then((code) => {
+    void (async () => {
+        try {
+            const code = await process.exited;
             if (code === 0) {
                 childProcessMetrics.succeeded += 1;
             } else {
                 childProcessMetrics.failed += 1;
             }
-        })
-        .catch(() => {
+        } catch {
             childProcessMetrics.failed += 1;
-        })
-        .finally(() => {
+        } finally {
             const durationMs =
                 Math.round(Math.max(0, performance.now() - startedAt) * 100) / 100;
             childProcessMetrics.active = Math.max(0, childProcessMetrics.active - 1);
@@ -115,11 +117,15 @@ export function spawnProcess(
                     : Math.round(
                           (childProcessMetrics.totalDurationMs / completed) * 100
                       ) / 100;
-        });
+        }
+    })();
     return process;
 }
 
-/** Returns aggregate process telemetry without command arguments or environment data. */
+/**
+ * Returns aggregate process telemetry without command arguments or environment data.
+ * @returns aggregate process telemetry without command arguments or environment data.
+ */
 export function getChildProcessMetrics(): ChildProcessMetrics {
     return { ...childProcessMetrics };
 }

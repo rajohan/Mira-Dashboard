@@ -12,7 +12,9 @@ const BLOCK_DURATIONS = [
 ] as const;
 
 export type AuthenticationThrottleKind =
-    "account-password" | "login-password" | "second-factor";
+    | "account-password"
+    | "login-password"
+    | "second-factor";
 
 interface AuthenticationThrottleRow {
     blocked_until: string | null;
@@ -40,7 +42,10 @@ function blockDurationMs(failureCount: number): number {
     );
 }
 
-/** Returns whether the account-scoped authentication bucket may be attempted. */
+/**
+ * Returns whether the account-scoped authentication bucket may be attempted.
+ * @returns Whether the account-scoped authentication bucket may be attempted.
+ */
 export function authenticationThrottleStatus(
     kind: AuthenticationThrottleKind,
     subject: number | string,
@@ -66,7 +71,10 @@ export function authenticationThrottleStatus(
     };
 }
 
-/** Records one failed authentication attempt and applies progressive cooldowns. */
+/**
+ * Records one failed authentication attempt and applies progressive cooldowns.
+ * @returns Record authentication failure result.
+ */
 export function recordAuthenticationFailure(
     kind: AuthenticationThrottleKind,
     subject: number | string,
@@ -83,7 +91,7 @@ export function recordAuthenticationFailure(
                  WHERE bucket_key = ?`
             )
             .get(key) as AuthenticationThrottleRow | undefined;
-        const firstFailedAt = row ? Date.parse(row.first_failed_at) : NaN;
+        const firstFailedAt = row ? Date.parse(row.first_failed_at) : Number.NaN;
         const isCurrentWindow =
             Number.isFinite(firstFailedAt) &&
             firstFailedAt <= now.getTime() &&
@@ -127,11 +135,12 @@ export function recordAuthenticationFailure(
         try {
             database.run("ROLLBACK");
         } catch (rollbackError) {
-            throw new AggregateError(
+            const rollbackFailure = new AggregateError(
                 [error, rollbackError],
                 "Authentication throttle update and rollback failed",
-                { cause: rollbackError }
+                { cause: error }
             );
+            throw rollbackFailure;
         }
         throw error;
     }
@@ -147,7 +156,11 @@ export function clearAuthenticationFailures(
         .run(bucketKey(kind, subject));
 }
 
-/** Removes old throttle state after its failure window and cooldown are over. */
+/**
+ * Removes old throttle state after its failure window and cooldown are over.
+ * @param now Now value.
+ * @returns Cleanup authentication throttle state result.
+ */
 export function cleanupAuthenticationThrottleState(now = new Date()): number {
     return database
         .prepare(

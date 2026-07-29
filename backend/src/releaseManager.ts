@@ -1,11 +1,11 @@
+import { Database } from "bun:sqlite";
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { Database } from "bun:sqlite";
-
+import { isPlainRecord } from "../../contracts/runtime.ts";
 import {
     assertMiraDatabasePathSafeForEnvironment,
     getMiraDatabasePath,
@@ -169,14 +169,6 @@ async function syncFile(filePath: string): Promise<void> {
     } finally {
         await file.close();
     }
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return false;
-    }
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
 }
 
 function hasExactKeys(record: Record<string, unknown>, expected: string[]): boolean {
@@ -637,9 +629,9 @@ async function removeReleaseLink(
     await syncDirectory(layout.root);
 }
 
-async function readLiveDatabaseSchemaState(
+function readLiveDatabaseSchemaState(
     maximumCompatibleVersion: number
-): Promise<DashboardLiveSchemaState> {
+): DashboardLiveSchemaState {
     const databasePath = getMiraDatabasePath();
     assertMiraDatabasePathSafeForEnvironment(databasePath);
     const database = new Database(databasePath, { readonly: true });
@@ -919,26 +911,22 @@ async function applyReleaseLinkState(
     expectedReleases?: Map<string, ManagedDashboardRelease>
 ): Promise<void> {
     const releases = expectedReleases ?? (await validateReleaseLinkState(layout, state));
-    if (state.current) {
-        await replaceReleaseLink(
-            layout,
-            "current",
-            state.current,
-            requireValidatedRelease(releases, state.current)
-        );
-    } else {
-        await removeReleaseLink(layout, "current");
-    }
-    if (state.previous) {
-        await replaceReleaseLink(
-            layout,
-            "previous",
-            state.previous,
-            requireValidatedRelease(releases, state.previous)
-        );
-    } else {
-        await removeReleaseLink(layout, "previous");
-    }
+    await (state.current
+        ? replaceReleaseLink(
+              layout,
+              "current",
+              state.current,
+              requireValidatedRelease(releases, state.current)
+          )
+        : removeReleaseLink(layout, "current"));
+    await (state.previous
+        ? replaceReleaseLink(
+              layout,
+              "previous",
+              state.previous,
+              requireValidatedRelease(releases, state.previous)
+          )
+        : removeReleaseLink(layout, "previous"));
 }
 
 function requireValidatedRelease(
@@ -1076,7 +1064,7 @@ async function acquireReleaseTransitionLock(
             continue;
         }
         assertReleaseTransitionLockCommandSucceeded(
-            result.error as NodeJS.ErrnoException | undefined,
+            result.error,
             result.status,
             result.stderr?.toString("utf8") ?? ""
         );
@@ -1097,21 +1085,27 @@ async function withReleaseTransitionLock<T>(
         onContention
     );
     let result: T | undefined;
-    let transitionError: unknown;
+    let transitionError: Error | undefined;
     try {
         result = await transition();
     } catch (primaryError) {
-        transitionError = primaryError;
+        transitionError =
+            primaryError instanceof Error
+                ? primaryError
+                : new Error("Managed release transition failed", {
+                      cause: primaryError,
+                  });
     }
     try {
         await lockFile.close();
     } catch (cleanupError) {
         if (transitionError !== undefined) {
-            throw new AggregateError(
+            const transitionFailure = new AggregateError(
                 [transitionError, cleanupError],
                 "Managed release transition failed and its lock could not be released",
-                { cause: cleanupError }
+                { cause: transitionError }
             );
+            throw transitionFailure;
         }
         throw cleanupError;
     }
@@ -1124,6 +1118,11 @@ async function withReleaseTransitionLock<T>(
 /**
  * Copies a verified build into the immutable release store while excluding
  * activation, rollback, pruning, and another publisher from its staging path.
+ * @param buildRoot Build root value.
+ * @param commitSha Commit sha value.
+ * @param releasesRoot Releases root value.
+ * @param options Operation options.
+ * @returns Promise resolving to the publish verified dashboard release result.
  */
 export async function publishVerifiedDashboardRelease(
     buildRoot: string,
@@ -1252,11 +1251,12 @@ async function executeReleaseTransition(
         try {
             await restoreInterruptedReleaseTransition(layout, snapshot);
         } catch (recoveryError) {
-            throw new AggregateError(
+            const transitionFailure = new AggregateError(
                 [error, recoveryError],
                 "Managed release transition and recovery both failed",
-                { cause: recoveryError }
+                { cause: error }
             );
+            throw transitionFailure;
         }
         throw error;
     }
@@ -1435,6 +1435,7 @@ export async function rollbackDashboardRelease(
  * Restores the exact current/previous snapshot that existed before a failed
  * activation. Unlike a manual rollback, the failed candidate is not retained
  * in the previous slot.
+ * @returns Promise resolving to the restore dashboard release after failed activation result.
  */
 export async function restoreDashboardReleaseAfterFailedActivation(
     options: DashboardReleaseFailedActivationRestoreOptions,

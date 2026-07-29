@@ -22,7 +22,7 @@ describe("coalesced snapshots", () => {
 
         expect(producer).toHaveBeenCalledTimes(1);
         load.resolve("shared");
-        await expect(Promise.all([first, second])).resolves.toEqual(["shared", "shared"]);
+        expect(Promise.all([first, second])).resolves.toEqual(["shared", "shared"]);
         expect(
             getCoalescedSnapshotMetrics().find(
                 (entry) => entry.name === "test.cold-single-flight"
@@ -49,17 +49,17 @@ describe("coalesced snapshots", () => {
             staleForMs: 5000,
         });
 
-        await expect(snapshot.read()).resolves.toBe("first");
+        expect(snapshot.read()).resolves.toBe("first");
         now = 2000;
-        await expect(snapshot.read()).resolves.toBe("first");
-        await expect(snapshot.read()).resolves.toBe("first");
+        expect(snapshot.read()).resolves.toBe("first");
+        expect(snapshot.read()).resolves.toBe("first");
         expect(producer).toHaveBeenCalledTimes(2);
 
         now = 2100;
         refresh.resolve("second");
         await refresh.promise;
         await Promise.resolve();
-        await expect(snapshot.read()).resolves.toBe("second");
+        expect(snapshot.read()).resolves.toBe("second");
     });
 
     it("does not let an invalidated load repopulate a newer generation", async () => {
@@ -84,13 +84,13 @@ describe("coalesced snapshots", () => {
         expect(producer).toHaveBeenCalledTimes(2);
 
         oldLoad.resolve("old");
-        await expect(oldRead).resolves.toBe("old");
+        expect(oldRead).resolves.toBe("old");
         newLoad.resolve("new");
-        await expect(newRead).resolves.toBe("new");
-        await expect(snapshot.read()).resolves.toBe("new");
+        expect(newRead).resolves.toBe("new");
+        expect(snapshot.read()).resolves.toBe("new");
     });
 
-    it("propagates refresh failures after the hard stale boundary", async () => {
+    it("propagates refresh failures after the hard stale boundary", () => {
         let now = 1000;
         const producer = jest
             .fn<() => Promise<string>>()
@@ -104,9 +104,9 @@ describe("coalesced snapshots", () => {
             staleForMs: 1000,
         });
 
-        await expect(snapshot.read()).resolves.toBe("first");
+        expect(snapshot.read()).resolves.toBe("first");
         now = 2501;
-        await expect(snapshot.read()).rejects.toThrow("producer unavailable");
+        expect(snapshot.read()).rejects.toThrow("producer unavailable");
     });
 
     it("reuses a cold failure until its retry delay expires", async () => {
@@ -125,14 +125,14 @@ describe("coalesced snapshots", () => {
             staleForMs: 1000,
         });
 
-        await expect(snapshot.read()).rejects.toBe(failure);
+        expect(snapshot.read()).rejects.toBe(failure);
         await Promise.resolve();
         now = 2000;
-        await expect(snapshot.read()).rejects.toBe(failure);
+        expect(snapshot.read()).rejects.toBe(failure);
         expect(producer).toHaveBeenCalledTimes(1);
 
         now = 6001;
-        await expect(snapshot.read()).resolves.toBe("recovered");
+        expect(snapshot.read()).resolves.toBe("recovered");
         expect(producer).toHaveBeenCalledTimes(2);
     });
 });

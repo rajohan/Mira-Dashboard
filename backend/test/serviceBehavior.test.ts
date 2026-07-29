@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it, jest } from "bun:test";
 import {
     appendFileSync,
     chmodSync,
@@ -15,8 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it, jest } from "bun:test";
-
+import { parseJsonText, requestUrl } from "../../test/support/fetch.ts";
 import type { DashboardSocket } from "../src/dashboardSocket.ts";
 import { database, sqlNullable } from "../src/database.ts";
 import { resolveDashboardProjectPaths } from "../src/lib/dashboardPaths.ts";
@@ -25,12 +25,26 @@ import {
     ensureDashboardReleaseLayout,
     managedReleasePath,
 } from "../src/releaseManager.ts";
+import { apiErrorExpectation } from "./support/apiErrorExpectation.ts";
 import {
     createReleaseFixture,
     rewriteReleaseFixtureSchemaVersion,
 } from "./support/releaseFixture.ts";
+import { captureStructuredLogs } from "./support/structuredLogCapture.ts";
 
 const cleanupCallbacks: Array<() => Promise<void> | void> = [];
+
+function countRollbackExecutions(): number {
+    return (
+        database
+            .prepare(
+                `SELECT COUNT(*) AS count
+                 FROM job_executions
+                 WHERE action_key = 'dashboard.rollback'`
+            )
+            .get() as { count: number }
+    ).count;
+}
 
 function rememberEnvironment(key: string): void {
     const originalValue = process.env[key];
@@ -135,7 +149,7 @@ function routeRequest<T extends string>(
     });
 }
 
-function rollbackRouteRequest(targetCommit: unknown): Request {
+function rollbackRouteRequest(targetCommit?: unknown): Request {
     return new Request("https://dashboard.test/api/pull-requests/releases/rollback", {
         body: JSON.stringify({ targetCommit }),
         headers: { "Content-Type": "application/json" },
@@ -365,9 +379,11 @@ class FakeGatewayWebSocket extends EventTarget {
     closeCode: number | undefined;
     closeReason = "";
     sendError: Error | undefined;
+    readonly url: string;
 
-    constructor(readonly url: string) {
+    constructor(url: string) {
         super();
+        this.url = url;
         FakeGatewayWebSocket.instances.push(this);
     }
 
@@ -405,7 +421,11 @@ function waitFor(isReady: () => boolean, timeoutMilliseconds = 1000): Promise<vo
                     return;
                 }
             } catch (error) {
-                reject(error);
+                reject(
+                    error instanceof Error
+                        ? error
+                        : new Error("Test condition failed", { cause: error })
+                );
                 return;
             }
             if (Date.now() > deadline) {
@@ -499,14 +519,14 @@ describe("backend service behavior", () => {
 
             const user = await createUser(username, "test-password");
             expect(user).toMatchObject({ username: normalizedUsername });
-            const originalHashPassword = Bun.password.hash;
+            const originalHashPassword = Bun.password.hash.bind(Bun.password);
             cleanupCallbacks.push(() => {
                 Bun.password.hash = originalHashPassword;
             });
             Bun.password.hash = () => {
                 throw new Error("Password hashing should not run after bootstrap closes");
             };
-            await expect(
+            expect(
                 createFirstUser(`first-${username}`, "correct-password")
             ).resolves.toBeUndefined();
             Bun.password.hash = originalHashPassword;
@@ -548,7 +568,7 @@ describe("backend service behavior", () => {
             cleanupExpiredSessions();
             expect(getAuthUserFromSessionId(expiredSessionId)).toBeUndefined();
 
-            const legacySessionId = "a".repeat(64);
+            const malformedSessionId = "a".repeat(64);
             database
                 .prepare(
                     `INSERT INTO auth_sessions (
@@ -556,14 +576,14 @@ describe("backend service behavior", () => {
                      ) VALUES (?, ?, ?, ?, NULL)`
                 )
                 .run(
-                    legacySessionId,
+                    malformedSessionId,
                     user.id,
                     "2026-07-23T00:00:00.000Z",
                     "2099-01-01T00:00:00.000Z"
                 );
-            expect(getAuthUserFromSessionId(legacySessionId)).toBeUndefined();
-            deleteSession(legacySessionId);
-            expect(getAuthUserFromSessionId(legacySessionId)).toBeUndefined();
+            expect(getAuthUserFromSessionId(malformedSessionId)).toBeUndefined();
+            deleteSession(malformedSessionId);
+            expect(getAuthUserFromSessionId(malformedSessionId)).toBeUndefined();
 
             persistGatewayToken("token-one");
             expect(getPersistedGatewayToken()).toBe("token-one");
@@ -592,13 +612,10 @@ describe("backend service behavior", () => {
                     `INSERT INTO app_config (key, value, updated_at)
                      VALUES ('gateway_token', ?, ?)`
                 )
-                .run("legacy-plaintext-token", new Date().toISOString());
-            expect(getPersistedGatewayToken()).toBe("legacy-plaintext-token");
-            const migratedGatewayToken = database
-                .prepare("SELECT value FROM app_config WHERE key = 'gateway_token'")
-                .get() as { value: string };
-            expect(migratedGatewayToken.value).toStartWith("v1.");
-            expect(migratedGatewayToken.value).not.toContain("legacy-plaintext-token");
+                .run("malformed-stored-secret", new Date().toISOString());
+            expect(() => getPersistedGatewayToken()).toThrow(
+                "Unsupported stored-secret envelope"
+            );
         } finally {
             database
                 .prepare(
@@ -760,12 +777,7 @@ describe("backend service behavior", () => {
         rememberEnvironment("MIRA_DASHBOARD_LOGS_ROOT");
         const logsRoot = createTemporaryRoot("mira-log-streams-empty-test-");
         process.env.MIRA_DASHBOARD_LOGS_ROOT = logsRoot;
-        const originalConsoleError = console.error;
-        Object.defineProperty(console, "error", {
-            configurable: true,
-            value: () => {},
-            writable: true,
-        });
+        const structuredLogs = captureStructuredLogs();
 
         const messages: unknown[] = [];
         const socket = {
@@ -796,14 +808,16 @@ describe("backend service behavior", () => {
                 type: "log_history_complete",
                 count: 0,
             });
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    event: "openclaw_logs.history_send_failed",
+                    level: "error",
+                })
+            );
         } finally {
             unsubscribeFromLogs(socket);
             unsubscribeFromLogs(throwingSocket);
-            Object.defineProperty(console, "error", {
-                configurable: true,
-                value: originalConsoleError,
-                writable: true,
-            });
+            structuredLogs.stop();
         }
     });
 
@@ -929,7 +943,7 @@ describe("backend service behavior", () => {
             expect(JSON.parse(row.metadata_json)).toEqual({ source: "preserved" });
 
             invalidateCacheEntry(key, new Date(0));
-            expect(await getCacheEntry(key)).toMatchObject({
+            expect(getCacheEntry(key)).toMatchObject({
                 data: JSON.stringify({ version: 1 }),
                 status: "stale",
             });
@@ -1066,7 +1080,7 @@ describe("backend service behavior", () => {
             Date.parse(startupDatabaseRun.availableAt) -
                 Date.parse(startupDatabaseRun.queuedAt)
         ).toBeLessThan(2500);
-        expect(await getCacheEntry(key)).toMatchObject({
+        expect(getCacheEntry(key)).toMatchObject({
             data: JSON.stringify({ migrations: "old" }),
             status: "stale",
         });
@@ -1111,7 +1125,7 @@ describe("backend service behavior", () => {
                 )
                 .get(systemRun.id)
         ).toEqual({ status: "queued", triggerType: "system" });
-        expect(await getCacheEntry(key)).toMatchObject({
+        expect(getCacheEntry(key)).toMatchObject({
             data: JSON.stringify({ migrations: "current" }),
             status: "stale",
         });
@@ -1142,7 +1156,7 @@ describe("backend service behavior", () => {
                 )
                 .get(disabledBaselineRunId)
         ).toEqual({ count: 0 });
-        expect(await getCacheEntry(key)).toMatchObject({
+        expect(getCacheEntry(key)).toMatchObject({
             data: JSON.stringify({ migrations: "paused" }),
             status: "stale",
         });
@@ -1159,10 +1173,10 @@ describe("backend service behavior", () => {
         const createdBackupPaths: string[] = [];
         const createdRunIds: number[] = [];
         const queuedRefresh = jest.fn(() => {});
-        const consoleWarn = jest.spyOn(console, "warn").mockImplementation(() => {});
+        const structuredLogs = captureStructuredLogs();
 
         cleanupCallbacks.push(() => {
-            consoleWarn.mockRestore();
+            structuredLogs.stop();
             for (const backupPath of createdBackupPaths) {
                 rmSync(backupPath, { force: true });
             }
@@ -1227,9 +1241,15 @@ describe("backend service behavior", () => {
             },
             status: "success",
         });
-        expect(consoleWarn).toHaveBeenCalledWith(
-            "[SQLiteMaintenance] Database summary cache refresh enqueue failed:",
-            "refresh queue unavailable"
+        expect(structuredLogs.entries).toContainEqual(
+            expect.objectContaining({
+                component: "sqlite-maintenance",
+                error: expect.objectContaining({
+                    message: "refresh queue unavailable",
+                }),
+                event: "sqlite_maintenance.summary_refresh_enqueue_failed",
+                level: "warn",
+            })
         );
     });
 
@@ -1237,7 +1257,7 @@ describe("backend service behavior", () => {
         const { refreshCacheProducer, waitForLocalCacheSeed } =
             await import("../src/services/cacheRefresh.ts");
         const { cacheRoutes } = await import("../src/routes/cacheRoutes.ts");
-        await expect(refreshCacheProducer("unknown.cache.key")).rejects.toThrow(
+        expect(refreshCacheProducer("unknown.cache.key")).rejects.toThrow(
             "No backend refresh producer configured for cache key"
         );
         const unknownRefresh = await cacheRoutes["/api/cache/:key/refresh"].POST(
@@ -1252,25 +1272,27 @@ describe("backend service behavior", () => {
             )
         );
         expect(unknownRefresh.status).toBe(400);
-        await expect(unknownRefresh.json()).resolves.toEqual({
-            error: "No backend refresh producer configured for cache key: unknown.cache.key",
-        });
-        const missingCacheKey = await cacheRoutes["/api/cache/:key"].GET(
+        expect(unknownRefresh.json()).resolves.toEqual(
+            apiErrorExpectation(
+                "No backend refresh producer configured for cache key: unknown.cache.key"
+            )
+        );
+        const missingCacheKey = cacheRoutes["/api/cache/:key"].GET(
             Object.assign(new Request("https://dashboard.test/api/cache/%20"), {
                 params: { key: " " },
             })
         );
         expect(missingCacheKey.status).toBe(400);
-        await expect(missingCacheKey.json()).resolves.toEqual({
-            error: "Missing cache key",
-        });
+        expect(missingCacheKey.json()).resolves.toEqual(
+            apiErrorExpectation("Missing cache key")
+        );
 
         const controller = new AbortController();
         controller.abort();
-        await expect(
+        expect(
             refreshCacheProducer("weather.spydeberg", controller.signal)
         ).rejects.toMatchObject({ name: "AbortError" });
-        await expect(waitForLocalCacheSeed("missing.key")).resolves.toBeUndefined();
+        expect(waitForLocalCacheSeed("missing.key")).resolves.toBeUndefined();
     });
 
     it("refreshes supported cache keys through the cache route", async () => {
@@ -1294,50 +1316,52 @@ describe("backend service behavior", () => {
                 )
                 .run();
         });
-        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(((
             input: Request | string | URL
         ) => {
-            const url = input instanceof Request ? input.url : String(input);
-            if (url.startsWith("https://wttr.in/Spydeberg")) {
-                return Response.json({
-                    current_condition: [
-                        {
-                            FeelsLikeC: "8",
-                            humidity: "75",
-                            temp_C: "10",
-                            weatherCode: "116",
-                            weatherDesc: [{ value: "Partly cloudy" }],
-                            windspeedKmph: "14",
+            return Promise.try(() => {
+                const url = input instanceof Request ? input.url : requestUrl(input);
+                if (url.startsWith("https://wttr.in/Spydeberg")) {
+                    return Response.json({
+                        current_condition: [
+                            {
+                                FeelsLikeC: "8",
+                                humidity: "75",
+                                temp_C: "10",
+                                weatherCode: "116",
+                                weatherDesc: [{ value: "Partly cloudy" }],
+                                windspeedKmph: "14",
+                            },
+                        ],
+                        nearest_area: [{ areaName: [{ value: "Spydeberg" }] }],
+                        weather: [
+                            {
+                                date: "2026-06-26",
+                                maxtempC: "18",
+                                mintempC: "7",
+                                hourly: [
+                                    {
+                                        weatherCode: "116",
+                                        weatherDesc: [{ value: "Partly cloudy" }],
+                                    },
+                                ],
+                            },
+                        ],
+                    });
+                }
+                if (url === "https://www.moltbook.com/api/v1/home") {
+                    return Response.json({
+                        activity_on_your_posts: [],
+                        posts_from_accounts_you_follow: [],
+                        what_to_do_next: [],
+                        your_direct_messages: {
+                            pending_request_count: 0,
+                            unread_message_count: 0,
                         },
-                    ],
-                    nearest_area: [{ areaName: [{ value: "Spydeberg" }] }],
-                    weather: [
-                        {
-                            date: "2026-06-26",
-                            maxtempC: "18",
-                            mintempC: "7",
-                            hourly: [
-                                {
-                                    weatherCode: "116",
-                                    weatherDesc: [{ value: "Partly cloudy" }],
-                                },
-                            ],
-                        },
-                    ],
-                });
-            }
-            if (url === "https://www.moltbook.com/api/v1/home") {
-                return Response.json({
-                    activity_on_your_posts: [],
-                    posts_from_accounts_you_follow: [],
-                    what_to_do_next: [],
-                    your_direct_messages: {
-                        pending_request_count: 0,
-                        unread_message_count: 0,
-                    },
-                });
-            }
-            return new Response("not found", { status: 404 });
+                    });
+                }
+                return new Response("not found", { status: 404 });
+            });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
 
@@ -1384,7 +1408,7 @@ describe("backend service behavior", () => {
         );
 
         expect(response.status).toBe(200);
-        await expect(response.json()).resolves.toMatchObject({
+        expect(response.json()).resolves.toMatchObject({
             entry: {
                 data: {
                     description: "Partly cloudy",
@@ -1724,13 +1748,13 @@ describe("backend service behavior", () => {
                 "Release readiness failed; automatic rollback restored the exact pre-deploy release slots"
             );
         try {
-            await expect(getDashboardReleaseStatus()).resolves.toMatchObject({
+            expect(getDashboardReleaseStatus()).resolves.toMatchObject({
                 rollback: {
                     available: false,
                     reason: "Previous release failed its latest runtime readiness check",
                 },
             });
-            await expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
+            expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
                 "Previous release is not eligible for rollback: Previous release failed its latest runtime readiness check"
             );
         } finally {
@@ -1755,7 +1779,7 @@ describe("backend service behavior", () => {
         const statusResponse =
             await pullRequestRoutes["/api/pull-requests/releases"].GET();
         expect(statusResponse.status).toBe(200);
-        await expect(statusResponse.json()).resolves.toMatchObject({
+        expect(statusResponse.json()).resolves.toMatchObject({
             release: { rollback: { available: true } },
         });
 
@@ -1802,24 +1826,30 @@ describe("backend service behavior", () => {
                 database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
             ).toBeNull();
 
-            await expect(prepareAndStartRollback(currentCommit)).rejects.toThrow(
+            expect(prepareAndStartRollback(currentCommit)).rejects.toThrow(
                 "Rollback target changed"
             );
             const changedTargetResponse = await pullRequestRoutes[
                 "/api/pull-requests/releases/rollback"
             ].POST(rollbackRouteRequest(currentCommit));
             expect(changedTargetResponse.status).toBe(409);
-            await expect(changedTargetResponse.json()).resolves.toMatchObject({
-                error: "Rollback target changed. Refresh release status and confirm the current previous release",
-            });
+            expect(changedTargetResponse.json()).resolves.toMatchObject(
+                apiErrorExpectation(
+                    "Rollback target changed. Refresh release status and confirm the current previous release"
+                )
+            );
 
-            const missingTargetResponse = await pullRequestRoutes[
-                "/api/pull-requests/releases/rollback"
-            ].POST(rollbackRouteRequest(undefined));
+            const missingTargetResponse =
+                await pullRequestRoutes["/api/pull-requests/releases/rollback"].POST(
+                    rollbackRouteRequest()
+                );
             expect(missingTargetResponse.status).toBe(400);
-            await expect(missingTargetResponse.json()).resolves.toMatchObject({
-                error: "Rollback target commit is required",
-            });
+            expect(missingTargetResponse.json()).resolves.toMatchObject(
+                apiErrorExpectation(
+                    expect.stringContaining("body.targetCommit"),
+                    "invalid_request"
+                )
+            );
 
             const nullBodyResponse = await pullRequestRoutes[
                 "/api/pull-requests/releases/rollback"
@@ -1834,28 +1864,30 @@ describe("backend service behavior", () => {
                 )
             );
             expect(nullBodyResponse.status).toBe(400);
-            await expect(nullBodyResponse.json()).resolves.toMatchObject({
-                error: "Rollback target commit is required",
-            });
+            expect(nullBodyResponse.json()).resolves.toMatchObject(
+                apiErrorExpectation(expect.stringContaining("body"), "invalid_request")
+            );
 
             rmSync(path.join(releasesRoot, "previous"));
-            await expect(getDashboardReleaseStatus()).resolves.toMatchObject({
+            expect(getDashboardReleaseStatus()).resolves.toMatchObject({
                 previous: undefined,
                 rollback: {
                     available: false,
                     reason: "No distinct previous release is available",
                 },
             });
-            await expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
+            expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
                 "requires active current and previous releases"
             );
             const unavailableRollbackResponse = await pullRequestRoutes[
                 "/api/pull-requests/releases/rollback"
             ].POST(rollbackRouteRequest(previousCommit));
             expect(unavailableRollbackResponse.status).toBe(409);
-            await expect(unavailableRollbackResponse.json()).resolves.toMatchObject({
-                error: "Managed release rollback requires active current and previous releases",
-            });
+            expect(unavailableRollbackResponse.json()).resolves.toMatchObject(
+                apiErrorExpectation(
+                    "Managed release rollback requires active current and previous releases"
+                )
+            );
             expect(
                 database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
             ).toBeNull();
@@ -1865,7 +1897,7 @@ describe("backend service behavior", () => {
                 path.join(releasesRoot, "previous"),
                 "dir"
             );
-            await expect(prepareAndStartRollback(currentCommit)).rejects.toThrow(
+            expect(prepareAndStartRollback(currentCommit)).rejects.toThrow(
                 "requires two distinct releases"
             );
             expect(
@@ -1921,19 +1953,9 @@ describe("backend service behavior", () => {
         const { getDashboardReleaseStatus, prepareAndStartRollback } =
             await import("../src/services/pullRequests.ts");
         const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
-        const rollbackExecutionCount = () =>
-            (
-                database
-                    .prepare(
-                        `SELECT COUNT(*) AS count
-                         FROM job_executions
-                         WHERE action_key = 'dashboard.rollback'`
-                    )
-                    .get() as { count: number }
-            ).count;
-        const executionCountBefore = rollbackExecutionCount();
+        const executionCountBefore = countRollbackExecutions();
 
-        await expect(getDashboardReleaseStatus()).resolves.toMatchObject({
+        expect(getDashboardReleaseStatus()).resolves.toMatchObject({
             current: {
                 commitSha: currentCommit,
                 schema: { maximumCompatible: 7, target: 7 },
@@ -1947,17 +1969,19 @@ describe("backend service behavior", () => {
                 reason: "Rollback release cannot open SQLite schema 7",
             },
         });
-        await expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
+        expect(prepareAndStartRollback(previousCommit)).rejects.toThrow(
             "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 7"
         );
         const response = await pullRequestRoutes[
             "/api/pull-requests/releases/rollback"
         ].POST(rollbackRouteRequest(previousCommit));
         expect(response.status).toBe(409);
-        await expect(response.json()).resolves.toMatchObject({
-            error: "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 7",
-        });
-        expect(rollbackExecutionCount()).toBe(executionCountBefore);
+        expect(response.json()).resolves.toMatchObject(
+            apiErrorExpectation(
+                "Previous release is not eligible for rollback: Rollback release cannot open SQLite schema 7"
+            )
+        );
+        expect(countRollbackExecutions()).toBe(executionCountBefore);
         expect(
             database.prepare("SELECT job_id FROM deployment_lock WHERE id = 1").get()
         ).toBeNull();
@@ -2104,7 +2128,8 @@ printf 'scheduled\n'
                 const row = database
                     .prepare("SELECT status, note FROM deployment_jobs WHERE id = ?")
                     .get(rollback.id) as
-                    { note: string | null; status: string } | undefined;
+                    | { note: string | null; status: string }
+                    | undefined;
                 return (
                     row?.status === "verifying" &&
                     row.note ===
@@ -2210,8 +2235,8 @@ printf 'scheduled\n'
                 "building",
                 new Date().toISOString(),
                 new Date().toISOString(),
-                sqlNullable(undefined),
-                sqlNullable(undefined),
+                sqlNullable(),
+                sqlNullable(),
                 "active",
                 "",
                 ""
@@ -2465,7 +2490,7 @@ printf 'scheduled\n'
             );
 
             cancelJobExecution(execution.id);
-            await expect(approval).rejects.toThrow("Job cancelled before execution");
+            expect(approval).rejects.toThrow("Job cancelled before execution");
 
             const deployment = startDeployLatest();
             deploymentId = deployment.id;
@@ -2658,7 +2683,7 @@ printf 'scheduled\n'
             stopScheduledJobExecutor,
         } = await import("../src/services/scheduledJobs.ts");
         registerPullRequestExecutionActions();
-        registerScheduledJobAction("test.after-deploy", async () => ({}));
+        registerScheduledJobAction("test.after-deploy", () => Promise.try(() => ({})));
         await startTestScheduledExecutor();
         const job = startDeployLatest();
         const deploymentExecution = database
@@ -2726,22 +2751,20 @@ printf 'scheduled\n'
                     )
                     .get(job.id) as { updatedAt: string }
             ).updatedAt;
-            await expect(Bun.file(gitLog).text()).resolves.toContain(
+            expect(Bun.file(gitLog).text()).resolves.toContain(
                 "pull --ff-only origin main"
             );
-            await expect(Bun.file(bunLog).text()).resolves.toContain(
+            expect(Bun.file(bunLog).text()).resolves.toContain(
                 `${worktreeRoot}/release-${candidateCommit.slice(0, 12)}-`
             );
-            await expect(Bun.file(bunLog).text()).resolves.toContain(
-                "|run deploy:prepare"
-            );
-            await expect(Bun.file(systemctlLog).text()).resolves.toContain(
+            expect(Bun.file(bunLog).text()).resolves.toContain("|run deploy:prepare");
+            expect(Bun.file(systemctlLog).text()).resolves.toContain(
                 "show mira-dashboard.service"
             );
-            await expect(Bun.file(systemctlLog).text()).resolves.toContain(
+            expect(Bun.file(systemctlLog).text()).resolves.toContain(
                 `--user show mira-dashboard-deploy-${job.id}.service --property=ActiveState --property=LoadState --no-pager`
             );
-            await expect(Bun.file(systemdLog).text()).resolves.toContain(
+            expect(Bun.file(systemdLog).text()).resolves.toContain(
                 `mira-dashboard-deploy-${job.id}`
             );
             const restartCommand = await Bun.file(systemdLog).text();
@@ -3185,7 +3208,7 @@ printf 'scheduled\n'
             isProductionRoot: true,
             isSafeForDeploy: true,
         });
-        await expect(ensureProductionReadyForDeploy()).resolves.toBeUndefined();
+        expect(ensureProductionReadyForDeploy()).resolves.toBeUndefined();
     });
 
     it("rejects unsafe production checkout states before deploy work starts", async () => {
@@ -3230,7 +3253,7 @@ fi
             getProductionCheckoutStatus,
         } = await import("../src/services/pullRequests.ts");
 
-        await expect(getProductionCheckoutStatus()).resolves.toMatchObject({
+        expect(getProductionCheckoutStatus()).resolves.toMatchObject({
             branch: "feature",
             isClean: false,
             isProductionRoot: false,
@@ -3239,10 +3262,10 @@ fi
             statusShort: "M backend/src/server.ts",
             upstream: undefined,
         });
-        await expect(ensureProductionCheckout()).rejects.toThrow(
+        expect(ensureProductionCheckout()).rejects.toThrow(
             "Expected production checkout"
         );
-        await expect(ensureProductionReadyForDeploy()).rejects.toThrow(
+        expect(ensureProductionReadyForDeploy()).rejects.toThrow(
             "Production checkout must be clean main before deploy"
         );
     });
@@ -3276,8 +3299,8 @@ fi
             reviewerApproved: true,
             canReviewerApprove: false,
         });
-        await expect(isDashboardPullRequestOpen(2)).resolves.toBe(true);
-        await expect(isDashboardPullRequestOpen(99)).resolves.toBe(false);
+        expect(isDashboardPullRequestOpen(2)).resolves.toBe(true);
+        expect(isDashboardPullRequestOpen(99)).resolves.toBe(false);
         expect(validatePrNumber("42")).toBe(42);
         for (const value of ["0", "-1", "1.5", "abc", 1]) {
             expect(() => validatePrNumber(value)).toThrow("Invalid pull request number");
@@ -3333,7 +3356,7 @@ fi
         await startTestScheduledExecutor();
         const { pullRequestRoutes } = await import("../src/routes/pullRequestRoutes.ts");
 
-        await expect(approvePullRequestReview(3)).resolves.toMatchObject({
+        expect(approvePullRequestReview(3)).resolves.toMatchObject({
             isOk: true,
             message: "PR #3 review approved",
             pullRequest: {
@@ -3342,12 +3365,12 @@ fi
                 reviewerApproved: false,
             },
         });
-        await expect(updatePullRequestBranch(4)).resolves.toMatchObject({
+        expect(updatePullRequestBranch(4)).resolves.toMatchObject({
             isOk: true,
             message: "PR #4 branch update started",
             pullRequest: { number: 4 },
         });
-        await expect(rejectPullRequest(5, "Not ready")).resolves.toMatchObject({
+        expect(rejectPullRequest(5, "Not ready")).resolves.toMatchObject({
             cleanup: {
                 branch: "close-branch",
                 status: "skipped",
@@ -3363,7 +3386,7 @@ fi
         const reviewRoute = await pullRequestRoutes[
             "/api/pull-requests/:number/review-approval"
         ].POST(routeRequest("/api/pull-requests/3/review-approval", { number: "3" }));
-        await expect(reviewRoute.json()).resolves.toMatchObject({
+        expect(reviewRoute.json()).resolves.toMatchObject({
             isOk: true,
             message: "PR #3 review approved",
         });
@@ -3371,7 +3394,7 @@ fi
         const updateRoute = await pullRequestRoutes[
             "/api/pull-requests/:number/update-branch"
         ].POST(routeRequest("/api/pull-requests/4/update-branch", { number: "4" }));
-        await expect(updateRoute.json()).resolves.toMatchObject({
+        expect(updateRoute.json()).resolves.toMatchObject({
             isOk: true,
             message: "PR #4 branch update started",
         });
@@ -3389,7 +3412,7 @@ fi
                 }
             )
         );
-        await expect(rejectRoute.json()).resolves.toMatchObject({
+        expect(rejectRoute.json()).resolves.toMatchObject({
             isOk: true,
             message: "PR #5 closed",
         });
@@ -3397,7 +3420,7 @@ fi
         const defaultRejectRoute = await pullRequestRoutes[
             "/api/pull-requests/:number/reject"
         ].POST(routeRequest("/api/pull-requests/5/reject", { number: "5" }));
-        await expect(defaultRejectRoute.json()).resolves.toMatchObject({
+        expect(defaultRejectRoute.json()).resolves.toMatchObject({
             isOk: true,
             message: "PR #5 closed",
         });
@@ -3444,16 +3467,16 @@ fi
             )
         );
         expect(malformedApproveRoute.status).toBe(400);
-        await expect(malformedApproveRoute.json()).resolves.toMatchObject({
-            error: expect.stringContaining("JSON"),
-        });
+        expect(malformedApproveRoute.json()).resolves.toMatchObject(
+            apiErrorExpectation(expect.stringContaining("JSON"))
+        );
 
-        await expect(Bun.file(ghLog).text()).resolves.toContain("pr review 3");
-        await expect(Bun.file(ghLog).text()).resolves.toContain(
+        expect(Bun.file(ghLog).text()).resolves.toContain("pr review 3");
+        expect(Bun.file(ghLog).text()).resolves.toContain(
             "repos/rajohan/Mira-Dashboard/pulls/4/update-branch"
         );
-        await expect(Bun.file(ghLog).text()).resolves.toContain("pr close 5");
-        await expect(Bun.file(ghLog).text()).resolves.toContain(
+        expect(Bun.file(ghLog).text()).resolves.toContain("pr close 5");
+        expect(Bun.file(ghLog).text()).resolves.toContain(
             "Closed from Mira Dashboard after Rajohan rejected it."
         );
     });
@@ -3526,8 +3549,8 @@ fi
                     status: "skipped",
                 },
             });
-            await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
-            await expect(Bun.file(gitLog).text()).resolves.toContain("worktree remove");
+            expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
+            expect(Bun.file(gitLog).text()).resolves.toContain("worktree remove");
             expect(existsSync(localWorktree)).toBe(false);
             expect(
                 database
@@ -3621,8 +3644,8 @@ fi
                 },
                 syncError: expect.stringContaining("remote moved unexpectedly"),
             });
-            await expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
-            await expect(Bun.file(gitLog).text()).resolves.toContain(
+            expect(Bun.file(ghLog).text()).resolves.toContain("pr merge 11");
+            expect(Bun.file(gitLog).text()).resolves.toContain(
                 "pull --ff-only origin main"
             );
         } finally {
@@ -3651,7 +3674,7 @@ fi
         try {
             const { listDashboardPullRequests } =
                 await import("../src/services/pullRequests.ts");
-            await expect(listDashboardPullRequests()).rejects.toThrow(
+            expect(listDashboardPullRequests()).rejects.toThrow(
                 "GitHub CLI JSON line was too large"
             );
             expect(killSpy).toHaveBeenCalledWith(expect.any(Object), "SIGTERM");
@@ -3669,9 +3692,9 @@ fi
             routeRequest("/api/pull-requests/nope/review-approval", { number: "nope" })
         );
         expect(invalidNumber.status).toBe(400);
-        await expect(invalidNumber.json()).resolves.toEqual({
-            error: "Invalid pull request number",
-        });
+        expect(invalidNumber.json()).resolves.toEqual(
+            apiErrorExpectation("Invalid pull request number")
+        );
 
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
             () =>
@@ -3686,9 +3709,9 @@ fi
         try {
             const listResponse = await pullRequestRoutes["/api/pull-requests"].GET();
             expect(listResponse.status).toBe(500);
-            await expect(listResponse.json()).resolves.toEqual({
-                error: "graphql unavailable",
-            });
+            expect(listResponse.json()).resolves.toEqual(
+                apiErrorExpectation("Pull request route failed", "pull_request_failed")
+            );
         } finally {
             spawnSpy.mockRestore();
         }
@@ -3715,22 +3738,22 @@ fi
             updatePullRequestBranch,
         } = await import("../src/services/pullRequests.ts");
 
-        await expect(approvePullRequest(6, false)).rejects.toThrow(
+        expect(approvePullRequest(6, false)).rejects.toThrow(
             "Draft pull requests cannot be approved from the dashboard"
         );
-        await expect(rejectPullRequest(7, "Wrong base")).rejects.toThrow(
+        expect(rejectPullRequest(7, "Wrong base")).rejects.toThrow(
             "Only main-targeted pull requests can be managed here"
         );
-        await expect(updatePullRequestBranch(8)).rejects.toThrow(
+        expect(updatePullRequestBranch(8)).rejects.toThrow(
             "Pull request branch is not behind the base branch"
         );
-        await expect(updatePullRequestBranch(9)).rejects.toThrow(
+        expect(updatePullRequestBranch(9)).rejects.toThrow(
             "Pull request branch has merge conflicts"
         );
-        await expect(approvePullRequestReview(10)).rejects.toThrow(
+        expect(approvePullRequestReview(10)).rejects.toThrow(
             "Rajohan cannot approve his own pull request"
         );
-        await expect(approvePullRequestReview(6)).rejects.toThrow(
+        expect(approvePullRequestReview(6)).rejects.toThrow(
             "Draft pull requests cannot be approved from the dashboard"
         );
     });
@@ -3750,33 +3773,35 @@ fi
         });
         Object.defineProperty(globalThis, "fetch", {
             configurable: true,
-            value: async (input: Parameters<typeof fetch>[0]) => {
-                const url = String(input);
-                calls.push(url);
-                if (url.includes("wttr.in")) {
-                    return new Response("unavailable", { status: 503 });
-                }
-                return Response.json({
-                    current: {
-                        apparent_temperature: -2,
-                        relative_humidity_2m: 80,
-                        temperature_2m: 1,
-                        weather_code: 61,
-                        wind_speed_10m: 12,
-                    },
-                    daily: {
-                        time: ["2026-06-24", "2026-06-25"],
-                        temperature_2m_max: [4, 5],
-                        temperature_2m_min: [-1, 0],
-                        weather_code: [61, 0],
-                    },
+            value: (input: Parameters<typeof fetch>[0]) => {
+                return Promise.try(() => {
+                    const url = requestUrl(input);
+                    calls.push(url);
+                    if (url.includes("wttr.in")) {
+                        return new Response("unavailable", { status: 503 });
+                    }
+                    return Response.json({
+                        current: {
+                            apparent_temperature: -2,
+                            relative_humidity_2m: 80,
+                            temperature_2m: 1,
+                            weather_code: 61,
+                            wind_speed_10m: 12,
+                        },
+                        daily: {
+                            time: ["2026-06-24", "2026-06-25"],
+                            temperature_2m_max: [4, 5],
+                            temperature_2m_min: [-1, 0],
+                            weather_code: [61, 0],
+                        },
+                    });
                 });
             },
             writable: true,
         });
 
         const { refreshWeatherCache } = await import("../src/services/cacheRefresh.ts");
-        await expect(refreshWeatherCache()).resolves.toEqual({
+        expect(refreshWeatherCache()).resolves.toEqual({
             refreshed: ["weather.spydeberg"],
         });
 
@@ -3814,57 +3839,59 @@ fi
         });
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation((async (file, arguments_) => {
-                expect(file).toBe("git");
-                const gitArguments = [...arguments_];
-                let repo = "";
-                let commandArguments = gitArguments;
-                if (gitArguments[0] === "-C") {
-                    repo = String(gitArguments[1]);
-                    commandArguments = gitArguments.slice(2);
-                }
-                const command = commandArguments.join(" ");
-                if (command === "rev-parse --is-inside-work-tree") {
-                    return { code: 0, stderr: "", stdout: "true\n" };
-                }
-                if (command === "branch --show-current") {
-                    return { code: 0, stderr: "", stdout: "main\n" };
-                }
-                if (command === "rev-parse HEAD") {
-                    return { code: 0, stderr: "", stdout: "abcdef1234567890\n" };
-                }
-                if (command === "remote -v") {
+            .mockImplementation((file, arguments_) => {
+                return Promise.try(() => {
+                    expect(file).toBe("git");
+                    const gitArguments = [...arguments_];
+                    let repo = "";
+                    let commandArguments = gitArguments;
+                    if (gitArguments[0] === "-C") {
+                        repo = String(gitArguments[1]);
+                        commandArguments = gitArguments.slice(2);
+                    }
+                    const command = commandArguments.join(" ");
+                    if (command === "rev-parse --is-inside-work-tree") {
+                        return { code: 0, stderr: "", stdout: "true\n" };
+                    }
+                    if (command === "branch --show-current") {
+                        return { code: 0, stderr: "", stdout: "main\n" };
+                    }
+                    if (command === "rev-parse HEAD") {
+                        return { code: 0, stderr: "", stdout: "abcdef1234567890\n" };
+                    }
+                    if (command === "remote -v") {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: [
+                                `origin\thttps://token@example.com/${path.basename(repo)}.git (fetch)`,
+                                `origin\tgit@example.com:${path.basename(repo)}.git (push)`,
+                                "",
+                            ].join("\n"),
+                        };
+                    }
+                    if (command === "status --short") {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: [
+                                " M modified.txt",
+                                "A  staged.txt",
+                                "D  deleted.txt",
+                                "R  old.txt -> new.txt",
+                                "?? untracked.txt",
+                                "UU conflicted.txt",
+                                "",
+                            ].join("\n"),
+                        };
+                    }
                     return {
-                        code: 0,
-                        stderr: "",
-                        stdout: [
-                            `origin\thttps://token@example.com/${path.basename(repo)}.git (fetch)`,
-                            `origin\tgit@example.com:${path.basename(repo)}.git (push)`,
-                            "",
-                        ].join("\n"),
+                        code: 2,
+                        stderr: `unexpected git args for ${repo}: ${command}`,
+                        stdout: "",
                     };
-                }
-                if (command === "status --short") {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: [
-                            " M modified.txt",
-                            "A  staged.txt",
-                            "D  deleted.txt",
-                            "R  old.txt -> new.txt",
-                            "?? untracked.txt",
-                            "UU conflicted.txt",
-                            "",
-                        ].join("\n"),
-                    };
-                }
-                return {
-                    code: 2,
-                    stderr: `unexpected git args for ${repo}: ${command}`,
-                    stdout: "",
-                };
-            }) as typeof processModule.runProcess);
+                });
+            });
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
         const { refreshGitCache } = await import("../src/services/cacheRefresh.ts");
 
@@ -3941,60 +3968,62 @@ fi
                 .prepare("DELETE FROM cache_entries WHERE key = 'quotas.summary'")
                 .run();
         });
-        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(((
             input: Request | string | URL
         ) => {
-            const url = String(input);
-            if (url === "https://openrouter.ai/api/v1/key") {
-                return Response.json({
-                    data: { usage: 2, usage_monthly: 7 },
-                });
-            }
-            if (url === "https://openrouter.ai/api/v1/credits") {
-                return Response.json({
-                    data: { total_credits: 10 },
-                });
-            }
-            if (url === "https://api.elevenlabs.io/v1/user") {
-                return Response.json({
-                    subscription: {
-                        character_count: 250,
-                        character_limit: 1000,
-                        next_character_count_reset_unix: 1_800_000_000,
-                        tier: "creator",
-                    },
-                });
-            }
-            if (url === "https://api.synthetic.new/v2/quotas") {
-                return Response.json({
-                    rollingFiveHourLimit: {
-                        limited: false,
-                        max: 100,
-                        nextTickAt: "soon",
-                        remaining: 75,
-                        tickPercent: 10,
-                    },
-                    search: {
-                        hourly: {
-                            limit: 20,
-                            renewsAt: "later",
-                            requests: 5,
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                if (url === "https://openrouter.ai/api/v1/key") {
+                    return Response.json({
+                        data: { usage: 2, usage_monthly: 7 },
+                    });
+                }
+                if (url === "https://openrouter.ai/api/v1/credits") {
+                    return Response.json({
+                        data: { total_credits: 10 },
+                    });
+                }
+                if (url === "https://api.elevenlabs.io/v1/user") {
+                    return Response.json({
+                        subscription: {
+                            character_count: 250,
+                            character_limit: 1000,
+                            next_character_count_reset_unix: 1_800_000_000,
+                            tier: "creator",
                         },
-                    },
-                    subscription: {
-                        limit: 50,
-                        renewsAt: "tomorrow",
-                        requests: 10,
-                    },
-                    weeklyTokenLimit: {
-                        maxCredits: "$100.00",
-                        nextRegenAt: "weekly",
-                        nextRegenCredits: "$20.00",
-                        remainingCredits: "$40.00",
-                    },
-                });
-            }
-            return new Response("not found", { status: 404 });
+                    });
+                }
+                if (url === "https://api.synthetic.new/v2/quotas") {
+                    return Response.json({
+                        rollingFiveHourLimit: {
+                            limited: false,
+                            max: 100,
+                            nextTickAt: "soon",
+                            remaining: 75,
+                            tickPercent: 10,
+                        },
+                        search: {
+                            hourly: {
+                                limit: 20,
+                                renewsAt: "later",
+                                requests: 5,
+                            },
+                        },
+                        subscription: {
+                            limit: 50,
+                            renewsAt: "tomorrow",
+                            requests: 10,
+                        },
+                        weeklyTokenLimit: {
+                            maxCredits: "$100.00",
+                            nextRegenAt: "weekly",
+                            nextRegenCredits: "$20.00",
+                            remainingCredits: "$40.00",
+                        },
+                    });
+                }
+                return new Response("not found", { status: 404 });
+            });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
         const runProcessSpy = jest
@@ -4035,37 +4064,41 @@ fi
         expect(runProcessSpy.mock.calls[0]?.[1]?.[1]).toContain(
             'grep -Eiq "Weekly limit:"'
         );
-        const data = JSON.parse(row.data_json);
-        expect(data.openrouter).toMatchObject({
-            percentUsed: 20,
-            remaining: 8,
-            totalCredits: 10,
-            usage: 2,
-            usageMonthly: 7,
-        });
-        expect(data.elevenlabs).toMatchObject({
-            percentUsed: 25,
-            remaining: 750,
-            tier: "creator",
-            total: 1000,
-            used: 250,
-        });
-        expect(data.synthetic).toMatchObject({
-            rollingFiveHourLimit: { percentUsed: 25, remaining: 75 },
-            searchHourly: { percentUsed: 25, remaining: 15 },
-            subscription: { percentUsed: 20, remaining: 40 },
-            weeklyTokenLimit: {
-                nextRegenPercent: 20,
-                percentRemaining: 40,
+        const data = parseJsonText(row.data_json);
+        expect(data).toMatchObject({
+            elevenlabs: {
+                percentUsed: 25,
+                remaining: 750,
+                tier: "creator",
+                total: 1000,
+                used: 250,
+            },
+            openai: {
+                fiveHourLeftPercent: 80,
+                percentUsed: 35,
+                weeklyLeftPercent: 65,
+            },
+            openrouter: {
+                percentUsed: 20,
+                remaining: 8,
+                totalCredits: 10,
+                usage: 2,
+                usageMonthly: 7,
+            },
+            synthetic: {
+                rollingFiveHourLimit: { percentUsed: 25, remaining: 75 },
+                searchHourly: { percentUsed: 25, remaining: 15 },
+                subscription: { percentUsed: 20, remaining: 40 },
+                weeklyTokenLimit: {
+                    nextRegenPercent: 20,
+                    percentRemaining: 40,
+                },
             },
         });
-        expect(data.openai).toMatchObject({
-            fiveHourLeftPercent: 80,
-            percentUsed: 35,
-            weeklyLeftPercent: 65,
+        expect(data).not.toMatchObject({
+            openai: { account: expect.anything() },
         });
-        expect(data.openai.account).toBeUndefined();
-        expect(JSON.parse(row.metadata_json)).toMatchObject({
+        expect(parseJsonText(row.metadata_json)).toMatchObject({
             missing: [],
             producers: ["openrouter", "elevenlabs", "synthetic", "openai"],
         });
@@ -4082,7 +4115,7 @@ fi
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });
         expect(runProcessSpy).toHaveBeenCalledTimes(1);
-        const weeklyOnlyQuota = JSON.parse(
+        const weeklyOnlyQuota = parseJsonText(
             (
                 database
                     .prepare(
@@ -4091,11 +4124,15 @@ fi
                     .get() as { data_json: string }
             ).data_json
         );
-        expect(weeklyOnlyQuota.openai).toMatchObject({
-            percentUsed: 35,
-            weeklyLeftPercent: 65,
+        expect(weeklyOnlyQuota).toMatchObject({
+            openai: {
+                percentUsed: 35,
+                weeklyLeftPercent: 65,
+            },
         });
-        expect(weeklyOnlyQuota.openai.fiveHourLeftPercent).toBeUndefined();
+        expect(weeklyOnlyQuota).not.toMatchObject({
+            openai: { fiveHourLeftPercent: expect.anything() },
+        });
 
         runProcessSpy.mockReset().mockResolvedValue({
             code: 0,
@@ -4104,7 +4141,7 @@ fi
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });
         expect(runProcessSpy).toHaveBeenCalledTimes(2);
-        const repeatedParseFailure = JSON.parse(
+        const repeatedParseFailure = parseJsonText(
             (
                 database
                     .prepare(
@@ -4113,9 +4150,11 @@ fi
                     .get() as { data_json: string }
             ).data_json
         );
-        expect(repeatedParseFailure.openai).toEqual({
-            note: "Could not parse Codex /status output",
-            status: "error",
+        expect(repeatedParseFailure).toMatchObject({
+            openai: {
+                note: "Could not parse Codex /status output",
+                status: "error",
+            },
         });
 
         runProcessSpy.mockReset().mockResolvedValue({
@@ -4125,7 +4164,7 @@ fi
         });
         await refreshCacheProducer("quotas.summary", undefined, { force: true });
         expect(runProcessSpy).toHaveBeenCalledTimes(1);
-        const commandFailure = JSON.parse(
+        const commandFailure = parseJsonText(
             (
                 database
                     .prepare(
@@ -4134,9 +4173,11 @@ fi
                     .get() as { data_json: string }
             ).data_json
         );
-        expect(commandFailure.openai).toEqual({
-            note: "codex quota exited 1: update failed",
-            status: "error",
+        expect(commandFailure).toMatchObject({
+            openai: {
+                note: "codex quota exited 1: update failed",
+                status: "error",
+            },
         });
     });
 
@@ -4146,36 +4187,38 @@ fi
                 .prepare("DELETE FROM cache_entries WHERE key = 'weather.spydeberg'")
                 .run();
         });
-        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(((
             input: Request | string | URL
         ) => {
-            const url = String(input);
-            if (url.startsWith("https://wttr.in/Spydeberg")) {
-                return new Response("upstream unavailable", { status: 503 });
-            }
-            if (url.startsWith("https://api.open-meteo.com/")) {
-                return Response.json({
-                    current: {
-                        apparent_temperature: 12.5,
-                        relative_humidity_2m: 94,
-                        temperature_2m: 13,
-                        weather_code: 61,
-                        wind_speed_10m: 5,
-                    },
-                    daily: {
-                        temperature_2m_max: [21, 22, 20],
-                        temperature_2m_min: [14, 15, 13],
-                        time: ["2026-06-26", "2026-06-27", "2026-06-28"],
-                        weather_code: [0, 95, "bad"],
-                    },
-                });
-            }
-            return new Response("not found", { status: 404 });
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                if (url.startsWith("https://wttr.in/Spydeberg")) {
+                    return new Response("upstream unavailable", { status: 503 });
+                }
+                if (url.startsWith("https://api.open-meteo.com/")) {
+                    return Response.json({
+                        current: {
+                            apparent_temperature: 12.5,
+                            relative_humidity_2m: 94,
+                            temperature_2m: 13,
+                            weather_code: 61,
+                            wind_speed_10m: 5,
+                        },
+                        daily: {
+                            temperature_2m_max: [21, 22, 20],
+                            temperature_2m_min: [14, 15, 13],
+                            time: ["2026-06-26", "2026-06-27", "2026-06-28"],
+                            weather_code: [0, 95, "bad"],
+                        },
+                    });
+                }
+                return new Response("not found", { status: 404 });
+            });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
         const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
 
-        await expect(
+        expect(
             refreshCacheProducer("weather.spydeberg", undefined, { force: true })
         ).resolves.toEqual({ refreshed: ["weather.spydeberg"] });
 
@@ -4185,7 +4228,7 @@ fi
             )
             .get() as { data_json: string; metadata_json: string; status: string };
         expect(row.status).toBe("fresh");
-        const data = JSON.parse(row.data_json);
+        const data = parseJsonText(row.data_json);
         expect(data).toMatchObject({
             description: "Rain",
             forecast: [
@@ -4197,7 +4240,7 @@ fi
             location: "Spydeberg",
             temperatureC: 13,
         });
-        expect(JSON.parse(row.metadata_json)).toMatchObject({
+        expect(parseJsonText(row.metadata_json)).toMatchObject({
             fallbackReason: expect.stringContaining("HTTP 503"),
             fallbackUsed: true,
             providerPriority: ["wttr.in", "open-meteo"],
@@ -4212,53 +4255,55 @@ fi
                 .prepare("DELETE FROM cache_entries WHERE key LIKE 'moltbook.%'")
                 .run();
         });
-        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
+        const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(((
             input: Request | string | URL
         ) => {
-            const url = String(input);
-            if (url.endsWith("/home")) {
-                return Response.json({
-                    activity_on_your_posts: [{ id: "activity-1" }],
-                    latest_moltbook_announcement: {
-                        author_name: "OpenClaw",
-                        created_at: "2026-06-25T10:00:00.000Z",
-                        post_id: "post-1",
-                        preview: "Hello",
-                        title: "Announcement",
-                    },
-                    posts_from_accounts_you_follow: [{ id: "followed-1" }],
-                    what_to_do_next: [{ label: "reply" }],
-                    your_direct_messages: {
-                        pending_request_count: "2",
-                        unread_message_count: "3",
-                    },
-                });
-            }
-            if (url.endsWith("/feed?sort=hot&limit=25")) {
-                return Response.json({
-                    feed_filter: "all",
-                    feed_type: "hot",
-                    has_more: true,
-                    posts: [{ id: "hot-1" }],
-                    tip: "keep going",
-                });
-            }
-            if (url.endsWith("/feed?sort=new&limit=25")) {
-                return new Response("feed failed", { status: 502 });
-            }
-            if (url.endsWith("/agents/profile?name=mira_2026")) {
-                return Response.json({
-                    agent: { name: "mira_2026" },
-                    recentComments: [{ id: "comment-1" }],
-                    recentPosts: [{ id: "post-2" }],
-                });
-            }
-            return new Response("not found", { status: 404 });
+            return Promise.try(() => {
+                const url = requestUrl(input);
+                if (url.endsWith("/home")) {
+                    return Response.json({
+                        activity_on_your_posts: [{ id: "activity-1" }],
+                        latest_moltbook_announcement: {
+                            author_name: "OpenClaw",
+                            created_at: "2026-06-25T10:00:00.000Z",
+                            post_id: "post-1",
+                            preview: "Hello",
+                            title: "Announcement",
+                        },
+                        posts_from_accounts_you_follow: [{ id: "followed-1" }],
+                        what_to_do_next: [{ label: "reply" }],
+                        your_direct_messages: {
+                            pending_request_count: "2",
+                            unread_message_count: "3",
+                        },
+                    });
+                }
+                if (url.endsWith("/feed?sort=hot&limit=25")) {
+                    return Response.json({
+                        feed_filter: "all",
+                        feed_type: "hot",
+                        has_more: true,
+                        posts: [{ id: "hot-1" }],
+                        tip: "keep going",
+                    });
+                }
+                if (url.endsWith("/feed?sort=new&limit=25")) {
+                    return new Response("feed failed", { status: 502 });
+                }
+                if (url.endsWith("/agents/profile?name=mira_2026")) {
+                    return Response.json({
+                        agent: { name: "mira_2026" },
+                        recentComments: [{ id: "comment-1" }],
+                        recentPosts: [{ id: "post-2" }],
+                    });
+                }
+                return new Response("not found", { status: 404 });
+            });
         }) as typeof fetch);
         cleanupCallbacks.push(() => fetchSpy.mockRestore());
         const { refreshCacheProducer } = await import("../src/services/cacheRefresh.ts");
 
-        await expect(
+        expect(
             refreshCacheProducer("moltbook", undefined, { force: true })
         ).rejects.toThrow("Moltbook refresh had sub-request failures");
 
@@ -4302,7 +4347,7 @@ fi
         const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation((async (
             input: Request | string | URL
         ) => {
-            const url = String(input);
+            const url = requestUrl(input);
             if (url.startsWith("https://wttr.in/Spydeberg")) {
                 weatherResponses += 1;
                 const gate = Promise.withResolvers<void>();
@@ -4362,13 +4407,13 @@ fi
         ).toBe("pending");
         releaseWeather?.();
 
-        await expect(firstRefresh).resolves.toEqual({
+        expect(firstRefresh).resolves.toEqual({
             refreshed: ["weather.spydeberg"],
         });
-        await expect(secondRefresh).resolves.toEqual({
+        expect(secondRefresh).resolves.toEqual({
             refreshed: ["weather.spydeberg"],
         });
-        await expect(abortedRefreshState).resolves.toBe("Cache refresh aborted");
+        expect(abortedRefreshState).resolves.toBe("Cache refresh aborted");
         expect(weatherResponses).toBe(1);
     });
 
@@ -4391,8 +4436,6 @@ fi
         const events: unknown[] = [];
         const connectErrors: string[] = [];
         const closeEvents: Array<{ code: number; reason: string }> = [];
-        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-        cleanupCallbacks.push(() => errorSpy.mockRestore());
         const identityRoot = createTemporaryRoot("mira-gateway-device-identity-");
         const { loadOrCreateDeviceIdentity, OpenClawGatewayClient } =
             await import("../src/lib/openclawGatewayClient.ts");
@@ -4498,7 +4541,7 @@ fi
                 type: "res",
             })
         );
-        await expect(success).resolves.toEqual({ value: 2 });
+        expect(success).resolves.toEqual({ value: 2 });
 
         const failure = client.request("demo.fail");
         await waitFor(() => socket!.sent.length === 3);
@@ -4511,7 +4554,7 @@ fi
                 type: "response",
             })
         );
-        await expect(failure).rejects.toThrow("gateway rejected");
+        expect(failure).rejects.toThrow("gateway rejected");
 
         const extendedRequest = client.request("demo.extended", {}, { timeoutMs: 500 });
         await waitFor(() => socket!.sent.length === 4);
@@ -4525,7 +4568,7 @@ fi
                 type: "response",
             })
         );
-        await expect(extendedRequest).resolves.toEqual({ extended: true });
+        expect(extendedRequest).resolves.toEqual({ extended: true });
 
         const timeoutSpy = jest.spyOn(globalThis, "setTimeout");
         try {
@@ -4547,7 +4590,7 @@ fi
                     type: "res",
                 })
             );
-            await expect(fractionalRequest).resolves.toEqual({ fractional: true });
+            expect(fractionalRequest).resolves.toEqual({ fractional: true });
 
             const timeoutCallCount = timeoutSpy.mock.calls.length;
             const noDeadlineRequest = client.request(
@@ -4565,19 +4608,19 @@ fi
                     type: "res",
                 })
             );
-            await expect(noDeadlineRequest).resolves.toEqual({ completed: true });
+            expect(noDeadlineRequest).resolves.toEqual({ completed: true });
         } finally {
             timeoutSpy.mockRestore();
         }
 
         socket!.sendError = new Error("send failed");
-        await expect(client.request("demo.send-fail")).rejects.toThrow("send failed");
+        expect(client.request("demo.send-fail")).rejects.toThrow("send failed");
         socket!.sendError = undefined;
 
         const closedRequest = client.request("demo.closed");
         await waitFor(() => socket!.sent.length === 7);
         socket?.close(4001, "gone");
-        await expect(closedRequest).rejects.toThrow("gateway closed (4001): gone");
+        expect(closedRequest).rejects.toThrow("gateway closed (4001): gone");
         expect(closeEvents).toContainEqual({ code: 4001, reason: "gone" });
 
         const missingNonceClient = new OpenClawGatewayClient({
@@ -4616,16 +4659,16 @@ fi
         expect(gateway.isConnected()).toBe(false);
         expect(gateway.getStatus()).toEqual({ gateway: "disconnected", sessions: 0 });
         expect(gateway.getGatewayWs()).toBeUndefined();
-        await expect(gateway.request("sessions.list", {})).rejects.toThrow(
+        expect(gateway.request("sessions.list", {})).rejects.toThrow(
             "Gateway not connected"
         );
-        await expect(
-            gateway.sendSessionMessage("agent:main:main", "hello")
-        ).rejects.toThrow("Gateway not connected");
-        await expect(gateway.abortSessionRun("agent:main:main")).rejects.toThrow(
+        expect(gateway.sendSessionMessage("agent:main:main", "hello")).rejects.toThrow(
             "Gateway not connected"
         );
-        await expect(gateway.deleteSession("agent:main:main")).rejects.toThrow(
+        expect(gateway.abortSessionRun("agent:main:main")).rejects.toThrow(
+            "Gateway not connected"
+        );
+        expect(gateway.deleteSession("agent:main:main")).rejects.toThrow(
             "Gateway not connected"
         );
     });
@@ -4634,7 +4677,7 @@ fi
         const { clearNeedsAttentionBackupJob, mapBackupJob } =
             await import("../src/services/backups.ts");
 
-        expect(mapBackupJob(undefined)).toBeUndefined();
+        expect(mapBackupJob()).toBeUndefined();
         expect(
             mapBackupJob({
                 code: 0,
@@ -4657,10 +4700,10 @@ fi
             stdout: "ok",
             type: "kopia",
         });
-        await expect(clearNeedsAttentionBackupJob("kopia")).rejects.toMatchObject({
+        expect(clearNeedsAttentionBackupJob("kopia")).rejects.toMatchObject({
             statusCode: 404,
         });
-        await expect(clearNeedsAttentionBackupJob("walg")).rejects.toThrow(
+        expect(clearNeedsAttentionBackupJob("walg")).rejects.toThrow(
             "WALG backup job not found"
         );
     });
@@ -4712,7 +4755,7 @@ fi
                 stdout: expect.stringContaining("backup ok"),
                 type: "walg",
             });
-            await expect(clearNeedsAttentionBackupJob("walg")).rejects.toMatchObject({
+            expect(clearNeedsAttentionBackupJob("walg")).rejects.toMatchObject({
                 statusCode: 404,
             });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
@@ -4734,7 +4777,7 @@ fi
 
         try {
             registerBackupScheduledJobs();
-            await expect(startManualBackup("walg")).rejects.toMatchObject({
+            expect(startManualBackup("walg")).rejects.toMatchObject({
                 statusCode: 503,
             });
             expect(getCurrentBackupJob("walg")).toBeUndefined();
@@ -4757,17 +4800,15 @@ fi
             .mockImplementation(() => {
                 throw new Error("spawn unavailable");
             });
-        const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
         const { getCurrentBackupJob, registerBackupScheduledJobs, startManualBackup } =
             await import("../src/services/backups.ts");
 
         try {
             registerBackupScheduledJobs();
-            await expect(startManualBackup("walg")).rejects.toThrow("spawn unavailable");
+            expect(startManualBackup("walg")).rejects.toThrow("spawn unavailable");
             expect(getCurrentBackupJob("walg")).toBeUndefined();
         } finally {
             spawnSpy.mockRestore();
-            warnSpy.mockRestore();
             database
                 .prepare("DELETE FROM scheduled_job_runs WHERE job_id LIKE 'backup.%'")
                 .run();
@@ -4781,23 +4822,25 @@ fi
         const exit = Promise.withResolvers<number>();
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (_command, arguments_) => {
-                const joined = arguments_.join(" ");
-                if (joined.includes("pgrep -f")) {
-                    return {
-                        code: 1,
-                        stderr: "",
-                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
-                    };
-                }
-                if (joined.includes("wal-g backup-list")) {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: "[]",
-                    };
-                }
-                return { code: 0, stderr: "", stdout: "" };
+            .mockImplementation((_command, arguments_) => {
+                return Promise.try(() => {
+                    const joined = arguments_.join(" ");
+                    if (joined.includes("pgrep -f")) {
+                        return {
+                            code: 1,
+                            stderr: "",
+                            stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                        };
+                    }
+                    if (joined.includes("wal-g backup-list")) {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: "[]",
+                        };
+                    }
+                    return { code: 0, stderr: "", stdout: "" };
+                });
             });
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
             () =>
@@ -4818,7 +4861,7 @@ fi
             expect(spawnSpy).toHaveBeenCalledTimes(1);
 
             exit.resolve(0);
-            await expect(first.completed).resolves.toMatchObject({
+            expect(first.completed).resolves.toMatchObject({
                 code: 0,
                 status: "done",
             });
@@ -4843,16 +4886,18 @@ fi
         const largeOutput = `${"x".repeat(100_200)}tail-marker\n`;
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (_command, arguments_) => {
-                const joined = arguments_.join(" ");
-                if (joined.includes("pgrep -f")) {
-                    return {
-                        code: 1,
-                        stderr: "",
-                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
-                    };
-                }
-                return { code: 0, stderr: "", stdout: "" };
+            .mockImplementation((_command, arguments_) => {
+                return Promise.try(() => {
+                    const joined = arguments_.join(" ");
+                    if (joined.includes("pgrep -f")) {
+                        return {
+                            code: 1,
+                            stderr: "",
+                            stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                        };
+                    }
+                    return { code: 0, stderr: "", stdout: "" };
+                });
             });
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
             () =>
@@ -4905,16 +4950,18 @@ fi
             await import("../src/services/backups.ts");
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (_command, arguments_) => {
-                const joined = arguments_.join(" ");
-                if (joined.includes("pgrep -f")) {
-                    return {
-                        code: 1,
-                        stderr: "",
-                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
-                    };
-                }
-                return { code: 0, stderr: "", stdout: "" };
+            .mockImplementation((_command, arguments_) => {
+                return Promise.try(() => {
+                    const joined = arguments_.join(" ");
+                    if (joined.includes("pgrep -f")) {
+                        return {
+                            code: 1,
+                            stderr: "",
+                            stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                        };
+                    }
+                    return { code: 0, stderr: "", stdout: "" };
+                });
             });
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
             () =>
@@ -4993,23 +5040,25 @@ fi
         const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (_command, arguments_) => {
-                const joined = arguments_.join(" ");
-                if (joined.includes("pgrep -f")) {
-                    return {
-                        code: 1,
-                        stderr: "",
-                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
-                    };
-                }
-                if (joined.includes("wal-g backup-list")) {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: "[]",
-                    };
-                }
-                return { code: 0, stderr: "", stdout: "" };
+            .mockImplementation((_command, arguments_) => {
+                return Promise.try(() => {
+                    const joined = arguments_.join(" ");
+                    if (joined.includes("pgrep -f")) {
+                        return {
+                            code: 1,
+                            stderr: "",
+                            stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                        };
+                    }
+                    if (joined.includes("wal-g backup-list")) {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: "[]",
+                        };
+                    }
+                    return { code: 0, stderr: "", stdout: "" };
+                });
             });
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
             () =>
@@ -5049,15 +5098,17 @@ fi
         const { runScheduledJob } = await import("../src/services/scheduledJobs.ts");
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (command, arguments_) => {
-                if (command === "pgrep") {
-                    expect(arguments_).toEqual([
-                        "-f",
-                        "/opt/docker/apps/kopia/backup.sh",
-                    ]);
-                    return { code: 1, stderr: "", stdout: "" };
-                }
-                return { code: 0, stderr: "", stdout: "{}" };
+            .mockImplementation((command, arguments_) => {
+                return Promise.try(() => {
+                    if (command === "pgrep") {
+                        expect(arguments_).toEqual([
+                            "-f",
+                            "/opt/docker/apps/kopia/backup.sh",
+                        ]);
+                        return { code: 1, stderr: "", stdout: "" };
+                    }
+                    return { code: 0, stderr: "", stdout: "{}" };
+                });
             });
         const spawnSpy = jest
             .spyOn(processModule, "spawnProcess")
@@ -5113,23 +5164,25 @@ fi
         const runProcessCalls: string[] = [];
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (command, arguments_) => {
-                const joined = `${command} ${arguments_.join(" ")}`;
-                runProcessCalls.push(joined);
-                if (joined.includes("pgrep -f")) {
-                    return {
-                        code: 1,
-                        stderr: "",
-                        stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
-                    };
-                }
-                if (joined.includes("pkill")) {
+            .mockImplementation((command, arguments_) => {
+                return Promise.try(() => {
+                    const joined = `${command} ${arguments_.join(" ")}`;
+                    runProcessCalls.push(joined);
+                    if (joined.includes("pgrep -f")) {
+                        return {
+                            code: 1,
+                            stderr: "",
+                            stdout: "__MIRA_CONTAINER_PGREP_NO_MATCH__\n",
+                        };
+                    }
+                    if (joined.includes("pkill")) {
+                        return { code: 0, stderr: "", stdout: "" };
+                    }
+                    if (joined.includes("wal-g backup-list")) {
+                        return { code: 0, stderr: "", stdout: "[]" };
+                    }
                     return { code: 0, stderr: "", stdout: "" };
-                }
-                if (joined.includes("wal-g backup-list")) {
-                    return { code: 0, stderr: "", stdout: "[]" };
-                }
-                return { code: 0, stderr: "", stdout: "" };
+                });
             });
         const killSignals: NodeJS.Signals[] = [];
         const spawnSpy = jest.spyOn(processModule, "spawnProcess").mockImplementation(
@@ -5193,22 +5246,24 @@ fi
             await import("../src/services/scheduledJobs.ts");
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (_command, arguments_) => {
-                const joined = arguments_.join(" ");
-                if (joined.includes("pgrep -f")) {
-                    return { code: 0, stderr: "", stdout: "23456\n" };
-                }
-                if (joined.includes("wal-g backup-list")) {
-                    return { code: 0, stderr: "", stdout: "[]" };
-                }
-                throw new Error(`Unexpected backup command: ${joined}`);
+            .mockImplementation((_command, arguments_) => {
+                return Promise.try(() => {
+                    const joined = arguments_.join(" ");
+                    if (joined.includes("pgrep -f")) {
+                        return { code: 0, stderr: "", stdout: "23456\n" };
+                    }
+                    if (joined.includes("wal-g backup-list")) {
+                        return { code: 0, stderr: "", stdout: "[]" };
+                    }
+                    throw new Error(`Unexpected backup command: ${joined}`);
+                });
             });
 
         try {
             registerBackupScheduledJobs();
             const scheduledRun = runScheduledJob("backup.walg");
             await startTestScheduledExecutor();
-            await expect(scheduledRun).resolves.toMatchObject({
+            expect(scheduledRun).resolves.toMatchObject({
                 output: {
                     backup: {
                         code: 130,
@@ -5227,7 +5282,7 @@ fi
                 stderr: expect.stringContaining("backup process is still running"),
                 type: "walg",
             });
-            await expect(startManualBackup("walg")).rejects.toThrow(
+            expect(startManualBackup("walg")).rejects.toThrow(
                 "WALG backup needs attention"
             );
             expect(getPersistedBackupJob("walg")).toMatchObject({
@@ -5266,12 +5321,14 @@ fi
             await import("../src/services/scheduledJobs.ts");
         const runProcessSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (_command, arguments_) => {
-                const joined = arguments_.join(" ");
-                if (joined.includes("wal-g backup-list")) {
-                    return { code: 0, stderr: "", stdout: "[]" };
-                }
-                throw new Error(`Unexpected backup command: ${joined}`);
+            .mockImplementation((_command, arguments_) => {
+                return Promise.try(() => {
+                    const joined = arguments_.join(" ");
+                    if (joined.includes("wal-g backup-list")) {
+                        return { code: 0, stderr: "", stdout: "[]" };
+                    }
+                    throw new Error(`Unexpected backup command: ${joined}`);
+                });
             });
 
         try {
@@ -5315,12 +5372,12 @@ fi
 
             const scheduledRun = runScheduledJob("backup.walg");
             await startTestScheduledExecutor();
-            await expect(scheduledRun).resolves.toMatchObject({
+            expect(scheduledRun).resolves.toMatchObject({
                 output: { backup },
                 status: "failed",
             });
             expect(getPersistedBackupJob("walg")).toMatchObject(backup);
-            await expect(clearPersistedBackupAttention("walg")).resolves.toMatchObject({
+            expect(clearPersistedBackupAttention("walg")).resolves.toMatchObject({
                 code: backup.code,
                 endedAt: backup.endedAt,
                 id: backup.id,
@@ -5493,7 +5550,7 @@ fi
                 );
 
             await startTestScheduledExecutor();
-            await expect(clearPromise).rejects.toMatchObject({
+            expect(clearPromise).rejects.toMatchObject({
                 message: "WALG backup attention changed before clearing",
                 statusCode: 409,
             });
@@ -5522,7 +5579,7 @@ fi
 
         try {
             registerBackupScheduledJobs();
-            await expect(startManualBackup("kopia")).rejects.toMatchObject({
+            expect(startManualBackup("kopia")).rejects.toMatchObject({
                 statusCode: 503,
             });
             expect(getCurrentBackupJob("kopia")).toBeUndefined();
@@ -5551,7 +5608,7 @@ fi
 
         try {
             registerBackupScheduledJobs();
-            await expect(startManualBackup("kopia")).rejects.toMatchObject({
+            expect(startManualBackup("kopia")).rejects.toMatchObject({
                 statusCode: 409,
             });
             expect(mapBackupJob(getCurrentBackupJob("kopia"))).toMatchObject({
@@ -5560,7 +5617,7 @@ fi
                 stderr: expect.stringContaining("backup process is still running"),
                 type: "kopia",
             });
-            await expect(startManualBackup("kopia")).rejects.toThrow(
+            expect(startManualBackup("kopia")).rejects.toThrow(
                 "KOPIA backup needs attention"
             );
 
@@ -5599,12 +5656,12 @@ fi
             name: string;
         }> = [
             {
-                config: JSON.parse("null") as unknown,
+                config: null,
                 message: "Config must be an object",
                 name: "non-object config",
             },
             {
-                config: { ...validBase, defaults: JSON.parse("null") as unknown },
+                config: { ...validBase, defaults: null },
                 message: "Config defaults must be an object",
                 name: "null defaults",
             },
@@ -5701,7 +5758,7 @@ fi
 
         for (const { config, message, name } of invalidCases) {
             writeFileSync(configFile, `${JSON.stringify(config)}\n`);
-            await expect(
+            expect(
                 runLogRotationService({ config: configFile, isDryRun: true }),
                 name
             ).rejects.toThrow(message);
@@ -5757,7 +5814,7 @@ fi
                 rotatedFiles: 1,
             })
         );
-        await expect(
+        expect(
             runLogRotationService({
                 config: path.join(rotationRoot, "missing.json"),
                 isDryRun: true,
@@ -6128,7 +6185,7 @@ fi
             });
         cleanupCallbacks.push(() => runProcessSpy.mockRestore());
 
-        await expect(runElevatedLogRotationService({ isDryRun: true })).resolves.toEqual({
+        expect(runElevatedLogRotationService({ isDryRun: true })).resolves.toEqual({
             result: { checkedFiles: 2, isOk: true },
             stderr: "sudo notice",
         });
@@ -6142,31 +6199,29 @@ fi
             MIRA_DASHBOARD_DB_PATH: configuredDatabasePath,
             MIRA_DASHBOARD_LOG_ROTATION_LOCK_FILE: configuredLockFile,
         });
-        await expect(
-            runElevatedLogRotationService({ isDryRun: false })
-        ).resolves.toMatchObject({
-            result: {
-                error: "Elevated log rotation returned empty JSON output",
-                isOk: false,
-            },
-            stderr: "Elevated log rotation returned empty JSON output",
-        });
-        await expect(runElevatedLogRotationService({ isDryRun: false })).resolves.toEqual(
+        expect(runElevatedLogRotationService({ isDryRun: false })).resolves.toMatchObject(
             {
-                result: { error: "policy denied", isOk: false, stdout: "details" },
-                stderr: "sudo failed",
+                result: {
+                    error: "Elevated log rotation returned empty JSON output",
+                    isOk: false,
+                },
+                stderr: "Elevated log rotation returned empty JSON output",
             }
         );
-        await expect(
-            runElevatedLogRotationService({ isDryRun: false })
-        ).resolves.toMatchObject({
-            result: {
-                error: "Failed to parse elevated log rotation JSON",
-                isOk: false,
-                stdout: "not json",
-            },
-            stderr: expect.stringContaining("bad json stderr"),
+        expect(runElevatedLogRotationService({ isDryRun: false })).resolves.toEqual({
+            result: { error: "policy denied", isOk: false, stdout: "details" },
+            stderr: "sudo failed",
         });
+        expect(runElevatedLogRotationService({ isDryRun: false })).resolves.toMatchObject(
+            {
+                result: {
+                    error: "Failed to parse elevated log rotation JSON",
+                    isOk: false,
+                    stdout: "not json",
+                },
+                stderr: expect.stringContaining("bad json stderr"),
+            }
+        );
     });
 
     it("uses the configured lock for non-elevated log rotation", async () => {
@@ -6375,10 +6430,10 @@ fi
         const agentId = `agent-${Bun.randomUUIDv7()}`;
 
         try {
-            await expect(updateAgentCurrentTask("../bad", "Task")).rejects.toMatchObject({
+            expect(updateAgentCurrentTask("../bad", "Task")).rejects.toMatchObject({
                 statusCode: 400,
             });
-            await expect(updateAgentCurrentTask(agentId, " ")).rejects.toMatchObject({
+            expect(updateAgentCurrentTask(agentId, " ")).rejects.toMatchObject({
                 statusCode: 400,
             });
 
@@ -6699,29 +6754,31 @@ fi
                 updatedAt: Date.now(),
             },
         ];
-        gateway.request = async (method) => {
-            if (method === "sessions.list") {
-                return {
-                    sessions: [
-                        {
-                            isRunning: true,
-                            key: "agent:mira-2026:main",
-                            model: "openai/gpt-5.5",
-                            status: "running",
-                            updatedAt: Date.now(),
-                        },
-                        {
-                            endedAt: Date.now(),
-                            key: "agent:coder:main",
-                            model: "openai/gpt-4.1",
-                            status: "exited",
-                            updatedAt: Date.now() - 120_000,
-                        },
-                        { key: "", model: "ignored" },
-                    ],
-                };
-            }
-            throw new Error(`unexpected gateway method: ${method}`);
+        gateway.request = (method) => {
+            return Promise.try(() => {
+                if (method === "sessions.list") {
+                    return {
+                        sessions: [
+                            {
+                                isRunning: true,
+                                key: "agent:mira-2026:main",
+                                model: "openai/gpt-5.5",
+                                status: "running",
+                                updatedAt: Date.now(),
+                            },
+                            {
+                                endedAt: Date.now(),
+                                key: "agent:coder:main",
+                                model: "openai/gpt-4.1",
+                                status: "exited",
+                                updatedAt: Date.now() - 120_000,
+                            },
+                            { key: "", model: "ignored" },
+                        ],
+                    };
+                }
+                throw new Error(`unexpected gateway method: ${method}`);
+            });
         };
 
         const { buildAgentStatuses, buildSingleAgentStatus, parseAgentsConfig } =
@@ -6808,26 +6865,28 @@ fi
                 })
             );
         }
-        await expect(
-            buildSingleAgentStatus("missing", parseAgentsConfig()!)
-        ).resolves.toBe(undefined);
-        await expect(
+        expect(buildSingleAgentStatus("missing", parseAgentsConfig()!)).resolves.toBe(
+            undefined
+        );
+        expect(
             buildSingleAgentStatus("coder", parseAgentsConfig()!)
         ).resolves.toMatchObject({
             id: "coder",
             model: "gpt-4.1",
         });
 
-        const originalConsoleError = console.error;
-        console.error = () => {};
-        cleanupCallbacks.push(() => {
-            console.error = originalConsoleError;
-        });
+        const structuredLogs = captureStructuredLogs();
         writeFileSync(path.join(openclawRoot, "openclaw.json"), "{");
         try {
             expect(parseAgentsConfig()).toBeUndefined();
+            expect(structuredLogs.entries).toContainEqual(
+                expect.objectContaining({
+                    event: "agents.openclaw_config_parse_failed",
+                    level: "error",
+                })
+            );
         } finally {
-            console.error = originalConsoleError;
+            structuredLogs.stop();
         }
     });
 
@@ -6836,44 +6895,42 @@ fi
             await import("../src/services/execJobs.ts");
         const { execRoutes } = await import("../src/routes/execRoutes.ts");
 
-        await expect(runExecOnce(undefined)).rejects.toThrow(
-            "request body must be a JSON object"
+        expect(runExecOnce()).rejects.toThrow("request body must be a JSON object");
+        expect(runExecOnce({ args: [], command: "node", shell: true })).rejects.toThrow(
+            "args cannot be combined with shell mode"
         );
-        await expect(
-            runExecOnce({ args: [], command: "node", shell: true })
-        ).rejects.toThrow("args cannot be combined with shell mode");
-        await expect(runExecOnce({ args: [], command: "node/child" })).rejects.toThrow(
+        expect(runExecOnce({ args: [], command: "node/child" })).rejects.toThrow(
             "command must be an approved executable name"
         );
-        await expect(runExecOnce({ args: [], command: "node" })).rejects.toThrow(
+        expect(runExecOnce({ args: [], command: "node" })).rejects.toThrow(
             "command executable is not approved"
         );
-        await expect(
+        expect(
             runExecOnce({ args: ["-lc", "echo hi"], command: "bash" })
         ).rejects.toThrow("bash argv execution requires job tracking");
-        await expect(
+        expect(
             runExecOnce({
                 args: "not-array",
                 command: "__mira_dashboard_shell_smoke_test__",
             })
         ).rejects.toThrow("args must be an array");
-        await expect(
+        expect(
             runExecOnce({ args: [42], command: "__mira_dashboard_shell_smoke_test__" })
         ).rejects.toThrow("all args must be strings");
-        await expect(
+        expect(
             runExecOnce({
                 args: ["bad\0arg"],
                 command: "__mira_dashboard_shell_smoke_test__",
             })
         ).rejects.toThrow("args cannot contain null bytes");
-        await expect(
+        expect(
             runExecOnce({
                 command: "__mira_dashboard_shell_smoke_test__",
                 cwd: 42,
                 shell: true,
             })
         ).rejects.toThrow("cwd must be a string");
-        await expect(
+        expect(
             runExecOnce({
                 command: "__mira_dashboard_shell_smoke_test__",
                 cwd: "relative",
@@ -6882,7 +6939,7 @@ fi
         ).rejects.toThrow("cwd must be an absolute path");
         const execFileCwd = path.join(createTemporaryRoot("mira-exec-cwd-"), "file");
         writeFileSync(execFileCwd, "not a directory");
-        await expect(
+        expect(
             runExecOnce({
                 command: "__mira_dashboard_shell_smoke_test__",
                 cwd: execFileCwd,
@@ -6915,7 +6972,7 @@ fi
             })
         );
         expect(invalidPost.status).toBe(400);
-        await expect(invalidPost.json()).resolves.toEqual({
+        expect(invalidPost.json()).resolves.toEqual({
             error: {
                 code: "exec_invalid_request",
                 message: "args are required unless shell mode is enabled",
@@ -6930,7 +6987,7 @@ fi
             })
         );
         expect(malformedStart.status).toBe(400);
-        await expect(malformedStart.json()).resolves.toEqual({
+        expect(malformedStart.json()).resolves.toEqual({
             error: {
                 code: "invalid_json",
                 message: "Invalid JSON",
@@ -6942,9 +6999,9 @@ fi
             new Request("https://test.local/api/exec/missing-job"),
             { params: { jobId: "missing-job" } }
         );
-        const missingJob = await execRoutes["/api/exec/:jobId"].GET(missingJobRequest);
+        const missingJob = execRoutes["/api/exec/:jobId"].GET(missingJobRequest);
         expect(missingJob.status).toBe(404);
-        await expect(missingJob.json()).resolves.toEqual({
+        expect(missingJob.json()).resolves.toEqual({
             error: {
                 code: "exec_job_not_found",
                 message: "Exec job not found",
@@ -6953,9 +7010,9 @@ fi
         });
 
         const stopMissingJob =
-            await execRoutes["/api/exec/:jobId/stop"].POST(missingJobRequest);
+            execRoutes["/api/exec/:jobId/stop"].POST(missingJobRequest);
         expect(stopMissingJob.status).toBe(404);
-        await expect(stopMissingJob.json()).resolves.toEqual({
+        expect(stopMissingJob.json()).resolves.toEqual({
             error: {
                 code: "exec_job_not_found",
                 message: "Exec job not found",
@@ -7227,35 +7284,37 @@ fi
         cleanupCallbacks.push(() => {
             gateway.request = originalRequest;
         });
-        gateway.request = async (method, parameters) => {
-            if (method === "config.get") {
-                return {
-                    hash: "hash-1",
-                    parsed: {
-                        skills: {
-                            entries: {
-                                configuredOnly: {
-                                    description: "Configured only",
-                                    enabled: true,
+        gateway.request = (method, parameters) => {
+            return Promise.try(() => {
+                if (method === "config.get") {
+                    return {
+                        hash: "hash-1",
+                        parsed: {
+                            skills: {
+                                entries: {
+                                    configuredOnly: {
+                                        description: "Configured only",
+                                        enabled: true,
+                                    },
+                                    workspaceSkill: { enabled: false },
                                 },
-                                workspaceSkill: { enabled: false },
                             },
+                            theme: "dark",
                         },
-                        theme: "dark",
-                    },
-                };
-            }
-            if (method === "config.patch") {
-                patchCalls.push(parameters);
-                return { hash: "hash-2" };
-            }
-            throw new Error(`unexpected gateway method: ${method}`);
+                    };
+                }
+                if (method === "config.patch") {
+                    patchCalls.push(parameters);
+                    return { hash: "hash-2" };
+                }
+                throw new Error(`unexpected gateway method: ${method}`);
+            });
         };
         const { openclawConfigRoutes } =
             await import("../src/routes/openclawConfigRoutes.ts");
 
         const configResponse = await openclawConfigRoutes["/api/config"].GET();
-        await expect(configResponse.json()).resolves.toMatchObject({
+        expect(configResponse.json()).resolves.toMatchObject({
             __hash: "hash-1",
             theme: "dark",
         });
@@ -7341,7 +7400,7 @@ fi
         });
 
         const backupResponse = await openclawConfigRoutes["/api/backup"].POST();
-        await expect(backupResponse.json()).resolves.toMatchObject({
+        expect(backupResponse.json()).resolves.toMatchObject({
             config: expect.objectContaining({ theme: "dark" }),
             hash: "hash-1",
         });
@@ -7357,9 +7416,11 @@ fi
                 .run();
         });
         await startTestScheduledExecutor();
-        const restartResponse = await openclawConfigRoutes["/api/restart"].POST();
+        const restartResponse = await openclawConfigRoutes["/api/restart"].POST(
+            new Request("https://test.local/api/restart", { method: "POST" })
+        );
         expect(restartResponse.status).toBe(200);
-        await expect(restartResponse.json()).resolves.toEqual({ isOk: true });
+        expect(restartResponse.json()).resolves.toEqual({ isOk: true });
         expect(
             database
                 .prepare(
@@ -7402,20 +7463,22 @@ fi
             gateway.deleteSession = originalDeleteSession;
         });
 
-        gateway.request = async (method, parameters) => {
-            gatewayCalls.push({ method, parameters });
-            if (method === "cron.list") {
-                return {
-                    items: [{ enabled: true, id: "heartbeat", name: "Heartbeat" }],
-                };
-            }
-            if (method === "cron.remove" || method === "cron.run") {
-                return { method, parameters };
-            }
-            if (method === "cron.update") {
-                return { isOk: true };
-            }
-            throw new Error(`unexpected gateway method: ${method}`);
+        gateway.request = (method, parameters) => {
+            return Promise.try(() => {
+                gatewayCalls.push({ method, parameters });
+                if (method === "cron.list") {
+                    return {
+                        jobs: [{ enabled: true, id: "heartbeat", name: "Heartbeat" }],
+                    };
+                }
+                if (method === "cron.remove" || method === "cron.run") {
+                    return { method, parameters };
+                }
+                if (method === "cron.update") {
+                    return { isOk: true };
+                }
+                throw new Error(`unexpected gateway method: ${method}`);
+            });
         };
         gateway.getSessions = () => [
             {
@@ -7451,18 +7514,27 @@ fi
                 updatedAt: 0,
             },
         ];
-        gateway.abortSessionRun = async (sessionKey) => {
-            gatewayCalls.push({ method: "chat.abort", parameters: { sessionKey } });
-        };
-        gateway.sendSessionMessage = async (sessionKey, message) => {
-            gatewayCalls.push({
-                method: "chat.send",
-                parameters: { message, sessionKey },
+        gateway.abortSessionRun = (sessionKey) => {
+            return Promise.try(() => {
+                gatewayCalls.push({ method: "chat.abort", parameters: { sessionKey } });
             });
         };
-        gateway.deleteSession = async (sessionKey) => {
-            gatewayCalls.push({ method: "sessions.delete", parameters: { sessionKey } });
-            return { deleted: sessionKey };
+        gateway.sendSessionMessage = (sessionKey, message) => {
+            return Promise.try(() => {
+                gatewayCalls.push({
+                    method: "chat.send",
+                    parameters: { message, sessionKey },
+                });
+            });
+        };
+        gateway.deleteSession = (sessionKey) => {
+            return Promise.try(() => {
+                gatewayCalls.push({
+                    method: "sessions.delete",
+                    parameters: { sessionKey },
+                });
+                return { deleted: sessionKey };
+            });
         };
 
         const [{ cronRoutes }, { sessionRoutes }] = await Promise.all([
@@ -7471,7 +7543,7 @@ fi
         ]);
 
         const cronList = await cronRoutes["/api/cron/jobs"].GET();
-        await expect(cronList.json()).resolves.toEqual({
+        expect(cronList.json()).resolves.toEqual({
             jobs: [{ enabled: true, id: "heartbeat", name: "Heartbeat" }],
         });
         expect(gatewayCalls).toContainEqual({
@@ -7484,7 +7556,7 @@ fi
         } as Request & { params: { id: string } };
         const cronDelete =
             await cronRoutes["/api/cron/jobs/:id/delete"].POST(cronDeleteRequest);
-        await expect(cronDelete.json()).resolves.toMatchObject({ isOk: true });
+        expect(cronDelete.json()).resolves.toMatchObject({ isOk: true });
         expect(gatewayCalls).toContainEqual({
             method: "cron.remove",
             parameters: { jobId: "heartbeat" },
@@ -7501,9 +7573,12 @@ fi
             Object.assign(badToggleRequest, { params: { id: "heartbeat" } })
         );
         expect(badToggle.status).toBe(400);
-        await expect(badToggle.json()).resolves.toEqual({
-            error: "enabled must be a boolean",
-        });
+        expect(badToggle.json()).resolves.toEqual(
+            apiErrorExpectation(
+                expect.stringContaining("body.enabled"),
+                "invalid_request"
+            )
+        );
 
         const validToggleRequest = new Request(
             "https://dashboard.test/api/cron/jobs/heartbeat/toggle",
@@ -7515,7 +7590,7 @@ fi
         const validToggle = await cronRoutes["/api/cron/jobs/:id/toggle"].POST(
             Object.assign(validToggleRequest, { params: { id: "heartbeat" } })
         );
-        await expect(validToggle.json()).resolves.toEqual({ isOk: true });
+        expect(validToggle.json()).resolves.toEqual({ isOk: true });
         expect(gatewayCalls).toContainEqual({
             method: "cron.update",
             parameters: { jobId: "heartbeat", patch: { enabled: false } },
@@ -7532,9 +7607,9 @@ fi
             Object.assign(badUpdateRequest, { params: { id: "heartbeat" } })
         );
         expect(badUpdate.status).toBe(400);
-        await expect(badUpdate.json()).resolves.toEqual({
-            error: "patch must be an object",
-        });
+        expect(badUpdate.json()).resolves.toEqual(
+            apiErrorExpectation("body.patch: must be an object", "invalid_request")
+        );
 
         const validUpdateRequest = new Request(
             "https://dashboard.test/api/cron/jobs/heartbeat/update",
@@ -7549,7 +7624,7 @@ fi
             Object.assign(validUpdateRequest, { params: { id: "heartbeat" } })
         );
         expect(validUpdate.status).toBe(200);
-        await expect(validUpdate.json()).resolves.toEqual({ isOk: true });
+        expect(validUpdate.json()).resolves.toEqual({ isOk: true });
         expect(gatewayCalls).toContainEqual({
             method: "cron.update",
             parameters: {
@@ -7561,14 +7636,13 @@ fi
         const sessionListRequest = new Request(
             "https://dashboard.test/api/sessions/list?model=codex"
         );
-        const sessionList =
-            await sessionRoutes["/api/sessions/list"].GET(sessionListRequest);
-        await expect(sessionList.json()).resolves.toMatchObject({
+        const sessionList = sessionRoutes["/api/sessions/list"].GET(sessionListRequest);
+        expect(sessionList.json()).resolves.toMatchObject({
             sessions: [expect.objectContaining({ key: "agent:main:main" })],
         });
 
-        const stats = await sessionRoutes["/api/sessions/stats"].GET();
-        await expect(stats.json()).resolves.toMatchObject({
+        const stats = sessionRoutes["/api/sessions/stats"].GET();
+        expect(stats.json()).resolves.toMatchObject({
             activeInLastHour: 1,
             byModel: { codex: 1, glm: 1 },
             total: 2,
@@ -7582,7 +7656,7 @@ fi
         const compact = await sessionRoutes["/api/sessions/:id/action"].POST(
             Object.assign(compactRequest, { params: { id: "agent:main:main" } })
         );
-        await expect(compact.json()).resolves.toEqual({
+        expect(compact.json()).resolves.toEqual({
             action: "compact",
             isSuccess: true,
         });
@@ -7598,15 +7672,15 @@ fi
             Object.assign(unsupportedRequest, { params: { id: "agent:main:main" } })
         );
         expect(unsupported.status).toBe(400);
-        await expect(unsupported.json()).resolves.toEqual({
-            error: "Unsupported action: sleep",
-        });
+        expect(unsupported.json()).resolves.toEqual(
+            apiErrorExpectation(expect.stringContaining("body.action"), "invalid_request")
+        );
 
         const deleteRequest = {
             params: { id: "agent:main:main" },
         } as Request & { params: { id: string } };
         const deleted = await sessionRoutes["/api/sessions/:id"].DELETE(deleteRequest);
-        await expect(deleted.json()).resolves.toEqual({
+        expect(deleted.json()).resolves.toEqual({
             isSuccess: true,
             result: { deleted: "agent:main:main" },
         });
@@ -7647,9 +7721,9 @@ fi
         const invalidContainerResponse = await dockerRoutes[
             "/api/docker/containers/:containerId"
         ].GET(invalidContainerRequest);
-        await expect(invalidContainerResponse.json()).resolves.toEqual({
-            error: "Invalid containerId",
-        });
+        expect(invalidContainerResponse.json()).resolves.toEqual(
+            apiErrorExpectation("Invalid containerId")
+        );
         expect(
             await dockerRoutes["/api/docker/images/:imageId"].DELETE(invalidImageRequest)
         ).toMatchObject({ status: 400 });
@@ -7672,65 +7746,67 @@ fi
         expect(missingExec.status).toBe(404);
         const dockerRunSpy = jest
             .spyOn(processModule, "runProcess")
-            .mockImplementation(async (_command, arguments_) => {
-                const joined = arguments_.join(" ");
-                if (joined.includes("ps -a")) {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: `${JSON.stringify({
-                            Command: "sleep 100",
-                            CreatedAt: "2026-06-26 01:00:00 +0000 UTC",
-                            ID: "abc123",
-                            Image: "unit/web:latest",
-                            Labels: "",
-                            Mounts: "",
-                            Names: "unit-web",
-                            Networks: "bridge",
-                            Ports: "",
-                            RunningFor: "1 minute",
-                            State: "running",
-                            Status: "Up 1 minute",
-                        })}\n`,
-                    };
-                }
-                if (joined.includes("stats --no-stream")) {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: `${JSON.stringify({
-                            BlockIO: "0B / 0B",
-                            CPUPerc: "0.00%",
-                            ID: "abc123",
-                            MemPerc: "0.00%",
-                            MemUsage: "1MiB / 1GiB",
-                            NetIO: "0B / 0B",
-                            PIDs: "1",
-                        })}\n`,
-                    };
-                }
-                if (arguments_[0] === "inspect") {
-                    return {
-                        code: 0,
-                        stderr: "",
-                        stdout: JSON.stringify([
-                            {
-                                Config: {
-                                    Env: ["API_TOKEN=secret", "PLAIN=value"],
-                                    Labels: { "com.docker.compose.service": "web" },
+            .mockImplementation((_command, arguments_) => {
+                return Promise.try(() => {
+                    const joined = arguments_.join(" ");
+                    if (joined.includes("ps -a")) {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: `${JSON.stringify({
+                                Command: "sleep 100",
+                                CreatedAt: "2026-06-26 01:00:00 +0000 UTC",
+                                ID: "abc123",
+                                Image: "unit/web:latest",
+                                Labels: "",
+                                Mounts: "",
+                                Names: "unit-web",
+                                Networks: "bridge",
+                                Ports: "",
+                                RunningFor: "1 minute",
+                                State: "running",
+                                Status: "Up 1 minute",
+                            })}\n`,
+                        };
+                    }
+                    if (joined.includes("stats --no-stream")) {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: `${JSON.stringify({
+                                BlockIO: "0B / 0B",
+                                CPUPerc: "0.00%",
+                                ID: "abc123",
+                                MemPerc: "0.00%",
+                                MemUsage: "1MiB / 1GiB",
+                                NetIO: "0B / 0B",
+                                PIDs: "1",
+                            })}\n`,
+                        };
+                    }
+                    if (arguments_[0] === "inspect") {
+                        return {
+                            code: 0,
+                            stderr: "",
+                            stdout: JSON.stringify([
+                                {
+                                    Config: {
+                                        Env: ["API_TOKEN=secret", "PLAIN=value"],
+                                        Labels: { "com.docker.compose.service": "web" },
+                                    },
+                                    Created: "2026-06-26T01:00:00.000Z",
+                                    Id: "abc123full",
+                                    Image: "sha256:image",
+                                    Mounts: [],
+                                    NetworkSettings: { Networks: {} },
+                                    RestartCount: 0,
+                                    State: { StartedAt: "2026-06-26T01:00:00.000Z" },
                                 },
-                                Created: "2026-06-26T01:00:00.000Z",
-                                Id: "abc123full",
-                                Image: "sha256:image",
-                                Mounts: [],
-                                NetworkSettings: { Networks: {} },
-                                RestartCount: 0,
-                                State: { StartedAt: "2026-06-26T01:00:00.000Z" },
-                            },
-                        ]),
-                    };
-                }
-                return { code: 1, stderr: `unexpected docker ${joined}`, stdout: "" };
+                            ]),
+                        };
+                    }
+                    return { code: 1, stderr: `unexpected docker ${joined}`, stdout: "" };
+                });
             });
         const dockerSpawnSpy = jest
             .spyOn(processModule, "spawnProcess")
@@ -7766,13 +7842,13 @@ fi
                     { params: { jobId: execStartBody.jobId } }
                 )
             );
-            await expect(failedExec.json()).resolves.toMatchObject({
+            expect(failedExec.json()).resolves.toMatchObject({
                 code: 1,
                 containerId: "abc123",
                 stderr: "docker exec spawn failed",
                 status: "done",
             });
-            const stopFinished = await dockerRoutes["/api/docker/exec/:jobId/stop"].POST(
+            const stopFinished = dockerRoutes["/api/docker/exec/:jobId/stop"].POST(
                 Object.assign(
                     new Request(
                         `https://dashboard.test/api/docker/exec/${execStartBody.jobId}/stop`,
@@ -7782,9 +7858,9 @@ fi
                 )
             );
             expect(stopFinished.status).toBe(400);
-            await expect(stopFinished.json()).resolves.toEqual({
-                error: "Job is not running",
-            });
+            expect(stopFinished.json()).resolves.toEqual(
+                apiErrorExpectation("Job is not running")
+            );
         } finally {
             dockerRunSpy.mockRestore();
             dockerSpawnSpy.mockRestore();
@@ -7856,8 +7932,7 @@ fi
                     "2026-06-24T12:00:00.000Z"
                 );
 
-            const servicesResponse =
-                await dockerRoutes["/api/docker/updater/services"].GET();
+            const servicesResponse = dockerRoutes["/api/docker/updater/services"].GET();
             const servicesBody = (await servicesResponse.json()) as {
                 services: Array<{
                     appSlug: string;
@@ -7878,7 +7953,7 @@ fi
             expect(servicesBody.summary.total).toBeGreaterThanOrEqual(1);
             expect(servicesBody.summary.updateAvailable).toBeGreaterThanOrEqual(1);
 
-            const eventsResponse = await dockerRoutes["/api/docker/updater/events"].GET(
+            const eventsResponse = dockerRoutes["/api/docker/updater/events"].GET(
                 new Request("https://dashboard.test/api/docker/updater/events?limit=1")
             );
             const eventsBody = (await eventsResponse.json()) as {
@@ -7903,9 +7978,9 @@ fi
                     disabledServiceRequest
                 );
             expect(disabledServiceResponse.status).toBe(400);
-            await expect(disabledServiceResponse.json()).resolves.toEqual({
-                error: "Updater service is disabled",
-            });
+            expect(disabledServiceResponse.json()).resolves.toEqual(
+                apiErrorExpectation("Updater service is disabled")
+            );
 
             rememberEnvironment("MIRA_DOCKER_APPS_ROOT");
             const appsRoot = createTemporaryRoot("mira-docker-route-unsupported-");
@@ -7926,7 +8001,7 @@ fi
             const { registerDockerUpdaterScheduledJobs, registerDockerUpdaterServices } =
                 await import("../src/services/dockerUpdater.ts");
             registerDockerUpdaterScheduledJobs();
-            await expect(registerDockerUpdaterServices()).resolves.toMatchObject({
+            expect(registerDockerUpdaterServices()).toMatchObject({
                 isOk: true,
             });
             const unsupportedService = database
@@ -7946,9 +8021,9 @@ fi
                     unsupportedRequest
                 );
             expect(unsupportedResponse.status).toBe(422);
-            await expect(unsupportedResponse.json()).resolves.toEqual({
-                error: "Unsupported image registry: example.com",
-            });
+            expect(unsupportedResponse.json()).resolves.toEqual(
+                apiErrorExpectation("Unsupported image registry", "unsupported_registry")
+            );
         } finally {
             database
                 .prepare("DELETE FROM docker_update_events WHERE app_slug = ?")
@@ -8178,9 +8253,7 @@ fi
                 name: "Scheduled future job",
                 scheduleType: "interval",
             });
-            await expect(
-                runScheduledJob(scheduledFutureId, "schedule")
-            ).rejects.toMatchObject({
+            expect(runScheduledJob(scheduledFutureId, "schedule")).rejects.toMatchObject({
                 statusCode: 409,
             });
 
@@ -8193,7 +8266,7 @@ fi
                 name: "Scheduled disabled job",
                 scheduleType: "interval",
             });
-            await expect(
+            expect(
                 runScheduledJob(scheduledDisabledId, "schedule")
             ).rejects.toMatchObject({
                 statusCode: 409,
@@ -8255,18 +8328,13 @@ fi
                 name: "Timeout job",
                 scheduleType: "interval",
             });
-            const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-            try {
-                await expect(runScheduledJob(timeoutJobId)).resolves.toMatchObject({
-                    jobId: timeoutJobId,
-                    message: "Scheduled job timed out",
-                    output: {},
-                    status: "failed",
-                });
-                expect(isTimeoutHandlerSettled).toBe(true);
-            } finally {
-                warnSpy.mockRestore();
-            }
+            expect(runScheduledJob(timeoutJobId)).resolves.toMatchObject({
+                jobId: timeoutJobId,
+                message: "Scheduled job timed out",
+                output: {},
+                status: "failed",
+            });
+            expect(isTimeoutHandlerSettled).toBe(true);
 
             const abortActionKey = `test-abort-action-${Bun.randomUUIDv7()}`;
             const abortJobId = `test-job-abort-${Bun.randomUUIDv7()}`;
@@ -8280,7 +8348,7 @@ fi
             });
             const controller = new AbortController();
             controller.abort();
-            await expect(
+            expect(
                 runScheduledJob(abortJobId, "manual", controller.signal)
             ).rejects.toHaveProperty("name", "AbortError");
         } finally {

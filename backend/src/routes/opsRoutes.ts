@@ -1,6 +1,12 @@
+import {
+    type LogRotationStatus,
+    parseLogRotationSummary,
+} from "../../../contracts/logRotation.ts";
 import { database } from "../database.ts";
 import { json } from "../http.ts";
-import { errorMessage, httpStatusCode } from "../lib/errors.ts";
+import { httpStatusCode } from "../lib/errors.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { routeErrorResponse, routeFailureResponse } from "../routeSupport.ts";
 import { runElevatedLogRotationService } from "../services/logRotation.ts";
 import {
     enqueueAndWaitForJobExecution,
@@ -8,6 +14,7 @@ import {
 } from "../services/queuedJobExecution.ts";
 
 const LOG_ROTATION_STATE_KEY = "log_rotation.state";
+const logger = createStructuredLogger("operations");
 
 interface LogRotationResult {
     result: Record<string, unknown>;
@@ -18,60 +25,7 @@ type LogRotationRunner = (options: { isDryRun: boolean }) => Promise<LogRotation
 
 const elevatedLogRotationRunner: LogRotationRunner = runElevatedLogRotationService;
 
-function normalizeLastRunErrors(run: Record<string, unknown>): unknown[] {
-    if (Array.isArray(run.errors)) return run.errors;
-    const result = run.result ?? undefined;
-    const message =
-        typeof run.message === "string" && run.message.trim()
-            ? run.message.trim()
-            : typeof run.stderr === "string" && run.stderr.trim()
-              ? run.stderr.trim()
-              : "";
-    if (!message && result === undefined) return [];
-    return [
-        {
-            message: message || "Log rotation failed",
-            result,
-            stderr: typeof run.stderr === "string" ? run.stderr : "",
-        },
-    ];
-}
-
-function normalizeLastRun(value: unknown) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return;
-    }
-    const run = value as Record<string, unknown>;
-    return {
-        checkedFiles: Number.isFinite(Number(run.checkedFiles))
-            ? Number(run.checkedFiles)
-            : 0,
-        checkedGroups: Number.isFinite(Number(run.checkedGroups))
-            ? Number(run.checkedGroups)
-            : 0,
-        compressedFiles: Number.isFinite(Number(run.compressedFiles))
-            ? Number(run.compressedFiles)
-            : 0,
-        deletedArchives: Number.isFinite(Number(run.deletedArchives))
-            ? Number(run.deletedArchives)
-            : 0,
-        errors: normalizeLastRunErrors(run),
-        finishedAt: typeof run.finishedAt === "string" ? run.finishedAt : undefined,
-        groups: Array.isArray(run.groups) ? run.groups : [],
-        isDryRun: run.isDryRun === true,
-        isOk: run.isOk === true,
-        rotatedFiles: Number.isFinite(Number(run.rotatedFiles))
-            ? Number(run.rotatedFiles)
-            : 0,
-        skippedFiles: Number.isFinite(Number(run.skippedFiles))
-            ? Number(run.skippedFiles)
-            : 0,
-        startedAt: typeof run.startedAt === "string" ? run.startedAt : undefined,
-        warnings: Array.isArray(run.warnings) ? run.warnings : [],
-    };
-}
-
-async function readLogRotationStatus() {
+function readLogRotationStatus(): LogRotationStatus {
     const row = database
         .prepare("SELECT data_json FROM cache_entries WHERE key = ? LIMIT 1")
         .get(LOG_ROTATION_STATE_KEY) as undefined | { data_json: string | null };
@@ -81,13 +35,19 @@ async function readLogRotationStatus() {
         try {
             data = JSON.parse(raw) as { lastRun?: unknown };
         } catch (error) {
-            console.warn("[opsRoutes] Ignoring malformed log rotation state", error);
+            logger.warn("operations.log_rotation_state_invalid", { error });
         }
     }
-    return {
-        isSuccess: true,
-        lastRun: normalizeLastRun(data?.lastRun),
-    };
+    if (data?.lastRun === undefined) return { isSuccess: true };
+    try {
+        return {
+            isSuccess: true,
+            lastRun: parseLogRotationSummary(data.lastRun, "logRotationState.lastRun"),
+        };
+    } catch (error) {
+        logger.warn("operations.log_rotation_last_run_invalid", { error });
+        return { isSuccess: true };
+    }
 }
 
 export async function runLogRotation(options: {
@@ -96,7 +56,7 @@ export async function runLogRotation(options: {
     return elevatedLogRotationRunner(options);
 }
 
-async function runLogRotationResponse(isDryRun: boolean) {
+async function runLogRotationResponse(request: Request, isDryRun: boolean) {
     try {
         const execution = await enqueueAndWaitForJobExecution({
             actionKey: "ops.log-rotation",
@@ -111,7 +71,10 @@ async function runLogRotationResponse(isDryRun: boolean) {
             successfulJobExecutionOutput(execution);
             throw new Error("Log rotation result was missing");
         }
-        const { result, stderr } = logRotation as unknown as LogRotationResult;
+        const rawResult: unknown = Reflect.get(logRotation, "result");
+        const rawStderr: unknown = Reflect.get(logRotation, "stderr");
+        const result = parseLogRotationSummary(rawResult, "logRotation.result");
+        const stderr = typeof rawStderr === "string" ? rawStderr : "";
         return json({
             isSuccess: result?.isOk === true,
             result,
@@ -119,33 +82,35 @@ async function runLogRotationResponse(isDryRun: boolean) {
         });
     } catch (error) {
         const status = httpStatusCode(error);
-        if (status === 500) console.error("[opsRoutes] Ops route failed", error);
-        return json(
-            {
-                error:
-                    status === 500
-                        ? "Ops route failed"
-                        : errorMessage(error, "Ops route failed"),
-            },
-            { status }
-        );
+        if (status === 500) {
+            logger.error("operations.log_rotation_failed", { error });
+        }
+        return routeErrorResponse(request, error, {
+            code: "log_rotation_failed",
+            context: "ops.log-rotation",
+            message: "Ops route failed",
+        });
     }
 }
 
 export const opsRoutes = {
     "/api/ops/log-rotation/dry-run": {
-        POST: () => runLogRotationResponse(true),
+        POST: (request: Request) => runLogRotationResponse(request, true),
     },
     "/api/ops/log-rotation/run": {
-        POST: () => runLogRotationResponse(false),
+        POST: (request: Request) => runLogRotationResponse(request, false),
     },
     "/api/ops/log-rotation/status": {
-        GET: async () => {
+        GET: () => {
             try {
-                return json(await readLogRotationStatus());
+                return json(readLogRotationStatus());
             } catch (error) {
-                console.error("[opsRoutes] Ops route failed", error);
-                return json({ error: "Ops route failed" }, { status: 500 });
+                logger.error("operations.status_read_failed", { error });
+                return routeFailureResponse({
+                    context: "ops",
+                    message: "Ops route failed",
+                    status: 500,
+                });
             }
         },
     },

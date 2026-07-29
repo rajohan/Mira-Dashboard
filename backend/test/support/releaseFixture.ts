@@ -15,7 +15,12 @@ interface ReleaseFixtureOptions {
     commitTitle?: string;
 }
 
-/** Creates the complete artifact set shared by immutable release tests. */
+/**
+ * Creates the complete artifact set shared by immutable release tests.
+ * @param releaseRoot Release root value.
+ * @param commitSha Commit sha value.
+ * @param options Operation options.
+ */
 export async function createReleaseFixture(
     releaseRoot: string,
     commitSha: string,
@@ -26,8 +31,6 @@ export async function createReleaseFixture(
     mkdirSync(path.join(releaseRoot, "dist", "assets"), { recursive: true });
     writeFileSync(path.join(releaseRoot, "package.json"), "{}\n");
     writeFileSync(path.join(releaseRoot, "bun.lock"), "root-lock\n");
-    writeFileSync(path.join(releaseRoot, "backend", "package.json"), "{}\n");
-    writeFileSync(path.join(releaseRoot, "backend", "bun.lock"), "backend-lock\n");
     writeFileSync(
         path.join(releaseRoot, "backend", "config", "log-rotation.json"),
         '{"jobs":[]}\n'
@@ -77,7 +80,11 @@ export async function createReleaseFixture(
     });
 }
 
-/** Rewrites a release fixture to model an older exact schema compatibility window. */
+/**
+ * Rewrites a release fixture to model an older exact schema compatibility window.
+ * @param releaseRoot Release root value.
+ * @param schemaVersion Schema version value.
+ */
 export async function rewriteReleaseFixtureSchemaVersion(
     releaseRoot: string,
     schemaVersion: number

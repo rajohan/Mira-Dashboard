@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
 import {
     chmodSync,
@@ -23,10 +24,10 @@ import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { Database } from "bun:sqlite";
-
 import { dashboardProjectPaths } from "../lib/dashboardPaths.ts";
 import { formatOpenClawLogDate } from "../lib/logRoots.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+import { hasLineBreakOrNullByte } from "../lib/values.ts";
 import {
     type DevelopmentWorkspaceState,
     prepareDevelopmentOpenClawSnapshot,
@@ -41,8 +42,10 @@ const MANAGED_STATE_BASENAME_PATTERN = /^pr-\d+$/u;
 const DEFAULT_FRONTEND_PORT = 5173;
 const DEFAULT_BACKEND_PORT = 3101;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
+const HOST_OPENCLAW_LOGS_ROOT = "/tmp/openclaw";
 const SECRET_KEY_BYTES = 32;
 const DEVELOPMENT_LOG_FIXTURE_INTERVAL_MS = 5000;
+const logger = createStructuredLogger("development-stack");
 const MAX_DEVELOPMENT_LOG_BYTES = 2 * 1024 * 1024;
 const ISOLATED_JOB_ACTION_KEYS = ["cache.refresh", "database.maintenance"] as const;
 const INHERITED_ENVIRONMENT_KEYS = [
@@ -75,6 +78,7 @@ export interface DevelopmentStackConfig {
     openClawClientHome: string;
     openClawConfigSource?: string;
     openClawHome: string;
+    openClawLogMode: "host-read-only" | "synthetic";
     publicOrigin: string;
     releaseRoot: string;
     releaseSource?: string;
@@ -95,6 +99,16 @@ export interface DevelopmentStateResult {
 
 function developmentLogsRoot(config: DevelopmentStackConfig): string {
     return path.join(config.stateRoot, "logs");
+}
+
+function developmentAppLogPath(config: DevelopmentStackConfig): string {
+    return path.join(developmentLogsRoot(config), "dashboard.ndjson");
+}
+
+function developmentOpenClawLogsRoot(config: DevelopmentStackConfig): string {
+    return config.openClawLogMode === "host-read-only"
+        ? HOST_OPENCLAW_LOGS_ROOT
+        : path.join(developmentLogsRoot(config), "openclaw");
 }
 
 interface DevelopmentLogFixtureEntry {
@@ -137,7 +151,7 @@ function developmentLogPath(
     timestamp = new Date()
 ): string {
     return path.join(
-        developmentLogsRoot(config),
+        developmentOpenClawLogsRoot(config),
         `openclaw-${formatOpenClawLogDate(timestamp)}.log`
     );
 }
@@ -203,21 +217,40 @@ function developmentLogFileSize(logPath: string): number | undefined {
     }
 }
 
+function seedDevelopmentOpenClawLog(
+    config: DevelopmentStackConfig,
+    timestamp: Date
+): void {
+    const logPath = developmentLogPath(config, timestamp);
+    const existingLogSize = developmentLogFileSize(logPath);
+    if (existingLogSize !== undefined && existingLogSize >= 1024) return;
+    for (let index = 0; index < 24; index += 1) {
+        appendDevelopmentLogEntry(
+            config,
+            DEVELOPMENT_LOG_FIXTURES[index % DEVELOPMENT_LOG_FIXTURES.length]!,
+            new Date(timestamp.getTime() - (24 - index) * 1000)
+        );
+    }
+}
+
 function prepareDevelopmentLog(config: DevelopmentStackConfig): void {
     const logsRoot = developmentLogsRoot(config);
     ensurePrivateStateDirectory(config, logsRoot);
-    const timestamp = new Date();
-    const logPath = developmentLogPath(config, timestamp);
-    const existingLogSize = developmentLogFileSize(logPath);
-    if (existingLogSize === undefined || existingLogSize < 1024) {
-        for (let index = 0; index < 24; index += 1) {
-            appendDevelopmentLogEntry(
-                config,
-                DEVELOPMENT_LOG_FIXTURES[index % DEVELOPMENT_LOG_FIXTURES.length]!,
-                new Date(timestamp.getTime() - (24 - index) * 1000)
+    if (config.openClawLogMode === "host-read-only") {
+        if (!isRealDirectory(HOST_OPENCLAW_LOGS_ROOT)) {
+            throw new Error(
+                `OpenClaw host logs must be a real directory: ${HOST_OPENCLAW_LOGS_ROOT}`
             );
         }
+        return;
     }
+    ensurePrivateStateDirectory(config, developmentOpenClawLogsRoot(config));
+    const timestamp = new Date();
+    seedDevelopmentOpenClawLog(config, timestamp);
+    seedDevelopmentOpenClawLog(
+        config,
+        new Date(timestamp.getTime() - 24 * 60 * 60 * 1000)
+    );
     appendDevelopmentLogEntry(config, {
         level: "INFO",
         message:
@@ -345,7 +378,10 @@ function normalizedOptionalRpId(
     return rpId;
 }
 
-/** Resolves one isolated frontend/backend development stack. */
+/**
+ * Resolves one isolated frontend/backend development stack.
+ * @returns Resolved one isolated frontend/backend development stack.
+ */
 export function resolveDevelopmentStackConfig(
     environment: Record<string, string | undefined>,
     root: string
@@ -432,6 +468,10 @@ export function resolveDevelopmentStackConfig(
                 : undefined
         ),
         openClawHome: path.join(stateRoot, "openclaw-home"),
+        openClawLogMode:
+            !isManagedPreviewState && isRealDirectory(HOST_OPENCLAW_LOGS_ROOT)
+                ? "host-read-only"
+                : "synthetic",
         publicOrigin: publicOrigin.origin,
         releaseRoot: path.join(stateRoot, "releases-root"),
         releaseSource: absoluteNonRootPath(
@@ -540,115 +580,6 @@ function runIfTableExists(
     }
 }
 
-interface CompletedDeploymentHistoryRow {
-    commit_sha: null | string;
-    commit_title: null | string;
-    id: string;
-    note: null | string;
-    started_at: string;
-    status: "failed" | "isOk";
-    stderr: null | string;
-    stdout: null | string;
-    updated_at: string;
-}
-
-/**
- * Restores terminal release history into snapshots created by older Dashboard
- * versions without refreshing any mutable development data.
- */
-function backfillCompletedDeploymentHistory(
-    sourcePath: string,
-    targetPath: string
-): void {
-    if (!isRealRegularFile(sourcePath)) {
-        throw new Error(
-            `MIRA_DASHBOARD_DEV_DB_SOURCE must be a real regular file: ${sourcePath}`
-        );
-    }
-    if (path.resolve(sourcePath) === path.resolve(targetPath)) {
-        throw new Error("Development database source and target must be distinct");
-    }
-
-    const target = new Database(targetPath);
-    try {
-        if (!hasTable(target, "deployment_jobs")) return;
-        target.run("BEGIN IMMEDIATE");
-        try {
-            if (hasTable(target, "deployment_lock")) {
-                target.run("DELETE FROM deployment_lock");
-            }
-            target.run(
-                "DELETE FROM deployment_jobs WHERE status NOT IN ('isOk', 'failed')"
-            );
-            const existing = target
-                .query(
-                    "SELECT 1 FROM deployment_jobs WHERE status IN ('isOk', 'failed') LIMIT 1"
-                )
-                .get();
-            if (!existing) {
-                const source = new Database(sourcePath, { readonly: true });
-                let rows: CompletedDeploymentHistoryRow[];
-                try {
-                    rows = hasTable(source, "deployment_jobs")
-                        ? (source
-                              .query(
-                                  `SELECT
-                                       id,
-                                       status,
-                                       started_at,
-                                       updated_at,
-                                       commit_sha,
-                                       commit_title,
-                                       note,
-                                       stdout,
-                                       stderr
-                                   FROM deployment_jobs
-                                   WHERE status IN ('isOk', 'failed')
-                                   ORDER BY started_at, id`
-                              )
-                              .all() as CompletedDeploymentHistoryRow[])
-                        : [];
-                } finally {
-                    source.close();
-                }
-                const insert = target.prepare(
-                    `INSERT INTO deployment_jobs (
-                         id,
-                         status,
-                         started_at,
-                         updated_at,
-                         commit_sha,
-                         commit_title,
-                         note,
-                         stdout,
-                         stderr
-                     )
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-                );
-                for (const row of rows) {
-                    insert.run(
-                        row.id,
-                        row.status,
-                        row.started_at,
-                        row.updated_at,
-                        row.commit_sha,
-                        row.commit_title,
-                        row.note,
-                        row.stdout,
-                        row.stderr
-                    );
-                }
-            }
-            target.run("COMMIT");
-        } catch (error) {
-            if (target.inTransaction) target.run("ROLLBACK");
-            throw error;
-        }
-    } finally {
-        target.close();
-    }
-}
-
 function scrubDevelopmentDatabase(
     databasePath: string,
     shouldPreserveWebAuthnCredentials: boolean
@@ -734,7 +665,8 @@ function scrubDevelopmentDatabase(
         );
         database.run("COMMIT");
         const quickCheck = database.query("PRAGMA quick_check").get() as
-            Record<string, unknown> | undefined;
+            | Record<string, unknown>
+            | undefined;
         if (
             !quickCheck ||
             Object.values(quickCheck).every(
@@ -955,7 +887,10 @@ function developmentSecretEncryptionKey(config: DevelopmentStackConfig): string 
     return encodedKey;
 }
 
-/** Creates or reuses isolated, ignored development state. */
+/**
+ * Creates or reuses isolated, ignored development state.
+ * @returns Created or reuses isolated, ignored development state.
+ */
 export function prepareDevelopmentState(
     config: DevelopmentStackConfig
 ): DevelopmentStateResult {
@@ -990,14 +925,6 @@ export function prepareDevelopmentState(
     } else {
         database = "created-empty";
     }
-    if (
-        config.databaseSource &&
-        isRealRegularFile(config.databaseSource) &&
-        isRealRegularFile(config.databasePath)
-    ) {
-        backfillCompletedDeploymentHistory(config.databaseSource, config.databasePath);
-    }
-
     let releases: DevelopmentStateResult["releases"];
     const currentRelease = releaseCommitForSlot(config.releaseRoot, "current");
     const previousRelease = releaseCommitForSlot(config.releaseRoot, "previous");
@@ -1053,7 +980,7 @@ function developmentGatewayToken(
     } else {
         token = environment.OPENCLAW_GATEWAY_TOKEN?.trim();
     }
-    if (!token || token.length > 16_384 || /[\r\n\0]/u.test(token)) {
+    if (!token || token.length > 16_384 || hasLineBreakOrNullByte(token)) {
         throw new Error(
             "Dashboard dev requires OPENCLAW_GATEWAY_TOKEN or MIRA_DASHBOARD_DEV_GATEWAY_TOKEN_FILE"
         );
@@ -1061,7 +988,10 @@ function developmentGatewayToken(
     return token;
 }
 
-/** Produces the explicit, secret-minimized backend development environment. */
+/**
+ * Produces the explicit, secret-minimized backend development environment.
+ * @returns Development backend environment result.
+ */
 export function developmentBackendEnvironment(
     config: DevelopmentStackConfig
 ): Record<string, string> {
@@ -1070,6 +1000,7 @@ export function developmentBackendEnvironment(
         ...inheritedChildEnvironment(),
         HOME: config.openClawHome,
         MIRA_DASHBOARD_ALLOWED_ORIGINS: config.publicOrigin,
+        MIRA_DASHBOARD_APPLICATION_LOG_PATH: developmentAppLogPath(config),
         MIRA_DASHBOARD_DB_PATH: config.databasePath,
         MIRA_DASHBOARD_DEV_COOKIE_NAMESPACE: `mira_dashboard_dev_${config.frontendPort}`,
         MIRA_DASHBOARD_DEV_SAFE_MODE: "1",
@@ -1079,7 +1010,7 @@ export function developmentBackendEnvironment(
             config.stateRoot,
             "log-rotation.lock"
         ),
-        MIRA_DASHBOARD_LOGS_ROOT: developmentLogsRoot(config),
+        MIRA_DASHBOARD_LOGS_ROOT: developmentOpenClawLogsRoot(config),
         MIRA_DASHBOARD_OPENCLAW_HOME: config.openClawClientHome,
         MIRA_DASHBOARD_RELEASES_ROOT: config.releaseRoot,
         MIRA_DASHBOARD_ROOT: config.repositoryRoot,
@@ -1122,7 +1053,10 @@ function stopChild(child: DevelopmentChild): void {
     }
 }
 
-/** Starts frontend/backend children and keeps their lifecycle coupled. */
+/**
+ * Starts frontend/backend children and keeps their lifecycle coupled.
+ * @returns Promise resolving to the run development stack result.
+ */
 export async function runDevelopmentStack(
     config: DevelopmentStackConfig
 ): Promise<number> {
@@ -1148,18 +1082,21 @@ export async function runDevelopmentStack(
         }
     );
     let developmentLogFixtureIndex = 0;
-    const developmentLogFixtureTimer = setInterval(() => {
-        try {
-            const entry =
-                DEVELOPMENT_LOG_FIXTURES[
-                    developmentLogFixtureIndex % DEVELOPMENT_LOG_FIXTURES.length
-                ]!;
-            developmentLogFixtureIndex += 1;
-            appendDevelopmentLogEntry(config, entry);
-        } catch (error) {
-            console.error("[DevelopmentLogs] Failed to append fixture entry:", error);
-        }
-    }, DEVELOPMENT_LOG_FIXTURE_INTERVAL_MS);
+    const developmentLogFixtureTimer =
+        config.openClawLogMode === "host-read-only"
+            ? undefined
+            : setInterval(() => {
+                  try {
+                      const entry =
+                          DEVELOPMENT_LOG_FIXTURES[
+                              developmentLogFixtureIndex % DEVELOPMENT_LOG_FIXTURES.length
+                          ]!;
+                      developmentLogFixtureIndex += 1;
+                      appendDevelopmentLogEntry(config, entry);
+                  } catch (error) {
+                      logger.error("development.log_fixture_append_failed", { error });
+                  }
+              }, DEVELOPMENT_LOG_FIXTURE_INTERVAL_MS);
     let isStopRequested = false;
     let isChildrenStopping = false;
     const stopChildren = () => {
@@ -1175,25 +1112,35 @@ export async function runDevelopmentStack(
     process.once("SIGINT", handleSignal);
     process.once("SIGTERM", handleSignal);
 
-    console.log(
-        [
-            `Mira Dashboard development stack: ${config.publicOrigin}`,
-            `Frontend${config.hotReload ? " HMR" : ""}: ${config.frontendHost}:${config.frontendPort}`,
-            `Backend${config.hotReload ? " restart-on-change" : ""}: ${config.backendHost}:${config.backendPort}`,
-            `Hot reload: ${config.hotReload ? "enabled" : "disabled"}.`,
-            `State: ${config.stateRoot} (database ${state.database}, workspace ${state.workspace}, releases ${state.releases})`,
-            `Gateway: ${config.gatewayUrl}`,
-            "Isolated scheduler/worker enabled.",
-            "Host-control and backup jobs are disabled.",
-        ].join("\n")
-    );
+    logger.info("development.started", {
+        backendHost: config.backendHost,
+        backendPort: config.backendPort,
+        frontendHost: config.frontendHost,
+        frontendPort: config.frontendPort,
+        gatewayUrl: config.gatewayUrl,
+        hotReload: config.hotReload,
+        logs: {
+            application: "development-file",
+            openClaw: config.openClawLogMode,
+        },
+        publicOrigin: config.publicOrigin,
+        state: {
+            database: state.database,
+            releases: state.releases,
+            root: config.stateRoot,
+            workspace: state.workspace,
+        },
+        workerEnabled: true,
+    });
 
     const childExits = [
         developmentChildExit(backend, "backend"),
         developmentChildExit(frontend, "frontend"),
     ];
     const exited = await Promise.race(childExits);
-    clearInterval(developmentLogFixtureTimer);
+    if (developmentLogFixtureTimer) {
+        clearInterval(developmentLogFixtureTimer);
+    }
     stopChildren();
     await Promise.allSettled([backend.exited, frontend.exited]);
     process.removeListener("SIGINT", handleSignal);
@@ -1201,6 +1148,9 @@ export async function runDevelopmentStack(
     if (isStopRequested) {
         return 0;
     }
-    console.error(`Development ${exited.process} exited with code ${exited.code}`);
+    logger.error("development.process_exited", {
+        exitCode: exited.code,
+        process: exited.process,
+    });
     return exited.code || 1;
 }

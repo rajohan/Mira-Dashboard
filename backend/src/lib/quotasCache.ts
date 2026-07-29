@@ -1,7 +1,11 @@
 import type { QuotaError, QuotasResponse } from "../../../contracts/quotas.ts";
 import { getCacheEntry, parseJsonField } from "./cacheStore.ts";
 
-/** Returns whether quota status is present. */
+/**
+ * Returns whether quota status is present.
+ * @param value Value to process.
+ * @returns Whether quota status is present.
+ */
 export function hasQuotaStatus(value: unknown): value is QuotaError {
     return (
         typeof value === "object" &&
@@ -11,9 +15,12 @@ export function hasQuotaStatus(value: unknown): value is QuotaError {
     );
 }
 
-/** Fetches cached quotas. */
-export async function fetchCachedQuotas(): Promise<QuotasResponse> {
-    const row = await getCacheEntry("quotas.summary");
+/**
+ * Fetches cached quotas.
+ * @returns Fetch cached quotas result.
+ */
+export function fetchCachedQuotas(): QuotasResponse {
+    const row = getCacheEntry("quotas.summary");
     if (!row || row.status !== "fresh") {
         throw new Error("Quota cache entry not found or not fresh");
     }

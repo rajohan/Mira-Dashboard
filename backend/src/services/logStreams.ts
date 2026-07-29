@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { DashboardSocket } from "../dashboardSocket.ts";
-import { errorMessage } from "../lib/errors.ts";
 import { guardedPath, openReadNoFollowNonblockingGuarded } from "../lib/guardedOps.ts";
 import {
     formatOpenClawLogDate,
@@ -10,6 +9,9 @@ import {
     resolveRealLogsDirectory,
 } from "../lib/logRoots.ts";
 import { lineEntriesFromLogRead, type LogRead } from "../lib/logTail.ts";
+import { createStructuredLogger } from "../lib/structuredLogger.ts";
+
+const logger = createStructuredLogger("openclaw-log-stream");
 
 const logsRouteState: {
     logWatcher: NodeJS.Timeout | undefined;
@@ -43,7 +45,11 @@ function isLogRootResolutionError(error: unknown): boolean {
     );
 }
 
-/** Returns today log file. */
+/**
+ * Returns today log file.
+ * @param root Root value.
+ * @returns today log file.
+ */
 function getTodayLogFile(root = resolveRealLogsDirectory()): string {
     const today = formatOpenClawLogDate(new Date());
     return path.join(root, "openclaw-" + today + ".log");
@@ -200,12 +206,15 @@ async function pollLogFile(): Promise<void> {
     }
 }
 
-/** Performs a single tick of the log watcher. */
+/**
+ * Performs a single tick of the log watcher.
+ * @param poller Poller value.
+ */
 async function pollLogFileAndLogErrors(poller = pollLogFile): Promise<void> {
     try {
         await poller();
     } catch (error) {
-        console.error("[LogWatcher] Error:", errorMessage(error, "Log polling failed"));
+        logger.error("openclaw_logs.poll_failed", { error });
     }
 }
 
@@ -235,7 +244,7 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
         try {
             ws.send(JSON.stringify(payload));
         } catch (error) {
-            console.error("[Logs] Error sending history:", (error as Error).message);
+            logger.error("openclaw_logs.history_send_failed", { error });
         }
     };
 
@@ -289,7 +298,7 @@ async function sendLogHistory(ws: DashboardSocket): Promise<void> {
         // Send completion
         send({ type: "log_history_complete", count: lines.length });
     } catch (error) {
-        console.error("[Logs] Error sending history:", (error as Error).message);
+        logger.error("openclaw_logs.history_send_failed", { error });
         send({ type: "log_history_complete", count: 0 });
     }
 }

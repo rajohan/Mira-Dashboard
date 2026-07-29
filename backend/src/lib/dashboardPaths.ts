@@ -74,6 +74,10 @@ export function resolveDashboardProjectPathsForRuntime(
 /**
  * Keeps the production layout immutable while allowing isolated development
  * children and tests to inject process-specific paths.
+ * @param derivedPath Derived path value.
+ * @param internalOverride Internal override value.
+ * @param environment Environment value.
+ * @returns Resolve dashboard runtime path result.
  */
 export function resolveDashboardRuntimePath(
     derivedPath: string | undefined,
